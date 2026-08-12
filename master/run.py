@@ -51,10 +51,6 @@ def main() -> None:
 
     # 组合根：进程内唯一配置初始化点，此后所有模块用 get_settings() 读取
     settings = configure(args.env_file)
-    # 启动时校验安全配置（JWT 密钥强度），弱配置直接拒绝启动
-    from master.api.v1.security import validate_security_settings
-
-    validate_security_settings()
     log_path = configure_logging(
         settings.log_file,
         level=settings.log_level,

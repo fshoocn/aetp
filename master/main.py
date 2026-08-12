@@ -85,7 +85,9 @@ async def lifespan(app: FastAPI):
     logger.info("应用生命周期启动")
     container = Container()
     logger.debug("依赖注入容器已创建")
-    # 启动时校验安全配置（JWT 密钥强度等），弱配置直接拒绝启动
+    # 启动时校验安全配置（JWT 密钥强度等），弱配置直接拒绝启动。
+    # 校验只在这里做一次：无论从 run.py / 直接 uvicorn / 测试 / 嵌入方式启动，
+    # lifespan 都会执行，保证所有入口都经过同一道启动检查。
     from master.api.v1.security import validate_security_settings
 
     validate_security_settings()
