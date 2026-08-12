@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _DEFAULT_FORMAT = (
-    "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    "%(asctime)s | %(levelname)-7s | %(name)s:%(funcName)s:%(lineno)d | %(message)s"
 )
 _MAX_BYTES = 10 * 1024 * 1024
 _BACKUP_COUNT = 5
