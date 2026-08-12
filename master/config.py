@@ -28,6 +28,12 @@ def runtime_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+# 项目根目录（仓库根）：master/config.py 的上一级。
+# 集中定义一次，供 Alembic 迁移定位 alembic.ini / migrations 等仓库级资源使用，
+# 避免在各模块散落 parents[N] 魔法索引。
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
 def resolve_sqlite_url(url: str) -> str:
     """将 SQLite 相对路径基于运行目录解析为绝对连接串。"""
     scheme, _, rest = url.partition("://")

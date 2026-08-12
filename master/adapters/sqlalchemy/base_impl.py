@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 import threading
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Generator
 
 from sqlalchemy.engine import Engine
@@ -22,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .database_interface import DatabaseConfig, DatabaseInterface
 from master.adapters.sqlalchemy.orm import Base
+from master.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class BaseDatabase(DatabaseInterface):
             from alembic import command
             from alembic.config import Config as AlembicConfig
 
-            alembic_ini = Path(__file__).resolve().parents[3] / "alembic.ini"
+            alembic_ini = PROJECT_ROOT / "alembic.ini"
             aleb_cfg = AlembicConfig(str(alembic_ini))
             # 复用当前应用 Engine 的连接，避免 Alembic 再创建第二个 Engine。
             logger.info("开始数据库迁移: database_type=%s", self.db_type)

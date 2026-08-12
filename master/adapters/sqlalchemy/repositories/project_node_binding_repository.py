@@ -9,6 +9,7 @@ from master.adapters.sqlalchemy.orm import Node as NodeORM
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
 from master.adapters.sqlalchemy.orm import ProjectNodeBinding as BindingORM
 from master.adapters.sqlalchemy.orm import Device as DeviceORM
+from master.domain.enums import DeviceStatus
 from master.domain.models import (
     Device,
     ProjectNodeBinding,
@@ -23,7 +24,7 @@ def _device_to_domain(orm: DeviceORM) -> Device:
         device_id=orm.device_id,
         node_id=orm.node.node_id if orm.node is not None else None,
         name=orm.name,
-        status=orm.status,
+        status=DeviceStatus(orm.status),
         online=orm.online,
         last_seen_at=orm.last_seen_at,
         created_at=orm.created_at,
