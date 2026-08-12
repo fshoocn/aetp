@@ -47,6 +47,18 @@ def configure_logging(
     root = logging.getLogger()
     root.setLevel(log_level)
 
+    # 接管 uvicorn 的日志：让启动/错误信息冒泡到 root，统一使用 AETP 格式；
+    # 访问日志已由应用中间件记录，关闭 uvicorn.access 避免重复输出。
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.asgi"):
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers = []
+        uvicorn_logger.propagate = True
+        uvicorn_logger.setLevel(log_level)
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.handlers = []
+    access_logger.propagate = False
+    access_logger.setLevel(logging.WARNING)
+
     existing_file: RotatingFileHandler | None = None
     existing_console: logging.Handler | None = None
     for handler in list(root.handlers):

@@ -73,6 +73,9 @@ def main() -> None:
             reload=args.reload,
             # 使用 SelectorEventLoop 工厂，绕开 Windows 默认 Proactor
             loop="master.loop_factory:selector_loop_factory",
+            # 复用 configure_logging 配置的 root 日志（统一 AETP 格式），
+            # 不使用 uvicorn 自带的日志格式
+            log_config=None,
         )
     except Exception:
         logger.exception("Master API 启动失败")

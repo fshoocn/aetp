@@ -22,8 +22,11 @@ from master.adapters.sqlalchemy import orm as _orm  # noqa: F401
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# 应用内运行迁移（base_impl 已注入 connection）时，复用应用自己的日志配置
+# （root 统一 AETP 格式），不再让 alembic.ini 的 fileConfig 覆盖 root logger；
+# 仅当独立执行 alembic CLI 命令（未注入连接）时才启用 alembic.ini 的控制台输出。
+if config.config_file_name is not None and config.attributes.get("connection") is None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
