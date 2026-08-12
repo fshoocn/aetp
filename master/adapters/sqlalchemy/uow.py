@@ -56,3 +56,17 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         finally:
             self._session.close()
             self._session = None
+
+
+class SqlAlchemyUnitOfWorkFactory:
+    """SqlAlchemyUnitOfWork 的工厂：每次调用返回一个新 UoW（一个新事务）。
+
+    自身无状态（仅持有 database），可在 DI 容器中作为进程级单例注入；
+    服务通过 `with self._uow_factory() as uow:` 获得相互独立的事务。
+    """
+
+    def __init__(self, database: DatabaseInterface) -> None:
+        self._database = database
+
+    def __call__(self) -> SqlAlchemyUnitOfWork:
+        return SqlAlchemyUnitOfWork(self._database)

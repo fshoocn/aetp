@@ -20,7 +20,7 @@ from dependency_injector import containers, providers
 from master.config import get_settings
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.database_factory import create_database
-from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWork
+from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.auth_service import AuthService
 from master.application.services.device_service import DeviceService
@@ -38,15 +38,6 @@ def _init_database(url: str) -> DatabaseInterface:
     return db
 
 
-def _build_uow_factory(database: DatabaseInterface):
-    """返回创建新工作单元实例的工厂函数（每次业务操作一个 UoW）。"""
-
-    def factory() -> SqlAlchemyUnitOfWork:
-        return SqlAlchemyUnitOfWork(database)
-
-    return factory
-
-
 class Container(containers.DeclarativeContainer):
     """AETP Master 应用容器。"""
 
@@ -56,8 +47,9 @@ class Container(containers.DeclarativeContainer):
     # 数据库：进程级单例
     database = providers.Singleton(_init_database, database_url)
 
-    # 工作单元：每次解析创建新实例，绑定同一 Session 与全部仓储
-    uow_factory = providers.Callable(_build_uow_factory, database=database)
+    # 工作单元工厂：进程级单例（工厂本身无状态，仅持有 database；
+    # 每次调用返回一个新 UoW = 一个新事务）
+    uow_factory = providers.Singleton(SqlAlchemyUnitOfWorkFactory, database=database)
 
     # SSE 事件总线：进程级单例
     event_bus = providers.Singleton(EventBus)

@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
+from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.auth_service import AuthService
 from master.application.services.device_service import DeviceService
@@ -47,7 +48,7 @@ def get_database(
 
 def get_uow_factory(
     container: Annotated[Container, Depends(get_container)],
-) -> Callable[[], UnitOfWork]:
+) -> SqlAlchemyUnitOfWorkFactory:
     """从容器解析工作单元工厂（可调用，返回新 UoW 实例）。"""
     return container.uow_factory()
 
@@ -144,7 +145,9 @@ def get_current_user(
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 DbDep = Annotated[DatabaseInterface, Depends(get_database)]
-UowFactoryDep = Annotated[Callable[[], UnitOfWork], Depends(get_uow_factory)]
+UowFactoryDep = Annotated[
+    SqlAlchemyUnitOfWorkFactory, Depends(get_uow_factory)
+]
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
 AuthDep = Annotated[AuthService, Depends(get_auth_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
