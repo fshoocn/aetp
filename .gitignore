@@ -1,0 +1,40 @@
+# ---- 环境与凭据 ----
+.env
+.env.*
+!.env.example
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- 数据库与数据 ----
+data/*.db
+data/*.sqlite
+*.sqlite3
+
+# ---- 日志 ----
+logs/
+*.log
+
+# ---- 前端 ----
+web/node_modules/
+web/dist/
+web/.vite/
+
+# ---- IDE / 系统 ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

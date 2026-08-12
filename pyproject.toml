@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aetp-master"
+version = "0.1.0"
+description = "汽车电子测试平台（AETP）Master 主节点"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.30",
+    "sqlalchemy>=2.0.30",
+    "dependency-injector>=4.41",
+    "argon2-cffi>=23.1",
+    "PyJWT>=2.8",
+    "pydantic>=2.7",
+    "alembic>=1.13",
+    "pymysql>=1.1",
+    "psycopg2-binary>=2.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+python_files = ["test_*.py"]
