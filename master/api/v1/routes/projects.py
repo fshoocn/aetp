@@ -35,7 +35,7 @@ def list_projects(
         projects = service.list_all(limit=limit, offset=offset)
     else:
         projects = service.list_visible_to_user(
-            current_user.id, limit=limit, offset=offset
+            current_user.persisted_id, limit=limit, offset=offset
         )
     return [ProjectOut.model_validate(project) for project in projects]
 
@@ -51,7 +51,7 @@ def create_project(
         project_key=body.project_key,
         name=body.name,
         description=body.description,
-        created_by=admin.id,
+        created_by=admin.persisted_id,
         owner_id=body.owner_id,
     )
     return ProjectOut.model_validate(project)
@@ -67,7 +67,7 @@ def get_project(
     if current_user.platform_role == PlatformRole.ADMIN:
         project = service.get_by_project_id(project_id)
     else:
-        project = service.get_visible_to_user(project_id, current_user.id)
+        project = service.get_visible_to_user(project_id, current_user.persisted_id)
     if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -125,7 +125,7 @@ def add_project_member(
         project_id,
         user_id=body.user_id,
         project_role=body.project_role,
-        assigned_by=access.user.id,
+        assigned_by=access.user.persisted_id,
         actor_role=access.project_role,
         is_platform_admin=access.is_platform_admin,
     )
@@ -150,7 +150,7 @@ def update_project_member(
         project_role=body.project_role,
         actor_role=access.project_role,
         is_platform_admin=access.is_platform_admin,
-        assigned_by=access.user.id,
+        assigned_by=access.user.persisted_id,
     )
     return ProjectMemberOut.model_validate(member)
 

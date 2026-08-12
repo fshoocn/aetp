@@ -53,7 +53,7 @@ def get_project_access(
     """解析项目成员角色；普通用户对非成员项目统一返回 404。"""
     if current_user.platform_role == PlatformRole.ADMIN:
         return ProjectAccess(current_user, None, True)
-    project_role = member_service.get_role(project_id, current_user.id)
+    project_role = member_service.get_role(project_id, current_user.persisted_id)
     if project_role is None:
         logger.warning(
             "项目访问拒绝: user_id=%s, project_id=%s",

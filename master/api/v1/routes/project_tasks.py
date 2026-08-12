@@ -53,7 +53,7 @@ async def create_project_task(
         project_id=project_id,
         device_id=body.device_id,
         command=body.command,
-        created_by=access.user.id,
+        created_by=access.user.persisted_id,
     )
     out = TaskOut.model_validate(task)
     await event_bus.publish(

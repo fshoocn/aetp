@@ -44,7 +44,7 @@ def bind_project_node(
     binding = service.bind_node(
         project_id,
         node_id=body.node_id,
-        assigned_by=access.user.id,
+        assigned_by=access.user.persisted_id,
     )
     return ProjectNodeBindingOut.model_validate(binding)
 
@@ -62,7 +62,7 @@ def update_project_node(
         project_id,
         node_id,
         enabled=body.enabled,
-        assigned_by=access.user.id,
+        assigned_by=access.user.persisted_id,
     )
     return ProjectNodeBindingOut.model_validate(binding)
 
