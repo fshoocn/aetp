@@ -19,13 +19,13 @@ venv/
 htmlcov/
 
 # ---- 数据库与数据 ----
-data/*.db
-data/*.sqlite
-*.sqlite3
+**/data/*.db
+**/data/*.sqlite
+**/*.sqlite3
 
 # ---- 日志 ----
-logs/
-*.log
+**/logs/
+**/*.log
 
 # ---- 前端 ----
 web/node_modules/

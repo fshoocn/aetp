@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument(
         "--env-file",
         default=None,
-        help="自定义 .env 配置文件路径（默认 exe/项目根目录下的 .env）",
+        help="自定义 .env 配置文件路径（默认 master/ 目录或 exe 同目录下的 .env）",
     )
     parser.add_argument("--reload", action="store_true", help="开发模式自动重载（文件变更时热重启）")
     args = parser.parse_args()

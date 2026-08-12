@@ -17,10 +17,15 @@ _MIN_JWT_SECRET_BYTES = 32
 
 
 def runtime_dir() -> Path:
-    """返回开发运行或 exe 运行时的外部资源目录。"""
+    """返回组件运行目录（外部资源所在目录）。
+
+    开发运行：master/ 目录（config.py 所在目录，作为 Master 组件根，
+    .env、data/、logs/ 均位于此）；
+    exe 冻结运行：exe 所在目录。
+    """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parent
 
 
 def resolve_sqlite_url(url: str) -> str:
@@ -99,7 +104,7 @@ class MasterSettings:
 
     @classmethod
     def default_env_file(cls) -> Path:
-        """返回外置 .env 文件路径；exe 部署时与 exe 放在同一目录。"""
+        """返回外置 .env 文件路径；开发运行在 master/ 下，exe 部署与 exe 同目录。"""
         return _runtime_dir() / ".env"
 
     @classmethod
