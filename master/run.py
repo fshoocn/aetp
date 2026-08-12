@@ -33,8 +33,7 @@ def main() -> None:
     2. configure(args.env_file) 从外置 .env 文件初始化进程级配置
        （组合根模式：此后所有模块通过 get_settings() 只读获取）
     3. 命令行 --host/--port 优先覆盖 .env 默认值
-    4. uvicorn.run 启动 FastAPI app，使用 SelectorEventLoop 工厂
-       （Windows 默认 Proactor 与 MQTT/子进程不兼容）
+    4. uvicorn.run 启动 FastAPI app（使用系统默认事件循环）
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=None, help="覆盖配置的 http_host（默认 127.0.0.1）")
@@ -71,8 +70,6 @@ def main() -> None:
             host=host,
             port=port,
             reload=args.reload,
-            # 使用 SelectorEventLoop 工厂，绕开 Windows 默认 Proactor
-            loop="master.loop_factory:selector_loop_factory",
             # 复用 configure_logging 配置的 root 日志（统一 AETP 格式），
             # 不使用 uvicorn 自带的日志格式
             log_config=None,
