@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from .audit_log_repository import AuditLogRepositoryImpl
 from .device_repository import DeviceRepositoryImpl
+from .domain_event_repository import DomainEventRepositoryImpl
+from .inbox_message_repository import InboxMessageRepositoryImpl
 from .node_repository import NodeRepositoryImpl
+from .outbox_message_repository import OutboxMessageRepositoryImpl
 from .project_member_repository import ProjectMemberRepositoryImpl
 from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
 from .project_repository import ProjectRepositoryImpl
@@ -23,6 +27,10 @@ from .user_repository import UserRepositoryImpl
 
 __all__ = [
     "UserRepositoryImpl",
+    "AuditLogRepositoryImpl",
+    "DomainEventRepositoryImpl",
+    "InboxMessageRepositoryImpl",
+    "OutboxMessageRepositoryImpl",
     "ProjectRepositoryImpl",
     "RefreshTokenRepositoryImpl",
     "ScriptCaseRepositoryImpl",

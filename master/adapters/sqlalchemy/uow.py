@@ -15,8 +15,12 @@ from sqlalchemy.orm import Session
 
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.repositories import (
+    AuditLogRepositoryImpl,
     DeviceRepositoryImpl,
+    DomainEventRepositoryImpl,
+    InboxMessageRepositoryImpl,
     NodeRepositoryImpl,
+    OutboxMessageRepositoryImpl,
     ProjectMemberRepositoryImpl,
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
@@ -56,6 +60,10 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.run_case_results = RunCaseResultRepositoryImpl(session)
         self.run_artifacts = RunArtifactRepositoryImpl(session)
         self.run_results = RunResultRepositoryImpl(session)
+        self.inbox_messages = InboxMessageRepositoryImpl(session)
+        self.outbox_messages = OutboxMessageRepositoryImpl(session)
+        self.domain_events = DomainEventRepositoryImpl(session)
+        self.audit_logs = AuditLogRepositoryImpl(session)
         self.projects = ProjectRepositoryImpl(session)
         self.members = ProjectMemberRepositoryImpl(session)
         self.nodes = NodeRepositoryImpl(session)
