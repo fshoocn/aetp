@@ -21,9 +21,15 @@ from master.adapters.sqlalchemy.repositories import (
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
     RefreshTokenRepositoryImpl,
+    RunArtifactRepositoryImpl,
+    RunCaseResultRepositoryImpl,
+    RunResultRepositoryImpl,
+    RunShardRepositoryImpl,
     ScriptCaseRepositoryImpl,
+    ShardAttemptRepositoryImpl,
     TaskLogRepositoryImpl,
     TaskRepositoryImpl,
+    TaskRunRepositoryImpl,
     TestScriptRepositoryImpl,
     TestTaskRepositoryImpl,
     UserRepositoryImpl,
@@ -44,6 +50,12 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.test_scripts = TestScriptRepositoryImpl(session)
         self.script_cases = ScriptCaseRepositoryImpl(session)
         self.test_tasks = TestTaskRepositoryImpl(session)
+        self.task_runs = TaskRunRepositoryImpl(session)
+        self.run_shards = RunShardRepositoryImpl(session)
+        self.shard_attempts = ShardAttemptRepositoryImpl(session)
+        self.run_case_results = RunCaseResultRepositoryImpl(session)
+        self.run_artifacts = RunArtifactRepositoryImpl(session)
+        self.run_results = RunResultRepositoryImpl(session)
         self.projects = ProjectRepositoryImpl(session)
         self.members = ProjectMemberRepositoryImpl(session)
         self.nodes = NodeRepositoryImpl(session)

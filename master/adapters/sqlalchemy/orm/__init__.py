@@ -19,9 +19,15 @@ from .project import Project
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
 from .refresh_token import RefreshToken
+from .run_artifact import RunArtifact
+from .run_case_result import RunCaseResult
+from .run_result import RunResult
+from .run_shard import RunShard
 from .script_case import ScriptCase
+from .shard_attempt import ShardAttempt
 from .task import Task
 from .task_log import TaskLog
+from .task_run import TaskRun
 from .test_script import TestScript
 from .test_task import TestTask
 from .user import User
@@ -43,6 +49,12 @@ __all__ = [
     "ScriptCase",
     "TestScript",
     "TestTask",
+    "TaskRun",
+    "RunShard",
+    "ShardAttempt",
+    "RunCaseResult",
+    "RunArtifact",
+    "RunResult",
     "Task",
     "TaskLog",
 ]

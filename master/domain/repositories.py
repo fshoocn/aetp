@@ -20,9 +20,15 @@ from master.domain.models import (
     ProjectNodeBinding,
     ProjectNodeBindingView,
     RefreshToken,
+    RunArtifact,
+    RunCaseResult,
+    RunResult,
+    RunShard,
     ScriptCase,
+    ShardAttempt,
     Task,
     TaskLog,
+    TaskRun,
     TestScript,
     TestTask,
     User,
@@ -136,6 +142,119 @@ class TestTaskRepository(ABC):
 
     @abstractmethod
     def update(self, task: TestTask) -> TestTask: ...
+
+
+class TaskRunRepository(ABC):
+    """Run 执行仓储（P3.4，task_runs 表）。"""
+
+    @abstractmethod
+    def add(self, run: TaskRun) -> TaskRun: ...
+
+    @abstractmethod
+    def get_by_run_id(
+        self, run_id: str, project_id: str | None = None
+    ) -> TaskRun | None: ...
+
+    @abstractmethod
+    def list(
+        self,
+        *,
+        project_id: str | None = None,
+        task_id: str | None = None,
+        status: str | None = None,
+        trigger_type: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[TaskRun]: ...
+
+    @abstractmethod
+    def update(self, run: TaskRun) -> TaskRun: ...
+
+
+class RunShardRepository(ABC):
+    """Shard 仓储（P3.4，run_shards 表）。"""
+
+    @abstractmethod
+    def add(self, shard: RunShard) -> RunShard: ...
+
+    @abstractmethod
+    def add_many(self, shards: list[RunShard]) -> list[RunShard]: ...
+
+    @abstractmethod
+    def get_by_shard_id(self, shard_id: str) -> RunShard | None: ...
+
+    @abstractmethod
+    def list_by_run(self, run_id: str) -> list[RunShard]: ...
+
+    @abstractmethod
+    def update(self, shard: RunShard) -> RunShard: ...
+
+
+class ShardAttemptRepository(ABC):
+    """Shard 派发尝试仓储（P3.4，shard_attempts 表，D-20 历史全量保留）。"""
+
+    @abstractmethod
+    def add(self, attempt: ShardAttempt) -> ShardAttempt: ...
+
+    @abstractmethod
+    def get_by_shard_attempt(
+        self, shard_id: str, attempt_no: int
+    ) -> ShardAttempt | None: ...
+
+    @abstractmethod
+    def list_by_shard(self, shard_id: str) -> list[ShardAttempt]: ...
+
+    @abstractmethod
+    def update(self, attempt: ShardAttempt) -> ShardAttempt: ...
+
+
+class RunCaseResultRepository(ABC):
+    """case 级结果仓储（P3.4，run_case_results 表，D-20 按 attempt 全量保留）。"""
+
+    @abstractmethod
+    def add_many(self, results: list[RunCaseResult]) -> list[RunCaseResult]: ...
+
+    @abstractmethod
+    def list_by_run(self, run_id: str) -> list[RunCaseResult]: ...
+
+    @abstractmethod
+    def list_by_shard(
+        self, run_id: str, shard_id: str
+    ) -> list[RunCaseResult]: ...
+
+    @abstractmethod
+    def get_by_key(
+        self, run_id: str, shard_id: str, case_key: str, attempt_no: int
+    ) -> RunCaseResult | None: ...
+
+    @abstractmethod
+    def update(self, result: RunCaseResult) -> RunCaseResult: ...
+
+
+class RunArtifactRepository(ABC):
+    """结束产物仓储（P3.4，run_artifacts 表）。"""
+
+    @abstractmethod
+    def add(self, artifact: RunArtifact) -> RunArtifact: ...
+
+    @abstractmethod
+    def get_by_artifact_id(self, artifact_id: str) -> RunArtifact | None: ...
+
+    @abstractmethod
+    def list_by_run(self, run_id: str) -> list[RunArtifact]: ...
+
+
+class RunResultRepository(ABC):
+    """Run 级汇总投影仓储（P3.4，results 表，run_pk 唯一）。"""
+
+    @abstractmethod
+    def add(self, result: RunResult) -> RunResult: ...
+
+    @abstractmethod
+    def get_by_run_id(self, run_id: str) -> RunResult | None: ...
+
+    @abstractmethod
+    def update(self, result: RunResult) -> RunResult: ...
 
 
 class ProjectRepository(ABC):
@@ -272,6 +391,12 @@ class UnitOfWork(ABC):
     test_scripts: TestScriptRepository
     script_cases: ScriptCaseRepository
     test_tasks: TestTaskRepository
+    task_runs: TaskRunRepository
+    run_shards: RunShardRepository
+    shard_attempts: ShardAttemptRepository
+    run_case_results: RunCaseResultRepository
+    run_artifacts: RunArtifactRepository
+    run_results: RunResultRepository
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository

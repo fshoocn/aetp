@@ -8,6 +8,14 @@ from .project import Project
 from .project_member import ProjectMember, ProjectMemberWithUser
 from .project_node_binding import ProjectNodeBinding, ProjectNodeBindingView
 from .refresh_token import RefreshToken
+from .run import (
+    RunArtifact,
+    RunCaseResult,
+    RunResult,
+    RunShard,
+    ShardAttempt,
+    TaskRun,
+)
 from .script_case import ScriptCase
 from .task import InvalidTaskTransitionError, Task
 from .task_log import TaskLog
@@ -28,6 +36,12 @@ __all__ = [
     "ScriptCase",
     "TestScript",
     "TestTask",
+    "TaskRun",
+    "RunShard",
+    "ShardAttempt",
+    "RunCaseResult",
+    "RunArtifact",
+    "RunResult",
     "Task",
     "TaskLog",
     "InvalidTaskTransitionError",

@@ -108,6 +108,98 @@ class SplitPolicyType(StrEnum):
     CUSTOM = "custom"
 
 
+class TriggerType(StrEnum):
+    """Run 触发来源（§18.7，统一 RunRequested 用例）。
+
+    手动/API/定时/CI 为外部触发；retry/recovery 为服务端触发，
+    必须引用原 Run 与原因，浏览器不能伪造。
+    """
+
+    MANUAL_WEB = "manual_web"
+    API = "api"
+    SCHEDULE = "schedule"
+    CI_WEBHOOK = "ci_webhook"
+    RETRY = "retry"
+    RECOVERY = "recovery"
+
+
+class RunStatus(StrEnum):
+    """Run 总体状态（§6.4）。
+
+    created → dispatched → acked → running → succeeded / failed / cancelled / timed_out / lost
+    """
+
+    CREATED = "created"
+    DISPATCHED = "dispatched"
+    ACKED = "acked"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    TIMED_OUT = "timed_out"
+    LOST = "lost"
+
+
+class ShardStatus(StrEnum):
+    """Shard 状态（Run 内部，§5.4）。
+
+    pending → dispatching → running → succeeded / failed / cancelled / timed_out；
+    waiting_recovery 表示等待离线恢复策略。
+    """
+
+    PENDING = "pending"
+    DISPATCHING = "dispatching"
+    RUNNING = "running"
+    WAITING_RECOVERY = "waiting_recovery"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    TIMED_OUT = "timed_out"
+
+
+class ShardAttemptStatus(StrEnum):
+    """Shard 向某 Node 的一次派发尝试状态（D-20 历史全量保留）。
+
+    created → dispatched → acked → running → succeeded / failed / cancelled / timed_out
+    """
+
+    CREATED = "created"
+    DISPATCHED = "dispatched"
+    ACKED = "acked"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    TIMED_OUT = "timed_out"
+
+
+class CaseStatus(StrEnum):
+    """case 级执行结果状态（§6.4）。
+
+    pytest 类插件可运行中实时上报；CANoe 类仅在结束后由插件解析报告产出（D-19）。
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    PASSED = "passed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    ERROR = "error"
+
+
+class ArtifactKind(StrEnum):
+    """结束产物类型（§6.4）。
+
+    report: 测试报告文件（插件 parse_results 的输入）
+    log_archive: 结束后的日志归档
+    data: 测量/数据文件
+    """
+
+    REPORT = "report"
+    LOG_ARCHIVE = "log_archive"
+    DATA = "data"
+
+
 class DeviceStatus(StrEnum):
     """设备运行状态。"""
 
