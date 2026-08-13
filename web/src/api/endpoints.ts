@@ -33,7 +33,15 @@ export interface Task {
   project_id: string;
   task_id: string;
   device_id: string;
-  status: string;
+  status:
+    | "pending"
+    | "dispatching"
+    | "running"
+    | "cancelling"
+    | "succeeded"
+    | "failed"
+    | "cancelled"
+    | "timed_out";
   command: Record<string, unknown>;
   result: Record<string, unknown> | null;
   error: string | null;

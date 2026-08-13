@@ -90,13 +90,13 @@ function prettyJson(v: unknown): string {
 function statusText(s: string) {
   const map: Record<string, string> = {
     pending: "待派发",
-    dispatched: "已派发",
-    accepted: "已接受",
+    dispatching: "派发中",
     running: "运行中",
-    completed: "已完成",
+    cancelling: "取消中",
+    succeeded: "成功",
     failed: "失败",
     cancelled: "已取消",
-    timeout: "超时",
+    timed_out: "超时",
   };
   return map[s] ?? s;
 }
@@ -104,13 +104,13 @@ function statusText(s: string) {
 function statusTag(s: string) {
   const map: Record<string, "success" | "danger" | "warning" | "info"> = {
     pending: "info",
-    dispatched: "info",
-    accepted: "warning",
+    dispatching: "info",
     running: "warning",
-    completed: "success",
+    cancelling: "warning",
+    succeeded: "success",
     failed: "danger",
     cancelled: "info",
-    timeout: "danger",
+    timed_out: "danger",
   };
   return map[s] ?? "info";
 }

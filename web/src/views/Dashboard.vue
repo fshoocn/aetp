@@ -72,12 +72,12 @@ const queryError = computed(() => (tasksQuery.error.value || devicesQuery.error.
 const allTasks = computed(() => tasksQuery.data.value ?? []);
 const allDevices = computed(() => devicesQuery.data.value ?? []);
 const recentTasks = computed(() => allTasks.value.slice(0, 8));
-const stats = computed(() => { const total = allDevices.value.length; const online = allDevices.value.filter((device) => device.online).length; return { totalTasks: allTasks.value.length, runningTasks: allTasks.value.filter((task) => ["pending", "running", "dispatched", "accepted"].includes(task.status)).length, onlineDevices: online, deviceRate: total ? Math.round((online / total) * 100) : 0 }; });
+const stats = computed(() => { const total = allDevices.value.length; const online = allDevices.value.filter((device) => device.online).length; return { totalTasks: allTasks.value.length, runningTasks: allTasks.value.filter((task) => ["pending", "dispatching", "running", "cancelling"].includes(task.status)).length, onlineDevices: online, deviceRate: total ? Math.round((online / total) * 100) : 0 }; });
 function refresh() { queryClient.invalidateQueries({ queryKey: ["tasks"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
 function gotoTask(row: Task) { router.push(`/tasks/${row.task_id}`); }
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
-function statusText(status: string) { return ({ pending: "待处理", dispatched: "已派发", accepted: "已接受", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", timeout: "超时" } as Record<string, string>)[status] || status; }
-function statusTag(status: string) { return ({ completed: "success", running: "warning", accepted: "warning", dispatched: "info", pending: "info", failed: "danger", timeout: "danger", cancelled: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
+function statusText(status: string) { return ({ pending: "待处理", dispatching: "派发中", running: "运行中", cancelling: "取消中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时" } as Record<string, string>)[status] || status; }
+function statusTag(status: string) { return ({ succeeded: "success", running: "warning", cancelling: "warning", dispatching: "info", pending: "info", failed: "danger", timed_out: "danger", cancelled: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
 </script>
 
 <style scoped>

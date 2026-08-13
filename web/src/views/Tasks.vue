@@ -63,7 +63,7 @@ const canDispatch = computed(() => auth.user?.platform_role === "admin" || ["ope
 const page = ref(1);
 const pageSize = 25;
 const filters = reactive({ status: "", deviceId: "" });
-const statusOptions = [{ label: "待处理", value: "pending" }, { label: "已派发", value: "dispatched" }, { label: "运行中", value: "running" }, { label: "已完成", value: "completed" }, { label: "失败", value: "failed" }, { label: "已取消", value: "cancelled" }];
+const statusOptions = [{ label: "待处理", value: "pending" }, { label: "派发中", value: "dispatching" }, { label: "运行中", value: "running" }, { label: "取消中", value: "cancelling" }, { label: "成功", value: "succeeded" }, { label: "失败", value: "failed" }, { label: "已取消", value: "cancelled" }, { label: "超时", value: "timed_out" }];
 const taskQuery = useQuery({ queryKey: ["tasks", "list", projectId, page, filters], queryFn: () => aetpApi.tasks.list(projectId.value, { status: filters.status || undefined, deviceId: filters.deviceId || undefined, limit: pageSize, offset: (page.value - 1) * pageSize }), enabled: computed(() => !!projectId.value) });
 const deviceQuery = useQuery({ queryKey: ["devices", "task-form", projectId], queryFn: () => aetpApi.devices.list(projectId.value), enabled: computed(() => !!projectId.value) });
 const tasks = computed(() => taskQuery.data.value ?? []);
@@ -85,8 +85,8 @@ function changePage(value: number) { page.value = value; }
 function refresh() { queryClient.invalidateQueries({ queryKey: ["tasks"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
 function gotoTask(row: Task) { router.push(`/tasks/${row.task_id}`); }
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
-function statusText(status: string) { return ({ pending: "待处理", dispatched: "已派发", accepted: "已接受", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", timeout: "超时" } as Record<string, string>)[status] || status; }
-function statusTag(status: string) { return ({ completed: "success", running: "warning", accepted: "warning", dispatched: "info", pending: "info", failed: "danger", timeout: "danger", cancelled: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
+function statusText(status: string) { return ({ pending: "待处理", dispatching: "派发中", running: "运行中", cancelling: "取消中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时" } as Record<string, string>)[status] || status; }
+function statusTag(status: string) { return ({ succeeded: "success", running: "warning", cancelling: "warning", dispatching: "info", pending: "info", failed: "danger", timed_out: "danger", cancelled: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
 watch(() => projectId.value, () => { page.value = 1; });
 </script>
 
