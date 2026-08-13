@@ -118,7 +118,11 @@ class AuthService:
                 logger.warning("刷新失败：令牌已过期")
                 return None
             user = uow.users.get_by_id(old.user_id)
-            if user is None or user.account_status != AccountStatus.ACTIVE:
+            if (
+                user is None
+                or user.id is None
+                or user.account_status != AccountStatus.ACTIVE
+            ):
                 logger.warning(
                     "刷新失败：用户不存在或非 active: user_id=%s", old.user_id
                 )
@@ -195,13 +199,14 @@ class AuthService:
         """修改密码（使用 Argon2id 哈希）；用户不存在返回 False。"""
         with self._uow_factory() as uow:
             user = uow.users.get_by_username(username)
-            if user is None:
+            if user is None or user.id is None:
                 return False
+            user_id = user.id
             user.password_hash = _hash_password(new_password)
             user.updated_at = utcnow()
             uow.users.update(user)
             # 改密后撤销全部会话（P2.10），旧刷新令牌全部失效
-            uow.refresh_tokens.revoke_all_for_user(user.id)
+            uow.refresh_tokens.revoke_all_for_user(user_id)
             logger.info("用户密码已修改并撤销全部会话: username=%s", username)
             return True
 

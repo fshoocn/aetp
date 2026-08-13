@@ -38,6 +38,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 def _issue_token_response(auth: AuthService, user: User) -> TokenResponse:
     """签发访问令牌 + 刷新令牌（刷新令牌只存哈希入库，P2.10）。"""
+    if user.id is None:
+        # 持久化用户必有主键；防御性校验避免把 None 写入会话表
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="用户主键缺失",
+        )
     settings = get_settings()
     raw_refresh = generate_refresh_token()
     expires_at = utcnow() + timedelta(days=settings.refresh_token_expire_days)
