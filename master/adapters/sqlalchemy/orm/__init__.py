@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from .audit_log import AuditLog
 from .base import (
     JSONType,
     NAMING_CONVENTION,
@@ -14,7 +15,10 @@ from .base import (
     utcnow,
 )
 from .device import Device
+from .domain_event import DomainEvent
+from .inbox_message import InboxMessage
 from .node import Node
+from .outbox_message import OutboxMessage
 from .project import Project
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
@@ -40,6 +44,10 @@ __all__ = [
     "JSONType",
     "utcnow",
     "User",
+    "AuditLog",
+    "DomainEvent",
+    "InboxMessage",
+    "OutboxMessage",
     "Device",
     "Node",
     "Project",
