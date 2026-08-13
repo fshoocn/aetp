@@ -51,6 +51,11 @@ class RunShard(Base, TimestampMixin):
     shard_index: Mapped[int] = mapped_column(Integer, nullable=False)
     # sym:case_keys 该 Shard 负责的 case 集合（stable_key 列表）
     case_keys: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    # sym:execution_params 该子任务专属执行参数 JSON（插件 split_shards 产出，
+    #   Agent 插件 execute 使用；与共享 config 合并/覆盖）
+    execution_params: Mapped[dict] = mapped_column(
+        JSONType, nullable=False, default=dict
+    )
     # sym:estimated_duration_s 预估耗时（秒；null=未知）
     estimated_duration_s: Mapped[Optional[float]] = mapped_column(
         Float, nullable=True

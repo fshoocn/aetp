@@ -83,6 +83,9 @@ class RunShard:
     shard_index: int = 0
     # sym:case_keys 该 Shard 负责的 case 集合（stable_key 列表）
     case_keys: list[str] = field(default_factory=list)
+    # sym:execution_params 该子任务专属执行参数（插件 split_shards 产出，
+    #   执行时与共享 config 合并/覆盖；run.assign 下发，Agent 插件 execute 使用）
+    execution_params: dict = field(default_factory=dict)
     # sym:estimated_duration_s 预估耗时（秒，by_time 分割产出；null=未知）
     estimated_duration_s: float | None = None
     # sym:mutex_keys 互斥资源键（共用同一硬件通道的 Shard 不得并行，§18.6）
