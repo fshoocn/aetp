@@ -25,8 +25,8 @@ class WorkflowStage:
     name: str
     # sym:action 动作名（引擎经 WorkflowActionRunner 路由到具体实现：调插件/发 MQTT/落库）
     action: str = ""
-    # sym:timeout_s 动作超时（秒）；0 = 无超时
-    timeout_s: int = 0
+    # sym:timeout_s 动作超时（秒，可亚秒）；0 = 无超时
+    timeout_s: float = 0
     # sym:retry 动作失败重试次数（0 = 不重试）
     retry: int = 0
     # sym:on_success 成功后下一阶段；空 = 进入成功终态

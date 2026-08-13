@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any, Mapping
 
 import pytest
 
@@ -38,8 +39,8 @@ class PytestPlugin:
     display_name = "pytest"
     plugin_version = "1.0.0"
     supported_versions = frozenset({"1.0.0"})
-    config_schema = {"type": "object", "properties": {}}
-    upload_spec = {"extensions": [".py", ".zip"], "max_size_mb": 10}
+    config_schema: Mapping[str, Any] = {"type": "object", "properties": {}}
+    upload_spec: Mapping[str, Any] = {"extensions": [".py", ".zip"], "max_size_mb": 10}
     parse_location = "master"
     result_parse_location = "agent"
     verify_location = "master"
@@ -215,10 +216,11 @@ def test_registry_list_sorted():
         display_name = "a"
         plugin_version = "1.0.0"
         supported_versions = frozenset({"1.0.0"})
-        config_schema = {}
-        upload_spec = {}
+        config_schema: Mapping[str, Any] = {}
+        upload_spec: Mapping[str, Any] = {}
         parse_location = "master"
         result_parse_location = "master"
+        verify_location = "master"
 
         def verify_script(self, script_dir, config):
             return []
@@ -307,6 +309,9 @@ class PytestExecutionPlugin:
     supported_versions = frozenset({"1.0.0"})
     display_name = "pytest"
     verify_location = "master"
+
+    def verify_script(self, script_dir, config):
+        return []
 
     async def execute(self, context):
         return {"status": "passed"}
