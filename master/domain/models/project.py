@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from master.domain.enums import ProjectStatus
+from master.domain.enums import ProjectRole, ProjectStatus
 
 
 @dataclass
@@ -29,3 +29,5 @@ class Project:
     created_by: int
     created_at: datetime
     updated_at: datetime
+    # 仅用于“当前用户可见项目”查询的权限投影，管理员列表为空。
+    project_role: ProjectRole | None = None

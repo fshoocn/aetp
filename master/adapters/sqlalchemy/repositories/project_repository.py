@@ -7,12 +7,12 @@ from sqlalchemy.orm import Session
 
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
 from master.adapters.sqlalchemy.orm import ProjectMember as ProjectMemberORM
-from master.domain.enums import ProjectStatus
+from master.domain.enums import ProjectRole, ProjectStatus
 from master.domain.models import Project
 from master.domain.repositories import ProjectRepository
 
 
-def _to_domain(orm: ProjectORM) -> Project:
+def _to_domain(orm: ProjectORM, project_role: str | None = None) -> Project:
     return Project(
         id=orm.id,
         project_id=orm.project_id,
@@ -23,6 +23,7 @@ def _to_domain(orm: ProjectORM) -> Project:
         created_by=orm.created_by,
         created_at=orm.created_at,
         updated_at=orm.updated_at,
+        project_role=ProjectRole(project_role) if project_role else None,
     )
 
 
@@ -52,7 +53,7 @@ class ProjectRepositoryImpl(ProjectRepository):
         self, user_id: int, *, limit: int = 100, offset: int = 0
     ) -> list[Project]:
         stmt = (
-            select(ProjectORM)
+            select(ProjectORM, ProjectMemberORM.project_role)
             .join(
                 ProjectMemberORM,
                 ProjectMemberORM.project_pk == ProjectORM.id,
@@ -62,7 +63,10 @@ class ProjectRepositoryImpl(ProjectRepository):
             .limit(limit)
             .offset(offset)
         )
-        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+        return [
+            _to_domain(project, role)
+            for project, role in self._s.execute(stmt).all()
+        ]
 
     def add(self, project: Project) -> Project:
         orm = ProjectORM(

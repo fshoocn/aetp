@@ -229,6 +229,7 @@ class ProjectOut(BaseModel):
     created_by: int
     created_at: datetime
     updated_at: datetime
+    project_role: ProjectRole | None = None
 
 
 class AdminUserOut(BaseModel):

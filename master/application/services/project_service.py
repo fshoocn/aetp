@@ -138,6 +138,7 @@ class ProjectService:
             role = uow.members.get_role(project_id, user_id)
             if role is None:
                 return None
+            project.project_role = ProjectRole(role)
             logger.debug(
                 "查询项目成员详情: project_id=%s, user_id=%s, found=%s",
                 project_id,
