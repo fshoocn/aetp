@@ -8,14 +8,18 @@ from .project_member_repository import ProjectMemberRepositoryImpl
 from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
 from .project_repository import ProjectRepositoryImpl
 from .refresh_token_repository import RefreshTokenRepositoryImpl
+from .script_case_repository import ScriptCaseRepositoryImpl
 from .task_log_repository import TaskLogRepositoryImpl
 from .task_repository import TaskRepositoryImpl
+from .test_script_repository import TestScriptRepositoryImpl
 from .user_repository import UserRepositoryImpl
 
 __all__ = [
     "UserRepositoryImpl",
     "ProjectRepositoryImpl",
     "RefreshTokenRepositoryImpl",
+    "ScriptCaseRepositoryImpl",
+    "TestScriptRepositoryImpl",
     "ProjectMemberRepositoryImpl",
     "NodeRepositoryImpl",
     "DeviceRepositoryImpl",

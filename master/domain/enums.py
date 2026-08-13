@@ -77,6 +77,22 @@ class TaskStatus(StrEnum):
     TIMED_OUT = "timed_out"
 
 
+class ScriptParseStatus(StrEnum):
+    """测试脚本用例解析状态。"""
+
+    PENDING = "pending"
+    PARSING = "parsing"
+    PARSED = "parsed"
+    FAILED = "failed"
+
+
+class ScriptParseLocation(StrEnum):
+    """用例解析/结果解析执行位置（D-17）。"""
+
+    MASTER = "master"
+    AGENT = "agent"
+
+
 class DeviceStatus(StrEnum):
     """设备运行状态。"""
 

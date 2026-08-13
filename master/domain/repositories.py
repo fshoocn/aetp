@@ -20,8 +20,10 @@ from master.domain.models import (
     ProjectNodeBinding,
     ProjectNodeBindingView,
     RefreshToken,
+    ScriptCase,
     Task,
     TaskLog,
+    TestScript,
     User,
 )
 
@@ -60,6 +62,51 @@ class RefreshTokenRepository(ABC):
 
     @abstractmethod
     def revoke_all_for_user(self, user_id: int) -> int: ...
+
+
+class TestScriptRepository(ABC):
+    @abstractmethod
+    def get_by_script_id(self, script_id: str) -> TestScript | None: ...
+
+    @abstractmethod
+    def get_by_hash(self, sha256: str) -> TestScript | None: ...
+
+    @abstractmethod
+    def find_by_name_version(
+        self, project_id: str, name: str, version: int
+    ) -> TestScript | None: ...
+
+    @abstractmethod
+    def list_by_project(
+        self, project_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[TestScript]: ...
+
+    @abstractmethod
+    def add(self, script: TestScript) -> TestScript: ...
+
+    @abstractmethod
+    def update(self, script: TestScript) -> TestScript: ...
+
+
+class ScriptCaseRepository(ABC):
+    @abstractmethod
+    def list_by_script(
+        self, script_id: str, *, include_deleted: bool = False
+    ) -> list[ScriptCase]: ...
+
+    @abstractmethod
+    def get_by_stable_key(
+        self, script_id: str, stable_key: str
+    ) -> ScriptCase | None: ...
+
+    @abstractmethod
+    def add(self, case: ScriptCase) -> ScriptCase: ...
+
+    @abstractmethod
+    def add_many(self, cases: list[ScriptCase]) -> list[ScriptCase]: ...
+
+    @abstractmethod
+    def update(self, case: ScriptCase) -> ScriptCase: ...
 
 
 class ProjectRepository(ABC):
@@ -193,6 +240,8 @@ class UnitOfWork(ABC):
 
     users: UserRepository
     refresh_tokens: RefreshTokenRepository
+    test_scripts: TestScriptRepository
+    script_cases: ScriptCaseRepository
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository

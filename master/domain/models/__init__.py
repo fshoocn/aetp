@@ -8,8 +8,10 @@ from .project import Project
 from .project_member import ProjectMember, ProjectMemberWithUser
 from .project_node_binding import ProjectNodeBinding, ProjectNodeBindingView
 from .refresh_token import RefreshToken
+from .script_case import ScriptCase
 from .task import InvalidTaskTransitionError, Task
 from .task_log import TaskLog
+from .test_script import TestScript
 from .user import User
 
 __all__ = [
@@ -22,6 +24,8 @@ __all__ = [
     "ProjectNodeBinding",
     "ProjectNodeBindingView",
     "RefreshToken",
+    "ScriptCase",
+    "TestScript",
     "Task",
     "TaskLog",
     "InvalidTaskTransitionError",
