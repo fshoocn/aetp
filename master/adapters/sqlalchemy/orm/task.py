@@ -35,8 +35,8 @@ class Task(Base, TimestampMixin):
         Index("ix_tasks_project_status", "project_pk", "status"),
         Index("ix_tasks_created_at", "created_at"),
         CheckConstraint(
-            "status IN ('pending','dispatched','accepted','running',"
-            "'completed','failed','cancelled','timeout')",
+            "status IN ('pending','dispatching','running','cancelling',"
+            "'succeeded','failed','cancelled','timed_out')",
             name="ck_tasks_status",
         ),
     )

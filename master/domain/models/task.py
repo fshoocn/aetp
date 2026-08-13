@@ -1,9 +1,10 @@
 """领域对象：测试任务（含状态机）。
 
-任务状态迁移规则：
-    pending → dispatched → accepted → running → completed / failed
+任务状态迁移规则（D-22 目标命名）：
+    pending → dispatching → running → succeeded / failed / timed_out
     pending → cancelled
-    running → timeout
+    dispatching → failed（派发耗尽）
+    running → cancelling → cancelled
 
 状态迁移通过 Task 自身的方法完成，非法迁移会抛出
 InvalidTaskTransitionError，由应用层/API 层映射为 409。
@@ -24,17 +25,26 @@ class InvalidTaskTransitionError(ValueError):
 
 # 允许的状态迁移表
 _ALLOWED_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    TaskStatus.PENDING: {TaskStatus.DISPATCHED, TaskStatus.CANCELLED},
-    TaskStatus.DISPATCHED: {TaskStatus.ACCEPTED, TaskStatus.CANCELLED},
-    TaskStatus.ACCEPTED: {TaskStatus.RUNNING, TaskStatus.CANCELLED},
-    TaskStatus.RUNNING: {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.TIMEOUT},
+    TaskStatus.PENDING: {TaskStatus.DISPATCHING, TaskStatus.CANCELLED},
+    TaskStatus.DISPATCHING: {
+        TaskStatus.RUNNING,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+    },
+    TaskStatus.RUNNING: {
+        TaskStatus.SUCCEEDED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLING,
+        TaskStatus.TIMED_OUT,
+    },
+    TaskStatus.CANCELLING: {TaskStatus.CANCELLED},
 }
 
 _TERMINAL_STATUSES = {
-    TaskStatus.COMPLETED,
+    TaskStatus.SUCCEEDED,
     TaskStatus.FAILED,
     TaskStatus.CANCELLED,
-    TaskStatus.TIMEOUT,
+    TaskStatus.TIMED_OUT,
 }
 
 
@@ -91,22 +101,22 @@ class Task:
         self.status = target
         self.updated_at = utcnow()
 
-    def mark_dispatched(self) -> None:
-        """派发给 Agent。"""
-        self._transition(TaskStatus.DISPATCHED)
-
-    def mark_accepted(self) -> None:
-        """Agent 已接受。"""
-        self._transition(TaskStatus.ACCEPTED)
+    def mark_dispatching(self) -> None:
+        """派发给 Agent（含旧 dispatched/accepted 语义）。"""
+        self._transition(TaskStatus.DISPATCHING)
 
     def mark_running(self) -> None:
-        """开始执行。"""
+        """Agent 开始执行。"""
         self._transition(TaskStatus.RUNNING)
         self.started_at = utcnow()
 
-    def complete(self, result: dict | None = None) -> None:
+    def mark_cancelling(self) -> None:
+        """执行中收到取消请求，进入取消中状态。"""
+        self._transition(TaskStatus.CANCELLING)
+
+    def succeed(self, result: dict | None = None) -> None:
         """执行成功。"""
-        self._transition(TaskStatus.COMPLETED)
+        self._transition(TaskStatus.SUCCEEDED)
         self.result = result
         self.error = None
         self.finished_at = utcnow()
@@ -118,13 +128,36 @@ class Task:
         self.finished_at = utcnow()
 
     def cancel(self) -> None:
-        """取消任务。"""
+        """取消任务。
+
+        pending/dispatching 直接进入 cancelled；
+        running 先进入 cancelling（由 Agent 确认后 mark_cancelled）；
+        cancelling 直接进入 cancelled。
+        """
+        if self.status in (TaskStatus.PENDING, TaskStatus.DISPATCHING):
+            self._transition(TaskStatus.CANCELLED)
+        elif self.status == TaskStatus.RUNNING:
+            self._transition(TaskStatus.CANCELLING)
+        elif self.status == TaskStatus.CANCELLING:
+            self._transition(TaskStatus.CANCELLED)
+        else:
+            raise InvalidTaskTransitionError(
+                f"任务状态 {self.status.value} 不允许取消"
+            )
+        self.finished_at = utcnow()
+
+    def mark_cancelled(self) -> None:
+        """Agent 确认取消完成（仅 cancelling 可进入）。"""
+        if self.status != TaskStatus.CANCELLING:
+            raise InvalidTaskTransitionError(
+                f"任务状态 {self.status.value} 未处于取消中，无法标记取消完成"
+            )
         self._transition(TaskStatus.CANCELLED)
         self.finished_at = utcnow()
 
-    def mark_timeout(self) -> None:
+    def mark_timed_out(self) -> None:
         """执行超时。"""
-        self._transition(TaskStatus.TIMEOUT)
+        self._transition(TaskStatus.TIMED_OUT)
         self.finished_at = utcnow()
 
     @property

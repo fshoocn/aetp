@@ -56,21 +56,25 @@ class ProjectRole(StrEnum):
 
 
 class TaskStatus(StrEnum):
-    """测试任务状态机。
+    """测试任务状态机（D-22 目标命名，P3.1 已迁移）。
 
-    pending → dispatched → accepted → running → completed / failed
+    pending → dispatching → running → succeeded / failed / timed_out
     pending → cancelled
-    running → timeout
+    dispatching → failed（派发耗尽）
+    running → cancelling → cancelled
+
+    旧值迁移映射：dispatched/accepted → dispatching；
+    completed → succeeded；timeout → timed_out。
     """
 
     PENDING = "pending"
-    DISPATCHED = "dispatched"
-    ACCEPTED = "accepted"
+    DISPATCHING = "dispatching"
     RUNNING = "running"
-    COMPLETED = "completed"
+    CANCELLING = "cancelling"
+    SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
-    TIMEOUT = "timeout"
+    TIMED_OUT = "timed_out"
 
 
 class DeviceStatus(StrEnum):
