@@ -30,10 +30,24 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """JWT 响应。"""
+    """登录/刷新响应：短期访问令牌 + 长期刷新令牌。"""
 
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+    expires_in: int = Field(description="访问令牌有效期（秒）")
+
+
+class RefreshRequest(BaseModel):
+    """刷新令牌请求。"""
+
+    refresh_token: str = Field(min_length=16, max_length=512)
+
+
+class LogoutRequest(BaseModel):
+    """登出请求：携带刷新令牌以服务端撤销。"""
+
+    refresh_token: str | None = None
 
 
 class UserOut(BaseModel):

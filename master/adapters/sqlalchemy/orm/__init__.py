@@ -18,6 +18,7 @@ from .node import Node
 from .project import Project
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
+from .refresh_token import RefreshToken
 from .task import Task
 from .task_log import TaskLog
 from .user import User
@@ -35,6 +36,7 @@ __all__ = [
     "Project",
     "ProjectMember",
     "ProjectNodeBinding",
+    "RefreshToken",
     "Task",
     "TaskLog",
 ]

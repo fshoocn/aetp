@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Callable
 
 from argon2 import PasswordHasher
@@ -22,7 +23,7 @@ from master.application.errors import (
     UsernameAlreadyExistsError,
 )
 from master.domain.enums import AccountStatus, PlatformRole
-from master.domain.models import User
+from master.domain.models import RefreshToken, User
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 
@@ -79,6 +80,83 @@ class AuthService:
             raise InvalidCredentialsError("用户名或密码错误")
         return user
 
+    # ---- 刷新令牌会话（P2.10） ----
+
+    def issue_refresh_token(
+        self, user_id: int, token_hash: str, expires_at: datetime
+    ) -> None:
+        """登录/刷新成功后登记新刷新令牌（只存 SHA-256 哈希）。"""
+        with self._uow_factory() as uow:
+            uow.refresh_tokens.add(
+                RefreshToken(
+                    id=None,
+                    user_id=user_id,
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                    revoked_at=None,
+                    replaced_by_hash=None,
+                    created_at=utcnow(),
+                    updated_at=utcnow(),
+                )
+            )
+            logger.info("刷新令牌已签发: user_id=%s", user_id)
+
+    def rotate_refresh_token(
+        self, old_hash: str, new_hash: str, expires_at: datetime
+    ) -> User | None:
+        """轮换刷新令牌：校验旧令牌有效后，同一事务内撤销旧令牌并签发新令牌。
+
+        返回激活用户（调用方据此签发新访问令牌）；
+        令牌不存在/已撤销/已过期/用户非 active 均返回 None。
+        """
+        with self._uow_factory() as uow:
+            old = uow.refresh_tokens.get_by_hash(old_hash)
+            if old is None or old.revoked_at is not None:
+                logger.warning("刷新失败：令牌不存在或已撤销")
+                return None
+            if old.expires_at <= utcnow():
+                logger.warning("刷新失败：令牌已过期")
+                return None
+            user = uow.users.get_by_id(old.user_id)
+            if user is None or user.account_status != AccountStatus.ACTIVE:
+                logger.warning(
+                    "刷新失败：用户不存在或非 active: user_id=%s", old.user_id
+                )
+                return None
+            old.revoked_at = utcnow()
+            old.replaced_by_hash = new_hash
+            uow.refresh_tokens.update(old)
+            uow.refresh_tokens.add(
+                RefreshToken(
+                    id=None,
+                    user_id=user.id,
+                    token_hash=new_hash,
+                    expires_at=expires_at,
+                    revoked_at=None,
+                    replaced_by_hash=None,
+                    created_at=utcnow(),
+                    updated_at=utcnow(),
+                )
+            )
+            logger.info("刷新令牌已轮换: user_id=%s", user.id)
+            return user
+
+    def revoke_refresh_token(self, token_hash: str) -> bool:
+        """撤销单个刷新令牌（登出）；不存在返回 False。"""
+        with self._uow_factory() as uow:
+            token = uow.refresh_tokens.get_by_hash(token_hash)
+            if token is None:
+                return False
+            token.revoked_at = utcnow()
+            uow.refresh_tokens.update(token)
+            logger.info("刷新令牌已撤销: user_id=%s", token.user_id)
+            return True
+
+    def revoke_all_for_user(self, user_id: int) -> int:
+        """撤销用户全部未撤销的刷新令牌，返回撤销数量。"""
+        with self._uow_factory() as uow:
+            return uow.refresh_tokens.revoke_all_for_user(user_id)
+
     # ---- 注册 / 修改密码 ----
 
     def create_user(
@@ -122,7 +200,9 @@ class AuthService:
             user.password_hash = _hash_password(new_password)
             user.updated_at = utcnow()
             uow.users.update(user)
-            logger.info("用户密码已修改: username=%s", username)
+            # 改密后撤销全部会话（P2.10），旧刷新令牌全部失效
+            uow.refresh_tokens.revoke_all_for_user(user.id)
+            logger.info("用户密码已修改并撤销全部会话: username=%s", username)
             return True
 
     def bootstrap_admin(
@@ -199,6 +279,14 @@ class AuthService:
                 user.platform_role = PlatformRole(platform_role)
             user.updated_at = utcnow()
             updated = uow.users.update(user)
+            # 账户被禁用时撤销全部会话（P2.10），已有刷新令牌全部失效
+            if updated.account_status == AccountStatus.DISABLED:
+                revoked = uow.refresh_tokens.revoke_all_for_user(user_id)
+                logger.info(
+                    "账户已禁用并撤销全部会话: user_id=%s, revoked=%s",
+                    user_id,
+                    revoked,
+                )
             logger.info(
                 "用户权限已更新: user_id=%s, account_status=%s, platform_role=%s",
                 user_id,

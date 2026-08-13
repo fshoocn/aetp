@@ -20,6 +20,7 @@ from master.adapters.sqlalchemy.repositories import (
     ProjectMemberRepositoryImpl,
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
+    RefreshTokenRepositoryImpl,
     TaskLogRepositoryImpl,
     TaskRepositoryImpl,
     UserRepositoryImpl,
@@ -36,6 +37,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         session = self._database.session()
         self._session = session
         self.users = UserRepositoryImpl(session)
+        self.refresh_tokens = RefreshTokenRepositoryImpl(session)
         self.projects = ProjectRepositoryImpl(session)
         self.members = ProjectMemberRepositoryImpl(session)
         self.nodes = NodeRepositoryImpl(session)

@@ -19,6 +19,7 @@ from master.domain.models import (
     ProjectMemberWithUser,
     ProjectNodeBinding,
     ProjectNodeBindingView,
+    RefreshToken,
     Task,
     TaskLog,
     User,
@@ -45,6 +46,20 @@ class UserRepository(ABC):
 
     @abstractmethod
     def update(self, user: User) -> User: ...
+
+
+class RefreshTokenRepository(ABC):
+    @abstractmethod
+    def get_by_hash(self, token_hash: str) -> RefreshToken | None: ...
+
+    @abstractmethod
+    def add(self, token: RefreshToken) -> RefreshToken: ...
+
+    @abstractmethod
+    def update(self, token: RefreshToken) -> RefreshToken: ...
+
+    @abstractmethod
+    def revoke_all_for_user(self, user_id: int) -> int: ...
 
 
 class ProjectRepository(ABC):
@@ -177,6 +192,7 @@ class UnitOfWork(ABC):
     """
 
     users: UserRepository
+    refresh_tokens: RefreshTokenRepository
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository

@@ -7,6 +7,7 @@ from .node import Node
 from .project import Project
 from .project_member import ProjectMember, ProjectMemberWithUser
 from .project_node_binding import ProjectNodeBinding, ProjectNodeBindingView
+from .refresh_token import RefreshToken
 from .task import InvalidTaskTransitionError, Task
 from .task_log import TaskLog
 from .user import User
@@ -20,6 +21,7 @@ __all__ = [
     "ProjectMemberWithUser",
     "ProjectNodeBinding",
     "ProjectNodeBindingView",
+    "RefreshToken",
     "Task",
     "TaskLog",
     "InvalidTaskTransitionError",

@@ -96,9 +96,14 @@ class MasterSettings:
     log_level: str = "INFO"
     log_file: Path = Path("logs/aetp.log")
     log_console: bool = True
-    # JWT 签名密钥与过期时间（分钟）
+    # JWT 签名密钥与过期时间（分钟）；访问令牌短、刷新令牌长（见 refresh_token_expire_days）
     jwt_secret: str = "aetp-master-dev-secret-change-me"
-    jwt_expire_minutes: int = 720
+    jwt_expire_minutes: int = 30
+    # JWT 签发方与受众（P2.9：解码时严格校验 iss/aud，防止令牌跨系统复用）
+    jwt_issuer: str = "aetp-master"
+    jwt_audience: str = "aetp-web"
+    # 刷新令牌有效期（天）；刷新时轮换，登出/改密/禁用账户时撤销
+    refresh_token_expire_days: int = 7
     # 数据库自动迁移（Alembic upgrade head）；生产可关闭改为部署脚本手动执行
     auto_migrate: bool = True
     # 开启首次启动时自动创建 platform_admin（若 users 表为空则创建，由 .env 凭据指定）
@@ -141,6 +146,7 @@ class MasterSettings:
         raw_port = values.get("AETP_MASTER_MQTT_PORT")
         raw_http_port = values.get("AETP_MASTER_HTTP_PORT")
         raw_jwt_expire = values.get("AETP_MASTER_JWT_EXPIRE_MINUTES")
+        raw_refresh_days = values.get("AETP_MASTER_REFRESH_TOKEN_EXPIRE_DAYS")
         raw_log_file = values.get("AETP_MASTER_LOG_FILE")
         log_file = Path(raw_log_file) if raw_log_file else cls.log_file
         if not log_file.is_absolute():
@@ -169,6 +175,11 @@ class MasterSettings:
             jwt_secret=values.get("AETP_MASTER_JWT_SECRET", cls.jwt_secret),
             jwt_expire_minutes=(
                 int(raw_jwt_expire) if raw_jwt_expire else cls.jwt_expire_minutes
+            ),
+            jwt_issuer=values.get("AETP_MASTER_JWT_ISSUER", cls.jwt_issuer),
+            jwt_audience=values.get("AETP_MASTER_JWT_AUDIENCE", cls.jwt_audience),
+            refresh_token_expire_days=(
+                int(raw_refresh_days) if raw_refresh_days else cls.refresh_token_expire_days
             ),
             auto_migrate=_parse_bool(
                 values.get("AETP_MASTER_AUTO_MIGRATE"), cls.auto_migrate

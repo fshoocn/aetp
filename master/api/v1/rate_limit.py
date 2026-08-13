@@ -46,6 +46,8 @@ class SlidingWindowRateLimiter:
 login_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=60)
 # 注册：每 IP 1 小时内最多 10 次
 register_limiter = SlidingWindowRateLimiter(max_attempts=10, window_seconds=3600)
+# 刷新令牌：客户端静默续期较频繁，阈值放宽；失败不重置计数
+refresh_limiter = SlidingWindowRateLimiter(max_attempts=60, window_seconds=60)
 
 
 def client_ip(request) -> str:
