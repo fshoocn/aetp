@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from master.adapters.sqlalchemy.orm import RefreshToken as RefreshTokenORM
@@ -60,12 +62,17 @@ class RefreshTokenRepositoryImpl(RefreshTokenRepository):
 
     def revoke_all_for_user(self, user_id: int) -> int:
         """撤销用户全部未撤销的刷新令牌，返回受影响行数。"""
-        result = self._s.execute(
-            update(RefreshTokenORM)
-            .where(
-                RefreshTokenORM.user_pk == user_id,
-                RefreshTokenORM.revoked_at.is_(None),
-            )
-            .values(revoked_at=utcnow())
+        # Session.execute 类型声明为 Result，但 UPDATE 语句实际返回 CursorResult；
+        # rowcount 仅在 CursorResult 上可用，运行时安全，此处用 cast 对齐类型。
+        result = cast(
+            CursorResult[Any],
+            self._s.execute(
+                update(RefreshTokenORM)
+                .where(
+                    RefreshTokenORM.user_pk == user_id,
+                    RefreshTokenORM.revoked_at.is_(None),
+                )
+                .values(revoked_at=utcnow())
+            ),
         )
         return result.rowcount or 0
