@@ -25,6 +25,7 @@ from master.adapters.sqlalchemy.repositories import (
     TaskLogRepositoryImpl,
     TaskRepositoryImpl,
     TestScriptRepositoryImpl,
+    TestTaskRepositoryImpl,
     UserRepositoryImpl,
 )
 from master.domain.repositories import UnitOfWork
@@ -42,6 +43,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.refresh_tokens = RefreshTokenRepositoryImpl(session)
         self.test_scripts = TestScriptRepositoryImpl(session)
         self.script_cases = ScriptCaseRepositoryImpl(session)
+        self.test_tasks = TestTaskRepositoryImpl(session)
         self.projects = ProjectRepositoryImpl(session)
         self.members = ProjectMemberRepositoryImpl(session)
         self.nodes = NodeRepositoryImpl(session)

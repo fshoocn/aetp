@@ -12,6 +12,7 @@ from .script_case import ScriptCase
 from .task import InvalidTaskTransitionError, Task
 from .task_log import TaskLog
 from .test_script import TestScript
+from .test_task import TestTask
 from .user import User
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "RefreshToken",
     "ScriptCase",
     "TestScript",
+    "TestTask",
     "Task",
     "TaskLog",
     "InvalidTaskTransitionError",

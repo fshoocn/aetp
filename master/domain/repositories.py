@@ -24,6 +24,7 @@ from master.domain.models import (
     Task,
     TaskLog,
     TestScript,
+    TestTask,
     User,
 )
 
@@ -107,6 +108,34 @@ class ScriptCaseRepository(ABC):
 
     @abstractmethod
     def update(self, case: ScriptCase) -> ScriptCase: ...
+
+
+class TestTaskRepository(ABC):
+    """测试任务定义仓储（P3.3，定义与执行分离）。"""
+
+    @abstractmethod
+    def get_by_task_id(
+        self, task_id: str, project_id: str | None = None
+    ) -> TestTask | None: ...
+
+    @abstractmethod
+    def find_by_name(self, project_id: str, name: str) -> TestTask | None: ...
+
+    @abstractmethod
+    def list_by_project(
+        self,
+        project_id: str,
+        *,
+        enabled: bool | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[TestTask]: ...
+
+    @abstractmethod
+    def add(self, task: TestTask) -> TestTask: ...
+
+    @abstractmethod
+    def update(self, task: TestTask) -> TestTask: ...
 
 
 class ProjectRepository(ABC):
@@ -242,6 +271,7 @@ class UnitOfWork(ABC):
     refresh_tokens: RefreshTokenRepository
     test_scripts: TestScriptRepository
     script_cases: ScriptCaseRepository
+    test_tasks: TestTaskRepository
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository

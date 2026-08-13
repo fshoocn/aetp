@@ -93,6 +93,21 @@ class ScriptParseLocation(StrEnum):
     AGENT = "agent"
 
 
+class SplitPolicyType(StrEnum):
+    """任务分割策略类型（§18.6，D-19/D-21）。
+
+    none: 不分割，单 Shard
+    by_time: 按 case 平均耗时切分（依赖 avg_duration_s，D-21）
+    by_case_count: 按用例数量切分
+    custom: 插件自定义分割
+    """
+
+    NONE = "none"
+    BY_TIME = "by_time"
+    BY_CASE_COUNT = "by_case_count"
+    CUSTOM = "custom"
+
+
 class DeviceStatus(StrEnum):
     """设备运行状态。"""
 
