@@ -8,6 +8,8 @@
 
 状态迁移通过 Task 自身的方法完成，非法迁移会抛出
 InvalidTaskTransitionError，由应用层/API 层映射为 409。
+
+迁移表与校验逻辑集中在 domain/state_machine.py（纯函数，P3.6）。
 """
 
 from __future__ import annotations
@@ -16,36 +18,15 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from master.domain.enums import TaskStatus
+from master.domain.state_machine import (
+    InvalidStateTransitionError,
+    assert_transition,
+    is_terminal as _is_terminal,
+)
 from master.domain.time import utcnow
 
-
-class InvalidTaskTransitionError(ValueError):
-    """任务状态迁移非法。"""
-
-
-# 允许的状态迁移表
-_ALLOWED_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    TaskStatus.PENDING: {TaskStatus.DISPATCHING, TaskStatus.CANCELLED},
-    TaskStatus.DISPATCHING: {
-        TaskStatus.RUNNING,
-        TaskStatus.FAILED,
-        TaskStatus.CANCELLED,
-    },
-    TaskStatus.RUNNING: {
-        TaskStatus.SUCCEEDED,
-        TaskStatus.FAILED,
-        TaskStatus.CANCELLING,
-        TaskStatus.TIMED_OUT,
-    },
-    TaskStatus.CANCELLING: {TaskStatus.CANCELLED},
-}
-
-_TERMINAL_STATUSES = {
-    TaskStatus.SUCCEEDED,
-    TaskStatus.FAILED,
-    TaskStatus.CANCELLED,
-    TaskStatus.TIMED_OUT,
-}
+# 向后兼容别名（P3.1 曾从本模块导出 InvalidTaskTransitionError）
+InvalidTaskTransitionError = InvalidStateTransitionError
 
 
 @dataclass
@@ -90,14 +71,7 @@ class Task:
         )
 
     def _transition(self, target: TaskStatus) -> None:
-        if self.status not in _ALLOWED_TRANSITIONS:
-            raise InvalidTaskTransitionError(
-                f"任务状态 {self.status.value} 已终态，无法迁移到 {target.value}"
-            )
-        if target not in _ALLOWED_TRANSITIONS[self.status]:
-            raise InvalidTaskTransitionError(
-                f"非法任务状态迁移: {self.status.value} -> {target.value}"
-            )
+        assert_transition(self.status, target)
         self.status = target
         self.updated_at = utcnow()
 
@@ -162,4 +136,4 @@ class Task:
 
     @property
     def is_terminal(self) -> bool:
-        return self.status in _TERMINAL_STATUSES
+        return _is_terminal(self.status)
