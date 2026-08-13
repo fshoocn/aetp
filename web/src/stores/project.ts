@@ -1,11 +1,15 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { aetpApi, type Project } from "@/api/endpoints";
 
 export const useProjectStore = defineStore("project", () => {
   const projects = ref<Project[]>([]);
   const currentProjectId = ref<string | null>(
     localStorage.getItem("current_project_id")
+  );
+  const currentRole = ref<Project["project_role"]>(null);
+  const currentProject = computed(() =>
+    projects.value.find((project) => project.project_id === currentProjectId.value)
   );
 
   async function load() {
@@ -21,6 +25,9 @@ export const useProjectStore = defineStore("project", () => {
         localStorage.removeItem("current_project_id");
       }
     }
+    currentRole.value = projects.value.find(
+      (project) => project.project_id === currentProjectId.value
+    )?.project_role ?? null;
     return currentProjectId.value;
   }
 
@@ -29,8 +36,11 @@ export const useProjectStore = defineStore("project", () => {
       return;
     }
     currentProjectId.value = projectId;
+    currentRole.value = projects.value.find(
+      (project) => project.project_id === projectId
+    )?.project_role ?? null;
     localStorage.setItem("current_project_id", projectId);
   }
 
-  return { projects, currentProjectId, load, select };
+  return { projects, currentProjectId, currentProject, currentRole, load, select };
 });

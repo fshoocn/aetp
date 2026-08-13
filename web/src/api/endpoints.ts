@@ -74,6 +74,7 @@ export interface Project {
   created_by: number;
   created_at: string;
   updated_at: string;
+  project_role?: "viewer" | "operator" | "maintainer" | "owner" | null;
 }
 
 export interface ProjectCreateRequest {
@@ -87,6 +88,27 @@ export interface ProjectUpdateRequest {
   name?: string;
   description?: string;
   status?: "active" | "archived";
+}
+
+export interface ProjectMember {
+  id: number;
+  project_id: string;
+  user_id: number;
+  username: string;
+  display_name: string;
+  project_role: "viewer" | "operator" | "maintainer" | "owner";
+  assigned_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminUser {
+  id: number;
+  username: string;
+  display_name: string;
+  account_status: "pending" | "active" | "disabled";
+  platform_role: "user" | "admin";
+  created_at: string;
 }
 
 export interface TaskQuery {
@@ -128,6 +150,11 @@ export const aetpApi = {
       return api.get<Device>(
         `${API_V1}/projects/${projectId}/devices/${deviceId}`
       );
+    },
+
+    listGlobal(online?: boolean) {
+      const query = online === undefined ? "" : `?online=${online}`;
+      return api.get<Device[]>(`${API_V1}/devices${query}`);
     },
   },
 
@@ -177,6 +204,57 @@ export const aetpApi = {
 
     update(projectId: string, request: ProjectUpdateRequest) {
       return api.patch<Project>(`${API_V1}/projects/${projectId}`, request);
+    },
+
+    members(projectId: string) {
+      return api.get<ProjectMember[]>(`${API_V1}/projects/${projectId}/members`);
+    },
+
+    addMember(projectId: string, userId: number, role: ProjectMember["project_role"]) {
+      return api.post<ProjectMember>(`${API_V1}/projects/${projectId}/members`, {
+        user_id: userId,
+        project_role: role,
+      });
+    },
+
+    updateMember(projectId: string, userId: number, role: ProjectMember["project_role"]) {
+      return api.patch<ProjectMember>(
+        `${API_V1}/projects/${projectId}/members/${userId}`,
+        { project_role: role }
+      );
+    },
+
+    removeMember(projectId: string, userId: number) {
+      return api.delete(`${API_V1}/projects/${projectId}/members/${userId}`);
+    },
+  },
+
+  assets: {
+    nodes(online?: boolean, enabled?: boolean) {
+      const params = new URLSearchParams();
+      if (online !== undefined) params.set("online", String(online));
+      if (enabled !== undefined) params.set("enabled", String(enabled));
+      const query = params.toString();
+      return api.get<Node[]>(`${API_V1}/nodes${query ? `?${query}` : ""}`);
+    },
+
+    devices(online?: boolean) {
+      const query = online === undefined ? "" : `?online=${online}`;
+      return api.get<Device[]>(`${API_V1}/devices${query}`);
+    },
+  },
+
+  admin: {
+    users(accountStatus?: AdminUser["account_status"]) {
+      const query = accountStatus ? `?account_status=${accountStatus}` : "";
+      return api.get<AdminUser[]>(`${API_V1}/users${query}`);
+    },
+
+    updateUser(
+      userId: number,
+      request: Partial<Pick<AdminUser, "account_status" | "platform_role">>
+    ) {
+      return api.patch<AdminUser>(`${API_V1}/users/${userId}`, request);
     },
   },
 };

@@ -12,6 +12,7 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
     "@tanstack/vue-query": "^5.101.4",
     "element-plus": "^2.14.4",
     "pinia": "^2.1.7",

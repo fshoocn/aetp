@@ -1,0 +1,94 @@
+:root {
+  --aetp-ink: #17212b;
+  --aetp-muted: #72808d;
+  --aetp-blue: #1e6fd9;
+  --aetp-blue-deep: #1254ab;
+  --aetp-cyan: #17a2a4;
+  --aetp-amber: #c98217;
+  --aetp-red: #c54843;
+  --aetp-bg: #eef2f5;
+  --aetp-panel: #ffffff;
+  --aetp-line: #dfe5ea;
+  --el-color-primary: var(--aetp-blue);
+  --el-color-primary-light-3: #5592e4;
+  --el-color-primary-light-5: #8ab6ed;
+  --el-color-primary-light-7: #b9d5f5;
+  --el-color-primary-light-9: #edf5ff;
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 5px;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: var(--aetp-ink);
+  background: var(--aetp-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--aetp-bg);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.el-card {
+  border-color: var(--aetp-line);
+  box-shadow: 0 8px 24px rgba(35, 52, 66, 0.05);
+}
+
+.el-table {
+  --el-table-header-bg-color: #f5f7f9;
+  --el-table-row-hover-bg-color: #f4f8fd;
+}
+
+.el-table th.el-table__cell {
+  color: #596a78;
+  font-weight: 650;
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--aetp-blue);
+  --el-button-border-color: var(--aetp-blue);
+  --el-button-hover-bg-color: var(--aetp-blue-deep);
+  --el-button-hover-border-color: var(--aetp-blue-deep);
+}
+
+.el-tag {
+  font-weight: 600;
+}
+
+.el-empty {
+  padding: 42px 0;
+}
+
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.fade-slide-enter-from,
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+@media (max-width: 760px) {
+  .el-dialog {
+    width: calc(100vw - 32px) !important;
+  }
+}

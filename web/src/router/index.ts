@@ -20,6 +20,16 @@ const routes = [
         component: () => import("@/views/Dashboard.vue"),
       },
       {
+        path: "projects",
+        name: "Projects",
+        component: () => import("@/views/Projects.vue"),
+      },
+      {
+        path: "projects",
+        name: "Projects",
+        component: () => import("@/views/Projects.vue"),
+      },
+      {
         path: "tasks",
         name: "Tasks",
         component: () => import("@/views/Tasks.vue"),
@@ -34,6 +44,26 @@ const routes = [
         path: "devices",
         name: "Devices",
         component: () => import("@/views/Devices.vue"),
+      },
+      {
+        path: "members",
+        name: "Members",
+        component: () => import("@/views/Members.vue"),
+      },
+      {
+        path: "users",
+        name: "Users",
+        component: () => import("@/views/Users.vue"),
+      },
+      {
+        path: "members",
+        name: "Members",
+        component: () => import("@/views/Members.vue"),
+      },
+      {
+        path: "users",
+        name: "Users",
+        component: () => import("@/views/Users.vue"),
       },
     ],
   },
