@@ -133,6 +133,7 @@ def _make_shard(run_id: str, shard_id: str, index: int, **kw) -> RunShard:
         run_id=run_id,
         shard_index=index,
         case_keys=[f"c{index}"],
+        execution_params={"channel": index},
         mutex_keys=["can0"],
         status=ShardStatus.PENDING,
     )
@@ -303,6 +304,8 @@ def test_shards_add_many_and_list_order(client):
         assert [s.shard_index for s in listed] == [0, 1]
         assert listed[0].run_id == "R-1"
         assert listed[0].case_keys == ["c0"]
+        assert listed[0].execution_params == {"channel": 0}
+        assert listed[1].execution_params == {"channel": 1}
         assert listed[0].mutex_keys == ["can0"]
         assert listed[0].status == ShardStatus.PENDING
 
