@@ -20,6 +20,7 @@ from master.adapters.sqlalchemy.repositories import (
     DomainEventRepositoryImpl,
     InboxMessageRepositoryImpl,
     NodeRepositoryImpl,
+    NodeSessionRepositoryImpl,
     OutboxMessageRepositoryImpl,
     ProjectMemberRepositoryImpl,
     ProjectNodeBindingRepositoryImpl,
@@ -67,6 +68,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.projects = ProjectRepositoryImpl(session)
         self.members = ProjectMemberRepositoryImpl(session)
         self.nodes = NodeRepositoryImpl(session)
+        self.node_sessions = NodeSessionRepositoryImpl(session)
         self.devices = DeviceRepositoryImpl(session)
         self.bindings = ProjectNodeBindingRepositoryImpl(session)
         self.tasks = TaskRepositoryImpl(session)

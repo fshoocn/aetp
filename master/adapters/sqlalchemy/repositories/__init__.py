@@ -7,6 +7,7 @@ from .device_repository import DeviceRepositoryImpl
 from .domain_event_repository import DomainEventRepositoryImpl
 from .inbox_message_repository import InboxMessageRepositoryImpl
 from .node_repository import NodeRepositoryImpl
+from .node_session_repository import NodeSessionRepositoryImpl
 from .outbox_message_repository import OutboxMessageRepositoryImpl
 from .project_member_repository import ProjectMemberRepositoryImpl
 from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
@@ -37,6 +38,7 @@ __all__ = [
     "TestScriptRepositoryImpl",
     "ProjectMemberRepositoryImpl",
     "NodeRepositoryImpl",
+    "NodeSessionRepositoryImpl",
     "DeviceRepositoryImpl",
     "ProjectNodeBindingRepositoryImpl",
     "TaskRepositoryImpl",

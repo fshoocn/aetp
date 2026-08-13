@@ -12,12 +12,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
+from master.domain.enums import DisconnectReason
 from master.domain.models import (
     AuditLog,
     Device,
     DomainEvent,
     InboxMessage,
     Node,
+    NodeSession,
     OutboxMessage,
     Project,
     ProjectMember,
@@ -394,6 +396,34 @@ class NodeRepository(ABC):
     @abstractmethod
     def get_by_id(self, node_id: str) -> Node | None: ...
 
+    @abstractmethod
+    def save(self, node: Node) -> Node:
+        """创建或更新节点（按 node_id upsert；返回持久化后的节点）。"""
+
+
+class NodeSessionRepository(ABC):
+    """节点会话仓储（P4.4，node_sessions 表）。
+
+    会话用于隔离旧连接：每次进程启动一个新 session_id，新会话注册时
+    旧会话关闭（SESSION_REPLACED），旧 session 的后续消息被拒绝。
+    """
+
+    @abstractmethod
+    def get(self, node_pk: int, session_id: str) -> NodeSession | None: ...
+
+    @abstractmethod
+    def get_current(self, node_pk: int) -> NodeSession | None:
+        """返回节点当前未关闭的会话（同一时刻至多一个有效会话）。"""
+
+    @abstractmethod
+    def create(self, session: NodeSession) -> NodeSession: ...
+
+    @abstractmethod
+    def close(
+        self, session: NodeSession, *, reason: DisconnectReason, at: datetime | None = None
+    ) -> NodeSession:
+        """关闭会话（置 disconnected_at + disconnect_reason）。"""
+
 
 class DeviceRepository(ABC):
     @abstractmethod
@@ -485,6 +515,7 @@ class UnitOfWork(ABC):
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository
+    node_sessions: NodeSessionRepository
     devices: DeviceRepository
     bindings: ProjectNodeBindingRepository
     tasks: TaskRepository

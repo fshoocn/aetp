@@ -28,6 +28,7 @@ from master.application.services.project_service import ProjectService
 from master.application.services.project_member_service import ProjectMemberService
 from master.application.services.project_node_binding_service import ProjectNodeBindingService
 from master.application.services.node_service import NodeService
+from master.application.services.node_presence_service import NodePresenceService
 from master.application.services.task_service import TaskService
 
 
@@ -78,3 +79,8 @@ class Container(containers.DeclarativeContainer):
 
     # Node/Device 平台资产只读查询服务
     node_service = providers.Factory(NodeService, uow_factory=uow_factory)
+
+    # 节点在线投影服务（P4.4：注册/心跳/LWT/会话校验）
+    node_presence_service = providers.Factory(
+        NodePresenceService, uow_factory=uow_factory
+    )

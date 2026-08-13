@@ -46,6 +46,21 @@ class NodeHeartbeatPayload(_Strict):
     active_run_ids: list[str] = Field(default_factory=list)
 
 
+class PresencePayload(_Strict):
+    """节点非正常离线（LWT，§8.6：仅携带 node_id/reason/sent_at，不含实时任务快照）。
+
+    LWT 在 CONNECT 时固定设置、Broker 不能动态替换 payload，因此不携带
+    current_run_id；Master 收到后按 OfflinePolicy 处理（§8.6 步骤）。
+    """
+
+    # sym:node_id 节点业务标识
+    node_id: str
+    # sym:reason 断开原因（unexpected_disconnect 等，DisconnectReason）
+    reason: str = "unexpected_disconnect"
+    # sym:sent_at 离线时间（UTC）
+    sent_at: datetime | None = None
+
+
 class ScriptVerifyPayload(_Strict):
     """脚本编译/格式验证命令（verify_location=agent，Master→Agent）。"""
 

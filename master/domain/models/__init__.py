@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .device import Device
 from .messaging import AuditLog, DomainEvent, InboxMessage, OutboxMessage
-from .node import Node
+from .node import Node, NodeSession
 from .project import Project
 from .project_member import ProjectMember, ProjectMemberWithUser
 from .project_node_binding import ProjectNodeBinding, ProjectNodeBindingView
@@ -32,6 +32,7 @@ __all__ = [
     "OutboxMessage",
     "Device",
     "Node",
+    "NodeSession",
     "Project",
     "ProjectMember",
     "ProjectMemberWithUser",

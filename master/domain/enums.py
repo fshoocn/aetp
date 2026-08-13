@@ -228,7 +228,30 @@ class DeviceStatus(StrEnum):
 
 
 class NodeStatus(StrEnum):
-    """节点运行状态。"""
+    """节点运行状态（D-22：P4 节点在线投影新增 busy/disabled）。
+
+    offline: 离线（未连接/心跳超时/LWT）
+    online: 在线（已注册且会话有效）
+    busy: 在线且有活动任务（由调度器在派发时设置，P4.6）
+    disabled: 被平台管理员禁用（禁用的节点不可被调度）
+    """
 
     OFFLINE = "offline"
     ONLINE = "online"
+    BUSY = "busy"
+    DISABLED = "disabled"
+
+
+class DisconnectReason(StrEnum):
+    """节点会话断开原因（§8.6 LWT / 节点会话管理）。
+
+    unexpected_disconnect: 非正常离线（LWT 触发）
+    normal_shutdown: 正常关闭
+    session_replaced: 同一节点新会话注册，旧会话被替换
+    expired: 会话过期（心跳超时）
+    """
+
+    UNEXPECTED_DISCONNECT = "unexpected_disconnect"
+    NORMAL_SHUTDOWN = "normal_shutdown"
+    SESSION_REPLACED = "session_replaced"
+    EXPIRED = "expired"

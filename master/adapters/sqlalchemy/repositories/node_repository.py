@@ -39,6 +39,7 @@ def _to_domain(orm: NodeORM) -> Node:
         capabilities=dict(orm.capabilities or {}),
         protocol_version=orm.protocol_version,
         last_seen_at=orm.last_seen_at,
+        load=dict(orm.load or {}),
         created_at=orm.created_at,
         updated_at=orm.updated_at,
         devices=[_device_to_domain(d) for d in (orm.devices or [])],
@@ -70,3 +71,25 @@ class NodeRepositoryImpl(NodeRepository):
             .where(NodeORM.node_id == node_id)
         ).scalar_one_or_none()
         return _to_domain(orm) if orm is not None else None
+
+    def save(self, node: Node) -> Node:
+        """创建或更新节点（按 node_id upsert，P4.4 注册/心跳投影用）。"""
+        orm = self._s.execute(
+            select(NodeORM).where(NodeORM.node_id == node.node_id)
+        ).scalar_one_or_none()
+        if orm is None:
+            orm = NodeORM(node_id=node.node_id)
+            self._s.add(orm)
+        orm.name = node.name
+        orm.hostname = node.hostname
+        orm.status = node.status.value
+        orm.online = node.online
+        orm.enabled = node.enabled
+        orm.tags = node.tags
+        orm.capabilities = node.capabilities
+        orm.protocol_version = node.protocol_version
+        orm.last_seen_at = node.last_seen_at
+        orm.load = node.load
+        self._s.flush()
+        self._s.refresh(orm)
+        return _to_domain(orm)

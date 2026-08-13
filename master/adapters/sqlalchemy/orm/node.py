@@ -19,7 +19,10 @@ class Node(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_nodes_status", "status"),
         Index("ix_nodes_online", "online"),
-        CheckConstraint("status IN ('offline','online')", name="ck_nodes_status"),
+        CheckConstraint(
+            "status IN ('offline','online','busy','disabled')",
+            name="ck_nodes_status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -39,6 +42,7 @@ class Node(Base, TimestampMixin):
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(
         UTCDateTime, nullable=True
     )
+    load: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
 
     devices: Mapped[list["Device"]] = relationship(
         back_populates="node",

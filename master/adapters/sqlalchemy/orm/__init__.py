@@ -18,6 +18,7 @@ from .device import Device
 from .domain_event import DomainEvent
 from .inbox_message import InboxMessage
 from .node import Node
+from .node_session import NodeSession
 from .outbox_message import OutboxMessage
 from .project import Project
 from .project_member import ProjectMember
@@ -50,6 +51,7 @@ __all__ = [
     "OutboxMessage",
     "Device",
     "Node",
+    "NodeSession",
     "Project",
     "ProjectMember",
     "ProjectNodeBinding",
