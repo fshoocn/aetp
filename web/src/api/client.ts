@@ -1,7 +1,56 @@
 const BASE = ""; // 所有 API 调用前缀（开发时 vite proxy 处理 /api）
 
+const ACCESS_KEY = "token";
+const REFRESH_KEY = "refresh_token";
+const USER_KEY = "user";
+
 function getToken(): string | null {
-  return localStorage.getItem("token");
+  return localStorage.getItem(ACCESS_KEY);
+}
+
+function clearSession(): void {
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+function storeTokens(body: { access_token: string; refresh_token: string }) {
+  localStorage.setItem(ACCESS_KEY, body.access_token);
+  localStorage.setItem(REFRESH_KEY, body.refresh_token);
+}
+
+/** 并发去重的静默刷新：多个 401 同时到达时只发起一次 /auth/refresh。 */
+let refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  const raw = localStorage.getItem(REFRESH_KEY);
+  if (!raw) return false;
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const resp = await fetch(`${BASE}/api/v1/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: raw }),
+        });
+        if (!resp.ok) {
+          clearSession();
+          return false;
+        }
+        const data = (await resp.json()) as {
+          access_token: string;
+          refresh_token: string;
+        };
+        storeTokens(data);
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
 }
 
 export class ApiError extends Error {
@@ -30,7 +79,8 @@ function extractDetail(body: unknown, fallback: string): string {
 
 async function request<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retried = false
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -43,13 +93,26 @@ async function request<T>(
 
   const resp = await fetch(`${BASE}${path}`, { ...options, headers });
 
+  const isAuthEndpoint = path.includes("/auth/login") || path.includes("/auth/refresh");
+
+  if (resp.status === 401 && !isAuthEndpoint && !retried) {
+    // 访问令牌过期：静默用刷新令牌换新令牌后重试一次原请求
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      return request<T>(path, options, true);
+    }
+  }
+
   if (resp.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    clearSession();
     if (window.location.hash !== "#/login") {
       window.location.hash = "#/login";
     }
     throw new ApiError(401, "登录已过期，请重新登录");
+  }
+
+  if (resp.status === 204) {
+    return undefined as T;
   }
 
   if (!resp.ok) {

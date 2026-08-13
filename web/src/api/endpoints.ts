@@ -13,7 +13,9 @@ export interface UserInfo {
 
 export interface LoginResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
+  expires_in: number;
 }
 
 export interface Device {
@@ -137,6 +139,18 @@ export const aetpApi = {
 
     me() {
       return api.get<UserInfo>(`${API_V1}/auth/me`);
+    },
+
+    refresh(refreshToken: string) {
+      return api.post<LoginResponse>(`${API_V1}/auth/refresh`, {
+        refresh_token: refreshToken,
+      });
+    },
+
+    logout(refreshToken?: string) {
+      return api.post<void>(`${API_V1}/auth/logout`, {
+        refresh_token: refreshToken ?? null,
+      });
     },
   },
 
