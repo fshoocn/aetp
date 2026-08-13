@@ -10,10 +10,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from master.domain.models import (
+    AuditLog,
     Device,
+    DomainEvent,
+    InboxMessage,
     Node,
+    OutboxMessage,
     Project,
     ProjectMember,
     ProjectMemberWithUser,
@@ -257,6 +262,82 @@ class RunResultRepository(ABC):
     def update(self, result: RunResult) -> RunResult: ...
 
 
+class InboxMessageRepository(ABC):
+    """入站消息去重仓储（P3.5，inbox_messages 表，(origin_id, message_id) 唯一）。"""
+
+    @abstractmethod
+    def get_by_origin_message(
+        self, origin_id: str, message_id: str
+    ) -> InboxMessage | None: ...
+
+    @abstractmethod
+    def add(self, message: InboxMessage) -> InboxMessage: ...
+
+    @abstractmethod
+    def mark_processed(self, message: InboxMessage) -> InboxMessage: ...
+
+    @abstractmethod
+    def list_unprocessed(self, *, limit: int = 100) -> list[InboxMessage]: ...
+
+
+class OutboxMessageRepository(ABC):
+    """事务性 outbox 仓储（P3.5，outbox_messages 表）。"""
+
+    @abstractmethod
+    def enqueue(self, message: OutboxMessage) -> OutboxMessage: ...
+
+    @abstractmethod
+    def get_by_outbox_id(self, outbox_id: str) -> OutboxMessage | None: ...
+
+    @abstractmethod
+    def claim_due(
+        self, *, limit: int = 100, now: datetime | None = None
+    ) -> list[OutboxMessage]: ...
+
+    @abstractmethod
+    def update(self, message: OutboxMessage) -> OutboxMessage: ...
+
+
+class DomainEventRepository(ABC):
+    """不可变领域事件仓储（P3.5，domain_events 表，sequence 唯一保证顺序）。"""
+
+    @abstractmethod
+    def add(self, event: DomainEvent) -> DomainEvent: ...
+
+    @abstractmethod
+    def get_by_event_id(self, event_id: str) -> DomainEvent | None: ...
+
+    @abstractmethod
+    def list(
+        self,
+        *,
+        project_id: str | None = None,
+        after_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[DomainEvent]: ...
+
+
+class AuditLogRepository(ABC):
+    """审计日志仓储（P3.5，audit_logs 表，append-only）。"""
+
+    @abstractmethod
+    def add(self, log: AuditLog) -> AuditLog: ...
+
+    @abstractmethod
+    def get_by_audit_id(self, audit_id: str) -> AuditLog | None: ...
+
+    @abstractmethod
+    def list(
+        self,
+        *,
+        project_id: str | None = None,
+        actor_id: int | None = None,
+        action: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AuditLog]: ...
+
+
 class ProjectRepository(ABC):
     @abstractmethod
     def get_by_project_id(self, project_id: str) -> Project | None: ...
@@ -397,6 +478,10 @@ class UnitOfWork(ABC):
     run_case_results: RunCaseResultRepository
     run_artifacts: RunArtifactRepository
     run_results: RunResultRepository
+    inbox_messages: InboxMessageRepository
+    outbox_messages: OutboxMessageRepository
+    domain_events: DomainEventRepository
+    audit_logs: AuditLogRepository
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository

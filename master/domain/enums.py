@@ -200,6 +200,25 @@ class ArtifactKind(StrEnum):
     DATA = "data"
 
 
+class OutboxStatus(StrEnum):
+    """Outbox 消息投递状态（事务性 outbox，§6.2/§8.6）。
+
+    pending: 已随业务事务落库，待 worker 取走
+    sending: 已 claim，正在发送
+    succeeded: 发送成功（MQTT ACK）
+    retrying: 发送失败待重试
+    exhausted: 重试耗尽
+    cancelled: 取消发送
+    """
+
+    PENDING = "pending"
+    SENDING = "sending"
+    SUCCEEDED = "succeeded"
+    RETRYING = "retrying"
+    EXHAUSTED = "exhausted"
+    CANCELLED = "cancelled"
+
+
 class DeviceStatus(StrEnum):
     """设备运行状态。"""
 

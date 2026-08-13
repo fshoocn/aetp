@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .device import Device
+from .messaging import AuditLog, DomainEvent, InboxMessage, OutboxMessage
 from .node import Node
 from .project import Project
 from .project_member import ProjectMember, ProjectMemberWithUser
@@ -25,6 +26,10 @@ from .user import User
 
 __all__ = [
     "User",
+    "AuditLog",
+    "DomainEvent",
+    "InboxMessage",
+    "OutboxMessage",
     "Device",
     "Node",
     "Project",
