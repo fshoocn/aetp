@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from aetp_protocol.capabilities import DeviceAllocation
+from aetp_protocol.capabilities import DeviceAllocation, SwitchRouteAllocation
 from aetp_protocol.envelope import PROTOCOL_VERSION, Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import RunAssignPayload
@@ -47,11 +47,12 @@ from master.domain.models import (
     TestTask,
 )
 from master.domain.repositories import UnitOfWork
-from master.domain.scheduler import (
+from master.domain.resources import (
     NodeSchedulingState,
     ResourceAssignment,
-    ShardScheduler,
+    SwitchRoute,
 )
+from master.domain.scheduler import ShardScheduler
 from master.domain.state_machine import assert_transition, next_attempt_no
 from master.domain.capability import list_capability_paths
 from master.domain.time import utcnow
@@ -116,7 +117,6 @@ class ShardSchedulerService:
                     continue
 
                 assignment = self._select_assignment(
-                    shard=shard,
                     script=script,
                     task=task,
                     states=states,
@@ -247,7 +247,6 @@ class ShardSchedulerService:
     def _select_assignment(
         self,
         *,
-        shard: RunShard,
         script: TestScript,
         task: TestTask,
         states: dict[str, NodeSchedulingState],
@@ -261,13 +260,11 @@ class ShardSchedulerService:
             if not self._failover_allowed(task, latest.attempt_no):
                 return None
             return self._scheduler.select_failover_assignment(
-                shard=shard,
                 requirements=script.hardware_requirements,
                 candidates=states.values(),
                 attempts=attempts,
             )
         return self._scheduler.select_assignment(
-            shard=shard,
             requirements=script.hardware_requirements,
             candidates=states.values(),
         )
@@ -342,6 +339,10 @@ class ShardSchedulerService:
                 DeviceAllocation(
                     device_id=device.device_id,
                     resource_type=device.capability.resource_type,
+                    labels=dict(device.capability.labels),
+                    switch_route=_switch_route_allocation(
+                        assignment.routes_by_device.get(device.device_id)
+                    ),
                 )
                 for device in assignment.devices
             ],
@@ -405,6 +406,19 @@ class ShardSchedulerService:
         """兼容单资源调用方，转发到批量释放。"""
 
         self.release_devices((device_id,))
+
+def _switch_route_allocation(
+    route: SwitchRoute | None,
+) -> SwitchRouteAllocation | None:
+    """将领域切换路径转换为协议分配对象。"""
+
+    if route is None:
+        return None
+    return SwitchRouteAllocation(
+        switch_device_id=route.switch_device_id,
+        port=route.port,
+    )
+
 
 def _positive_int(value: object, default: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
