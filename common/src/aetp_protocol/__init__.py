@@ -26,6 +26,8 @@ from .errors import (
 from .message_types import MessageType
 from .capabilities import (
     BusRequirement,
+    DeviceAllocation,
+    DeviceRequirement,
     HardwareChannel,
     HardwareRequirements,
     LanguageCapability,
@@ -35,6 +37,7 @@ from .capabilities import (
     NumericConstraint,
     OperatingSystem,
     OperatingSystemRequirement,
+    PhysicalDeviceCapability,
     SerialCapability,
     SerialPortCapability,
     SerialPortRequirement,
@@ -67,6 +70,8 @@ __all__ = [
     "InvalidSenderError",
     "TopicMismatchError",
     "BusRequirement",
+    "DeviceAllocation",
+    "DeviceRequirement",
     "HardwareChannel",
     "HardwareRequirements",
     "NodeCapabilities",
@@ -83,6 +88,7 @@ __all__ = [
     "LanguageRequirement",
     "OperatingSystem",
     "OperatingSystemRequirement",
+    "PhysicalDeviceCapability",
     "NumericConstraint",
     "Version",
     "VersionConstraint",

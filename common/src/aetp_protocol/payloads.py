@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .capabilities import NodeCapabilities
+from .capabilities import DeviceAllocation, NodeCapabilities
 
 
 class _Strict(BaseModel):
@@ -108,7 +108,7 @@ class ScriptVerifyResultPayload(_Strict):
 
 
 class RunAssignPayload(_Strict):
-    """Shard 派发（§8.4 run.assign；含 Shard 专属 execution_params）。"""
+    """Shard 派发（§8.4 run.assign；Master 已预留具体设备）。"""
 
     # sym:project_id 项目业务标识（仅审计/日志归属）
     project_id: str
@@ -122,6 +122,8 @@ class RunAssignPayload(_Strict):
     run_id: str
     # sym:attempt_no 派发尝试序号（D-20 failover）
     attempt_no: int
+    # sym:device_allocations Master 已原子选择并预留的全部物理设备
+    device_allocations: list[DeviceAllocation] = Field(default_factory=list)
     # sym:dispatch_id 本次投递意图 ID（无 ACK 重投保留）
     dispatch_id: str
     # sym:task_type 任务类型（Agent 查插件 registry）

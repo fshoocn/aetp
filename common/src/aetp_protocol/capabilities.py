@@ -82,6 +82,7 @@ class HardwareChannel(_Strict):
     """一个可被分配的车载硬件通道。"""
 
     name: Identifier
+    hardware_model: Identifier | None = None
     enabled: bool = True
 
 
@@ -168,6 +169,43 @@ class SerialCapability(_Strict):
     ports: tuple[SerialPortCapability, ...] = ()
 
 
+class PhysicalDeviceCapability(_Strict):
+    """一个可被 Master 分配的物理资源能力描述。"""
+
+    resource_type: Identifier
+    vendor: Identifier | None = None
+    model: Identifier | None = None
+    channel: Identifier | None = None
+    function: Identifier | None = None
+
+
+class DeviceRequirement(_Strict):
+    """脚本一次执行需要占用的一组物理资源。"""
+
+    resource_type: Identifier
+    quantity: int = Field(default=1, ge=1)
+    vendor: Identifier | None = None
+    model: Identifier | None = None
+    channel: Identifier | None = None
+    function: Identifier | None = None
+    device_ids: tuple[Identifier, ...] = ()
+
+    @model_validator(mode="after")
+    def _validate_device_ids(self) -> "DeviceRequirement":
+        if len(self.device_ids) > self.quantity:
+            raise ValueError("device_ids 数量不能大于 quantity")
+        if len(set(self.device_ids)) != len(self.device_ids):
+            raise ValueError("device_ids 不能重复")
+        return self
+
+
+class DeviceAllocation(_Strict):
+    """Master 为一次 Attempt 实际分配的物理资源。"""
+
+    device_id: Identifier
+    resource_type: Identifier
+
+
 class NodeCapabilities(_Strict):
     """节点能力总类；所有分类都是明确的公共类。"""
 
@@ -182,6 +220,7 @@ class BusRequirement(_Strict):
 
     bus_type: Identifier
     vendor: Identifier | None = None
+    hardware_model: Identifier | None = None
     minimum_channels: int | None = Field(default=None, ge=0)
     required_channels: tuple[Identifier, ...] = ()
 
@@ -247,3 +286,4 @@ class HardwareRequirements(_Strict):
     system: SystemRequirement | None = None
     serial_ports: tuple[SerialPortRequirement, ...] = ()
     required_tags: tuple[Identifier, ...] = ()
+    devices: tuple[DeviceRequirement, ...] = ()

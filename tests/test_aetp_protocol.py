@@ -160,6 +160,7 @@ def test_node_register_payload():
     # 强类型层级能力模型：按模型字段/类型访问
     assert p.capabilities.vehicle is not None
     assert p.capabilities.vehicle.vendors[0].buses[0].channels[0].name == "can0"
+    assert p.capabilities.system is not None
     assert p.capabilities.system.memory_mb == 16384
     with pytest.raises(ValidationError):
         NodeRegisterPayload.model_validate({"node_id": "x", "bogus": 1})
@@ -191,6 +192,7 @@ def test_node_heartbeat_payload():
 def test_run_assign_payload():
     p = RunAssignPayload.model_validate(GOLDEN_RUN_ASSIGN["payload"])
     assert p.run_id == "R-1"
+    assert p.device_allocations == []
     assert p.execution_params == {"channel": 0}
     assert p.script_ref["sha256"] == "a" * 64
     with pytest.raises(ValidationError):

@@ -87,6 +87,7 @@ GOLDEN_RUN_ASSIGN["payload"] = {
     "shard_index": 0,
     "run_id": "R-1",
     "attempt_no": 1,
+    "device_allocations": [],
     "dispatch_id": "D-1",
     "task_type": "can_test",
     "plugin_version": "1.0.0",
