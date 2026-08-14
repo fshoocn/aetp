@@ -157,9 +157,27 @@ def test_message_type_must_match_topic():
 def test_node_register_payload():
     p = NodeRegisterPayload.model_validate(GOLDEN_NODE_REGISTER["payload"])
     assert p.node_id == "bench-001"
-    assert p.capabilities["can_channels"] == 2
+    # 强类型层级能力模型：按模型字段/类型访问
+    assert p.capabilities.vehicle is not None
+    assert p.capabilities.vehicle.vendors[0].buses[0].channels[0].name == "can0"
+    assert p.capabilities.system.memory_mb == 16384
     with pytest.raises(ValidationError):
         NodeRegisterPayload.model_validate({"node_id": "x", "bogus": 1})
+    # 结构防变形：未知顶层分类/类型错误被模型校验拒绝
+    with pytest.raises(ValidationError):
+        NodeRegisterPayload.model_validate(
+            {
+                "node_id": "x",
+                "capabilities": {"bogus_category": {"a": 1}},
+            }
+        )
+    with pytest.raises(ValidationError):
+        NodeRegisterPayload.model_validate(
+            {
+                "node_id": "x",
+                "capabilities": {"system": {"os": 123}},  # os 应为 str
+            }
+        )
 
 
 def test_node_heartbeat_payload():

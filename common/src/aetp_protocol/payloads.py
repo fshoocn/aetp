@@ -11,20 +11,38 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .capabilities import NodeCapabilities
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
 class NodeRegisterPayload(_Strict):
-    """节点注册（§8.4：node_id、name、capabilities、tags、supported_versions、plugin_versions）。"""
+    """节点注册（§8.4：node_id、name、capabilities、tags、supported_versions、plugin_versions）。
+
+        capabilities 为**强类型对象图**（`NodeCapabilities` 模型，§18.5/§8.4）：
+                {
+                    "vehicle": {"vendors": [{"name": "vector", "buses": [{
+                        "bus_type": "can", "channels": [{"name": "can0", "enabled": true}]
+                    }]}]},
+                    "language": {"runtimes": [{"name": "python", "version": "3.11"}]},
+                    "system": {"operating_system": {"name": "windows", "version": "10.0.19045"},
+                                         "memory_mb": 16384, "cpu_cores": 8},
+                    "serial": {"ports": [{"function": "psu", "port": "30", "enabled": true}]}
+                }
+        分类：vehicle 车载（厂商→总线→通道对象）、language 语言运行时、
+        system 系统信息、serial 串口功能对象（功能→端口）。
+    结构由 Pydantic 模型校验（extra=forbid 拒绝未知字段/类型错误），
+    Agent 启动时从节点根目录能力配置文件读取并上报（P5）。
+    """
 
     # sym:node_id 节点业务标识
     node_id: str
     # sym:name 节点名
     name: str = ""
-    # sym:capabilities 硬件/能力谓词（硬件匹配 D-23 依据）
-    capabilities: dict[str, Any] = Field(default_factory=dict)
+    # sym:capabilities 层级能力树（强类型模型 NodeCapabilities）
+    capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
     # sym:tags 节点标签（tag 匹配）
     tags: list[str] = Field(default_factory=list)
     # sym:supported_versions 插件兼容版本（按 task_type 分组）

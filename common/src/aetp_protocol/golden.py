@@ -34,7 +34,36 @@ GOLDEN_NODE_REGISTER: dict = _base("node.register", "agent", "bench-001")
 GOLDEN_NODE_REGISTER["payload"] = {
     "node_id": "bench-001",
     "name": "Bench 1",
-    "capabilities": {"can_channels": 2, "canoe": {"gte": "17.0"}},
+    "capabilities": {
+        "vehicle": {
+            "vendors": [
+                {
+                    "name": "vector",
+                    "buses": [
+                        {
+                            "bus_type": "can",
+                            "channels": [
+                                {"name": "can0", "enabled": True},
+                                {"name": "can1", "enabled": True},
+                            ],
+                        },
+                        {
+                            "bus_type": "lin",
+                            "channels": [{"name": "lin0", "enabled": True}],
+                        },
+                    ],
+                }
+            ]
+        },
+        "system": {
+            "operating_system": {
+                "name": "windows",
+                "version": "10.0.19045",
+            },
+            "memory_mb": 16384,
+            "cpu_cores": 8,
+        },
+    },
     "tags": ["can", "bench"],
     "supported_versions": {"can_test": ["1.0.0"]},
     "plugin_versions": {"can_test": "1.0.0"},
