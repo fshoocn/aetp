@@ -1,30 +1,29 @@
-"""强类型硬件能力匹配器（P4.5 重构，§18.5）。
+"""强类型硬件能力匹配（P4.5 规格模式重构，§18.5）。
 
-匹配器只接收公共协议模型：``NodeCapabilities`` 与 ``HardwareRequirements``。
-不同能力类型由不同 matcher 负责：
+能力匹配采用规格模式（Specification）：每个能力类别是一个规格
+（``CapabilitySpec``），求值返回失败原因，空序列表示满足；``AllOf``
+负责组合，任一类别失败即整体失败。
 
-- ``VehicleMatcher``：厂商 / 总线 / 通道数量和通道名
-- ``LanguageMatcher``：语言运行时和语义化版本
-- ``SystemMatcher``：操作系统、版本、内存、CPU
-- ``SerialMatcher``：功能到串口的映射和启用状态
+- ``VehicleSpec``：厂商 / 总线 / 通道数量和通道名
+- ``LanguageSpec``：语言运行时和语义化版本
+- ``SystemSpec``：操作系统、版本、内存、CPU
+- ``SerialSpec``：功能到串口的映射和启用状态
+- ``TagSpec``：节点标签
 
-新增厂商、总线、语言或串口功能只增加模型数据，不修改通用匹配逻辑；
-新增能力类别时新增一个公共模型和一个 matcher，避免通用字符串路径逐渐变成隐式协议。
+新增能力类别只需新增一个规格类并加入默认组合，求值器与其它类别不受影响。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Iterable, Protocol, Sequence
 
 from aetp_protocol.capabilities import (
     BusRequirement,
-    DeviceRequirement,
     HardwareRequirements,
     LanguageRequirement,
     NumericConstraint,
     NodeCapabilities,
-    PhysicalDeviceCapability,
     SerialPortRequirement,
     SystemRequirement,
     VehicleRequirement,
@@ -37,31 +36,6 @@ class CapabilityRequirementError(ValueError):
     """硬件需求不合法或无法由对应 matcher 求值。"""
 
 
-class PhysicalDeviceMatcher:
-    """物理资源能力判定器。
-
-    设备 ID 的精确约束由调度器处理；本类只判断设备自身能力属性，
-    例如 ``vector/1640/can1`` 或 ``relay_board``。
-    """
-
-    def matches(
-        self,
-        capability: PhysicalDeviceCapability,
-        requirement: DeviceRequirement,
-    ) -> bool:
-        return (
-            capability.resource_type == requirement.resource_type
-            and _same_if_set(capability.vendor, requirement.vendor)
-            and _same_if_set(capability.model, requirement.model)
-            and _same_if_set(capability.channel, requirement.channel)
-            and _same_if_set(capability.function, requirement.function)
-        )
-
-
-def _same_if_set(actual: str | None, expected: str | None) -> bool:
-    return expected is None or actual == expected
-
-
 @dataclass(frozen=True)
 class CapabilityMatch:
     """节点能力匹配结果。"""
@@ -70,27 +44,51 @@ class CapabilityMatch:
     failures: tuple[str, ...] = ()
 
 
-class CapabilityMatcher(Protocol):
-    """能力类别 matcher 端口。"""
+class CapabilitySpec(Protocol):
+    """能力规格：求值返回失败原因，空序列表示满足。"""
 
-    def match(self, capabilities: NodeCapabilities, requirements: HardwareRequirements) -> list[str]:
-        """返回该类别的失败原因；空列表表示该类别满足。"""
-        ...
-
-
-class VehicleMatcher:
-    """车载能力判定：厂商 -> 总线 -> 已启用通道。"""
-
-    def match(
+    def evaluate(
         self,
         capabilities: NodeCapabilities,
         requirements: HardwareRequirements,
-    ) -> list[str]:
+        tags: Sequence[str] = (),
+    ) -> tuple[str, ...]:
+        """返回该规格的失败原因；空表示满足。"""
+        ...
+
+
+class AllOf:
+    """AND 组合规格：任一子规格失败即整体失败。"""
+
+    def __init__(self, specs: Iterable[CapabilitySpec]) -> None:
+        self._specs = tuple(specs)
+
+    def evaluate(
+        self,
+        capabilities: NodeCapabilities,
+        requirements: HardwareRequirements,
+        tags: Sequence[str] = (),
+    ) -> tuple[str, ...]:
+        failures: list[str] = []
+        for spec in self._specs:
+            failures.extend(spec.evaluate(capabilities, requirements, tags))
+        return tuple(failures)
+
+
+class VehicleSpec:
+    """车载能力规格：厂商 -> 总线 -> 已启用通道。"""
+
+    def evaluate(
+        self,
+        capabilities: NodeCapabilities,
+        requirements: HardwareRequirements,
+        tags: Sequence[str] = (),
+    ) -> tuple[str, ...]:
         requirement = requirements.vehicle
         if requirement is None:
-            return []
+            return ()
         if capabilities.vehicle is None:
-            return ["节点未上报 vehicle 能力"]
+            return ("节点未上报 vehicle 能力",)
 
         failures: list[str] = []
         for bus_requirement in requirement.all_of:
@@ -104,7 +102,7 @@ class VehicleMatcher:
                 self._failure(bus_requirement) for bus_requirement in requirement.any_of
             )
             failures.append(f"vehicle 任一总线需求均不满足: {alternatives}")
-        return failures
+        return tuple(failures)
 
     @staticmethod
     def _match_bus(capabilities: NodeCapabilities, requirement: BusRequirement) -> bool:
@@ -149,18 +147,19 @@ class VehicleMatcher:
         return f"vehicle 总线不满足: {vendor} bus={requirement.bus_type}（{'，'.join(details)}）"
 
 
-class LanguageMatcher:
-    """语言运行时判定：按语言名查找，按 VersionConstraint 比较版本。"""
+class LanguageSpec:
+    """语言运行时规格：按语言名查找，按 VersionConstraint 比较版本。"""
 
-    def match(
+    def evaluate(
         self,
         capabilities: NodeCapabilities,
         requirements: HardwareRequirements,
-    ) -> list[str]:
+        tags: Sequence[str] = (),
+    ) -> tuple[str, ...]:
         if not requirements.languages:
-            return []
+            return ()
         if capabilities.language is None:
-            return ["节点未上报 language 能力"]
+            return ("节点未上报 language 能力",)
 
         failures: list[str] = []
         for requirement in requirements.languages:
@@ -175,22 +174,23 @@ class LanguageMatcher:
                 for runtime in runtimes
             ):
                 failures.append(f"language 不满足: {requirement.name}")
-        return failures
+        return tuple(failures)
 
 
-class SystemMatcher:
-    """系统判定：操作系统/版本、内存、CPU 各自使用专用约束。"""
+class SystemSpec:
+    """系统规格：操作系统/版本、内存、CPU 各自使用专用约束。"""
 
-    def match(
+    def evaluate(
         self,
         capabilities: NodeCapabilities,
         requirements: HardwareRequirements,
-    ) -> list[str]:
+        tags: Sequence[str] = (),
+    ) -> tuple[str, ...]:
         requirement = requirements.system
         if requirement is None:
-            return []
+            return ()
         if capabilities.system is None:
-            return ["节点未上报 system 能力"]
+            return ("节点未上报 system 能力",)
 
         failures: list[str] = []
         if requirement.operating_system is not None:
@@ -227,21 +227,22 @@ class SystemMatcher:
                 requirement.cpu_cores,
             )
         )
-        return failures
+        return tuple(failures)
 
 
-class SerialMatcher:
-    """串口功能判定：按功能名定位端口，可选约束端口号和 enabled。"""
+class SerialSpec:
+    """串口功能规格：按功能名定位端口，可选约束端口号和 enabled。"""
 
-    def match(
+    def evaluate(
         self,
         capabilities: NodeCapabilities,
         requirements: HardwareRequirements,
-    ) -> list[str]:
+        tags: Sequence[str] = (),
+    ) -> tuple[str, ...]:
         if not requirements.serial_ports:
-            return []
+            return ()
         if capabilities.serial is None:
-            return ["节点未上报 serial 能力"]
+            return ("节点未上报 serial 能力",)
 
         failures: list[str] = []
         for requirement in requirements.serial_ports:
@@ -259,56 +260,65 @@ class SerialMatcher:
                 failures.append(
                     f"serial 功能不满足: function={requirement.function}{suffix}"
                 )
-        return failures
+        return tuple(failures)
 
 
-class HardwareCapabilityMatcher:
-    """聚合各能力类别 matcher；类别之间是 AND 关系。"""
+class TagSpec:
+    """节点标签规格。"""
 
-    def __init__(
+    def evaluate(
         self,
-        *,
-        vehicle: VehicleMatcher | None = None,
-        language: LanguageMatcher | None = None,
-        system: SystemMatcher | None = None,
-        serial: SerialMatcher | None = None,
-    ) -> None:
-        self._vehicle = vehicle or VehicleMatcher()
-        self._language = language or LanguageMatcher()
-        self._system = system or SystemMatcher()
-        self._serial = serial or SerialMatcher()
+        capabilities: NodeCapabilities,
+        requirements: HardwareRequirements,
+        tags: Sequence[str] = (),
+    ) -> tuple[str, ...]:
+        actual = set(tags)
+        return tuple(
+            f"缺少标签: {tag}"
+            for tag in requirements.required_tags
+            if tag not in actual
+        )
 
-    def match(
+
+def default_capability_spec() -> CapabilitySpec:
+    """默认能力规格组合：车载 + 语言 + 系统 + 串口 + 标签。"""
+    return AllOf(
+        (
+            VehicleSpec(),
+            LanguageSpec(),
+            SystemSpec(),
+            SerialSpec(),
+            TagSpec(),
+        )
+    )
+
+
+class CapabilityEvaluator:
+    """唯一能力求值器：组合全部类别规格，返回 CapabilityMatch。"""
+
+    def __init__(self, spec: CapabilitySpec | None = None) -> None:
+        self._spec = spec or default_capability_spec()
+
+    def evaluate(
         self,
         capabilities: NodeCapabilities,
         requirements: HardwareRequirements,
         tags: Sequence[str] = (),
     ) -> CapabilityMatch:
-        failures: list[str] = []
-        failures.extend(self._vehicle.match(capabilities, requirements))
-        failures.extend(self._language.match(capabilities, requirements))
-        failures.extend(self._system.match(capabilities, requirements))
-        failures.extend(self._serial.match(capabilities, requirements))
-        required_tags = set(requirements.required_tags)
-        actual_tags = set(tags)
-        failures.extend(
-            f"缺少标签: {tag}"
-            for tag in requirements.required_tags
-            if tag not in actual_tags
-        )
-        return CapabilityMatch(matched=not failures, failures=tuple(failures))
+        failures = self._spec.evaluate(capabilities, requirements, tags)
+        return CapabilityMatch(matched=not failures, failures=failures)
 
 
-_DEFAULT_MATCHER = HardwareCapabilityMatcher()
+_DEFAULT_EVALUATOR = CapabilityEvaluator()
 
 
-def match_capability(
+def evaluate_capability(
     requirements: HardwareRequirements,
     capabilities: NodeCapabilities,
     tags: Sequence[str] = (),
 ) -> CapabilityMatch:
-    """类型安全的公共匹配入口（具体逻辑由类别 matcher 负责）。"""
-    return _DEFAULT_MATCHER.match(capabilities, requirements, tags)
+    """类型安全的公共匹配入口。"""
+    return _DEFAULT_EVALUATOR.evaluate(capabilities, requirements, tags)
 
 
 def list_capability_paths(capabilities: NodeCapabilities) -> list[str]:

@@ -28,13 +28,14 @@ from aetp_protocol.capabilities import (
     VersionConstraint,
 )
 from master.domain.capability import (
-    HardwareCapabilityMatcher,
-    LanguageMatcher,
-    SerialMatcher,
-    SystemMatcher,
-    VehicleMatcher,
+    AllOf,
+    CapabilityEvaluator,
+    LanguageSpec,
+    SerialSpec,
+    SystemSpec,
+    VehicleSpec,
+    evaluate_capability,
     list_capability_paths,
-    match_capability,
 )
 
 
@@ -174,9 +175,9 @@ def test_vehicle_model_rejects_duplicate_vendor_bus_and_channel_names():
         )
 
 
-def test_vehicle_matcher_checks_vendor_bus_count_and_channel_name():
-    assert VehicleMatcher().match(_capabilities(), _requirements()) == []
-    assert VehicleMatcher().match(
+def test_vehicle_spec_checks_vendor_bus_count_and_channel_name():
+    assert VehicleSpec().evaluate(_capabilities(), _requirements()) == ()
+    assert VehicleSpec().evaluate(
         _capabilities(can_channels=("can0",)), _requirements()
     )
 
@@ -187,13 +188,13 @@ def test_vehicle_matcher_handles_lin_and_eth_as_data_not_logic():
             all_of=(BusRequirement(bus_type="lin", required_channels=("lin0",)),)
         )
     )
-    assert match_capability(requirements, _capabilities()).matched is True
+    assert evaluate_capability(requirements, _capabilities()).matched is True
     eth_requirement = HardwareRequirements(
         vehicle=VehicleRequirement(
             all_of=(BusRequirement(bus_type="eth", minimum_channels=1),)
         )
     )
-    assert match_capability(eth_requirement, _capabilities()).matched is False
+    assert evaluate_capability(eth_requirement, _capabilities()).matched is False
 
 
 def test_vehicle_matcher_supports_explicit_any_of_vendor_alternatives():
@@ -205,7 +206,7 @@ def test_vehicle_matcher_supports_explicit_any_of_vendor_alternatives():
             )
         )
     )
-    assert match_capability(requirement, _capabilities()).matched is True
+    assert evaluate_capability(requirement, _capabilities()).matched is True
 
 
 def test_language_matcher_uses_semantic_versions():
@@ -217,10 +218,10 @@ def test_language_matcher_uses_semantic_versions():
             ),
         )
     )
-    assert LanguageMatcher().match(
+    assert LanguageSpec().evaluate(
         _capabilities(python_version="3.11"), requirement
-    ) == []
-    assert LanguageMatcher().match(
+    ) == ()
+    assert LanguageSpec().evaluate(
         _capabilities(python_version="3.9"), requirement
     )
 
@@ -234,10 +235,10 @@ def test_version_17_10_is_greater_than_17_2():
             ),
         )
     )
-    assert match_capability(
+    assert evaluate_capability(
         requirement, _capabilities(python_version="17.2")
     ).matched is False
-    assert match_capability(
+    assert evaluate_capability(
         requirement, _capabilities(python_version="17.10")
     ).matched is True
 
@@ -253,7 +254,7 @@ def test_system_matcher_checks_os_memory_and_cpu_separately():
             cpu_cores=NumericConstraint(minimum=16),
         )
     )
-    failures = SystemMatcher().match(_capabilities(), requirement)
+    failures = SystemSpec().evaluate(_capabilities(), requirement)
     assert len(failures) == 2
     assert any("memory_mb" in failure for failure in failures)
     assert any("cpu_cores" in failure for failure in failures)
@@ -263,43 +264,40 @@ def test_serial_matcher_uses_function_as_identity_and_port_as_constraint():
     requirement = HardwareRequirements(
         serial_ports=(SerialPortRequirement(function="psu", port="30"),)
     )
-    assert SerialMatcher().match(_capabilities(), requirement) == []
+    assert SerialSpec().evaluate(_capabilities(), requirement) == ()
     wrong_port = HardwareRequirements(
         serial_ports=(SerialPortRequirement(function="psu", port="20"),)
     )
-    assert SerialMatcher().match(_capabilities(), wrong_port)
+    assert SerialSpec().evaluate(_capabilities(), wrong_port)
 
 
 def test_serial_matcher_checks_enabled_state():
     requirement = HardwareRequirements(
         serial_ports=(SerialPortRequirement(function="relay_board"),)
     )
-    assert SerialMatcher().match(
+    assert SerialSpec().evaluate(
         _capabilities(serial_enabled=True), requirement
-    ) == []
-    assert SerialMatcher().match(
+    ) == ()
+    assert SerialSpec().evaluate(
         _capabilities(serial_enabled=False), requirement
     )
 
 
-def test_aggregate_matcher_combines_categories_and_tags():
-    matcher = HardwareCapabilityMatcher()
-    assert matcher.match(
+def test_aggregate_evaluator_combines_categories_and_tags():
+    evaluator = CapabilityEvaluator()
+    assert evaluator.evaluate(
         _capabilities(), _requirements(), tags=("can",)
     ).matched is True
-    assert matcher.match(
+    assert evaluator.evaluate(
         _capabilities(), _requirements(), tags=()
     ).matched is False
 
 
-def test_matcher_can_inject_specialized_matchers():
-    matcher = HardwareCapabilityMatcher(
-        vehicle=VehicleMatcher(),
-        language=LanguageMatcher(),
-        system=SystemMatcher(),
-        serial=SerialMatcher(),
+def test_evaluator_can_inject_custom_spec():
+    evaluator = CapabilityEvaluator(
+        spec=AllOf((VehicleSpec(), LanguageSpec(), SystemSpec(), SerialSpec()))
     )
-    assert matcher.match(_capabilities(), HardwareRequirements()).matched is True
+    assert evaluator.evaluate(_capabilities(), HardwareRequirements()).matched is True
 
 
 def test_list_capability_paths_is_model_aware():
