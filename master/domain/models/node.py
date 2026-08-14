@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from aetp_protocol.capabilities import NodeCapabilities
+
 from master.domain.enums import DisconnectReason, NodeStatus
 
 
@@ -18,7 +20,7 @@ class Node:
     """运行 Agent 的执行节点。
 
     tags: 节点标签列表
-    capabilities: 节点能力字典（JSON）
+    capabilities: 公共强类型 NodeCapabilities（JSON 仅在持久化边界使用）
     load: 节点负载（心跳上报的结构化字段 {running_shards, queued_shards}，§18.5）
     devices: 该节点下的外设列表（查询时由仓储加载）
     """
@@ -31,7 +33,7 @@ class Node:
     online: bool
     enabled: bool
     tags: list = field(default_factory=list)
-    capabilities: dict = field(default_factory=dict)
+    capabilities: NodeCapabilities = field(default_factory=NodeCapabilities)
     protocol_version: str = ""
     last_seen_at: datetime | None = None
     load: dict = field(default_factory=dict)

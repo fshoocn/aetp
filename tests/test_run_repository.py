@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from aetp_protocol.capabilities import HardwareRequirements
+
 from master.domain.enums import (
     AccountStatus,
     ArtifactKind,
@@ -79,7 +81,7 @@ def _seed(container) -> tuple[int, str]:
                 size=1024,
                 sha256="a" * 64,
                 config={},
-                hardware_requirements={},
+                hardware_requirements=HardwareRequirements(),
                 parse_status=ScriptParseStatus.PARSED,
                 parse_location=ScriptParseLocation.MASTER,
                 result_parse_location=ScriptParseLocation.MASTER,

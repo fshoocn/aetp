@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aetp_protocol.capabilities import NodeCapabilities
+
 from master.domain.enums import (
     AccountStatus,
     PlatformRole,
@@ -192,7 +194,7 @@ class NodeDeviceOut(BaseModel):
 
 
 class NodeOut(BaseModel):
-    """平台 Node 及其 Device 列表。tags/capabilities 为结构化 JSON。"""
+    """平台 Node 及其 Device 列表。capabilities 为公共强类型模型。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -204,7 +206,7 @@ class NodeOut(BaseModel):
     online: bool
     enabled: bool
     tags: list = Field(default_factory=list)
-    capabilities: dict = Field(default_factory=dict)
+    capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
     protocol_version: str
     last_seen_at: datetime | None
     devices: list[NodeDeviceOut]

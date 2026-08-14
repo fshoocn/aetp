@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
+from aetp_protocol.capabilities import HardwareRequirements
+
 
 @dataclass(frozen=True)
 class CaseInfo:
@@ -163,6 +165,6 @@ class TaskTypePlugin(Protocol):
 
     def hardware_requirements(
         self, config: Mapping[str, Any], cases: list[CaseInfo]
-    ) -> Mapping[str, Any]:
-        """硬件能力谓词（§18.5 节点匹配依据）。"""
+    ) -> HardwareRequirements:
+        """强类型硬件需求（§18.5 节点匹配依据）。"""
         ...

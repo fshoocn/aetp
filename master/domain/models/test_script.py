@@ -1,13 +1,16 @@
 """领域对象：测试脚本版本（P3.2）。
 
 脚本文件存 Master 本地 `data/scripts/{script_id}/{version}/`，DB 只存引用与
-sha256；同 hash 重复上传幂等复用。config/hardware_requirements 为结构化 JSON。
+sha256；同 hash 重复上传幂等复用。config 保持插件配置，hardware_requirements 使用
+公共强类型 HardwareRequirements（JSON 仅在持久化边界使用）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from aetp_protocol.capabilities import HardwareRequirements
 
 from master.domain.enums import ScriptParseLocation, ScriptParseStatus
 
@@ -35,7 +38,9 @@ class TestScript:
     # sym:config 插件配置 JSON（执行与解析输入）
     config: dict = field(default_factory=dict)
     # sym:hardware_requirements 硬件能力谓词（§18.5 节点匹配）
-    hardware_requirements: dict = field(default_factory=dict)
+    hardware_requirements: HardwareRequirements = field(
+        default_factory=HardwareRequirements
+    )
     # sym:parse_status 用例解析状态（pending/parsing/parsed/failed）
     parse_status: ScriptParseStatus = ScriptParseStatus.PENDING
     # sym:parse_location 用例解析执行位置（master/agent，D-17）

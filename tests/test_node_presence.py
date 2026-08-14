@@ -8,6 +8,13 @@ from __future__ import annotations
 
 import uuid
 
+from aetp_protocol.capabilities import (
+    HardwareChannel,
+    NodeCapabilities,
+    VehicleCapability,
+    VehicleBus,
+    VehicleVendor,
+)
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
@@ -42,10 +49,32 @@ def _envelope(node_id: str, session_id: str, message_type: str, **kw) -> Envelop
 
 
 def _register(node_id: str = "bench-001", **kw) -> NodeRegisterPayload:
+    """构造注册 payload（强类型层级能力模型）。"""
     return NodeRegisterPayload(
         node_id=node_id,
         name="CAN 台架 01",
-        capabilities={"can_channels": 2, "canoe": "17"},
+        capabilities=NodeCapabilities(
+            vehicle=VehicleCapability(
+                vendors=(
+                    VehicleVendor(
+                        name="vector",
+                        buses=(
+                            VehicleBus(
+                                bus_type="can",
+                                channels=(
+                                    HardwareChannel(name="can0"),
+                                    HardwareChannel(name="can1"),
+                                ),
+                            ),
+                            VehicleBus(
+                                bus_type="lin",
+                                channels=(HardwareChannel(name="lin0"),),
+                            ),
+                        ),
+                    ),
+                )
+            )
+        ),
         tags=["can", "bench"],
         supported_versions={"can_test": ["1.0"]},
         plugin_versions={"can_test": "1.0"},
@@ -88,7 +117,9 @@ def test_register_upserts_node_and_sends_ack(client):
         assert node is not None
         assert node.online is True
         assert node.status is NodeStatus.ONLINE
-        assert node.capabilities == {"can_channels": 2, "canoe": "17"}
+        assert node.capabilities.vehicle is not None
+        assert node.capabilities.vehicle.vendors[0].name == "vector"
+        assert node.capabilities.vehicle.vendors[0].buses[0].bus_type == "can"
         assert node.tags == ["can", "bench"]
         assert node.last_seen_at is not None
         # 会话已建立

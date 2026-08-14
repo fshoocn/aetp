@@ -23,6 +23,7 @@ from master.adapters.sqlalchemy.database_factory import create_database
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.auth_service import AuthService
+from master.application.services.capability_service import CapabilityService
 from master.application.services.device_service import DeviceService
 from master.application.services.project_service import ProjectService
 from master.application.services.project_member_service import ProjectMemberService
@@ -30,6 +31,7 @@ from master.application.services.project_node_binding_service import ProjectNode
 from master.application.services.node_service import NodeService
 from master.application.services.node_presence_service import NodePresenceService
 from master.application.services.task_service import TaskService
+from master.application.services.test_task_service import TestTaskService
 
 
 def _init_database(url: str) -> DatabaseInterface:
@@ -83,4 +85,14 @@ class Container(containers.DeclarativeContainer):
     # 节点在线投影服务（P4.4：注册/心跳/LWT/会话校验）
     node_presence_service = providers.Factory(
         NodePresenceService, uow_factory=uow_factory
+    )
+
+    # 硬件能力匹配服务（P4.5：谓词匹配/硬校验/候选过滤，无状态）
+    capability_service = providers.Factory(CapabilityService)
+
+    # 测试任务定义服务（P4.5 延伸：创建/编辑时的节点筛选，D-23 软校验）
+    test_task_service = providers.Factory(
+        TestTaskService,
+        uow_factory=uow_factory,
+        capability_service=capability_service,
     )

@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from aetp_protocol.capabilities import HardwareRequirements
+
 from master.domain.enums import (
     AccountStatus,
     PlatformRole,
@@ -69,7 +71,7 @@ def _make_script(
         size=1024,
         sha256=sha,
         config={"channel": "can0"},
-        hardware_requirements={"all": []},
+        hardware_requirements=HardwareRequirements(),
         parse_status=ScriptParseStatus.PARSED,
         parse_location=ScriptParseLocation.MASTER,
         result_parse_location=ScriptParseLocation.MASTER,

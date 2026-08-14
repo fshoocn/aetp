@@ -58,6 +58,8 @@ class NodePresenceService:
         """节点注册：upsert 节点 + 会话切换 + outbox 回 register-ack。"""
         self._validate_agent_sender(envelope, payload.node_id)
         now = utcnow()
+        # 领域层保持 NodeCapabilities；JSON 序列化只发生在仓储边界
+        caps = payload.capabilities
 
         with self._uow_factory() as uow:
             node = uow.nodes.get_by_id(payload.node_id)
@@ -71,7 +73,7 @@ class NodePresenceService:
                     online=True,
                     enabled=True,
                     tags=payload.tags,
-                    capabilities=payload.capabilities,
+                    capabilities=caps,
                     protocol_version=str(envelope.protocol_version),
                     last_seen_at=now,
                     load={},
@@ -81,7 +83,7 @@ class NodePresenceService:
                 node.status = NodeStatus.ONLINE
                 node.online = True
                 node.tags = payload.tags
-                node.capabilities = payload.capabilities
+                node.capabilities = caps
                 node.protocol_version = str(envelope.protocol_version)
                 node.last_seen_at = now
             node = uow.nodes.save(node)

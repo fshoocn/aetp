@@ -51,6 +51,34 @@ class NodeDisabledError(ApplicationError):
     """节点已禁用，不能绑定到项目。"""
 
 
+class NodeCapabilityMismatchError(ApplicationError):
+    """节点硬件能力不满足任务需求（NODE_CAPABILITY_MISMATCH，§5.5/§18.5 D-23）。
+
+    failures 列出每个不满足条件的原因；available 列出节点实际上报的能力键，
+    便于排查"需求引用了错误能力键/节点缺该能力"的错位。
+    """
+
+    # sym:code 机器可读错误码（§5.5）
+    code = "NODE_CAPABILITY_MISMATCH"
+
+    def __init__(
+        self,
+        node_id: str,
+        failures: list[str] | tuple[str, ...] = (),
+        *,
+        available: list[str] | tuple[str, ...] = (),
+    ) -> None:
+        self.node_id = node_id
+        self.failures = list(failures)
+        self.available = list(available)
+        detail = f"节点 {node_id} 不满足硬件要求"
+        if self.failures:
+            detail += f"：{'；'.join(self.failures)}"
+        if self.available:
+            detail += f"（节点实际能力键: {', '.join(self.available)}）"
+        super().__init__(detail)
+
+
 class NodeBindingNotFoundError(ApplicationError):
     """项目节点绑定不存在。"""
 
@@ -77,3 +105,14 @@ class InvalidProjectOwnerError(ApplicationError):
 
 class TaskNotFoundError(ApplicationError):
     """任务不存在。"""
+
+
+class ScriptNotFoundError(ApplicationError):
+    """脚本不存在或当前用户不可见（SCRIPT_NOT_FOUND，§5.5）。"""
+
+
+class ProjectAccessDeniedError(ApplicationError):
+    """节点不在项目绑定范围（PROJECT_ACCESS_DENIED，§5.5/§18.5 D-23 两层绑定）。"""
+
+    # sym:code 机器可读错误码（§5.5）
+    code = "PROJECT_ACCESS_DENIED"

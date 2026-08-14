@@ -5,6 +5,8 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from aetp_protocol.capabilities import NodeCapabilities
+
 from master.adapters.sqlalchemy.orm import Device as DeviceORM
 from master.adapters.sqlalchemy.orm import Node as NodeORM
 from master.domain.enums import DeviceStatus, NodeStatus
@@ -36,7 +38,7 @@ def _to_domain(orm: NodeORM) -> Node:
         online=orm.online,
         enabled=orm.enabled,
         tags=list(orm.tags or []),
-        capabilities=dict(orm.capabilities or {}),
+        capabilities=NodeCapabilities.model_validate(orm.capabilities or {}),
         protocol_version=orm.protocol_version,
         last_seen_at=orm.last_seen_at,
         load=dict(orm.load or {}),
@@ -86,7 +88,9 @@ class NodeRepositoryImpl(NodeRepository):
         orm.online = node.online
         orm.enabled = node.enabled
         orm.tags = node.tags
-        orm.capabilities = node.capabilities
+        orm.capabilities = node.capabilities.model_dump(
+            mode="json", exclude_none=True
+        )
         orm.protocol_version = node.protocol_version
         orm.last_seen_at = node.last_seen_at
         orm.load = node.load

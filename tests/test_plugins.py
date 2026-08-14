@@ -13,6 +13,8 @@ from typing import Any, Mapping
 
 import pytest
 
+from aetp_protocol.capabilities import BusRequirement, HardwareRequirements, VehicleRequirement
+
 from master.plugins import (
     CaseInfo,
     CaseResult,
@@ -93,7 +95,11 @@ class PytestPlugin:
         ]
 
     def hardware_requirements(self, config, cases):
-        return {"all": [{"can_channels": {"gte": 1}}]}
+        return HardwareRequirements(
+            vehicle=VehicleRequirement(
+                all_of=(BusRequirement(bus_type="can", minimum_channels=1),)
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -185,10 +191,12 @@ def test_plugin_parse_results_contract():
 
 
 def test_plugin_hardware_requirements_contract():
-    """hardware_requirements 返回能力谓词（§18.5 节点匹配）。"""
+    """hardware_requirements 返回强类型需求（§18.5 节点匹配）。"""
     plugin: TaskTypePlugin = PytestPlugin()
     req = plugin.hardware_requirements({}, [])
-    assert req == {"all": [{"can_channels": {"gte": 1}}]}
+    assert isinstance(req, HardwareRequirements)
+    assert req.vehicle is not None
+    assert req.vehicle.all_of[0].minimum_channels == 1
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +243,7 @@ def test_registry_list_sorted():
             return []
 
         def hardware_requirements(self, config, cases):
-            return {}
+            return HardwareRequirements()
 
     class BPlugin(APlugin):
         task_type = "b"

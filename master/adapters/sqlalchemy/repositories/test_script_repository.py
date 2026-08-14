@@ -5,6 +5,8 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from aetp_protocol.capabilities import HardwareRequirements
+
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
 from master.adapters.sqlalchemy.orm import TestScript as TestScriptORM
 from master.domain.enums import ScriptParseLocation, ScriptParseStatus
@@ -24,7 +26,9 @@ def _to_domain(orm: TestScriptORM) -> TestScript:
         size=orm.size,
         sha256=orm.sha256,
         config=dict(orm.config or {}),
-        hardware_requirements=dict(orm.hardware_requirements or {}),
+        hardware_requirements=HardwareRequirements.model_validate(
+            orm.hardware_requirements or {}
+        ),
         parse_status=ScriptParseStatus(orm.parse_status),
         parse_location=ScriptParseLocation(orm.parse_location),
         result_parse_location=ScriptParseLocation(orm.result_parse_location),
@@ -110,7 +114,9 @@ class TestScriptRepositoryImpl(TestScriptRepository):
             size=script.size,
             sha256=script.sha256,
             config=script.config,
-            hardware_requirements=script.hardware_requirements,
+            hardware_requirements=script.hardware_requirements.model_dump(
+                mode="json", exclude_none=True
+            ),
             parse_status=script.parse_status.value,
             parse_location=script.parse_location.value,
             result_parse_location=script.result_parse_location.value,
@@ -130,7 +136,9 @@ class TestScriptRepositoryImpl(TestScriptRepository):
         orm.size = script.size
         orm.sha256 = script.sha256
         orm.config = script.config
-        orm.hardware_requirements = script.hardware_requirements
+        orm.hardware_requirements = script.hardware_requirements.model_dump(
+            mode="json", exclude_none=True
+        )
         orm.parse_status = script.parse_status.value
         orm.parse_location = script.parse_location.value
         orm.result_parse_location = script.result_parse_location.value
