@@ -169,18 +169,44 @@ class SerialCapability(_Strict):
     ports: tuple[SerialPortCapability, ...] = ()
 
 
+class SwitchPort(_Strict):
+    """切换开关的一个端口，带接线标签。"""
+
+    port: Identifier
+    labels: dict[str, str] = Field(default_factory=dict)
+
+
+class SwitchConnection(_Strict):
+    """资源经切换开关连接时的路径描述。"""
+
+    switch_device_id: Identifier
+    ports: tuple[SwitchPort, ...] = ()
+
+
 class PhysicalDeviceCapability(_Strict):
-    """一个可被 Master 分配的物理资源能力描述。"""
+    """一个可被 Master 分配的物理资源能力描述。
+
+    ``labels`` 是用户自定义标签，描述“该资源接的是什么/用在哪”，
+    例如 ``{"project": "P3", "dut": "ECU-x"}``。
+
+    ``connection`` 非空表示该资源经切换开关接入，各端口有自己的接线标签。
+    """
 
     resource_type: Identifier
     vendor: Identifier | None = None
     model: Identifier | None = None
     channel: Identifier | None = None
     function: Identifier | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    connection: SwitchConnection | None = None
 
 
 class DeviceRequirement(_Strict):
-    """脚本一次执行需要占用的一组物理资源。"""
+    """脚本一次执行需要占用的一组物理资源。
+
+    ``required_labels`` 是硬约束（must）：设备标签必须逐项满足；
+    ``preferred_labels`` 是软约束（prefer）：命中越多越优先。
+    """
 
     resource_type: Identifier
     quantity: int = Field(default=1, ge=1)
@@ -189,6 +215,9 @@ class DeviceRequirement(_Strict):
     channel: Identifier | None = None
     function: Identifier | None = None
     device_ids: tuple[Identifier, ...] = ()
+    required_labels: dict[str, str] = Field(default_factory=dict)
+    preferred_labels: dict[str, str] = Field(default_factory=dict)
+    allow_switching: bool = False
 
     @model_validator(mode="after")
     def _validate_device_ids(self) -> "DeviceRequirement":
@@ -199,11 +228,20 @@ class DeviceRequirement(_Strict):
         return self
 
 
+class SwitchRouteAllocation(_Strict):
+    """经切换开关的分配路径（Agent 据此切换）。"""
+
+    switch_device_id: Identifier
+    port: Identifier
+
+
 class DeviceAllocation(_Strict):
-    """Master 为一次 Attempt 实际分配的物理资源。"""
+    """Master 为一次 Attempt 实际分配的物理资源（含标签与切换路径回传）。"""
 
     device_id: Identifier
     resource_type: Identifier
+    labels: dict[str, str] = Field(default_factory=dict)
+    switch_route: SwitchRouteAllocation | None = None
 
 
 class NodeCapabilities(_Strict):
