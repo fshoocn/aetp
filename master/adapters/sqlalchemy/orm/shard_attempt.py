@@ -21,7 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from master.domain.enums import ShardAttemptStatus
 
-from .base import Base, TimestampMixin, UTCDateTime
+from .base import Base, JSONType, TimestampMixin, UTCDateTime
 
 if TYPE_CHECKING:
     from .run_shard import RunShard
@@ -52,6 +52,8 @@ class ShardAttempt(Base, TimestampMixin):
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
     # sym:node_id 执行节点业务 ID（failover 换节点时变化，无 FK 保留业务键）
     node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # sym:device_ids 本次 Attempt 占用的全部设备业务 ID；历史 Attempt 可为空
+    device_ids: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # sym:status 尝试状态（created/dispatched/acked/running/...）
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default=ShardAttemptStatus.CREATED.value

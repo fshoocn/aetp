@@ -86,7 +86,6 @@ def _make_task(created_by: int, script_id: str, name: str = "reg", **kw) -> Test
         default_case_selection=["can_open_channel", "can_send_frame"],
         node_ids=["bench-001", "bench-002"],
         split_policy={"type": "by_time", "target_duration_s": 300},
-        max_parallel_shards=2,
         retry_policy={"max_attempts": 2, "failover_nodes": True, "case_retry": 1},
         timeout_s=1800,
         enabled=True,
@@ -113,7 +112,6 @@ def test_add_and_get_by_task_id(client):
         assert fetched.default_case_selection == ["can_open_channel", "can_send_frame"]
         assert fetched.node_ids == ["bench-001", "bench-002"]
         assert fetched.split_policy == {"type": "by_time", "target_duration_s": 300}
-        assert fetched.max_parallel_shards == 2
         assert fetched.retry_policy == {
             "max_attempts": 2,
             "failover_nodes": True,

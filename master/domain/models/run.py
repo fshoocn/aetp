@@ -88,8 +88,6 @@ class RunShard:
     execution_params: dict = field(default_factory=dict)
     # sym:estimated_duration_s 预估耗时（秒，by_time 分割产出；null=未知）
     estimated_duration_s: float | None = None
-    # sym:mutex_keys 互斥资源键（共用同一硬件通道的 Shard 不得并行，§18.6）
-    mutex_keys: list[str] = field(default_factory=list)
     # sym:status Shard 状态（pending/dispatching/running/...，§5.4）
     status: ShardStatus = ShardStatus.PENDING
     # sym:final_node 最终执行节点业务 ID（多 attempt 后取最后有效者）
@@ -118,6 +116,8 @@ class ShardAttempt:
     attempt_no: int = 1
     # sym:node_id 执行节点业务 ID（failover 换节点时变化）
     node_id: str = ""
+    # sym:device_ids 本次 Attempt 原子占用的全部物理设备；历史记录可为空
+    device_ids: list[str] = field(default_factory=list)
     # sym:status 尝试状态（created/dispatched/acked/running/...）
     status: ShardAttemptStatus = ShardAttemptStatus.CREATED
     # sym:error_code 领域错误码（如 NODE_CAPABILITY_MISMATCH）

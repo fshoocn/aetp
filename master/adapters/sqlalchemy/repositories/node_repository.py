@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from aetp_protocol.capabilities import NodeCapabilities
+from aetp_protocol.capabilities import PhysicalDeviceCapability
 
 from master.adapters.sqlalchemy.orm import Device as DeviceORM
 from master.adapters.sqlalchemy.orm import Node as NodeORM
@@ -22,6 +23,9 @@ def _device_to_domain(orm: DeviceORM) -> Device:
         name=orm.name,
         status=DeviceStatus(orm.status),
         online=orm.online,
+        capability=PhysicalDeviceCapability.model_validate(
+            orm.capabilities or {"resource_type": "generic"}
+        ),
         last_seen_at=orm.last_seen_at,
         created_at=orm.created_at,
         updated_at=orm.updated_at,

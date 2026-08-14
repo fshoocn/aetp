@@ -101,7 +101,6 @@ def _seed(container) -> tuple[int, str]:
                 default_case_selection=["c1", "c2"],
                 node_ids=["bench-001"],
                 split_policy={"type": "by_time", "target_duration_s": 300},
-                max_parallel_shards=2,
                 retry_policy={"max_attempts": 2, "failover_nodes": True, "case_retry": 1},
                 timeout_s=1800,
                 enabled=True,
@@ -136,7 +135,6 @@ def _make_shard(run_id: str, shard_id: str, index: int, **kw) -> RunShard:
         shard_index=index,
         case_keys=[f"c{index}"],
         execution_params={"channel": index},
-        mutex_keys=["can0"],
         status=ShardStatus.PENDING,
     )
     for key, value in kw.items():
@@ -308,7 +306,6 @@ def test_shards_add_many_and_list_order(client):
         assert listed[0].case_keys == ["c0"]
         assert listed[0].execution_params == {"channel": 0}
         assert listed[1].execution_params == {"channel": 1}
-        assert listed[0].mutex_keys == ["can0"]
         assert listed[0].status == ShardStatus.PENDING
 
 

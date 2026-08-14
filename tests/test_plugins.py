@@ -84,7 +84,6 @@ class PytestPlugin:
                 ShardSpec(
                     case_keys=tuple(c.stable_key for c in group),
                     execution_params={"channel": shard_no},  # 每 Shard 专属执行参数（如不同 CAN 通道）
-                    mutex_keys=("can0",),
                 )
             )
         return shards
@@ -167,7 +166,6 @@ def test_plugin_split_shards_contract():
         ("test_can_close_channel",),
     ]
     assert [s.execution_params for s in shards] == [{"channel": 0}, {"channel": 1}]
-    assert shards[0].mutex_keys == ("can0",)
 
 
 def test_plugin_parse_results_contract():

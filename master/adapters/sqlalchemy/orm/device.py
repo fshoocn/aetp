@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, TimestampMixin, UTCDateTime
+from .base import Base, JSONType, TimestampMixin, UTCDateTime
 
 if TYPE_CHECKING:
     from .node import Node
@@ -33,6 +33,10 @@ class Device(Base, TimestampMixin):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    # sym:capabilities 物理资源能力 JSON（业务层使用 PhysicalDeviceCapability）
+    capabilities: Mapped[dict] = mapped_column(
+        JSONType, nullable=False, default=dict
+    )
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="offline"
     )

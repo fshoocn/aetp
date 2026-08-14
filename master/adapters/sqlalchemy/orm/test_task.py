@@ -62,10 +62,6 @@ class TestTask(Base, TimestampMixin):
     node_ids: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # sym:split_policy 分割策略 JSON：{type: none|by_time|by_case_count|custom, ...}（§18.6）
     split_policy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
-    # sym:max_parallel_shards 任务级最大并行 Shard 数（三层并发上限之一，§18.6）
-    max_parallel_shards: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1
-    )
     # sym:retry_policy 重试策略 JSON：{max_attempts, failover_nodes, case_retry}（D-20）
     retry_policy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # sym:timeout_s 任务超时秒数；0 = 不限制

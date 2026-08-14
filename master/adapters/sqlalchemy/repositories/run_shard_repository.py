@@ -21,7 +21,6 @@ def _to_domain(orm: RunShardORM) -> RunShard:
         case_keys=list(orm.case_keys or []),
         execution_params=dict(orm.execution_params or {}),
         estimated_duration_s=orm.estimated_duration_s,
-        mutex_keys=list(orm.mutex_keys or []),
         status=ShardStatus(orm.status),
         final_node=orm.final_node,
         created_at=orm.created_at,
@@ -53,7 +52,6 @@ class RunShardRepositoryImpl(RunShardRepository):
                 case_keys=shard.case_keys,
                 execution_params=shard.execution_params,
                 estimated_duration_s=shard.estimated_duration_s,
-                mutex_keys=shard.mutex_keys,
                 status=shard.status.value,
                 final_node=shard.final_node,
             )
@@ -92,7 +90,6 @@ class RunShardRepositoryImpl(RunShardRepository):
         orm.case_keys = shard.case_keys
         orm.execution_params = shard.execution_params
         orm.estimated_duration_s = shard.estimated_duration_s
-        orm.mutex_keys = shard.mutex_keys
         orm.status = shard.status.value
         orm.final_node = shard.final_node
         self._s.flush()

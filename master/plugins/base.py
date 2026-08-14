@@ -42,7 +42,8 @@ class ShardSpec:
     Shard 是插件要执行的最小派发单元：Master 只负责派发/调度，不执行；
     Agent 侧插件以 execute(shard_context) 执行（§9.5/§18.2）。
     因此每个 Shard 自包含执行所需信息：case_keys + execution_params
-    （每 Shard 专属执行参数，如 CAN 通道、测试参数）+ 资源互斥键。
+    （每 Shard 专属执行参数，如 CAN 通道、测试参数）。物理资源由
+    Master 调度时根据 HardwareRequirements 原子分配。
     """
 
     # sym:case_keys 该子任务负责的 case 集合（stable_key）
@@ -52,8 +53,6 @@ class ShardSpec:
     execution_params: Mapping[str, Any] = field(default_factory=dict)
     # sym:estimated_duration_s 预估耗时（秒；by_time 分割产出）
     estimated_duration_s: float | None = None
-    # sym:mutex_keys 互斥资源键（共用同一硬件通道的 Shard 不得并行，§18.6）
-    mutex_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

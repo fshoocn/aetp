@@ -427,6 +427,12 @@ class NodeSessionRepository(ABC):
 
 class DeviceRepository(ABC):
     @abstractmethod
+    def add(self, device: Device) -> Device: ...
+
+    @abstractmethod
+    def update(self, device: Device) -> Device: ...
+
+    @abstractmethod
     def list_all(self, *, online: bool | None = None) -> list[Device]: ...
 
     @abstractmethod

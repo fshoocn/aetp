@@ -19,6 +19,7 @@ def _to_domain(orm: ShardAttemptORM) -> ShardAttempt:
         shard_id=orm.shard.shard_id if orm.shard is not None else "",
         attempt_no=orm.attempt_no,
         node_id=orm.node_id,
+        device_ids=list(orm.device_ids or []),
         status=ShardAttemptStatus(orm.status),
         error_code=orm.error_code,
         error_message=orm.error_message,
@@ -44,6 +45,7 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
             shard_pk=shard_pk,
             attempt_no=attempt.attempt_no,
             node_id=attempt.node_id,
+            device_ids=attempt.device_ids,
             status=attempt.status.value,
             error_code=attempt.error_code,
             error_message=attempt.error_message,
@@ -90,6 +92,7 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
         if orm is None:
             raise ValueError(f"Attempt 不存在: id={attempt.id}")
         orm.node_id = attempt.node_id
+        orm.device_ids = attempt.device_ids
         orm.status = attempt.status.value
         orm.error_code = attempt.error_code
         orm.error_message = attempt.error_message

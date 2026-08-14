@@ -24,7 +24,6 @@ def _to_domain(orm: TestTaskORM) -> TestTask:
         default_case_selection=list(orm.default_case_selection or []),
         node_ids=list(orm.node_ids or []),
         split_policy=dict(orm.split_policy or {}),
-        max_parallel_shards=orm.max_parallel_shards,
         retry_policy=dict(orm.retry_policy or {}),
         timeout_s=orm.timeout_s,
         enabled=orm.enabled,
@@ -129,7 +128,6 @@ class TestTaskRepositoryImpl(TestTaskRepository):
             default_case_selection=task.default_case_selection,
             node_ids=task.node_ids,
             split_policy=task.split_policy,
-            max_parallel_shards=task.max_parallel_shards,
             retry_policy=task.retry_policy,
             timeout_s=task.timeout_s,
             enabled=task.enabled,
@@ -150,7 +148,6 @@ class TestTaskRepositoryImpl(TestTaskRepository):
         orm.default_case_selection = task.default_case_selection
         orm.node_ids = task.node_ids
         orm.split_policy = task.split_policy
-        orm.max_parallel_shards = task.max_parallel_shards
         orm.retry_policy = task.retry_policy
         orm.timeout_s = task.timeout_s
         orm.enabled = task.enabled

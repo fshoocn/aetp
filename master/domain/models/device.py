@@ -6,8 +6,10 @@ MQTT client_id 和 topic 节点标识，平台范围内唯一。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+
+from aetp_protocol.capabilities import PhysicalDeviceCapability
 
 from master.domain.enums import DeviceStatus
 
@@ -25,6 +27,9 @@ class Device:
     name: str
     status: DeviceStatus
     online: bool
+    capability: PhysicalDeviceCapability = field(
+        default_factory=lambda: PhysicalDeviceCapability(resource_type="generic")
+    )
     last_seen_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

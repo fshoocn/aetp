@@ -1,7 +1,7 @@
 """ORM：Run 内的 Shard（run_shards 表，P3.4）。
 
 由插件 split_shards 在 Run 创建时分割产出；case_keys 为该 Shard 负责的
-case 集合；mutex_keys 互斥资源键限制并行（§18.6 三层并发上限）。
+case 集合；物理设备由 Master 按脚本资源需求原子分配。
 """
 
 from __future__ import annotations
@@ -60,8 +60,6 @@ class RunShard(Base, TimestampMixin):
     estimated_duration_s: Mapped[Optional[float]] = mapped_column(
         Float, nullable=True
     )
-    # sym:mutex_keys 互斥资源键（共用硬件通道的 Shard 不得并行，§18.6）
-    mutex_keys: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # sym:status Shard 状态（pending/dispatching/running/...，§5.4）
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default=ShardStatus.PENDING.value
