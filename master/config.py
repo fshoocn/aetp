@@ -5,6 +5,13 @@ from pathlib import Path
 import secrets
 import sys
 
+from common.config_utils import (
+    load_env_file,
+    parse_bool,
+    parse_int,
+    resolve_sqlite_url as _resolve_sqlite_url,
+)
+
 # 进程级配置（组合根模式）：
 # - 只在入口（run.py）调用一次 configure() 显式初始化；
 # - 其余模块统一用 get_settings() 只读获取；
@@ -35,48 +42,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def resolve_sqlite_url(url: str) -> str:
-    """将 SQLite 相对路径基于运行目录解析为绝对连接串。"""
-    scheme, _, rest = url.partition("://")
-    if not scheme.lower().startswith("sqlite") or not rest.startswith("/"):
-        return url
-    relative_path = rest.lstrip("/")
-    if relative_path in ("", ":memory:", ":memory"):
-        return url
-    path = Path(relative_path)
-    if path.is_absolute():
-        return url
-    target = (runtime_dir() / path).resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    return f"{scheme}:///{target}"
+    """将 SQLite 相对路径基于运行目录解析为绝对连接串（公开 API 兼容）。"""
+    return _resolve_sqlite_url(url, runtime_dir())
 
 
 # 兼容旧内部调用
 _runtime_dir = runtime_dir
-
-
-def _load_env_file(env_file: str | Path) -> dict[str, str]:
-    """极简 .env 解析器：支持 KEY=VALUE、# 注释、成对引号去除。"""
-    values: dict[str, str] = {}
-    path = Path(env_file)
-    if not path.is_file():
-        return values
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-            value = value[1:-1]
-        values[key] = value
-    return values
-
-
-def _parse_bool(value: str | None, default: bool) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -138,7 +109,7 @@ class MasterSettings:
             else cls.default_env_file()
         )
 
-        values = _load_env_file(path)
+        values = load_env_file(path)
         base_dir = path.parent
 
         # CA 证书路径：相对路径以 .env 所在目录为基准解析
@@ -163,26 +134,26 @@ class MasterSettings:
         result = cls(
             database_url=values.get("AETP_MASTER_DATABASE_URL", cls.database_url),
             mqtt_host=values.get("AETP_MASTER_MQTT_HOST"),
-            mqtt_port=int(raw_port) if raw_port else cls.mqtt_port,
+            mqtt_port=parse_int(raw_port, cls.mqtt_port),
             mqtt_username=values.get("AETP_MASTER_MQTT_USERNAME"),
             mqtt_password=values.get("AETP_MASTER_MQTT_PASSWORD"),
             mqtt_client_id=values.get(
                 "AETP_MASTER_MQTT_CLIENT_ID", cls.mqtt_client_id
             ),
             mqtt_ca_cert_path=ca_cert_path,
-            mqtt_use_tls=_parse_bool(
+            mqtt_use_tls=parse_bool(
                 values.get("AETP_MASTER_MQTT_USE_TLS"), cls.mqtt_use_tls
             ),
             http_host=values.get("AETP_MASTER_HTTP_HOST", cls.http_host),
-            http_port=int(raw_http_port) if raw_http_port else cls.http_port,
+            http_port=parse_int(raw_http_port, cls.http_port),
             log_level=values.get("AETP_MASTER_LOG_LEVEL", cls.log_level),
             log_file=log_file,
-            log_console=_parse_bool(
+            log_console=parse_bool(
                 values.get("AETP_MASTER_LOG_CONSOLE"), cls.log_console
             ),
             jwt_secret=values.get("AETP_MASTER_JWT_SECRET", cls.jwt_secret),
-            jwt_expire_minutes=(
-                int(raw_jwt_expire) if raw_jwt_expire else cls.jwt_expire_minutes
+            jwt_expire_minutes=parse_int(
+                raw_jwt_expire, cls.jwt_expire_minutes
             ),
             jwt_issuer=values.get("AETP_MASTER_JWT_ISSUER", cls.jwt_issuer),
             jwt_audience=values.get("AETP_MASTER_JWT_AUDIENCE", cls.jwt_audience),
@@ -193,15 +164,13 @@ class MasterSettings:
                 "AETP_MASTER_INTERNAL_SIGNING_SECRET",
                 cls.internal_signing_secret,
             ),
-            internal_download_ttl_s=(
-                int(raw_download_ttl)
-                if raw_download_ttl
-                else cls.internal_download_ttl_s
+            internal_download_ttl_s=parse_int(
+                raw_download_ttl, cls.internal_download_ttl_s
             ),
-            refresh_token_expire_days=(
-                int(raw_refresh_days) if raw_refresh_days else cls.refresh_token_expire_days
+            refresh_token_expire_days=parse_int(
+                raw_refresh_days, cls.refresh_token_expire_days
             ),
-            auto_migrate=_parse_bool(
+            auto_migrate=parse_bool(
                 values.get("AETP_MASTER_AUTO_MIGRATE"), cls.auto_migrate
             ),
             bootstrap_admin_username=values.get(
