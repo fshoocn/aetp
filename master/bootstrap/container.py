@@ -17,11 +17,12 @@ from __future__ import annotations
 
 from dependency_injector import containers, providers
 
-from master.config import get_settings
+from master.config import get_settings, runtime_dir
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.database_factory import create_database
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
+from master.adapters.storage.local_storage import LocalStorage
 from master.application.services.auth_service import AuthService
 from master.application.services.capability_service import CapabilityService
 from master.application.services.device_service import DeviceService
@@ -33,6 +34,8 @@ from master.application.services.node_presence_service import NodePresenceServic
 from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
 from master.application.services.shard_scheduler_service import ShardSchedulerService
+from master.application.services.script_download_service import ScriptDownloadService
+from master.application.services.script_storage_service import ScriptStorageService
 
 
 def _init_database(url: str) -> DatabaseInterface:
@@ -40,6 +43,12 @@ def _init_database(url: str) -> DatabaseInterface:
     db = create_database(url)
     db.connect()
     return db
+
+
+def _internal_signing_secret() -> str:
+    """内部签名下载密钥：独立配置，缺省回退到 JWT 密钥。"""
+    settings = get_settings()
+    return settings.internal_signing_secret or settings.jwt_secret
 
 
 class Container(containers.DeclarativeContainer):
@@ -57,6 +66,17 @@ class Container(containers.DeclarativeContainer):
 
     # SSE 事件总线：进程级单例
     event_bus = providers.Singleton(EventBus)
+
+    # 文件存储：进程级单例（默认本地 data/ 目录；切云存储只换 adapter）
+    storage = providers.Singleton(
+        LocalStorage,
+        root=providers.Callable(lambda: runtime_dir() / "data"),
+    )
+
+    # 脚本文件存储服务（P4.7：上传/下载统一走 Storage 端口）
+    script_storage_service = providers.Factory(
+        ScriptStorageService, storage=storage
+    )
 
     # 认证服务
     auth_service = providers.Factory(AuthService, uow_factory=uow_factory)
@@ -91,6 +111,14 @@ class Container(containers.DeclarativeContainer):
     # 硬件能力匹配服务（P4.5：谓词匹配/硬校验/候选过滤，无状态）
     capability_service = providers.Factory(CapabilityService)
 
+    # 脚本签名下载服务（P4.7：限时 HMAC 签名 URL，Agent 下载校验 sha256）
+    script_download_service = providers.Factory(
+        ScriptDownloadService,
+        secret=providers.Callable(_internal_signing_secret),
+        base_url=providers.Callable(lambda: get_settings().public_base_url),
+        ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
+    )
+
     # 测试任务定义服务（P4.5 延伸：创建/编辑时的节点筛选，D-23 软校验）
     test_task_service = providers.Factory(
         TestTaskService,
@@ -103,4 +131,5 @@ class Container(containers.DeclarativeContainer):
         ShardSchedulerService,
         uow_factory=uow_factory,
         capability_service=capability_service,
+        download_url_builder=script_download_service.provided.build_download_url,
     )

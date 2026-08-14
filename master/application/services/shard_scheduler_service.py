@@ -89,11 +89,13 @@ class ShardSchedulerService:
         scheduler: ShardScheduler | None = None,
         capability_service: CapabilityService | None = None,
         master_id: str = "aetp-master",
+        download_url_builder: Callable[[str], str] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._scheduler = scheduler or ShardScheduler()
         self._capability = capability_service or CapabilityService()
         self._master_id = master_id
+        self._download_url_builder = download_url_builder
 
     def schedule_run(self, run_id: str) -> ScheduleResult:
         """为 Run 尽可能派发 pending Shard。
@@ -328,6 +330,11 @@ class ShardSchedulerService:
             device.status = DeviceStatus.BUSY
             uow.devices.update(device)
         outbox_id = uuid.uuid4().hex
+        script_ref = dict(run.script_ref)
+        if self._download_url_builder is not None:
+            script_ref["download_url"] = self._download_url_builder(
+                script.script_id
+            )
         payload = RunAssignPayload(
             project_id=run.project_id,
             task_id=run.task_id,
@@ -349,7 +356,7 @@ class ShardSchedulerService:
             dispatch_id=attempt.attempt_id,
             task_type=task.task_type,
             plugin_version=script.plugin_version,
-            script_ref=dict(run.script_ref),
+            script_ref=script_ref,
             case_keys=list(shard.case_keys),
             execution_params=dict(shard.execution_params),
             timeout_s=task.timeout_s,

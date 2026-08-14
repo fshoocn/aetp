@@ -17,6 +17,8 @@ from master.application.services.node_service import NodeService
 from master.application.services.project_member_service import ProjectMemberService
 from master.application.services.project_node_binding_service import ProjectNodeBindingService
 from master.application.services.project_service import ProjectService
+from master.application.services.script_download_service import ScriptDownloadService
+from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.task_service import TaskService
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
@@ -109,6 +111,20 @@ def get_node_service(
     return container.node_service()
 
 
+def get_script_download_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> ScriptDownloadService:
+    """从容器解析脚本签名下载服务（P4.7）。"""
+    return container.script_download_service()
+
+
+def get_script_storage_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> ScriptStorageService:
+    """从容器解析脚本文件存储服务（P4.7）。"""
+    return container.script_storage_service()
+
+
 def get_current_user(
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(_bearer)
@@ -160,3 +176,9 @@ ProjectNodeBindingServiceDep = Annotated[
     ProjectNodeBindingService, Depends(get_project_node_binding_service)
 ]
 NodeServiceDep = Annotated[NodeService, Depends(get_node_service)]
+ScriptDownloadServiceDep = Annotated[
+    ScriptDownloadService, Depends(get_script_download_service)
+]
+ScriptStorageServiceDep = Annotated[
+    ScriptStorageService, Depends(get_script_storage_service)
+]

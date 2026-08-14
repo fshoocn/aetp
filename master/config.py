@@ -102,6 +102,13 @@ class MasterSettings:
     # JWT 签发方与受众（P2.9：解码时严格校验 iss/aud，防止令牌跨系统复用）
     jwt_issuer: str = "aetp-master"
     jwt_audience: str = "aetp-web"
+    # 内部签名下载端点（P4.7）：Agent 经签名 URL 下载脚本包
+    # public_base_url 为 Master 对外 HTTP 地址（run.assign 的 download_url 前缀）；空则生成相对路径
+    public_base_url: str = ""
+    # internal_signing_secret 为签名 HMAC 密钥；空则回退到 jwt_secret
+    internal_signing_secret: str = ""
+    # internal_download_ttl_s 为签名 URL 有效期（秒）
+    internal_download_ttl_s: int = 300
     # 刷新令牌有效期（天）；刷新时轮换，登出/改密/禁用账户时撤销
     refresh_token_expire_days: int = 7
     # 数据库自动迁移（Alembic upgrade head）；生产可关闭改为部署脚本手动执行
@@ -147,6 +154,7 @@ class MasterSettings:
         raw_http_port = values.get("AETP_MASTER_HTTP_PORT")
         raw_jwt_expire = values.get("AETP_MASTER_JWT_EXPIRE_MINUTES")
         raw_refresh_days = values.get("AETP_MASTER_REFRESH_TOKEN_EXPIRE_DAYS")
+        raw_download_ttl = values.get("AETP_MASTER_INTERNAL_DOWNLOAD_TTL_S")
         raw_log_file = values.get("AETP_MASTER_LOG_FILE")
         log_file = Path(raw_log_file) if raw_log_file else cls.log_file
         if not log_file.is_absolute():
@@ -178,6 +186,18 @@ class MasterSettings:
             ),
             jwt_issuer=values.get("AETP_MASTER_JWT_ISSUER", cls.jwt_issuer),
             jwt_audience=values.get("AETP_MASTER_JWT_AUDIENCE", cls.jwt_audience),
+            public_base_url=values.get(
+                "AETP_MASTER_PUBLIC_BASE_URL", cls.public_base_url
+            ),
+            internal_signing_secret=values.get(
+                "AETP_MASTER_INTERNAL_SIGNING_SECRET",
+                cls.internal_signing_secret,
+            ),
+            internal_download_ttl_s=(
+                int(raw_download_ttl)
+                if raw_download_ttl
+                else cls.internal_download_ttl_s
+            ),
             refresh_token_expire_days=(
                 int(raw_refresh_days) if raw_refresh_days else cls.refresh_token_expire_days
             ),
