@@ -19,10 +19,12 @@ from typing import Protocol, Sequence
 
 from aetp_protocol.capabilities import (
     BusRequirement,
+    DeviceRequirement,
     HardwareRequirements,
     LanguageRequirement,
     NumericConstraint,
     NodeCapabilities,
+    PhysicalDeviceCapability,
     SerialPortRequirement,
     SystemRequirement,
     VehicleRequirement,
@@ -33,6 +35,31 @@ from aetp_protocol.capabilities import (
 
 class CapabilityRequirementError(ValueError):
     """硬件需求不合法或无法由对应 matcher 求值。"""
+
+
+class PhysicalDeviceMatcher:
+    """物理资源能力判定器。
+
+    设备 ID 的精确约束由调度器处理；本类只判断设备自身能力属性，
+    例如 ``vector/1640/can1`` 或 ``relay_board``。
+    """
+
+    def matches(
+        self,
+        capability: PhysicalDeviceCapability,
+        requirement: DeviceRequirement,
+    ) -> bool:
+        return (
+            capability.resource_type == requirement.resource_type
+            and _same_if_set(capability.vendor, requirement.vendor)
+            and _same_if_set(capability.model, requirement.model)
+            and _same_if_set(capability.channel, requirement.channel)
+            and _same_if_set(capability.function, requirement.function)
+        )
+
+
+def _same_if_set(actual: str | None, expected: str | None) -> bool:
+    return expected is None or actual == expected
 
 
 @dataclass(frozen=True)
@@ -89,7 +116,15 @@ class VehicleMatcher:
             for bus in vendor.buses:
                 if bus.bus_type != requirement.bus_type:
                     continue
-                enabled_channels = tuple(channel for channel in bus.channels if channel.enabled)
+                enabled_channels = tuple(
+                    channel
+                    for channel in bus.channels
+                    if channel.enabled
+                    and (
+                        requirement.hardware_model is None
+                        or channel.hardware_model == requirement.hardware_model
+                    )
+                )
                 names = {channel.name for channel in enabled_channels}
                 if (
                     requirement.minimum_channels is not None
@@ -109,6 +144,8 @@ class VehicleMatcher:
             details.append(f"至少 {requirement.minimum_channels} 个通道")
         if requirement.required_channels:
             details.append(f"需要通道 {', '.join(requirement.required_channels)}")
+        if requirement.hardware_model:
+            details.append(f"硬件型号 {requirement.hardware_model}")
         return f"vehicle 总线不满足: {vendor} bus={requirement.bus_type}（{'，'.join(details)}）"
 
 

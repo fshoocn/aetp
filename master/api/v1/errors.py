@@ -25,6 +25,7 @@ from master.application.errors import (
     ProjectKeyAlreadyExistsError,
     ProjectAccessDeniedError,
     ProjectNotFoundError,
+    RunNotFoundError,
     ScriptNotFoundError,
     TaskNotFoundError,
     UsernameAlreadyExistsError,
@@ -51,6 +52,7 @@ _STATUS_BY_ERROR: dict[type[ApplicationError], int] = {
     InvalidProjectOwnerError: 422,
     ScriptNotFoundError: 404,
     TaskNotFoundError: 404,
+    RunNotFoundError: 404,
 }
 logger = logging.getLogger(__name__)
 

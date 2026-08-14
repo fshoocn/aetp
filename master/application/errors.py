@@ -107,6 +107,10 @@ class TaskNotFoundError(ApplicationError):
     """任务不存在。"""
 
 
+class RunNotFoundError(ApplicationError):
+    """Run 不存在或当前用户不可见。"""
+
+
 class ScriptNotFoundError(ApplicationError):
     """脚本不存在或当前用户不可见（SCRIPT_NOT_FOUND，§5.5）。"""
 

@@ -32,6 +32,7 @@ from master.application.services.node_service import NodeService
 from master.application.services.node_presence_service import NodePresenceService
 from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
+from master.application.services.shard_scheduler_service import ShardSchedulerService
 
 
 def _init_database(url: str) -> DatabaseInterface:
@@ -93,6 +94,13 @@ class Container(containers.DeclarativeContainer):
     # 测试任务定义服务（P4.5 延伸：创建/编辑时的节点筛选，D-23 软校验）
     test_task_service = providers.Factory(
         TestTaskService,
+        uow_factory=uow_factory,
+        capability_service=capability_service,
+    )
+
+    # Shard 调度服务（P4.6：项目绑定、能力、三层并发、failover、run.assign outbox）
+    shard_scheduler_service = providers.Factory(
+        ShardSchedulerService,
         uow_factory=uow_factory,
         capability_service=capability_service,
     )
