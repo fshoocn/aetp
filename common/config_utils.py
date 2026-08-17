@@ -6,6 +6,7 @@
 - ``parse_bool`` / ``parse_int``：标量类型解析（空值回退默认）
 - ``parse_task_types``：逗号分隔列表解析
 - ``resolve_sqlite_url``：SQLite 相对路径基于给定基准目录解析为绝对连接串
+- ``upsert_env_value``：更新或追加 .env 键值并保留其他内容
 """
 
 from __future__ import annotations
@@ -30,6 +31,30 @@ def load_env_file(env_file: str | Path) -> dict[str, str]:
             value = value[1:-1]
         values[key] = value
     return values
+
+
+def upsert_env_value(env_file: str | Path, key: str, value: str) -> None:
+    """更新或追加一个 .env 键值，并保留其他配置与注释。"""
+    path = Path(env_file)
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    lines = text.splitlines()
+    replacement = f"{key}={value}"
+
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.lstrip()
+        if not stripped or stripped.startswith("#") or "=" not in raw_line:
+            continue
+        existing_key, _, _ = raw_line.partition("=")
+        if existing_key.strip() == key:
+            lines[index] = replacement
+            break
+    else:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(replacement)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def parse_bool(value: str | None, default: bool) -> bool:
