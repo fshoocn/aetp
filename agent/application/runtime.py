@@ -21,6 +21,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Callable
 
+from aetp_protocol.envelope import Envelope
+from aetp_protocol.message_types import MessageType
 from aetp_protocol.topics import command_topic
 
 from agent.application.services.command_dispatcher import CommandDispatcher
@@ -28,6 +30,10 @@ from agent.application.services.registration_service import (
     RegistrationRejectedError,
     RegistrationService,
     RegistrationTimeoutError,
+)
+from agent.application.services.script_cache_service import ScriptCacheService
+from agent.application.services.script_preflight_service import (
+    ScriptPreflightService,
 )
 from agent.config import AgentSettings
 from agent.domain.enums import AgentOutboxStatus
@@ -55,6 +61,8 @@ class AgentRuntime:
         *,
         plugin_registry: "AgentPluginRegistry | None" = None,
         plugin_installer: "PluginPackageInstaller | None" = None,
+        script_cache: ScriptCacheService | None = None,
+        script_preflight: ScriptPreflightService | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -67,6 +75,15 @@ class AgentRuntime:
             is_registered=lambda: registration.registered,
             plugin_registry=plugin_registry,
             plugin_installer=plugin_installer,
+            script_cache=script_cache,
+            session_id=lambda: registration.session_id,
+        )
+        self._script_preflight = script_preflight or ScriptPreflightService(
+            settings=settings,
+            ledger=ledger,
+            script_cache=script_cache,
+            plugin_registry=plugin_registry,
+            is_registered=lambda: registration.registered,
             session_id=lambda: registration.session_id,
         )
         self._outbox_task: asyncio.Task[None] | None = None
@@ -87,6 +104,8 @@ class AgentRuntime:
                 command_topic(self._settings.node_id, "register-ack"),
                 command_topic(self._settings.node_id, "assign"),
                 command_topic(self._settings.node_id, "cancel"),
+                command_topic(self._settings.node_id, "verify"),
+                command_topic(self._settings.node_id, "parse"),
             ]
         )
         self._outbox_task = asyncio.create_task(self._outbox_loop())
@@ -146,11 +165,33 @@ class AgentRuntime:
             self._registration_task = None
 
     async def _handle_message(self, message: MqttMessage) -> None:  # noqa: C901
-        """路由入站消息到 register-ack 或命令分发器（P5.4）。"""
+        """路由入站消息到 register-ack / 命令分发器 / 脚本预检（P5.4/P5.7）。"""
         if self._registration.handle_register_ack(message):
+            return
+        # P5.7：script.verify / script.parse 命令路由到脚本预检服务
+        if self._route_script_preflight(message):
             return
         # P5.4：run.assign / run.cancel 命令路由
         self._dispatcher.handle_command(message)
+
+    def _route_script_preflight(self, message: MqttMessage) -> bool:
+        """解析入站命令；若为 script.verify/script.parse 则交给预检服务。"""
+        if self._script_preflight is None:
+            return False
+        try:
+            envelope = Envelope.model_validate(
+                json.loads(message.payload.decode("utf-8"))
+            )
+        except Exception:  # noqa: BLE001 - 非预检命令交由 dispatcher 处理
+            return False
+        msg_type = envelope.message_type
+        if msg_type == MessageType.SCRIPT_VERIFY.value:
+            self._script_preflight.handle_verify(message.topic, envelope)
+            return True
+        if msg_type == MessageType.SCRIPT_PARSE.value:
+            self._script_preflight.handle_parse(message.topic, envelope)
+            return True
+        return False
 
     async def _outbox_loop(self) -> None:
         """本地 outbox publisher：发送成功标记 sent，失败按租约重试。"""

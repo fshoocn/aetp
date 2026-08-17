@@ -26,6 +26,10 @@ class AgentPluginCapability:
     plugin_version: str
     supported_versions: frozenset[str]
     display_name: str = ""
+    # sym:verify_location 脚本验证执行位置（agent=具备台架侧预检能力，P5.7）
+    verify_location: str = "master"
+    # sym:parse_location 用例解析位置（agent=具备台架侧解析能力，P5.7）
+    parse_location: str = "master"
 
     def supports(self, version: str) -> bool:
         return version in self.supported_versions
@@ -136,6 +140,8 @@ class AgentPluginRegistry:
                 plugin_version=plugin.plugin_version,
                 supported_versions=frozenset(plugin.supported_versions),
                 display_name=getattr(plugin, "display_name", ""),
+                verify_location=getattr(plugin, "verify_location", "master"),
+                parse_location=getattr(plugin, "parse_location", "master"),
             )
             for plugin in sorted(
                 self._plugins.values(), key=lambda item: item.task_type

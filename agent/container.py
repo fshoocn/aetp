@@ -15,6 +15,7 @@ from agent.adapters.mqtt.transport import AgentMqttTransport
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
 from agent.application.services.registration_service import RegistrationService
+from agent.application.services.script_cache_service import ScriptCacheService
 from agent.config import get_settings, resolve_sqlite_url
 from agent.plugins.registry import create_default_registry
 from agent.plugins.installer import LocalPluginInstaller
@@ -55,6 +56,13 @@ class Container(containers.DeclarativeContainer):
         root=providers.Callable(lambda: get_settings().plugin_dir),
     )
 
+    # 脚本下载/缓存单例（P5.6：下载 + sha256 校验 + 按 hash 本地缓存）
+    script_cache = providers.Singleton(
+        ScriptCacheService,
+        cache_dir=providers.Callable(lambda: get_settings().script_cache_dir),
+        ledger=ledger,
+    )
+
     # 注册与心跳服务（P5.3 + P5.5：register outbox → register-ack 校验 → heartbeat）
     registration_service = providers.Factory(
         RegistrationService,
@@ -64,8 +72,8 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
     )
 
-    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4 + P5.5）
-    # CommandDispatcher 由 AgentRuntime 从 RegistrationService 内部创建，
+    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4 + P5.5 + P5.7）
+    # CommandDispatcher / ScriptPreflightService 由 AgentRuntime 内部创建，
     # 避免 Container 中 is_registered 的循环依赖
     runtime = providers.Factory(
         AgentRuntime,
@@ -75,4 +83,5 @@ class Container(containers.DeclarativeContainer):
         registration=registration_service,
         plugin_registry=plugin_registry,
         plugin_installer=plugin_installer,
+        script_cache=script_cache,
     )

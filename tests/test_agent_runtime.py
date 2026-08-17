@@ -104,6 +104,8 @@ async def test_runtime_connects_registers_then_starts_heartbeat(tmp_path) -> Non
         command_topic("bench-001", "register-ack"),
         command_topic("bench-001", "assign"),
         command_topic("bench-001", "cancel"),
+        command_topic("bench-001", "verify"),
+        command_topic("bench-001", "parse"),
     }
     assert registration.registered is False
     assert registration.pending_register_message_id is not None
