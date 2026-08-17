@@ -235,6 +235,32 @@ class RunCancelPayload(_Strict):
     reason: str = ""
 
 
+class RunProgressPayload(_Strict):
+    """进度上报（§8.4 run.progress；QoS0 可丢，sequence 单调递增）。"""
+
+    # sym:run_id 对应 Run
+    run_id: str
+    # sym:sequence 进度序号（ge=1）
+    sequence: int = Field(ge=1)
+    # sym:percent 完成百分比（0..100）
+    percent: int = Field(ge=0, le=100)
+    # sym:stage 当前阶段名
+    stage: str = ""
+    # sym:message 进度说明
+    message: str = ""
+
+
+class RunCaseStatusPayload(_Strict):
+    """case 级状态上报（§8.4 run.case-status；仅支持实时 case 结果的插件）。"""
+
+    # sym:run_id 对应 Run
+    run_id: str
+    # sym:case_key 用例稳定键
+    case_key: str
+    # sym:status 状态（pending/running/passed/failed/skipped/error）
+    status: str
+
+
 class RunResultPayload(_Strict):
     """最终结果（§8.4 run.result；一个 attempt 只接收一个最终结果，D-19）。"""
 

@@ -24,10 +24,14 @@ from .errors import (
     TopicMismatchError,
 )
 from .message_types import MessageType
+from .logs import LogLevel, RunLogBatch, RunLogEntry
 from .payloads import (
     PluginPackageRef,
     RegisterAckPayload,
     RunCancelPayload,
+    RunCaseStatusPayload,
+    RunProgressPayload,
+    RunResultPayload,
     ScriptParsePayload,
     ScriptParseResultPayload,
     ScriptVerifyPayload,
@@ -92,10 +96,16 @@ __all__ = [
     "ShardSpec",
     "TaskDefinitionSpec",
     "RunCancelPayload",
+    "RunCaseStatusPayload",
+    "RunProgressPayload",
+    "RunResultPayload",
     "ScriptParsePayload",
     "ScriptParseResultPayload",
     "ScriptVerifyPayload",
     "ScriptVerifyResultPayload",
+    "LogLevel",
+    "RunLogEntry",
+    "RunLogBatch",
     "TopicInfo",
     "command_topic",
     "event_topic",
