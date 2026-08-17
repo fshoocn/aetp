@@ -29,7 +29,9 @@ from common.transport import MqttMessage
 
 
 def _now() -> datetime:
-    return datetime(2026, 8, 17, 10, 0, 0, tzinfo=timezone.utc)
+    # 用远未来固定时间：账本用真实 _utcnow() 写 next_attempt_at，
+    # claim_due_outbox 必须传一个 >= 它的时间才能取到消息，避免随墙钟漂移。
+    return datetime(2099, 1, 1, tzinfo=timezone.utc)
 
 
 _SETTINGS = AgentSettings(
