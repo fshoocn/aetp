@@ -64,6 +64,19 @@ class NodeHeartbeatPayload(_Strict):
     active_run_ids: list[str] = Field(default_factory=list)
 
 
+class RegisterAckPayload(_Strict):
+    """节点注册回执（Master -> Agent）。"""
+
+    # sym:node_id 回执对应的节点
+    node_id: str
+    # sym:session_id 回执对应的 Agent 会话
+    session_id: str
+    # sym:accepted 是否接受本次注册
+    accepted: bool = True
+    # sym:reason 拒绝原因（accepted=false 时使用）
+    reason: str = ""
+
+
 class PresencePayload(_Strict):
     """节点非正常离线（LWT，§8.6：仅携带 node_id/reason/sent_at，不含实时任务快照）。
 

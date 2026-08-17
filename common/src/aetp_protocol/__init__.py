@@ -24,6 +24,7 @@ from .errors import (
     TopicMismatchError,
 )
 from .message_types import MessageType
+from .payloads import RegisterAckPayload
 from .capabilities import (
     BusRequirement,
     DeviceAllocation,
@@ -62,6 +63,7 @@ __all__ = [
     "Sender",
     "SenderKind",
     "MessageType",
+    "RegisterAckPayload",
     "TopicInfo",
     "command_topic",
     "event_topic",
