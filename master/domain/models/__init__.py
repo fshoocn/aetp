@@ -18,7 +18,7 @@ from .run import (
     TaskRun,
 )
 from .script_case import ScriptCase
-from .task import InvalidTaskTransitionError, Task
+from .task import Task
 from .task_log import TaskLog
 from .test_script import TestScript
 from .test_task import TestTask
@@ -50,5 +50,4 @@ __all__ = [
     "RunResult",
     "Task",
     "TaskLog",
-    "InvalidTaskTransitionError",
 ]

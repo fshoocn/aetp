@@ -6,7 +6,7 @@ import pytest
 
 from master.domain.enums import TaskStatus
 from master.domain.models import Task
-from master.domain.models.task import InvalidTaskTransitionError
+from master.domain.state_machine import InvalidStateTransitionError
 
 
 def _task(status: TaskStatus | None = None) -> Task:
@@ -81,30 +81,30 @@ def test_terminal_cannot_transition():
     task.mark_dispatching()
     task.mark_running()
     task.succeed()
-    with pytest.raises(InvalidTaskTransitionError):
+    with pytest.raises(InvalidStateTransitionError):
         task.mark_running()
-    with pytest.raises(InvalidTaskTransitionError):
+    with pytest.raises(InvalidStateTransitionError):
         task.fail("again")
 
 
 def test_invalid_transitions_rejected():
     # pending 不能直接运行
     task = _task()
-    with pytest.raises(InvalidTaskTransitionError):
+    with pytest.raises(InvalidStateTransitionError):
         task.mark_running()
 
     # dispatching 不能直接成功
     task.mark_dispatching()
-    with pytest.raises(InvalidTaskTransitionError):
+    with pytest.raises(InvalidStateTransitionError):
         task.succeed()
 
     # 未请求取消时不能标记取消完成
-    with pytest.raises(InvalidTaskTransitionError):
+    with pytest.raises(InvalidStateTransitionError):
         task.mark_cancelled()
 
 
 def test_cancel_from_terminal_rejected():
     task = _task()
     task.cancel()
-    with pytest.raises(InvalidTaskTransitionError):
+    with pytest.raises(InvalidStateTransitionError):
         task.cancel()

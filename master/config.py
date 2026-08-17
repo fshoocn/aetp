@@ -42,12 +42,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def resolve_sqlite_url(url: str) -> str:
-    """将 SQLite 相对路径基于运行目录解析为绝对连接串（公开 API 兼容）。"""
+    """将 SQLite 相对路径基于运行目录解析为绝对连接串。"""
     return _resolve_sqlite_url(url, runtime_dir())
-
-
-# 兼容旧内部调用
-_runtime_dir = runtime_dir
 
 
 @dataclass(frozen=True)
@@ -94,7 +90,7 @@ class MasterSettings:
     @classmethod
     def default_env_file(cls) -> Path:
         """返回外置 .env 文件路径；开发运行在 master/ 下，exe 部署与 exe 同目录。"""
-        return _runtime_dir() / ".env"
+        return runtime_dir() / ".env"
 
     @classmethod
     def from_env_file(cls, env_file: str | Path | None = None) -> "MasterSettings":

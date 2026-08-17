@@ -7,7 +7,7 @@
     running → cancelling → cancelled
 
 状态迁移通过 Task 自身的方法完成，非法迁移会抛出
-InvalidTaskTransitionError，由应用层/API 层映射为 409。
+InvalidStateTransitionError，由应用层/API 层映射为 409。
 
 迁移表与校验逻辑集中在 domain/state_machine.py（纯函数，P3.6）。
 """
@@ -24,10 +24,6 @@ from master.domain.state_machine import (
     is_terminal as _is_terminal,
 )
 from master.domain.time import utcnow
-
-# 向后兼容别名（P3.1 曾从本模块导出 InvalidTaskTransitionError）
-InvalidTaskTransitionError = InvalidStateTransitionError
-
 
 @dataclass
 class Task:
@@ -115,7 +111,7 @@ class Task:
         elif self.status == TaskStatus.CANCELLING:
             self._transition(TaskStatus.CANCELLED)
         else:
-            raise InvalidTaskTransitionError(
+            raise InvalidStateTransitionError(
                 f"任务状态 {self.status.value} 不允许取消"
             )
         self.finished_at = utcnow()
@@ -123,7 +119,7 @@ class Task:
     def mark_cancelled(self) -> None:
         """Agent 确认取消完成（仅 cancelling 可进入）。"""
         if self.status != TaskStatus.CANCELLING:
-            raise InvalidTaskTransitionError(
+            raise InvalidStateTransitionError(
                 f"任务状态 {self.status.value} 未处于取消中，无法标记取消完成"
             )
         self._transition(TaskStatus.CANCELLED)
