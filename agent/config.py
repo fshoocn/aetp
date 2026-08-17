@@ -65,6 +65,8 @@ class AgentSettings:
     ledger_url: str = "sqlite:///data/agent.db"
     # ---- Agent 执行插件 ----
     plugin_dir: Path = Path("data/plugins")
+    # ---- 脚本本地缓存（P5.6：下载后按 hash 组织目录）----
+    script_cache_dir: Path = Path("data/scripts")
     # ---- 执行与心跳 ----
     max_concurrent_runs: int = 1
     heartbeat_interval_s: int = 5
@@ -143,6 +145,15 @@ class AgentSettings:
         if not plugin_dir.is_absolute():
             plugin_dir = base_dir / plugin_dir
 
+        raw_script_cache_dir = values.get("AETP_AGENT_SCRIPT_CACHE_DIR")
+        script_cache_dir = (
+            Path(raw_script_cache_dir)
+            if raw_script_cache_dir
+            else cls.script_cache_dir
+        )
+        if not script_cache_dir.is_absolute():
+            script_cache_dir = base_dir / script_cache_dir
+
         return cls(
             node_id=node_id,
             name=values.get("AETP_AGENT_NAME", cls.name),
@@ -163,6 +174,7 @@ class AgentSettings:
             ),
             ledger_url=values.get("AETP_AGENT_LEDGER_URL", cls.ledger_url),
             plugin_dir=plugin_dir,
+            script_cache_dir=script_cache_dir,
             max_concurrent_runs=parse_int(
                 values.get("AETP_AGENT_MAX_CONCURRENT_RUNS"),
                 cls.max_concurrent_runs,

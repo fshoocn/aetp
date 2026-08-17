@@ -37,6 +37,10 @@ from aetp_protocol.topics import (
     validate_sender_for_topic,
 )
 
+from agent.application.services.script_cache_service import (
+    ScriptCacheError,
+    ScriptCacheService,
+)
 from agent.config import AgentSettings
 from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
 from agent.domain.ledger import AgentRun, Ledger
@@ -64,6 +68,7 @@ class CommandDispatcher:
         is_registered: Callable[[], bool],
         plugin_registry: "AgentPluginRegistry | None" = None,
         plugin_installer: "PluginPackageInstaller | None" = None,
+        script_cache: ScriptCacheService | None = None,
         session_id: Callable[[], str] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -72,6 +77,7 @@ class CommandDispatcher:
         self._is_registered = is_registered
         self._plugin_registry = plugin_registry
         self._plugin_installer = plugin_installer
+        self._script_cache = script_cache
         self._session_id = session_id or (lambda: self._settings.node_id)
         self._now = now or (lambda: datetime.now(timezone.utc))
 
@@ -176,7 +182,22 @@ class CommandDispatcher:
                 )
                 return True
 
-        # Inbox 去重在插件准备成功后执行，避免安装失败把命令永久吞掉。
+        # 脚本下载/校验/缓存（P5.6）：先于 Inbox 去重与 claim，失败回 ACK(rejected)
+        # 且不写 Inbox，允许同一消息重试（§9.8：hash 不符丢弃缓存重下）。
+        if (
+            self._script_cache is not None
+            and payload.script_ref.get("download_url")
+        ):
+            try:
+                self._script_cache.ensure_cached(payload.script_ref)
+            except ScriptCacheError as exc:
+                logger.warning("run.assign 脚本准备失败: %s", exc)
+                self._ack_run_assign(
+                    envelope, accepted=False, reason=f"{exc.code}: {exc}"
+                )
+                return True
+
+        # Inbox 去重在插件/脚本准备成功后执行，避免准备失败把命令永久吞掉。
         if not self._ledger.record_inbox(
             origin_id=envelope.sender.id,
             message_id=envelope.message_id,
