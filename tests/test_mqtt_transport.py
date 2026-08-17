@@ -13,9 +13,9 @@ from types import SimpleNamespace
 import pytest
 
 from master.adapters.mqtt.transport import MqttTransport
-from master.application.backoff import ExponentialBackoff
+from common.backoff import ExponentialBackoff
+from common.transport import MqttMessage, Transport
 from master.config import MasterSettings
-from master.domain.transport import MqttMessage, Transport
 
 _SETTINGS = MasterSettings(
     mqtt_host="broker.test",
@@ -179,14 +179,15 @@ def test_mqtt_transport_connect_subscribe_publish():
     client = FakeClient.instances[-1]
     assert "aetp/v1/agents/+/events/#" in client.subscribed
     assert client.published == [("aetp/v1/master/test", b"cmd", 1)]
-    # 端口参数正确传递（host/port/client_id）
+    # 端口参数正确传递（host/port/identifier）
     assert client.kwargs["hostname"] == "broker.test"
     assert client.kwargs["port"] == 1883
+    assert client.kwargs["identifier"] == "test-master"
 
 
 def test_mqtt_transport_publish_when_disconnected_raises():
     """未连接时 publish 抛 TransportError（fail fast）。"""
-    from master.domain.transport import TransportError
+    from common.transport import TransportError
 
     transport = MqttTransport(_SETTINGS)
 

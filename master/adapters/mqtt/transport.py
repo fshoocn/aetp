@@ -13,14 +13,15 @@ from typing import Any, cast
 
 import aiomqtt
 
-from master.application.backoff import ExponentialBackoff
-from master.config import MasterSettings
-from master.domain.transport import (
+from common.backoff import ExponentialBackoff
+from common.transport import (
+    ConnectionHandler,
     MessageHandler,
     MqttMessage,
     Transport,
     TransportError,
 )
+from master.config import MasterSettings
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class MqttTransport(Transport):
         self._backoff = backoff or ExponentialBackoff()
         self._subscribed: list[str] = []
         self._handler: MessageHandler | None = None
+        self._connection_handler: ConnectionHandler | None = None
         self._client: aiomqtt.Client | None = None
         self._connected = False
         self._running = False
@@ -55,6 +57,10 @@ class MqttTransport(Transport):
 
     def on_message(self, handler: MessageHandler) -> None:
         self._handler = handler
+
+    def on_connection_change(self, handler: ConnectionHandler) -> None:
+        """注册连接状态变化处理器。"""
+        self._connection_handler = handler
 
     async def connect(self) -> None:
         """启动后台连接/重连循环（幂等）。"""
@@ -98,7 +104,9 @@ class MqttTransport(Transport):
         kwargs: dict[str, Any] = {
             "hostname": s.mqtt_host or "127.0.0.1",
             "port": s.mqtt_port,
-            "client_id": s.mqtt_client_id,
+            # aiomqtt.Client 使用 identifier 参数；client_id 会导致运行时
+            # TypeError，连接循环随后无限重连。
+            "identifier": s.mqtt_client_id,
             "keepalive": 30,
         }
         if s.mqtt_username:
@@ -125,6 +133,7 @@ class MqttTransport(Transport):
                 async with aiomqtt.Client(**self._client_kwargs()) as client:
                     self._client = client
                     self._connected = True
+                    await self._notify_connection_change(True, None)
                     self._backoff.reset()
                     logger.info(
                         "MQTT 已连接: %s:%s client=%s",
@@ -139,8 +148,7 @@ class MqttTransport(Transport):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - 断连/失败统一走退避重连
-                self._connected = False
-                self._client = None
+                await self._set_disconnected()
                 if not self._running:
                     break
                 delay = self._backoff.next()
@@ -151,6 +159,30 @@ class MqttTransport(Transport):
                     self._backoff.attempts,
                 )
                 await asyncio.sleep(delay)
+
+            finally:
+                if self._connected:
+                    await self._set_disconnected()
+
+    async def _notify_connection_change(
+        self, connected: bool, session_id: str | None
+    ) -> None:
+        """通知上层连接变化；回调失败不打断 MQTT 循环。"""
+        handler = self._connection_handler
+        if handler is None:
+            return
+        try:
+            await handler(connected, session_id)
+        except Exception:  # noqa: BLE001 - 生命周期回调 fail-open
+            logger.exception("MQTT 连接状态回调失败: connected=%s", connected)
+
+    async def _set_disconnected(self) -> None:
+        """统一清理断开状态，避免重连路径遗漏回调。"""
+        was_connected = self._connected
+        self._connected = False
+        self._client = None
+        if was_connected:
+            await self._notify_connection_change(False, None)
 
     async def _dispatch(self, raw: Any) -> None:
         """将 aiomqtt 消息转为 MqttMessage 交给处理器（处理器异常不影响循环）。"""

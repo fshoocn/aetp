@@ -18,12 +18,12 @@ import logging
 from datetime import timedelta
 from typing import Callable
 
-from master.application.backoff import ExponentialBackoff
+from common.backoff import ExponentialBackoff
+from common.transport import Transport
 from master.domain.enums import OutboxStatus
 from master.domain.models import OutboxMessage
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
-from master.domain.transport import Transport
 
 logger = logging.getLogger("master.workers.outbox")
 
