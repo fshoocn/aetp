@@ -17,11 +17,13 @@ class AgentRunStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    TIMED_OUT = "timed_out"
 
 
 class AgentOutboxStatus(StrEnum):
     """Agent 本地出站消息发送状态。"""
 
     PENDING = "pending"
+    SENDING = "sending"
     SENT = "sent"
     EXHAUSTED = "exhausted"

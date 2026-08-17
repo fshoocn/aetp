@@ -53,6 +53,7 @@ class AgentOutboxEntry:
     status: AgentOutboxStatus = AgentOutboxStatus.PENDING
     attempts: int = 0
     next_attempt_at: datetime | None = None
+    claimed_until: datetime | None = None
 
 
 @dataclass
@@ -93,6 +94,10 @@ class Ledger(Protocol):
         """更新 Run 状态/取消标志/结果摘要。"""
         ...
 
+    def list_active_runs(self) -> list[AgentRun]:
+        """返回未终结的 Run（claimed/running，用于心跳负载与恢复现场）。"""
+        ...
+
     def record_inbox(
         self, origin_id: str, message_id: str, message_type: str
     ) -> bool:
@@ -101,6 +106,10 @@ class Ledger(Protocol):
 
     def enqueue_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:
         """写入一条待发送出站消息。"""
+        ...
+
+    def replace_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:
+        """替换一条可重放消息（注册重连时使用同一逻辑消息 ID）。"""
         ...
 
     def claim_due_outbox(self, limit: int, now: datetime) -> list[AgentOutboxEntry]:
@@ -114,6 +123,7 @@ class Ledger(Protocol):
         status: AgentOutboxStatus,
         attempts: int,
         next_attempt_at: datetime | None,
+        claimed_until: datetime | None = None,
     ) -> None:
         """更新出站消息发送状态与下次重试时间。"""
         ...
