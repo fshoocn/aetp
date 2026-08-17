@@ -33,6 +33,7 @@ from aetp_protocol.payloads import (
     NodeRegisterPayload,
     RunAckPayload,
     RunAssignPayload,
+    RunCancelPayload,
 )
 
 
@@ -197,6 +198,19 @@ def test_run_assign_payload():
     assert p.script_ref["sha256"] == "a" * 64
     with pytest.raises(ValidationError):
         RunAssignPayload.model_validate({"run_id": "R-1"})  # 缺必填
+
+
+def test_run_cancel_payload():
+    p = RunCancelPayload(run_id="R-1", reason="user requested")
+    assert p.run_id == "R-1"
+    assert p.reason == "user requested"
+    # 默认 reason 为空
+    p2 = RunCancelPayload(run_id="R-2")
+    assert p2.reason == ""
+    with pytest.raises(ValidationError):
+        RunCancelPayload.model_validate({"reason": "no run_id"})
+    with pytest.raises(ValidationError):
+        RunCancelPayload.model_validate({"run_id": "R-1", "bogus": 1})
 
 
 def test_run_ack_payload():

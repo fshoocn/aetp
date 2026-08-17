@@ -49,7 +49,9 @@ class Container(containers.DeclarativeContainer):
         settings=settings,
     )
 
-    # AgentRuntime：唯一生命周期组合根（P5.3，P5.4 在 message handler 扩展）
+    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4）
+    # CommandDispatcher 由 AgentRuntime 从 RegistrationService 内部创建，
+    # 避免 Container 中 is_registered 的循环依赖
     runtime = providers.Factory(
         AgentRuntime,
         settings=settings,

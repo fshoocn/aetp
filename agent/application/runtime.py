@@ -23,6 +23,7 @@ from typing import Callable
 
 from aetp_protocol.topics import command_topic
 
+from agent.application.services.command_dispatcher import CommandDispatcher
 from agent.application.services.registration_service import (
     RegistrationRejectedError,
     RegistrationService,
@@ -46,6 +47,7 @@ class AgentRuntime:
         transport: Transport,
         ledger: Ledger,
         registration: RegistrationService,
+        dispatcher: CommandDispatcher | None = None,
         *,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
@@ -53,6 +55,11 @@ class AgentRuntime:
         self._transport = transport
         self._ledger = ledger
         self._registration = registration
+        self._dispatcher = dispatcher or CommandDispatcher(
+            settings=settings,
+            ledger=ledger,
+            is_registered=lambda: registration.registered,
+        )
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
@@ -67,7 +74,11 @@ class AgentRuntime:
         self._transport.on_message(self._handle_message)
         self._transport.on_connection_change(self._handle_connection_change)
         await self._transport.subscribe(
-            [command_topic(self._settings.node_id, "register-ack")]
+            [
+                command_topic(self._settings.node_id, "register-ack"),
+                command_topic(self._settings.node_id, "assign"),
+                command_topic(self._settings.node_id, "cancel"),
+            ]
         )
         self._outbox_task = asyncio.create_task(self._outbox_loop())
         await self._transport.connect()
@@ -125,11 +136,12 @@ class AgentRuntime:
             self._registration_task.cancel()
             self._registration_task = None
 
-    async def _handle_message(self, message: MqttMessage) -> None:
-        """当前只处理 register-ack；P5.4 在此扩展命令路由。"""
+    async def _handle_message(self, message: MqttMessage) -> None:  # noqa: C901
+        """路由入站消息到 register-ack 或命令分发器（P5.4）。"""
         if self._registration.handle_register_ack(message):
-            # ACK 处理发生在 Transport 消费循环内；不要阻塞它，只唤醒等待任务。
             return
+        # P5.4：run.assign / run.cancel 命令路由
+        self._dispatcher.handle_command(message)
 
     async def _outbox_loop(self) -> None:
         """本地 outbox publisher：发送成功标记 sent，失败按租约重试。"""
