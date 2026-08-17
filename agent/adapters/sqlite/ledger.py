@@ -19,12 +19,15 @@ agent_task_log_spool / agent_script_cache。
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import json
+import logging
 
 from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    delete,
     Integer,
     String,
     UniqueConstraint,
@@ -45,6 +48,8 @@ from agent.domain.ledger import (
     ScriptCacheEntry,
     TaskLogSpoolEntry,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -109,6 +114,10 @@ class AgentOutboxORM(_Base):
     next_attempt_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, default=_utcnow
     )
+    # sending 状态的租约到期后可被另一个 worker 回收
+    claimed_until: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=_utcnow
     )
@@ -160,7 +169,9 @@ class ScriptCacheORM(_Base):
 class SQLiteLedger:
     """Agent 本地账本的 SQLite 实现（每个方法独立短事务/会话）。"""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, max_spool_bytes: int = 104857600) -> None:
+        if max_spool_bytes <= 0:
+            raise ValueError("max_spool_bytes 必须大于 0")
         self._engine: Engine = create_engine(url)
         _Base.metadata.create_all(self._engine)
         # expire_on_commit=False：提交后属性仍可用，便于在会话外把 ORM 行
@@ -168,6 +179,7 @@ class SQLiteLedger:
         self._session_factory = sessionmaker(
             bind=self._engine, expire_on_commit=False
         )
+        self._max_spool_bytes = max_spool_bytes
 
     # ---- agent_runs：原子 claim ----
 
@@ -198,8 +210,18 @@ class SQLiteLedger:
             existing = session.execute(
                 select(AgentRunORM).where(AgentRunORM.run_id == run_id)
             ).scalar_one()
-            if existing.attempt_no == attempt_no:
-                return False  # 同一 run 同一 attempt 重复派发
+            if attempt_no <= existing.attempt_no:
+                return False  # 迟到旧 attempt 或同 attempt 重复派发
+            if existing.status in {
+                AgentRunStatus.SUCCEEDED.value,
+                AgentRunStatus.CANCELLED.value,
+            }:
+                return False  # 已成功/取消的 Run 不允许被旧链路重新抢占
+            if existing.status not in {
+                AgentRunStatus.FAILED.value,
+                AgentRunStatus.TIMED_OUT.value,
+            }:
+                return False  # 当前 attempt 尚未失败/超时，不接受未来 attempt
             # 同一 run 的新 attempt（D-20 failover）
             session.execute(
                 update(AgentRunORM)
@@ -235,6 +257,20 @@ class SQLiteLedger:
                     updated_at=_utcnow(),
                 )
             )
+
+    def list_active_runs(self) -> list[AgentRun]:
+        """返回未终结的 Run（claimed/running），用于心跳负载与恢复现场。"""
+        active = {
+            AgentRunStatus.CLAIMED.value,
+            AgentRunStatus.RUNNING.value,
+        }
+        with self._session_factory.begin() as session:
+            rows = session.execute(
+                select(AgentRunORM)
+                .where(AgentRunORM.status.in_(active))
+                .order_by(AgentRunORM.run_id)
+            ).scalars().all()
+        return [_to_run(row) for row in rows]
 
     # ---- inbox 去重 ----
 
@@ -275,19 +311,78 @@ class SQLiteLedger:
                 .on_conflict_do_nothing(index_elements=["outbox_id"])
             )
 
+    def replace_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:
+        """替换一条可重放消息，并重置发送状态与租约。"""
+        with self._session_factory.begin() as session:
+            session.execute(
+                sqlite_insert(AgentOutboxORM)
+                .values(
+                    outbox_id=outbox_id,
+                    topic=topic,
+                    payload=payload,
+                    status=AgentOutboxStatus.PENDING.value,
+                    attempts=0,
+                    next_attempt_at=_utcnow(),
+                    claimed_until=None,
+                )
+                .on_conflict_do_update(
+                    index_elements=["outbox_id"],
+                    set_={
+                        "topic": topic,
+                        "payload": payload,
+                        "status": AgentOutboxStatus.PENDING.value,
+                        "attempts": 0,
+                        "next_attempt_at": _utcnow(),
+                        "claimed_until": None,
+                    },
+                )
+            )
+
     def claim_due_outbox(
         self, limit: int, now: datetime
     ) -> list[AgentOutboxEntry]:
-        """取到期待发送消息（pending 且 next_attempt_at <= now）。"""
+        """事务性领取到期待发送消息，并设置短租约。
+
+        先回收租约过期的 ``sending`` 消息，再用带子查询的 UPDATE 把
+        ``pending`` 原子改成 ``sending``，最后只返回本次实际领取的行。
+        这样多个 worker 并发领取时不会重复拿到同一消息。
+        """
+        lease_until = now + timedelta(seconds=30)
         with self._session_factory.begin() as session:
-            rows = session.execute(
-                select(AgentOutboxORM)
+            session.execute(
+                update(AgentOutboxORM)
                 .where(
-                    AgentOutboxORM.status == AgentOutboxStatus.PENDING.value,
-                    AgentOutboxORM.next_attempt_at <= now,
+                    AgentOutboxORM.status == AgentOutboxStatus.SENDING.value,
+                    AgentOutboxORM.claimed_until <= now,
                 )
-                .order_by(AgentOutboxORM.created_at)
-                .limit(limit)
+                .values(
+                    status=AgentOutboxStatus.PENDING.value,
+                    next_attempt_at=now,
+                    claimed_until=None,
+                )
+            )
+            candidate_ids = select(AgentOutboxORM.outbox_id).where(
+                AgentOutboxORM.status == AgentOutboxStatus.PENDING.value,
+                AgentOutboxORM.next_attempt_at <= now,
+            ).order_by(AgentOutboxORM.created_at).limit(limit)
+            claimed = session.execute(
+                update(AgentOutboxORM)
+                .where(
+                    AgentOutboxORM.outbox_id.in_(candidate_ids),
+                    AgentOutboxORM.status == AgentOutboxStatus.PENDING.value,
+                )
+                .values(
+                    status=AgentOutboxStatus.SENDING.value,
+                    claimed_until=lease_until,
+                )
+                .returning(AgentOutboxORM.outbox_id)
+            ).scalars().all()
+            if not claimed:
+                return []
+            rows = session.execute(
+                select(AgentOutboxORM).where(
+                    AgentOutboxORM.outbox_id.in_(claimed)
+                )
             ).scalars().all()
         return [_to_outbox(row) for row in rows]
 
@@ -298,6 +393,7 @@ class SQLiteLedger:
         status: AgentOutboxStatus,
         attempts: int,
         next_attempt_at: datetime | None,
+        claimed_until: datetime | None = None,
     ) -> None:
         """更新出站消息发送状态与下次重试时间。"""
         with self._session_factory.begin() as session:
@@ -308,14 +404,67 @@ class SQLiteLedger:
                     status=status.value,
                     attempts=attempts,
                     next_attempt_at=next_attempt_at,
+                    claimed_until=claimed_until,
                 )
             )
 
     # ---- 任务日志 spool ----
 
     def append_task_log(self, entry: TaskLogSpoolEntry) -> None:
-        """追加一条任务日志（(run_id, sequence) 幂等）。"""
+        """追加一条任务日志，并按字节上限淘汰低等级未发布日志。
+
+        ``error`` 日志永不因容量策略被删除；如果单条 error 本身超过上限，
+        仍保留该条并记录告警。debug/info/warn 则从最早未发布条目开始淘汰。
+        """
         with self._session_factory.begin() as session:
+            duplicate = session.execute(
+                select(TaskLogSpoolORM.id).where(
+                    TaskLogSpoolORM.run_id == entry.run_id,
+                    TaskLogSpoolORM.sequence == entry.sequence,
+                )
+            ).scalar_one_or_none()
+            if duplicate is not None:
+                return
+            detail_size = len(
+                json.dumps(entry.detail, ensure_ascii=False).encode("utf-8")
+            )
+            entry_size = len(entry.message.encode("utf-8")) + detail_size
+            pending = session.execute(
+                select(TaskLogSpoolORM)
+                .where(TaskLogSpoolORM.published.is_(False))
+                .order_by(TaskLogSpoolORM.created_at, TaskLogSpoolORM.id)
+            ).scalars().all()
+            current_size = sum(
+                len(row.message.encode("utf-8"))
+                + len(json.dumps(row.detail or {}, ensure_ascii=False).encode("utf-8"))
+                for row in pending
+            )
+            for row in pending:
+                if current_size + entry_size <= self._max_spool_bytes:
+                    break
+                if row.level.lower() == "error":
+                    continue
+                current_size -= (
+                    len(row.message.encode("utf-8"))
+                    + len(json.dumps(row.detail or {}, ensure_ascii=False).encode("utf-8"))
+                )
+                session.execute(
+                    delete(TaskLogSpoolORM).where(TaskLogSpoolORM.id == row.id)
+                )
+            if current_size + entry_size > self._max_spool_bytes:
+                if entry.level.lower() != "error":
+                    logger.warning(
+                        "任务日志 spool 已满，丢弃低等级日志: run=%s sequence=%s",
+                        entry.run_id,
+                        entry.sequence,
+                    )
+                    return
+                # error 不因容量策略丢弃，即使这会暂时超过上限。
+                logger.warning(
+                    "任务日志 spool 超限但保留 error: run=%s sequence=%s",
+                    entry.run_id,
+                    entry.sequence,
+                )
             session.execute(
                 sqlite_insert(TaskLogSpoolORM)
                 .values(
@@ -407,6 +556,7 @@ def _to_outbox(row: AgentOutboxORM) -> AgentOutboxEntry:
         status=AgentOutboxStatus(row.status),
         attempts=row.attempts,
         next_attempt_at=row.next_attempt_at,
+        claimed_until=row.claimed_until,
     )
 
 
