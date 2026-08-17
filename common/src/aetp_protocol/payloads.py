@@ -168,6 +168,15 @@ class RunAckPayload(_Strict):
     reason: str = ""
 
 
+class RunCancelPayload(_Strict):
+    """任务取消（§8.4 run.cancel；Agent 设置取消标志，最终以 result 为准）。"""
+
+    # sym:run_id 对应 Run
+    run_id: str
+    # sym:reason 取消原因
+    reason: str = ""
+
+
 class RunResultPayload(_Strict):
     """最终结果（§8.4 run.result；一个 attempt 只接收一个最终结果，D-19）。"""
 
