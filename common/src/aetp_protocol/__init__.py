@@ -24,7 +24,15 @@ from .errors import (
     TopicMismatchError,
 )
 from .message_types import MessageType
-from .payloads import PluginPackageRef, RegisterAckPayload, RunCancelPayload
+from .payloads import (
+    PluginPackageRef,
+    RegisterAckPayload,
+    RunCancelPayload,
+    ScriptParsePayload,
+    ScriptParseResultPayload,
+    ScriptVerifyPayload,
+    ScriptVerifyResultPayload,
+)
 from .plugin import (
     AgentExecutionPlugin,
     AgentPackageSpec,
@@ -84,6 +92,10 @@ __all__ = [
     "ShardSpec",
     "TaskDefinitionSpec",
     "RunCancelPayload",
+    "ScriptParsePayload",
+    "ScriptParseResultPayload",
+    "ScriptVerifyPayload",
+    "ScriptVerifyResultPayload",
     "TopicInfo",
     "command_topic",
     "event_topic",

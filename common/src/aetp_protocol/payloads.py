@@ -120,6 +120,8 @@ class ScriptVerifyPayload(_Strict):
     version: int
     # sym:task_type 任务类型（Agent 选插件）
     task_type: str
+    # sym:plugin_version 本次验证所需插件版本（Agent 校验兼容性）
+    plugin_version: str = ""
     # sym:script_ref 脚本引用 {script_id, version, sha256, download_url}
     script_ref: dict[str, Any] = Field(default_factory=dict)
     # sym:config 插件配置（验证输入）
@@ -134,6 +136,43 @@ class ScriptVerifyResultPayload(_Strict):
     # sym:script_id 脚本业务标识
     script_id: str
     # sym:errors 验证错误列表（空 = 通过）
+    errors: list[str] = Field(default_factory=list)
+
+
+class ScriptParsePayload(_Strict):
+    """脚本辅助解析命令（parse_location=agent，Master→Agent，P5.7）。
+
+    仅在插件声明需要台架环境才能解析/预检时由 Master 下发；常规脚本
+    解析仍由 Master 面完成（D-17）。Agent 只回传解析出的原始用例事实，
+    主用例索引（``script_cases``）最终仍由 Master 校验后生成。
+    """
+
+    # sym:parse_id 解析请求 ID（parse-result 幂等键）
+    parse_id: str
+    # sym:script_id 脚本业务标识
+    script_id: str
+    # sym:version 脚本版本
+    version: int
+    # sym:task_type 任务类型（Agent 选插件）
+    task_type: str
+    # sym:plugin_version 本次解析所需插件版本（Agent 校验兼容性）
+    plugin_version: str = ""
+    # sym:script_ref 脚本引用 {script_id, version, sha256, download_url}
+    script_ref: dict[str, Any] = Field(default_factory=dict)
+    # sym:config 插件配置（解析输入）
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScriptParseResultPayload(_Strict):
+    """脚本辅助解析结果回传（Agent→Master，按 parse_id 幂等，P5.7）。"""
+
+    # sym:parse_id 对应 ScriptParsePayload.parse_id
+    parse_id: str
+    # sym:script_id 脚本业务标识
+    script_id: str
+    # sym:cases 解析出的用例事实列表（stable_key/name/parent_path/tags/params）
+    cases: list[dict[str, Any]] = Field(default_factory=list)
+    # sym:errors 解析错误列表（空 = 成功）
     errors: list[str] = Field(default_factory=list)
 
 

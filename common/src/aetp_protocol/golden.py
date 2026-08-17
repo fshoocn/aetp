@@ -112,10 +112,67 @@ GOLDEN_RUN_ACK["payload"] = {
     "reason": "ok",
 }
 
+# Master -> Agent：脚本辅助解析命令（P5.7，topic: .../commands/parse）
+GOLDEN_SCRIPT_PARSE: dict = _base("script.parse", "master", "master-01")
+GOLDEN_SCRIPT_PARSE["payload"] = {
+    "parse_id": "P-1",
+    "script_id": "S-1",
+    "version": 1,
+    "task_type": "canoe",
+    "plugin_version": "1.0.0",
+    "script_ref": {
+        "script_id": "S-1",
+        "version": 1,
+        "sha256": "a" * 64,
+        "download_url": "http://127.0.0.1:8000/api/v1/internal/scripts/S-1/download",
+    },
+    "config": {},
+}
+
+# Agent -> Master：脚本辅助解析结果（P5.7，topic: .../events/parse-result）
+GOLDEN_SCRIPT_PARSE_RESULT: dict = _base("script.parse-result", "agent", "bench-001")
+GOLDEN_SCRIPT_PARSE_RESULT["payload"] = {
+    "parse_id": "P-1",
+    "script_id": "S-1",
+    "cases": [
+        {"stable_key": "case-1", "name": "Case 1", "parent_path": "", "tags": [], "params": {}}
+    ],
+    "errors": [],
+}
+
+# Master -> Agent：脚本验证命令（verify_location=agent，topic: .../commands/verify）
+GOLDEN_SCRIPT_VERIFY: dict = _base("script.verify", "master", "master-01")
+GOLDEN_SCRIPT_VERIFY["payload"] = {
+    "verify_id": "V-1",
+    "script_id": "S-1",
+    "version": 1,
+    "task_type": "canoe",
+    "plugin_version": "1.0.0",
+    "script_ref": {
+        "script_id": "S-1",
+        "version": 1,
+        "sha256": "a" * 64,
+        "download_url": "http://127.0.0.1:8000/api/v1/internal/scripts/S-1/download",
+    },
+    "config": {},
+}
+
+# Agent -> Master：脚本验证结果（verify_location=agent，topic: .../events/verify-result）
+GOLDEN_SCRIPT_VERIFY_RESULT: dict = _base("script.verify-result", "agent", "bench-001")
+GOLDEN_SCRIPT_VERIFY_RESULT["payload"] = {
+    "verify_id": "V-1",
+    "script_id": "S-1",
+    "errors": [],
+}
+
 # 完整 Envelope 实例（解析/校验通过）
 GOLDEN_ENVELOPES: dict[str, Envelope] = {
     "node.register": Envelope.model_validate(GOLDEN_NODE_REGISTER),
     "node.heartbeat": Envelope.model_validate(GOLDEN_NODE_HEARTBEAT),
     "run.assign": Envelope.model_validate(GOLDEN_RUN_ASSIGN),
     "run.ack": Envelope.model_validate(GOLDEN_RUN_ACK),
+    "script.parse": Envelope.model_validate(GOLDEN_SCRIPT_PARSE),
+    "script.parse-result": Envelope.model_validate(GOLDEN_SCRIPT_PARSE_RESULT),
+    "script.verify": Envelope.model_validate(GOLDEN_SCRIPT_VERIFY),
+    "script.verify-result": Envelope.model_validate(GOLDEN_SCRIPT_VERIFY_RESULT),
 }

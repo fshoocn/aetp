@@ -81,12 +81,28 @@ class AgentTaskContext(Protocol):
 
 
 class AgentExecutionPlugin(Protocol):
-    """共享任务类型插件包中的 Agent 执行入口。"""
+    """共享任务类型插件包中的 Agent 执行入口。
+
+    除执行职责外，插件**可选**声明台架侧辅助预检/解析能力（P5.7，D-17）：
+
+    - ``verify_location == "agent"`` 且实现 ``verify_script``：具备台架环境
+      下脚本编译/格式预检能力（如 CANoe COM）；
+    - ``parse_location == "agent"`` 且实现 ``parse_cases``：具备台架环境下
+      解析用例索引的能力。
+
+    两者均属**受控辅助**——Agent 只回传事实，主用例索引与 ``parse_status``
+    仍由 Master 校验后决定，不把解析权威转移给 Agent。
+    """
 
     task_type: str
     plugin_version: str
     supported_versions: frozenset[str]
     display_name: str
+
+    # sym:verify_location 脚本验证执行位置（master/agent；默认 master）
+    verify_location: str
+    # sym:parse_location 用例解析位置（master/agent；默认 master）
+    parse_location: str
 
     async def execute(self, context: AgentTaskContext) -> Any: ...
 
@@ -99,6 +115,18 @@ class AgentExecutionPlugin(Protocol):
     ) -> Mapping[str, Any]: ...
 
     async def collect_logs(self, context: AgentTaskContext) -> None: ...
+
+    def verify_script(
+        self, script_dir: str, config: Mapping[str, Any]
+    ) -> list[str]:
+        """（可选）台架侧脚本预检：返回错误列表，空 = 通过。"""
+        ...
+
+    def parse_cases(
+        self, script_dir: str, config: Mapping[str, Any]
+    ) -> list["CaseInfo"]:
+        """（可选）台架侧用例解析：返回 CaseInfo 事实列表（同步）。"""
+        ...
 
 
 @dataclass(frozen=True)
