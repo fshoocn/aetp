@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import logging
 from pathlib import Path
 import sys
+import uuid
 
 from common.config_utils import (
     load_env_file,
@@ -21,6 +22,7 @@ from common.config_utils import (
     parse_int,
     parse_task_types,
     resolve_sqlite_url as _resolve_sqlite_url,
+    upsert_env_value,
 )
 
 _settings: "AgentSettings | None" = None
@@ -50,12 +52,14 @@ class AgentSettings:
     # ---- Agent 标识 ----
     node_id: str = ""
     name: str = ""
+    master_id: str = "aetp-master"
     # ---- MQTT 连接（与 Master 使用同一 Broker）----
     mqtt_host: str | None = None
     mqtt_port: int = 8883
     mqtt_username: str | None = None
     mqtt_password: str | None = None
-    mqtt_client_id: str = "aetp-agent"
+    # 空值表示由 from_env_file 按 node_id 派生，避免多个 Agent 共用固定 identifier
+    mqtt_client_id: str = ""
     mqtt_ca_cert_path: Path | None = None
     mqtt_use_tls: bool = True
     # ---- 本地账本 ----
@@ -76,6 +80,29 @@ class AgentSettings:
     # ---- 实际使用的 env 文件路径（便于排查）----
     env_file: Path | None = None
 
+    def validate(self) -> "AgentSettings":
+        """校验运行所需配置；组合根启动前必须调用。"""
+        if not self.node_id.strip():
+            raise ValueError("AETP_AGENT_NODE_ID 不能为空")
+        if not self.master_id.strip():
+            raise ValueError("AETP_AGENT_MASTER_ID 不能为空")
+        if not self.mqtt_client_id.strip():
+            raise ValueError("AETP_AGENT_MQTT_CLIENT_ID 不能为空")
+        if not 1 <= self.mqtt_port <= 65535:
+            raise ValueError("AETP_AGENT_MQTT_PORT 必须在 1..65535 范围内")
+        positive = (
+            ("AETP_AGENT_MAX_CONCURRENT_RUNS", self.max_concurrent_runs),
+            ("AETP_AGENT_HEARTBEAT_INTERVAL_S", self.heartbeat_interval_s),
+            ("AETP_AGENT_REGISTRATION_TIMEOUT_S", self.registration_timeout_s),
+            ("AETP_AGENT_TASK_LOG_BATCH_SIZE", self.task_log_batch_size),
+            ("AETP_AGENT_TASK_LOG_FLUSH_S", self.task_log_flush_s),
+            ("AETP_AGENT_TASK_LOG_SPOOL_MAX_BYTES", self.task_log_spool_max_bytes),
+        )
+        for name, value in positive:
+            if value <= 0:
+                raise ValueError(f"{name} 必须大于 0")
+        return self
+
     @classmethod
     def default_env_file(cls) -> Path:
         """返回外置 .env 路径；开发运行在 agent/ 下，exe 与 exe 同目录。"""
@@ -83,7 +110,7 @@ class AgentSettings:
 
     @classmethod
     def from_env_file(cls, env_file: str | Path | None = None) -> "AgentSettings":
-        """纯工厂：仅从外置 env 文件读取并构造，不缓存、无副作用。"""
+        """从外置 .env 文件读取并构造，首次缺失节点 ID 时写回生成值。"""
         path = (
             Path(env_file).resolve()
             if env_file is not None
@@ -91,6 +118,12 @@ class AgentSettings:
         )
         values = load_env_file(path)
         base_dir = path.parent
+
+        node_id = values.get("AETP_AGENT_NODE_ID", "").strip()
+        if not node_id or (node_id.startswith("<") and node_id.endswith(">")):
+            node_id = f"agent-{uuid.uuid4().hex}"
+            upsert_env_value(path, "AETP_AGENT_NODE_ID", node_id)
+            logger.info("AETP_AGENT_NODE_ID 未设置，已生成并写回 %s", path)
 
         ca_cert = values.get("AETP_AGENT_MQTT_CA_CERT_PATH")
         ca_cert_path = None
@@ -106,16 +139,18 @@ class AgentSettings:
             log_file = base_dir / log_file
 
         return cls(
-            node_id=values.get("AETP_AGENT_NODE_ID", cls.node_id),
+            node_id=node_id,
             name=values.get("AETP_AGENT_NAME", cls.name),
+            master_id=values.get("AETP_AGENT_MASTER_ID", cls.master_id),
             mqtt_host=values.get("AETP_AGENT_MQTT_HOST"),
             mqtt_port=parse_int(
                 values.get("AETP_AGENT_MQTT_PORT"), cls.mqtt_port
             ),
             mqtt_username=values.get("AETP_AGENT_MQTT_USERNAME"),
             mqtt_password=values.get("AETP_AGENT_MQTT_PASSWORD"),
-            mqtt_client_id=values.get(
-                "AETP_AGENT_MQTT_CLIENT_ID", cls.mqtt_client_id
+            mqtt_client_id=(
+                values.get("AETP_AGENT_MQTT_CLIENT_ID")
+                or f"aetp-agent-{node_id}"
             ),
             mqtt_ca_cert_path=ca_cert_path,
             mqtt_use_tls=parse_bool(
@@ -179,7 +214,7 @@ def configure(env_file: str | Path | None = None) -> AgentSettings:
             )
         return _settings
 
-    _settings = AgentSettings.from_env_file(env_file)
+    _settings = AgentSettings.from_env_file(env_file).validate()
     logger.info("Agent 配置初始化完成: env_file=%s", _settings.env_file)
     return _settings
 

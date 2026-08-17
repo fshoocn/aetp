@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Generator
 
 import pytest
@@ -62,7 +63,8 @@ def test_from_env_file_ignores_system_env(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AETP_AGENT_NODE_ID", "from-system-env")
     env_file = _write_env(tmp_path, "AETP_AGENT_NAME=file-only\n")
     settings = AgentSettings.from_env_file(env_file)
-    assert settings.node_id == ""  # 未被系统环境变量污染
+    assert settings.node_id != "from-system-env"
+    assert settings.node_id.startswith("agent-")
     assert settings.name == "file-only"
 
 
@@ -95,3 +97,39 @@ def test_configure_get_settings_roundtrip(tmp_path) -> None:
 def test_get_settings_raises_before_configure() -> None:
     with pytest.raises(RuntimeError):
         agent_config.get_settings()
+
+
+def test_settings_validate_rejects_missing_identity() -> None:
+    with pytest.raises(ValueError, match="NODE_ID"):
+        AgentSettings().validate()
+
+
+def test_settings_derive_client_id_and_validate(tmp_path) -> None:
+    env_file = _write_env(tmp_path, "AETP_AGENT_NODE_ID=bench-003\n")
+    settings = AgentSettings.from_env_file(env_file).validate()
+    assert settings.mqtt_client_id == "aetp-agent-bench-003"
+
+
+def test_missing_node_id_is_generated_and_persisted(tmp_path) -> None:
+    env_file = _write_env(tmp_path, "AETP_AGENT_NAME=CAN 台架 01\n")
+
+    first = AgentSettings.from_env_file(env_file).validate()
+    assert re.fullmatch(r"agent-[0-9a-f]{32}", first.node_id)
+    assert f"AETP_AGENT_NODE_ID={first.node_id}" in env_file.read_text(
+        encoding="utf-8"
+    )
+
+    second = AgentSettings.from_env_file(env_file).validate()
+    assert second.node_id == first.node_id
+    assert second.mqtt_client_id == first.mqtt_client_id
+
+
+def test_placeholder_node_id_is_replaced(tmp_path) -> None:
+    env_file = _write_env(tmp_path, "AETP_AGENT_NODE_ID=<node-id>\n")
+
+    settings = AgentSettings.from_env_file(env_file).validate()
+
+    assert settings.node_id != "<node-id>"
+    assert f"AETP_AGENT_NODE_ID={settings.node_id}" in env_file.read_text(
+        encoding="utf-8"
+    )
