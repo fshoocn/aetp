@@ -29,6 +29,11 @@ dev = [
     "httpx>=0.27",
 ]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*", "master*", "common*"]
+exclude = ["tests*", "web*", "migrations*", "common.src*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
