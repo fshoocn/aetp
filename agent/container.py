@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from dependency_injector import containers, providers
 
-from agent.config import get_settings
+from agent.adapters.sqlite.ledger import SQLiteLedger
+from agent.config import get_settings, resolve_sqlite_url
 
 
 class Container(containers.DeclarativeContainer):
@@ -19,3 +20,11 @@ class Container(containers.DeclarativeContainer):
 
     # 进程级配置单例（组合根 configure() 之后才求值）
     settings = providers.Singleton(lambda: get_settings())
+
+    # 本地账本单例（P5.2：SQLite，agent_runs/inbox/outbox/spool/cache）
+    ledger = providers.Singleton(
+        SQLiteLedger,
+        url=providers.Callable(
+            lambda: resolve_sqlite_url(get_settings().ledger_url)
+        ),
+    )
