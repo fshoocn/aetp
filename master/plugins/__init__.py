@@ -19,6 +19,12 @@ from .errors import (
     PluginVersionMismatchError,
 )
 from .registry import PluginRegistry, create_default_registry
+from .sharding import (
+    SplitPolicyError,
+    split_by_case_count,
+    split_by_time,
+    split_none,
+)
 
 __all__ = [
     "MasterTaskPlugin",
@@ -27,6 +33,10 @@ __all__ = [
     "TaskDefinitionSpec",
     "PluginRegistry",
     "create_default_registry",
+    "SplitPolicyError",
+    "split_none",
+    "split_by_case_count",
+    "split_by_time",
     "PluginCapability",
     "filter_supported",
     "PluginError",
