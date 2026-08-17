@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from aetp_protocol.topics import command_topic
 
@@ -35,6 +35,10 @@ from agent.domain.ledger import Ledger
 from common.backoff import ExponentialBackoff
 from common.transport import MqttMessage, Transport
 
+if TYPE_CHECKING:
+    from agent.plugins import AgentPluginRegistry
+    from agent.plugins.installer import PluginPackageInstaller
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +53,8 @@ class AgentRuntime:
         registration: RegistrationService,
         dispatcher: CommandDispatcher | None = None,
         *,
+        plugin_registry: "AgentPluginRegistry | None" = None,
+        plugin_installer: "PluginPackageInstaller | None" = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -59,6 +65,9 @@ class AgentRuntime:
             settings=settings,
             ledger=ledger,
             is_registered=lambda: registration.registered,
+            plugin_registry=plugin_registry,
+            plugin_installer=plugin_installer,
+            session_id=lambda: registration.session_id,
         )
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None

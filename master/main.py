@@ -95,6 +95,13 @@ async def lifespan(app: FastAPI):
     logger.info("开始初始化数据库和执行迁移")
     container.database()
     logger.info("数据库初始化完成")
+    # Master 插件注册表在应用启动时加载：脚本解析、验证、分片和硬件需求
+    # 均由 Master 侧插件提供；Agent 只加载对应执行包。
+    plugins = container.plugin_registry()
+    logger.info(
+        "Master 插件注册表已加载: task_types=%s",
+        [package.metadata.task_type for package in plugins.list()],
+    )
     app.state.container = container
 
     # 平台管理员 bootstrap：若 users 表为空且配置了管理员凭据，自动创建首个 admin

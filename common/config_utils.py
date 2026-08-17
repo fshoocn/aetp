@@ -4,7 +4,6 @@
 
 - ``load_env_file``：极简 .env 解析器（KEY=VALUE、# 注释、成对引号）
 - ``parse_bool`` / ``parse_int``：标量类型解析（空值回退默认）
-- ``parse_task_types``：逗号分隔列表解析
 - ``resolve_sqlite_url``：SQLite 相对路径基于给定基准目录解析为绝对连接串
 - ``upsert_env_value``：更新或追加 .env 键值并保留其他内容
 """
@@ -69,13 +68,6 @@ def parse_int(value: str | None, default: int) -> int:
     if value is None or value.strip() == "":
         return default
     return int(value)
-
-
-def parse_task_types(value: str | None) -> tuple[str, ...]:
-    """逗号分隔的任务类型列表解析。"""
-    if not value:
-        return ()
-    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def resolve_sqlite_url(url: str, base_dir: str | Path) -> str:

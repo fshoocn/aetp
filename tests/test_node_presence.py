@@ -121,6 +121,8 @@ def test_register_upserts_node_and_sends_ack(client):
         assert node.capabilities.vehicle.vendors[0].name == "vector"
         assert node.capabilities.vehicle.vendors[0].buses[0].bus_type == "can"
         assert node.tags == ["can", "bench"]
+        assert node.plugin_versions == {"can_test": "1.0"}
+        assert node.plugin_supported_versions == {"can_test": ["1.0"]}
         assert node.last_seen_at is not None
         # 会话已建立
         session = uow.node_sessions.get_current(node.id)

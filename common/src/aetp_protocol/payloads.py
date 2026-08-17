@@ -77,6 +77,23 @@ class RegisterAckPayload(_Strict):
     reason: str = ""
 
 
+class PluginPackageRef(_Strict):
+    """Agent 执行插件包引用（Master -> Agent）。"""
+
+    # sym:task_type 插件任务类型
+    task_type: str
+    # sym:package_name 已安装 Python 包名或受信任插件包标识
+    package_name: str
+    # sym:version 本次 run 所需的插件版本
+    version: str
+    # sym:download_url Master 签发的限时下载地址
+    download_url: str
+    # sym:sha256 下载包完整内容 SHA-256
+    sha256: str = Field(min_length=64, max_length=64)
+    # sym:entry_point Agent 侧执行插件入口点（module:attribute）
+    entry_point: str
+
+
 class PresencePayload(_Strict):
     """节点非正常离线（LWT，§8.6：仅携带 node_id/reason/sent_at，不含实时任务快照）。
 
@@ -143,6 +160,8 @@ class RunAssignPayload(_Strict):
     task_type: str
     # sym:plugin_version 插件版本（Agent 校验 PLUGIN_VERSION_MISMATCH）
     plugin_version: str
+    # sym:plugin_ref Agent 缺失/版本不符时下载并安装的执行插件包
+    plugin_ref: PluginPackageRef | None = None
     # sym:script_ref 脚本引用 {script_id, version, sha256, download_url}
     script_ref: dict[str, Any]
     # sym:case_keys 该 Shard 负责的 case 集合

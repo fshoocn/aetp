@@ -1,99 +1,19 @@
-"""任务类型插件数据接口（P3.8，D-19）。
+"""共享任务类型插件的 Master 面接口（P3.8/P5.5）。
 
-插件是随 Master/Agent 分发安装的 Python 包。Master 只通过本接口
-拿/收三类数据：case 列表、Shard 分割结果、结构化 case 结果；
-分割逻辑与报告解析全部在插件内部实现（§18.2）。
-
-**插件与 Master 仅数据耦合**：本模块只依赖标准库与领域 DTO，
-插件不得 import MQTT / FastAPI / 数据库实现或具体 broker 主题（§9.5）。
+Master 面负责把脚本和配置生成可执行任务定义、验证脚本、解析 Case、
+计算硬件需求并分割 Shard；Agent 面的执行入口由同一插件包提供，负责
+实际执行、日志整合和结果分析。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from aetp_protocol.capabilities import HardwareRequirements
+from aetp_protocol.plugin import CaseInfo, ShardSpec, TaskDefinitionSpec
 
 
-@dataclass(frozen=True)
-class CaseInfo:
-    """插件 parse_cases 产出的用例（写入 script_cases 的数据基础）。"""
-
-    # sym:stable_key 跨版本稳定标识（pytest nodeid / CANoe 用例名 / cdd 路径），
-    #   版本 diff 与任务定义勾选引用依赖它（§18.3）
-    stable_key: str
-    # sym:name 用例显示名
-    name: str
-    # sym:parent_path 父路径/分组（树形展示）
-    parent_path: str = ""
-    # sym:tags 用例标签
-    tags: tuple[str, ...] = ()
-    # sym:params 用例参数（插件执行时使用）
-    params: Mapping[str, Any] = field(default_factory=dict)
-    # sym:estimated_duration_s 预估耗时（秒；可选，D-21 缺耗时默认值数据源）
-    estimated_duration_s: float | None = None
-
-
-@dataclass(frozen=True)
-class ShardSpec:
-    """插件 split_shards 产出的一个**子任务（Shard）定义**（写入 run_shards）。
-
-    Shard 是插件要执行的最小派发单元：Master 只负责派发/调度，不执行；
-    Agent 侧插件以 execute(shard_context) 执行（§9.5/§18.2）。
-    因此每个 Shard 自包含执行所需信息：case_keys + execution_params
-    （每 Shard 专属执行参数，如 CAN 通道、测试参数）。物理资源由
-    Master 调度时根据 HardwareRequirements 原子分配。
-    """
-
-    # sym:case_keys 该子任务负责的 case 集合（stable_key）
-    case_keys: tuple[str, ...]
-    # sym:execution_params 该子任务专属执行参数/指令（插件执行时使用；
-    #   如 {"channel": 0} / {"config_section": "bench2"}，与共享 config 合并或覆盖）
-    execution_params: Mapping[str, Any] = field(default_factory=dict)
-    # sym:estimated_duration_s 预估耗时（秒；by_time 分割产出）
-    estimated_duration_s: float | None = None
-
-
-@dataclass(frozen=True)
-class CaseResult:
-    """插件 parse_results 产出的结构化 case 结果（写入 run_case_results，D-20）。"""
-
-    # sym:case_key 用例稳定标识（对应 run_case_results.case_key）
-    case_key: str
-    # sym:status case 结果状态（CaseStatus 值：passed/failed/skipped/error/...）
-    status: str
-    # sym:duration_ms 执行耗时（毫秒；D-21 成功耗时统计数据源）
-    duration_ms: int | None = None
-    # sym:error_summary 失败/错误摘要
-    error_summary: str | None = None
-    # sym:detail 结构化详情（断言信息、堆栈等）
-    detail: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class TaskContext:
-    """解析/执行上下文（§9.5 TaskContext 的数据子集）。
-
-    P3.8 为数据接口，仅提供只读上下文；Agent 侧执行阶段另有
-    progress/log/is_cancelled 等能力（P5/P6 补充）。
-    """
-
-    # sym:task_id 任务定义业务标识
-    task_id: str
-    # sym:shard_id Shard 业务标识
-    shard_id: str
-    # sym:run_id Run 业务标识
-    run_id: str
-    # sym:node_id 执行节点业务 ID
-    node_id: str
-    # sym:params 插件参数（config）
-    params: Mapping[str, Any]
-    # sym:script_ref 脚本引用快照 {script_id, version, sha256}（parse_results 定位报告）
-    script_ref: Mapping[str, Any] = field(default_factory=dict)
-
-
-class TaskTypePlugin(Protocol):
+class MasterTaskPlugin(Protocol):
     """Master 侧任务类型插件（纯数据接口，§18.2）。
 
     具体插件（pytest/cdd/canoe）随包发布，由 bootstrap 容器显式注册到
@@ -112,14 +32,6 @@ class TaskTypePlugin(Protocol):
     config_schema: Mapping[str, Any]
     # sym:upload_spec 上传规格（文件类型白名单/大小上限）
     upload_spec: Mapping[str, Any]
-    # sym:parse_location 用例解析位置（master/agent，D-17）
-    parse_location: str
-    # sym:result_parse_location 报告解析位置（master/agent，D-19）
-    result_parse_location: str
-    # sym:verify_location 脚本编译/格式验证执行位置（master/agent，与 D-17 同构）：
-    #   pytest/cdd 可 master 端（py_compile/格式检查）；
-    #   CANoe 工程验证依赖 CANoe COM → agent 端（下发 script.verify 到有验证能力的 Agent）
-    verify_location: str
 
     def verify_script(
         self, script_dir: str, config: Mapping[str, Any]
@@ -133,9 +45,8 @@ class TaskTypePlugin(Protocol):
 
         返回错误列表（空 = 通过）；有错则脚本 parse_status=failed，
         不进入解析队列（§18.3 步骤 2 前拦截）。
-        按 verify_location 执行：master 端 Master 直接调用；
-        agent 端 Master 下发 script.verify 到有验证能力的 Agent，由
-        Agent 侧 ExecutionPlugin.verify_script 执行后回传结果。
+        Master 默认直接调用；需要台架环境时可由 Agent 面提供受控辅助预检，
+        但最终可用性判断仍由 Master 工作流完成。
         """
         ...
 
@@ -143,6 +54,12 @@ class TaskTypePlugin(Protocol):
         self, script_dir: str, config: Mapping[str, Any]
     ) -> list[CaseInfo]:
         """用例解析：返回 CaseInfo 列表；stable_key 必须稳定（§18.3）。"""
+        ...
+
+    def build_task_definition(
+        self, config: Mapping[str, Any], cases: list[CaseInfo]
+    ) -> TaskDefinitionSpec:
+        """根据脚本和配置生成任务定义快照，不创建 Run。"""
         ...
 
     async def split_shards(
@@ -154,12 +71,8 @@ class TaskTypePlugin(Protocol):
         """任务分割：by_time（按耗时切到目标时长）/ by_case_count / custom（§18.6）。"""
         ...
 
-    async def parse_results(
-        self,
-        artifact_files: list[str],
-        context: TaskContext,
-    ) -> list[CaseResult]:
-        """测试报告解析为结构化 case 结果（D-19；CANoe 类仅结束后产生）。"""
+    def result_schema(self, config: Mapping[str, Any]) -> Mapping[str, Any]:
+        """声明 Agent 结果分析需要产出的结构，不在 Master 执行报告解析。"""
         ...
 
     def hardware_requirements(

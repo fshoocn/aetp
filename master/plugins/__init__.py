@@ -1,12 +1,13 @@
-"""任务类型插件包（P3.8）。
-
-Master 侧插件数据接口与注册表 + Agent 侧执行插件注册表与错误处理；
-具体插件（pytest/cdd/canoe）后续阶段实现。
-"""
+"""Master 侧任务类型插件包（P3.8/P5.5）。"""
 
 from __future__ import annotations
 
-from .base import CaseInfo, CaseResult, ShardSpec, TaskContext, TaskTypePlugin
+from .base import (
+    CaseInfo,
+    MasterTaskPlugin,
+    ShardSpec,
+    TaskDefinitionSpec,
+)
 from .capability import PluginCapability, filter_supported
 from .errors import (
     PLUGIN_LOAD_FAILED,
@@ -17,18 +18,15 @@ from .errors import (
     PluginNotFoundError,
     PluginVersionMismatchError,
 )
-from .execution import ExecutionPlugin, ExecutionPluginRegistry
-from .registry import PluginRegistry
+from .registry import PluginRegistry, create_default_registry
 
 __all__ = [
-    "TaskTypePlugin",
+    "MasterTaskPlugin",
     "CaseInfo",
     "ShardSpec",
-    "CaseResult",
-    "TaskContext",
+    "TaskDefinitionSpec",
     "PluginRegistry",
-    "ExecutionPlugin",
-    "ExecutionPluginRegistry",
+    "create_default_registry",
     "PluginCapability",
     "filter_supported",
     "PluginError",

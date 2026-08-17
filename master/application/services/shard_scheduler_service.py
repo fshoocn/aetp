@@ -20,7 +20,7 @@ from typing import Callable, Iterable
 from aetp_protocol.capabilities import DeviceAllocation, SwitchRouteAllocation
 from aetp_protocol.envelope import PROTOCOL_VERSION, Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.payloads import RunAssignPayload
+from aetp_protocol.payloads import PluginPackageRef, RunAssignPayload
 from aetp_protocol.topics import command_topic
 
 from master.application.errors import (
@@ -90,12 +90,15 @@ class ShardSchedulerService:
         capability_service: CapabilityService | None = None,
         master_id: str = "aetp-master",
         download_url_builder: Callable[[str], str] | None = None,
+        plugin_ref_builder: Callable[[str, str], PluginPackageRef | None]
+        | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._scheduler = scheduler or ShardScheduler()
         self._capability = capability_service or CapabilityService()
         self._master_id = master_id
         self._download_url_builder = download_url_builder
+        self._plugin_ref_builder = plugin_ref_builder
 
     def schedule_run(self, run_id: str) -> ScheduleResult:
         """为 Run 尽可能派发 pending Shard。
@@ -335,6 +338,11 @@ class ShardSchedulerService:
             script_ref["download_url"] = self._download_url_builder(
                 script.script_id
             )
+        plugin_ref = (
+            self._plugin_ref_builder(task.task_type, script.plugin_version)
+            if self._plugin_ref_builder is not None
+            else None
+        )
         payload = RunAssignPayload(
             project_id=run.project_id,
             task_id=run.task_id,
@@ -356,6 +364,7 @@ class ShardSchedulerService:
             dispatch_id=attempt.attempt_id,
             task_type=task.task_type,
             plugin_version=script.plugin_version,
+            plugin_ref=plugin_ref,
             script_ref=script_ref,
             case_keys=list(shard.case_keys),
             execution_params=dict(shard.execution_params),

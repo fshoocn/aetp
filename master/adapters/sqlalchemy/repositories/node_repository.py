@@ -44,6 +44,11 @@ def _to_domain(orm: NodeORM) -> Node:
         tags=list(orm.tags or []),
         capabilities=NodeCapabilities.model_validate(orm.capabilities or {}),
         protocol_version=orm.protocol_version,
+        plugin_versions=dict(orm.plugin_versions or {}),
+        plugin_supported_versions={
+            key: list(value)
+            for key, value in (orm.plugin_supported_versions or {}).items()
+        },
         last_seen_at=orm.last_seen_at,
         load=dict(orm.load or {}),
         created_at=orm.created_at,
@@ -96,6 +101,8 @@ class NodeRepositoryImpl(NodeRepository):
             mode="json", exclude_none=True
         )
         orm.protocol_version = node.protocol_version
+        orm.plugin_versions = node.plugin_versions
+        orm.plugin_supported_versions = node.plugin_supported_versions
         orm.last_seen_at = node.last_seen_at
         orm.load = node.load
         self._s.flush()

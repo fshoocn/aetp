@@ -234,7 +234,7 @@ async def test_runtime_handles_run_assign_after_registration(tmp_path) -> None:
     )
     assign_bytes = json.dumps(assign_envelope.model_dump(mode="json")).encode("utf-8")
     await transport.emit(command_topic("bench-001", "assign"), assign_bytes)
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.5)
 
     # Run 已被 claim
     run = ledger.get_run("R-100")

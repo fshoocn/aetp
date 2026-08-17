@@ -36,6 +36,7 @@ from master.application.services.test_task_service import TestTaskService
 from master.application.services.shard_scheduler_service import ShardSchedulerService
 from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.script_storage_service import ScriptStorageService
+from master.plugins.registry import create_default_registry
 
 
 def _init_database(url: str) -> DatabaseInterface:
@@ -49,6 +50,13 @@ def _internal_signing_secret() -> str:
     """内部签名下载密钥：独立配置，缺省回退到 JWT 密钥。"""
     settings = get_settings()
     return settings.internal_signing_secret or settings.jwt_secret
+
+
+def _plugin_ref_from_registry(
+    task_type: str, version: str
+):
+    """运行时从 Master 插件注册表获取 Agent 包引用。"""
+    return Container.plugin_registry().agent_package_ref(task_type)
 
 
 class Container(containers.DeclarativeContainer):
@@ -66,6 +74,9 @@ class Container(containers.DeclarativeContainer):
 
     # SSE 事件总线：进程级单例
     event_bus = providers.Singleton(EventBus)
+
+    # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据
+    plugin_registry = providers.Singleton(create_default_registry)
 
     # 文件存储：进程级单例（默认本地 data/ 目录；切云存储只换 adapter）
     storage = providers.Singleton(
@@ -132,4 +143,5 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         capability_service=capability_service,
         download_url_builder=script_download_service.provided.build_download_url,
+        plugin_ref_builder=providers.Object(_plugin_ref_from_registry),
     )

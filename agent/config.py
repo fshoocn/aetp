@@ -20,7 +20,6 @@ from common.config_utils import (
     load_env_file,
     parse_bool,
     parse_int,
-    parse_task_types,
     resolve_sqlite_url as _resolve_sqlite_url,
     upsert_env_value,
 )
@@ -64,11 +63,12 @@ class AgentSettings:
     mqtt_use_tls: bool = True
     # ---- 本地账本 ----
     ledger_url: str = "sqlite:///data/agent.db"
+    # ---- Agent 执行插件 ----
+    plugin_dir: Path = Path("data/plugins")
     # ---- 执行与心跳 ----
     max_concurrent_runs: int = 1
     heartbeat_interval_s: int = 5
     registration_timeout_s: int = 10
-    supported_task_types: tuple[str, ...] = ()
     # ---- 运行日志 ----
     log_file: Path = Path("logs/agent.log")
     log_level: str = "INFO"
@@ -138,6 +138,11 @@ class AgentSettings:
         if not log_file.is_absolute():
             log_file = base_dir / log_file
 
+        raw_plugin_dir = values.get("AETP_AGENT_PLUGIN_DIR")
+        plugin_dir = Path(raw_plugin_dir) if raw_plugin_dir else cls.plugin_dir
+        if not plugin_dir.is_absolute():
+            plugin_dir = base_dir / plugin_dir
+
         return cls(
             node_id=node_id,
             name=values.get("AETP_AGENT_NAME", cls.name),
@@ -157,6 +162,7 @@ class AgentSettings:
                 values.get("AETP_AGENT_MQTT_USE_TLS"), cls.mqtt_use_tls
             ),
             ledger_url=values.get("AETP_AGENT_LEDGER_URL", cls.ledger_url),
+            plugin_dir=plugin_dir,
             max_concurrent_runs=parse_int(
                 values.get("AETP_AGENT_MAX_CONCURRENT_RUNS"),
                 cls.max_concurrent_runs,
@@ -168,9 +174,6 @@ class AgentSettings:
             registration_timeout_s=parse_int(
                 values.get("AETP_AGENT_REGISTRATION_TIMEOUT_S"),
                 cls.registration_timeout_s,
-            ),
-            supported_task_types=parse_task_types(
-                values.get("AETP_AGENT_SUPPORTED_TASK_TYPES")
             ),
             log_file=log_file,
             log_level=values.get("AETP_AGENT_LOG_LEVEL", cls.log_level),

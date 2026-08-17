@@ -35,6 +35,8 @@ class Node:
     tags: list = field(default_factory=list)
     capabilities: NodeCapabilities = field(default_factory=NodeCapabilities)
     protocol_version: str = ""
+    plugin_versions: dict[str, str] = field(default_factory=dict)
+    plugin_supported_versions: dict[str, list[str]] = field(default_factory=dict)
     last_seen_at: datetime | None = None
     load: dict = field(default_factory=dict)
     created_at: datetime | None = None

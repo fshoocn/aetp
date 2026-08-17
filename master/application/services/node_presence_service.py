@@ -76,6 +76,11 @@ class NodePresenceService:
                     tags=payload.tags,
                     capabilities=caps,
                     protocol_version=str(envelope.protocol_version),
+                    plugin_versions=dict(payload.plugin_versions),
+                    plugin_supported_versions={
+                        key: list(value)
+                        for key, value in payload.supported_versions.items()
+                    },
                     last_seen_at=now,
                     load={},
                 )
@@ -86,6 +91,11 @@ class NodePresenceService:
                 node.tags = payload.tags
                 node.capabilities = caps
                 node.protocol_version = str(envelope.protocol_version)
+                node.plugin_versions = dict(payload.plugin_versions)
+                node.plugin_supported_versions = {
+                    key: list(value)
+                    for key, value in payload.supported_versions.items()
+                }
                 node.last_seen_at = now
             node = uow.nodes.save(node)
             assert node.id is not None  # save 后必有代理主键（后续会话查询用）

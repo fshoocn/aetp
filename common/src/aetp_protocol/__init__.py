@@ -24,7 +24,17 @@ from .errors import (
     TopicMismatchError,
 )
 from .message_types import MessageType
-from .payloads import RegisterAckPayload, RunCancelPayload
+from .payloads import PluginPackageRef, RegisterAckPayload, RunCancelPayload
+from .plugin import (
+    AgentExecutionPlugin,
+    AgentPackageSpec,
+    AgentTaskContext,
+    CaseInfo,
+    PluginMetadata,
+    PluginPackage,
+    ShardSpec,
+    TaskDefinitionSpec,
+)
 from .capabilities import (
     BusRequirement,
     DeviceAllocation,
@@ -64,6 +74,15 @@ __all__ = [
     "SenderKind",
     "MessageType",
     "RegisterAckPayload",
+    "PluginPackageRef",
+    "AgentPackageSpec",
+    "AgentExecutionPlugin",
+    "AgentTaskContext",
+    "CaseInfo",
+    "PluginMetadata",
+    "PluginPackage",
+    "ShardSpec",
+    "TaskDefinitionSpec",
     "RunCancelPayload",
     "TopicInfo",
     "command_topic",

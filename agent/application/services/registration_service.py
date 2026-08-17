@@ -17,7 +17,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from aetp_protocol.capabilities import NodeCapabilities
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
@@ -38,6 +38,9 @@ from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
 from agent.domain.ledger import Ledger
 from common.transport import MqttMessage, Transport
+
+if TYPE_CHECKING:
+    from agent.plugins import AgentPluginRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,7 @@ class RegistrationService:
         session_id: str | None = None,
         capabilities=None,
         tags: tuple[str, ...] = (),
+        plugin_registry: "AgentPluginRegistry | None" = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._transport = transport
@@ -70,6 +74,7 @@ class RegistrationService:
         self._session_id = session_id or uuid.uuid4().hex
         self._capabilities = capabilities
         self._tags = list(tags)
+        self._plugin_registry = plugin_registry
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._registered = False
         self._heartbeat_task: asyncio.Task[None] | None = None
@@ -137,6 +142,13 @@ class RegistrationService:
     def build_register_payload(self) -> NodeRegisterPayload:
         """构造注册载荷（节点能力/标签/插件版本来自配置与注册）。"""
         s = self._settings
+        # 插件版本由 registry 汇总，不信任手工配置（§9.4）
+        plugin_versions: dict[str, str] = {}
+        supported_versions: dict[str, list[str]] = {}
+        if self._plugin_registry is not None:
+            for cap in self._plugin_registry.capabilities():
+                plugin_versions[cap.task_type] = cap.plugin_version
+                supported_versions[cap.task_type] = sorted(cap.supported_versions)
         return NodeRegisterPayload(
             node_id=s.node_id,
             name=s.name,
@@ -146,8 +158,8 @@ class RegistrationService:
                 else NodeCapabilities()
             ),
             tags=self._tags,
-            supported_versions={},
-            plugin_versions={},
+            supported_versions=supported_versions,
+            plugin_versions=plugin_versions,
         )
 
     def enqueue_register(self) -> str:

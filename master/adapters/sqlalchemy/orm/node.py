@@ -39,6 +39,12 @@ class Node(Base, TimestampMixin):
     protocol_version: Mapped[str] = mapped_column(
         String(32), nullable=False, default=""
     )
+    plugin_versions: Mapped[dict] = mapped_column(
+        JSONType, nullable=False, default=dict
+    )
+    plugin_supported_versions: Mapped[dict] = mapped_column(
+        JSONType, nullable=False, default=dict
+    )
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(
         UTCDateTime, nullable=True
     )

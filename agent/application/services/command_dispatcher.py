@@ -20,7 +20,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.errors import (
@@ -40,6 +40,15 @@ from aetp_protocol.topics import (
 from agent.config import AgentSettings
 from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
 from agent.domain.ledger import AgentRun, Ledger
+from agent.plugins.errors import (
+    PluginInstallError,
+    PluginNotFoundError,
+    PluginVersionMismatchError,
+)
+
+if TYPE_CHECKING:
+    from agent.plugins import AgentPluginRegistry
+    from agent.plugins.installer import PluginPackageInstaller
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +62,17 @@ class CommandDispatcher:
         ledger: Ledger,
         *,
         is_registered: Callable[[], bool],
+        plugin_registry: "AgentPluginRegistry | None" = None,
+        plugin_installer: "PluginPackageInstaller | None" = None,
+        session_id: Callable[[], str] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._settings = settings
         self._ledger = ledger
         self._is_registered = is_registered
+        self._plugin_registry = plugin_registry
+        self._plugin_installer = plugin_installer
+        self._session_id = session_id or (lambda: self._settings.node_id)
         self._now = now or (lambda: datetime.now(timezone.utc))
 
     # -- 公共接口 -----------------------------------------------------------
@@ -113,20 +128,6 @@ class CommandDispatcher:
             logger.warning("run.assign 被拒绝：Agent 未注册")
             return False
 
-        # Inbox 去重
-        if not self._ledger.record_inbox(
-            origin_id=envelope.sender.id,
-            message_id=envelope.message_id,
-            message_type=envelope.message_type,
-        ):
-            logger.debug(
-                "run.assign 幂等忽略（inbox 去重）: message_id=%s",
-                envelope.message_id,
-            )
-            # 重复消息仍回 ACK（幂等 ACK，断网补发）
-            self._ack_run_assign(envelope, accepted=True, reason="ok (duplicate)")
-            return True
-
         # 校验 payload
         try:
             payload = RunAssignPayload.model_validate(envelope.payload)
@@ -137,7 +138,7 @@ class CommandDispatcher:
             )
             return False
 
-        # 校验 run.assign 目标节点
+        # 校验命令目标后再准备插件；安装失败不写 Inbox，允许同一消息重试。
         topic_info = parse_topic(topic)
         if topic_info.node_id != self._settings.node_id:
             logger.warning(
@@ -146,6 +147,47 @@ class CommandDispatcher:
                 topic_info.node_id,
             )
             return False
+
+        # 已有相同兼容版本直接复用，否则先安装 Master 提供的插件包。
+        if self._plugin_registry is not None:
+            try:
+                self._plugin_registry.ensure_compatible(
+                    payload.task_type,
+                    payload.plugin_version,
+                    package_ref=payload.plugin_ref,
+                    installer=self._plugin_installer,
+                )
+            except PluginNotFoundError as exc:
+                logger.warning("run.assign 插件缺失: %s", exc)
+                self._ack_run_assign(
+                    envelope, accepted=False, reason=str(exc)
+                )
+                return True  # 已回 ACK，不重试
+            except PluginVersionMismatchError as exc:
+                logger.warning("run.assign 插件版本不兼容: %s", exc)
+                self._ack_run_assign(
+                    envelope, accepted=False, reason=str(exc)
+                )
+                return True  # 已回 ACK，不重试
+            except PluginInstallError as exc:
+                logger.warning("run.assign 插件安装失败: %s", exc)
+                self._ack_run_assign(
+                    envelope, accepted=False, reason=f"{exc.code}: {exc}"
+                )
+                return True
+
+        # Inbox 去重在插件准备成功后执行，避免安装失败把命令永久吞掉。
+        if not self._ledger.record_inbox(
+            origin_id=envelope.sender.id,
+            message_id=envelope.message_id,
+            message_type=envelope.message_type,
+        ):
+            logger.debug(
+                "run.assign 幂等忽略（inbox 去重）: message_id=%s",
+                envelope.message_id,
+            )
+            self._ack_run_assign(envelope, accepted=True, reason="ok (duplicate)")
+            return True
 
         # 原子 claim（先 claim 后 ACK）
         claimed = self._ledger.claim_run(payload.run_id, payload.attempt_no)
@@ -262,7 +304,7 @@ class CommandDispatcher:
             sender=Sender(
                 kind=SenderKind.AGENT,
                 id=self._settings.node_id,
-                session_id="",  # session 由 outbox publisher 发送时确定
+                session_id=self._session_id(),
             ),
             correlation_id=envelope.message_id,
             trace_id=self._settings.node_id,
@@ -270,6 +312,6 @@ class CommandDispatcher:
         )
         topic = event_topic(self._settings.node_id, "ack")
         outbox_id = f"run-ack:{run_id}:{attempt_no}"
-        self._ledger.enqueue_outbox(
+        self._ledger.replace_outbox(
             outbox_id, topic, ack_envelope.model_dump(mode="json")
         )

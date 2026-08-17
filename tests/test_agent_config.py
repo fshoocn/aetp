@@ -34,7 +34,6 @@ def test_agent_settings_defaults() -> None:
     assert settings.ledger_url == "sqlite:///data/agent.db"
     assert settings.max_concurrent_runs == 1
     assert settings.heartbeat_interval_s == 5
-    assert settings.supported_task_types == ()
     assert settings.log_level == "INFO"
 
 
@@ -66,14 +65,6 @@ def test_from_env_file_ignores_system_env(tmp_path, monkeypatch) -> None:
     assert settings.node_id != "from-system-env"
     assert settings.node_id.startswith("agent-")
     assert settings.name == "file-only"
-
-
-def test_supported_task_types_parsing(tmp_path) -> None:
-    env_file = _write_env(
-        tmp_path, "AETP_AGENT_SUPPORTED_TASK_TYPES=can_test, flash_test\n"
-    )
-    settings = AgentSettings.from_env_file(env_file)
-    assert settings.supported_task_types == ("can_test", "flash_test")
 
 
 def test_relative_paths_resolve_against_env_dir(tmp_path) -> None:

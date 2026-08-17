@@ -18,7 +18,7 @@ from typing import Iterable
 class PluginCapability:
     """Agent 上报的插件能力条目（node.register / 变更上报 / 心跳携带载荷）。
 
-    由 Agent 端 ExecutionPluginRegistry.capabilities() 汇总生成，
+    由 Agent 端 AgentPluginRegistry.capabilities() 汇总生成，
     不信任手工伪造配置（§9.4）。
     """
 

@@ -16,6 +16,8 @@ from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
 from agent.application.services.registration_service import RegistrationService
 from agent.config import get_settings, resolve_sqlite_url
+from agent.plugins.registry import create_default_registry
+from agent.plugins.installer import LocalPluginInstaller
 
 
 class Container(containers.DeclarativeContainer):
@@ -41,15 +43,28 @@ class Container(containers.DeclarativeContainer):
         settings=settings,
     )
 
-    # 注册与心跳服务（P5.3：register outbox → register-ack 校验 → heartbeat）
+    # 插件注册表单例（P5.5：自动注册内置插件，上报 plugin_versions）
+    plugin_registry = providers.Singleton(
+        create_default_registry,
+        plugin_dir=providers.Callable(lambda: get_settings().plugin_dir),
+    )
+
+    # 插件安装器单例（P5.5：按 Master plugin_ref 下载、校验并隔离安装）
+    plugin_installer = providers.Singleton(
+        LocalPluginInstaller,
+        root=providers.Callable(lambda: get_settings().plugin_dir),
+    )
+
+    # 注册与心跳服务（P5.3 + P5.5：register outbox → register-ack 校验 → heartbeat）
     registration_service = providers.Factory(
         RegistrationService,
         transport=transport,
         ledger=ledger,
         settings=settings,
+        plugin_registry=plugin_registry,
     )
 
-    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4）
+    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4 + P5.5）
     # CommandDispatcher 由 AgentRuntime 从 RegistrationService 内部创建，
     # 避免 Container 中 is_registered 的循环依赖
     runtime = providers.Factory(
@@ -58,4 +73,6 @@ class Container(containers.DeclarativeContainer):
         transport=transport,
         ledger=ledger,
         registration=registration_service,
+        plugin_registry=plugin_registry,
+        plugin_installer=plugin_installer,
     )
