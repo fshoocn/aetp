@@ -23,6 +23,7 @@ from aetp_protocol.payloads import (
     NodeHeartbeatPayload,
     NodeRegisterPayload,
     PresencePayload,
+    RegisterAckPayload,
 )
 from aetp_protocol.topics import command_topic
 
@@ -234,10 +235,10 @@ class NodePresenceService:
             ),
             correlation_id=request.message_id,
             trace_id=request.trace_id,
-            payload={
-                "node_id": node_id,
-                "session_id": request.sender.session_id,
-                "accepted": True,
-            },
+            payload=RegisterAckPayload(
+                node_id=node_id,
+                session_id=request.sender.session_id,
+                accepted=True,
+            ).model_dump(mode="json"),
         )
         return ack.model_dump(mode="json")
