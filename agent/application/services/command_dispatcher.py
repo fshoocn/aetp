@@ -37,6 +37,7 @@ from aetp_protocol.topics import (
     validate_sender_for_topic,
 )
 
+from agent.application.services.execution_service import ExecutionService
 from agent.application.services.script_cache_service import (
     ScriptCacheError,
     ScriptCacheService,
@@ -69,6 +70,7 @@ class CommandDispatcher:
         plugin_registry: "AgentPluginRegistry | None" = None,
         plugin_installer: "PluginPackageInstaller | None" = None,
         script_cache: ScriptCacheService | None = None,
+        execution_service: ExecutionService | None = None,
         session_id: Callable[[], str] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -78,6 +80,7 @@ class CommandDispatcher:
         self._plugin_registry = plugin_registry
         self._plugin_installer = plugin_installer
         self._script_cache = script_cache
+        self._execution_service = execution_service
         self._session_id = session_id or (lambda: self._settings.node_id)
         self._now = now or (lambda: datetime.now(timezone.utc))
 
@@ -289,6 +292,9 @@ class CommandDispatcher:
 
         run.cancelled = True
         self._ledger.update_run(run)
+        # P6.1：触发执行器取消 token，中止排队/执行中的 Run
+        if self._execution_service is not None:
+            self._execution_service.cancel(payload.run_id)
         logger.info(
             "run.cancel 已标记: run_id=%s reason=%s",
             payload.run_id,

@@ -14,6 +14,7 @@ from dependency_injector import containers, providers
 from agent.adapters.mqtt.transport import AgentMqttTransport
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
+from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.config import get_settings, resolve_sqlite_url
@@ -63,6 +64,13 @@ class Container(containers.DeclarativeContainer):
         ledger=ledger,
     )
 
+    # 执行服务单例（P6.1：并发上限 + timeout + cancel token + 异常映射）
+    execution_service = providers.Singleton(
+        ExecutionService,
+        settings=settings,
+        ledger=ledger,
+    )
+
     # 注册与心跳服务（P5.3 + P5.5：register outbox → register-ack 校验 → heartbeat）
     registration_service = providers.Factory(
         RegistrationService,
@@ -72,7 +80,7 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
     )
 
-    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4 + P5.5 + P5.7）
+    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4 + P5.5 + P5.7 + P6.1）
     # CommandDispatcher / ScriptPreflightService 由 AgentRuntime 内部创建，
     # 避免 Container 中 is_registered 的循环依赖
     runtime = providers.Factory(
@@ -84,4 +92,5 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
         plugin_installer=plugin_installer,
         script_cache=script_cache,
+        execution_service=execution_service,
     )
