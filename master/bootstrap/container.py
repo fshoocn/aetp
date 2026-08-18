@@ -36,6 +36,12 @@ from master.application.services.test_task_service import TestTaskService
 from master.application.services.shard_scheduler_service import ShardSchedulerService
 from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.script_storage_service import ScriptStorageService
+from master.application.services.run_projection_service import RunProjectionService
+from master.application.services.run_trigger_service import RunTriggerService
+from master.application.services.message_router import MasterMessageRouter
+from master.application.services.mqtt_runtime import MasterMqttRuntime
+from master.adapters.mqtt.transport import MqttTransport
+from master.workers.outbox_worker import OutboxWorker
 from master.plugins.registry import create_default_registry
 
 
@@ -144,4 +150,41 @@ class Container(containers.DeclarativeContainer):
         capability_service=capability_service,
         download_url_builder=script_download_service.provided.build_download_url,
         plugin_ref_builder=providers.Object(_plugin_ref_from_registry),
+    )
+
+    # Run 投影服务（P6.4：ack/progress/log/result → Run 执行域投影）
+    run_projection_service = providers.Factory(
+        RunProjectionService, uow_factory=uow_factory
+    )
+
+    # Run 触发服务（P6.4：任务定义 → 插件分割 → Run/Shards → 派发）
+    run_trigger_service = providers.Factory(
+        RunTriggerService,
+        uow_factory=uow_factory,
+        plugin_registry=plugin_registry,
+        scheduler=shard_scheduler_service,
+    )
+
+    # 入站 Agent 事件路由（P6.4：严格 Envelope 校验后投影/在线处理）
+    message_router = providers.Factory(
+        MasterMessageRouter,
+        node_presence=node_presence_service,
+        projection=run_projection_service,
+        event_bus=event_bus,
+    )
+
+    # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）
+    mqtt_transport = providers.Singleton(MqttTransport, settings=providers.Callable(get_settings))
+
+    # Outbox worker（P4.3：事务性 outbox 可靠发送 run.assign/register-ack）
+    outbox_worker = providers.Factory(
+        OutboxWorker, uow_factory=uow_factory, transport=mqtt_transport
+    )
+
+    # Master MQTT 运行时（P6.4：订阅事件 → 路由投影 + outbox 发送）
+    mqtt_runtime = providers.Factory(
+        MasterMqttRuntime,
+        transport=mqtt_transport,
+        router=message_router,
+        outbox_worker=outbox_worker,
     )

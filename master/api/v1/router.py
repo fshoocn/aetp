@@ -8,6 +8,7 @@ from master.api.v1.routes.projects import router as projects_router
 from master.api.v1.routes.nodes import router as nodes_router
 from master.api.v1.routes.project_devices import router as project_devices_router
 from master.api.v1.routes.project_tasks import router as project_tasks_router
+from master.api.v1.routes.runs import router as runs_router
 from master.api.v1.routes.assets import router as assets_router
 from master.api.v1.routes.events import router as events_router
 from master.api.v1.routes.internal import router as internal_router
@@ -19,6 +20,7 @@ router.include_router(projects_router)
 router.include_router(nodes_router)
 router.include_router(project_devices_router)
 router.include_router(project_tasks_router)
+router.include_router(runs_router)
 router.include_router(assets_router)
 router.include_router(events_router)
 router.include_router(internal_router)

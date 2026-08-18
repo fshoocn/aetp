@@ -106,9 +106,25 @@ async def lifespan(app: FastAPI):
 
     # 平台管理员 bootstrap：若 users 表为空且配置了管理员凭据，自动创建首个 admin
     _bootstrap_admin(app)
+
+    # P6.4：Master MQTT 运行时（订阅 Agent 事件 → 路由投影 + outbox 发送）。
+    # 仅在显式配置了 MQTT broker 时才启动；否则跳过（纯 HTTP/单测模式）。
+    settings = get_settings()
+    if settings.mqtt_host:
+        runtime = container.mqtt_runtime()
+        await runtime.start()
+        app.state.mqtt_runtime = runtime
+        logger.info("Master MQTT 运行时已启动: broker=%s:%s", settings.mqtt_host, settings.mqtt_port)
+    else:
+        logger.info("未配置 MQTT broker，跳过 Master MQTT 运行时")
+
     logger.info("应用启动准备完成")
 
     yield
+
+    mqtt_runtime = getattr(app.state, "mqtt_runtime", None)
+    if mqtt_runtime is not None:
+        await mqtt_runtime.stop()
 
     logger.info("应用生命周期关闭，释放数据库连接")
     container.database().close()

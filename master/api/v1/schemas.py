@@ -118,6 +118,56 @@ class TaskLogOut(BaseModel):
     ts: datetime
 
 
+class RunTriggerRequest(BaseModel):
+    """触发一次 Run（P6.4）。"""
+
+    task_id: str = Field(min_length=1, max_length=64)
+    case_filter: list[str] | None = None
+
+
+class RunOut(BaseModel):
+    """Run 执行摘要响应。"""
+
+    run_id: str
+    project_id: str
+    task_id: str
+    status: str
+    trigger_type: str
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class RunDetailOut(RunOut):
+    """Run 详情（含汇总结果与分片）。"""
+
+    shards: list["ShardOut"] = Field(default_factory=list)
+    result: dict | None = None
+
+
+class ShardOut(BaseModel):
+    """Run 内 Shard 摘要。"""
+
+    shard_id: str
+    shard_index: int
+    case_keys: list[str]
+    status: str
+    final_node: str | None = None
+
+
+class RunLogOut(BaseModel):
+    """Run 执行日志行。"""
+
+    id: int
+    run_id: str
+    node_id: str
+    sequence: int
+    level: str
+    message: str
+    detail: dict | None = None
+    occurred_at: datetime | None = None
+
+
 class ProjectCreateRequest(BaseModel):
     """创建项目请求。"""
 

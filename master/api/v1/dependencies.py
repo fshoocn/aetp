@@ -20,6 +20,8 @@ from master.application.services.project_service import ProjectService
 from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.task_service import TaskService
+from master.application.services.run_trigger_service import RunTriggerService
+from master.application.services.run_projection_service import RunProjectionService
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
 from master.domain.models import User
@@ -74,6 +76,20 @@ def get_task_service(
 ) -> TaskService:
     """从容器解析任务服务。"""
     return container.task_service()
+
+
+def get_run_trigger_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> RunTriggerService:
+    """从容器解析 Run 触发服务（P6.4）。"""
+    return container.run_trigger_service()
+
+
+def get_run_projection_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> RunProjectionService:
+    """从容器解析 Run 投影服务（P6.4）。"""
+    return container.run_projection_service()
 
 
 def get_device_service(
@@ -167,6 +183,12 @@ UowFactoryDep = Annotated[
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
 AuthDep = Annotated[AuthService, Depends(get_auth_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+RunTriggerServiceDep = Annotated[
+    RunTriggerService, Depends(get_run_trigger_service)
+]
+RunProjectionServiceDep = Annotated[
+    RunProjectionService, Depends(get_run_projection_service)
+]
 DeviceServiceDep = Annotated[DeviceService, Depends(get_device_service)]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 ProjectMemberServiceDep = Annotated[
