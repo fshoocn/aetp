@@ -16,6 +16,7 @@ import argparse
 import logging
 import uvicorn
 
+from common.event_loop import selector_loop_factory
 from common.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def main() -> None:
     2. configure(args.env_file) 从外置 .env 文件初始化进程级配置
        （组合根模式：此后所有模块通过 get_settings() 只读获取）
     3. 命令行 --host/--port 优先覆盖 .env 默认值
-    4. uvicorn.run 启动 FastAPI app（使用系统默认事件循环）
+    4. uvicorn.run 启动 FastAPI app（使用 selector 事件循环工厂）
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=None, help="覆盖配置的 http_host（默认 127.0.0.1）")
@@ -50,6 +51,7 @@ def main() -> None:
 
     # 组合根：进程内唯一配置初始化点，此后所有模块用 get_settings() 读取
     settings = configure(args.env_file)
+
     log_path = configure_logging(
         settings.log_file,
         level=settings.log_level,
@@ -70,6 +72,7 @@ def main() -> None:
             host=host,
             port=port,
             reload=args.reload,
+            loop="common.event_loop:selector_loop_factory",
             # 复用 configure_logging 配置的 root 日志（统一 AETP 格式），
             # 不使用 uvicorn 自带的日志格式
             log_config=None,

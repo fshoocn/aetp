@@ -40,3 +40,4 @@ web/.vite/
 *.swp
 .DS_Store
 Thumbs.db
+*.crt

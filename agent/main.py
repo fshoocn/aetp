@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import logging
 
+from common.event_loop import run_with_selector
 from common.logging_config import configure_logging
 
 from agent.config import configure
@@ -51,7 +52,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        asyncio.run(_run(args.env_file))
+        run_with_selector(_run(args.env_file))
     except KeyboardInterrupt:
         logger.info("收到停止信号，Agent 正在关闭")
 
