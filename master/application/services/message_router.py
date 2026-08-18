@@ -25,6 +25,7 @@ from aetp_protocol.payloads import (
     PresencePayload,
     RunAckPayload,
     RunCaseStatusPayload,
+    RunLogCompletePayload,
     RunProgressPayload,
     RunResultPayload,
 )
@@ -124,6 +125,12 @@ class MasterMessageRouter:
                 payload = RunResultPayload.model_validate(envelope.payload)
                 await self._publish(
                     self._projection.handle_result(node_id, payload)
+                )
+                return True
+            if msg_type is MessageType.RUN_LOG_COMPLETE:
+                payload = RunLogCompletePayload.model_validate(envelope.payload)
+                await self._publish(
+                    self._projection.handle_log_complete(node_id, payload)
                 )
                 return True
         except NodePresenceError as exc:

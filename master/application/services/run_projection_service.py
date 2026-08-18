@@ -26,8 +26,10 @@ from typing import Callable
 
 from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.payloads import (
+    CaseResultEntry,
     RunAckPayload,
     RunCaseStatusPayload,
+    RunLogCompletePayload,
     RunProgressPayload,
     RunResultPayload,
 )
@@ -191,10 +193,18 @@ class RunProjectionService:
     def handle_log(
         self, node_id: str, payload: RunLogBatch
     ) -> ProjectionResult:
-        """日志批投影：按 (run_id, sequence) 幂等落库，重复跳过。"""
+        """日志批投影：按 (run_id, sequence) 幂等落库，重复跳过。
+
+        P6.6 日志围栏：run 已 log_complete 时拒绝任何日志条目。
+        """
         with self._uow_factory() as uow:
             run = uow.task_runs.get_by_run_id(payload.run_id)
             if run is None:
+                return ProjectionResult(False)
+            if run.log_complete:
+                logger.debug(
+                    "日志围栏已关闭，拒绝日志: run_id=%s", payload.run_id
+                )
                 return ProjectionResult(False)
 
             inserted = 0
@@ -221,6 +231,42 @@ class RunProjectionService:
                 event_type="run.log",
                 run_id=run.run_id,
                 project_id=run.project_id,
+            )
+
+    def handle_log_complete(
+        self, node_id: str, payload: RunLogCompletePayload
+    ) -> ProjectionResult:
+        """日志围栏（P6.6）：置位 log_complete 并记录末 sequence（幂等）。
+
+        此后 Master 拒绝该 run 的任何日志条目；触发 ``run.log_complete``
+        SSE 事件，前端停止轮询。
+        """
+        with self._uow_factory() as uow:
+            run = uow.task_runs.get_by_run_id(payload.run_id)
+            if run is None:
+                return ProjectionResult(False)
+
+            changed = False
+            if not run.log_complete:
+                run.log_complete = True
+                run.last_log_sequence = payload.last_sequence
+                uow.task_runs.update(run)
+                changed = True
+            # 幂等：已围栏时仍返回 handled=False（不重复广播）
+
+            if not changed:
+                return ProjectionResult(False)
+            return ProjectionResult(
+                True,
+                event_type="run.log_complete",
+                run_id=run.run_id,
+                project_id=run.project_id,
+                payload={
+                    "run_id": payload.run_id,
+                    "last_sequence": payload.last_sequence,
+                    "entry_count": payload.entry_count,
+                    "artifact_refs": payload.artifact_refs,
+                },
             )
 
     # -- result -------------------------------------------------------------
@@ -326,11 +372,26 @@ class RunProjectionService:
     def _persist_case_results(
         self, uow, run_id: str, shard_id: str, attempt_no: int, case_results: list
     ) -> None:
+        """落库结构化 case 结果（D-19：按 attempt 全量保留，不覆盖）。"""
         for item in case_results or []:
-            case_key = item.get("case_key") or item.get("stable_key") or ""
+            case_key = item.case_key if isinstance(item, CaseResultEntry) else item.get("case_key")
             if not case_key:
                 continue
-            status = _CASE_STATUS.get(item.get("status", ""), CaseStatus.ERROR)
+            status_raw = (
+                item.status if isinstance(item, CaseResultEntry) else item.get("status", "")
+            )
+            status = _CASE_STATUS.get(status_raw, CaseStatus.ERROR)
+            duration_ms = (
+                item.duration_ms
+                if isinstance(item, CaseResultEntry)
+                else item.get("duration_ms")
+            )
+            error_summary = (
+                item.error_summary
+                if isinstance(item, CaseResultEntry)
+                else item.get("error_summary")
+            )
+            detail = item.detail if isinstance(item, CaseResultEntry) else item.get("detail")
             existing = uow.run_case_results.get_by_key(
                 run_id, shard_id, case_key, attempt_no
             )
@@ -344,9 +405,9 @@ class RunProjectionService:
                         case_key=case_key,
                         attempt_no=attempt_no,
                         status=status,
-                        duration_ms=item.get("duration_ms"),
-                        error_summary=item.get("error_summary"),
-                        detail=item.get("detail"),
+                        duration_ms=duration_ms,
+                        error_summary=error_summary,
+                        detail=detail,
                     )
                 ]
             )
