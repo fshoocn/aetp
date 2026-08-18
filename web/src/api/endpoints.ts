@@ -112,6 +112,22 @@ export interface ProjectMember {
   updated_at: string;
 }
 
+export interface ProjectNodeBinding {
+  id: number;
+  project_id: string;
+  node_id: string;
+  name: string;
+  hostname: string;
+  status: string;
+  online: boolean;
+  node_enabled: boolean;
+  enabled: boolean;
+  assigned_by: number;
+  created_at: string;
+  updated_at: string;
+  devices: Device[];
+}
+
 export interface AdminUser {
   id: number;
   username: string;
@@ -347,6 +363,19 @@ export const aetpApi = {
     removeMember(projectId: string, userId: number) {
       return api.delete(`${API_V1}/projects/${projectId}/members/${userId}`);
     },
+
+    nodes(projectId: string) {
+      return api.get<ProjectNodeBinding[]>(`${API_V1}/projects/${projectId}/nodes`);
+    },
+    bindNode(projectId: string, nodeId: string) {
+      return api.post<ProjectNodeBinding>(`${API_V1}/projects/${projectId}/nodes`, { node_id: nodeId });
+    },
+    updateNode(projectId: string, nodeId: string, enabled: boolean) {
+      return api.patch<ProjectNodeBinding>(`${API_V1}/projects/${projectId}/nodes/${nodeId}`, { enabled });
+    },
+    removeNode(projectId: string, nodeId: string) {
+      return api.delete(`${API_V1}/projects/${projectId}/nodes/${nodeId}`);
+    },
   },
 
   assets: {
@@ -357,10 +386,16 @@ export const aetpApi = {
       const query = params.toString();
       return api.get<Node[]>(`${API_V1}/nodes${query ? `?${query}` : ""}`);
     },
+    getNode(nodeId: string) {
+      return api.get<Node>(`${API_V1}/nodes/${nodeId}`);
+    },
 
     devices(online?: boolean) {
       const query = online === undefined ? "" : `?online=${online}`;
       return api.get<Device[]>(`${API_V1}/devices${query}`);
+    },
+    getDevice(deviceId: string) {
+      return api.get<Device>(`${API_V1}/devices/${deviceId}`);
     },
   },
 

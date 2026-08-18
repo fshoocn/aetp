@@ -25,6 +25,8 @@ htmlcov/
 **/data/artifacts/
 **/data/scripts/
 
+**/plugins/
+
 # ---- 日志 ----
 **/logs/
 **/*.log
