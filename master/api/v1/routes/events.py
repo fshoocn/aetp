@@ -45,6 +45,10 @@ async def stream_events(
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=_KEEPALIVE_SECONDS)
+                    if event.type == "server.shutdown":
+                        # 生命周期关闭前由 Master 主动通知 SSE 客户端结束流，
+                        # 避免 Uvicorn 只能通过取消任务强行切断长连接。
+                        break
                     payload = json.dumps(
                         {
                             "type": event.type,
@@ -56,6 +60,10 @@ async def stream_events(
                     yield f"data: {payload}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            # Uvicorn 优雅关闭超时后会取消 SSE 生成器；必须立即退订，
+            # 不能等待下一次 keepalive 或继续持有连接。
+            raise
         finally:
             await event_bus.unsubscribe(queue)
             logger.debug("SSE 连接关闭")

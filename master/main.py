@@ -7,6 +7,7 @@ lifespan 中创建依赖注入容器并初始化（建表 + 结构同步），
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -124,7 +125,14 @@ async def lifespan(app: FastAPI):
 
     mqtt_runtime = getattr(app.state, "mqtt_runtime", None)
     if mqtt_runtime is not None:
-        await mqtt_runtime.stop()
+        try:
+            # Broker 断开、SSE 连接或 aiomqtt 消费任务异常时，关闭路径不能
+            # 无限等待；资源清理应有界，避免 Master 进程卡在退出阶段。
+            await asyncio.wait_for(mqtt_runtime.stop(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.error("Master MQTT 运行时关闭超时，继续释放数据库资源")
+        except Exception:
+            logger.exception("Master MQTT 运行时关闭失败，继续释放数据库资源")
 
     logger.info("应用生命周期关闭，释放数据库连接")
     container.database().close()
@@ -139,30 +147,53 @@ app = FastAPI(
 register_application_error_handlers(app)
 
 
-@app.middleware("http")
-async def request_logging(request: Request, call_next):
-    """记录每个 HTTP 请求的方法、路径、状态码和耗时。"""
-    started_at = time.perf_counter()
-    try:
-        response = await call_next(request)
-    except Exception:
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
-        logger.exception(
-            "HTTP 请求异常: %s %s (%.2f ms)",
-            request.method,
-            request.url.path,
-            elapsed_ms,
-        )
-        raise
-    elapsed_ms = (time.perf_counter() - started_at) * 1000
-    logger.info(
-        "HTTP 请求完成: %s %s -> %s (%.2f ms)",
-        request.method,
-        request.url.path,
-        response.status_code,
-        elapsed_ms,
-    )
-    return response
+class RequestLoggingMiddleware:
+    """纯 ASGI 请求日志中间件。
+
+    不使用 ``@app.middleware('http')`` 的 BaseHTTPMiddleware，避免 SSE
+    长连接在 Uvicorn 关闭时通过 AnyIO memory stream 产生额外的
+    ``CancelledError`` ASGI 异常栈。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started_at = time.perf_counter()
+        status_code = 500
+
+        async def logging_send(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, logging_send)
+        except asyncio.CancelledError:
+            # Uvicorn 在 graceful shutdown 超时后取消长连接，这是预期的
+            # 关闭路径，不按应用异常记录堆栈。
+            logger.debug("HTTP 请求因服务关闭取消: %s %s", scope["method"], scope["path"])
+            raise
+        except Exception:
+            logger.exception(
+                "HTTP 请求异常: %s %s (%.2f ms)",
+                scope["method"], scope["path"],
+                (time.perf_counter() - started_at) * 1000,
+            )
+            raise
+        else:
+            logger.info(
+                "HTTP 请求完成: %s %s -> %s (%.2f ms)",
+                scope["method"], scope["path"], status_code,
+                (time.perf_counter() - started_at) * 1000,
+            )
+
+
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(v1_router)
 

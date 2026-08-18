@@ -56,6 +56,8 @@ class MasterMqttRuntime:
         if not self._started:
             return
         self._started = False
+        # 两个后台任务都实现取消语义；先停止 outbox，避免关闭期间继续
+        # claim/publish，再断开 MQTT。CancelledError 由上层 wait_for 处理。
         await self._outbox_worker.stop()
         await self._transport.disconnect()
         logger.info("Master MQTT runtime 已停止")

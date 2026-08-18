@@ -73,6 +73,10 @@ def main() -> None:
             port=port,
             reload=args.reload,
             loop="common.event_loop:selector_loop_factory",
+            # SSE 是长连接；关闭时不要无限等待浏览器连接自行断开。
+            # 到期后 uvicorn 会取消剩余连接并继续执行 lifespan shutdown，
+            # 从而释放 MQTT/数据库资源，避免 Master 卡在 Waiting for connections。
+            timeout_graceful_shutdown=5,
             # 复用 configure_logging 配置的 root 日志（统一 AETP 格式），
             # 不使用 uvicorn 自带的日志格式
             log_config=None,
