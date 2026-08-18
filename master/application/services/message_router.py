@@ -1,0 +1,151 @@
+"""Master 入站 Agent 事件路由（P6.4，§9.6 阶段 E）。
+
+接收 Agent 上报的 events 主题消息，严格校验 Envelope 与 sender 身份后，
+路由到对应的投影/在线服务：
+
+- node.register / node.heartbeat / presence（LWT）→ NodePresenceService；
+- run.ack / run.progress / run.log / run.case-status / run.result →
+  RunProjectionService。
+
+失败 fail-open：单条非法/未识别消息只记录，不中断 MQTT 消费循环。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Callable
+
+from aetp_protocol.envelope import Envelope
+from aetp_protocol.logs import RunLogBatch
+from aetp_protocol.message_types import MessageType
+from aetp_protocol.payloads import (
+    NodeHeartbeatPayload,
+    NodeRegisterPayload,
+    PresencePayload,
+    RunAckPayload,
+    RunCaseStatusPayload,
+    RunProgressPayload,
+    RunResultPayload,
+)
+from aetp_protocol.topics import (
+    parse_topic,
+    validate_message_type_for_topic,
+    validate_sender_for_topic,
+)
+
+from master.application.services.node_presence_service import (
+    NodePresenceError,
+    NodePresenceService,
+)
+from master.application.services.run_projection_service import (
+    ProjectionResult,
+    RunProjectionService,
+)
+from master.adapters.sse.event_bus import EventBus
+from common.transport import MqttMessage
+
+logger = logging.getLogger(__name__)
+
+
+class MasterMessageRouter:
+    """校验并路由 Agent 上报事件（纯依赖，可单测）。"""
+
+    def __init__(
+        self,
+        node_presence: NodePresenceService,
+        projection: RunProjectionService,
+        event_bus: EventBus,
+    ) -> None:
+        self._node_presence = node_presence
+        self._projection = projection
+        self._event_bus = event_bus
+
+    async def handle(self, message: MqttMessage) -> bool:
+        """处理一条入站消息；成功返回 True。"""
+        try:
+            envelope = Envelope.model_validate(
+                json.loads(message.payload.decode("utf-8"))
+            )
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(
+                message.topic, MessageType(envelope.message_type)
+            )
+        except Exception:  # noqa: BLE001 - 协议错误静默忽略
+            logger.warning("入站消息校验失败: topic=%s", message.topic)
+            return False
+
+        msg_type = MessageType(envelope.message_type)
+        try:
+            if msg_type is MessageType.NODE_REGISTER:
+                payload = NodeRegisterPayload.model_validate(envelope.payload)
+                self._node_presence.handle_register(
+                    envelope=envelope, payload=payload
+                )
+                return True
+            if msg_type is MessageType.NODE_HEARTBEAT:
+                payload = NodeHeartbeatPayload.model_validate(envelope.payload)
+                self._node_presence.handle_heartbeat(
+                    envelope=envelope, payload=payload
+                )
+                return True
+            if msg_type is MessageType.PRESENCE:
+                payload = PresencePayload.model_validate(envelope.payload)
+                self._node_presence.handle_presence(
+                    envelope=envelope, payload=payload
+                )
+                return True
+
+            # Run 执行域事件
+            node_id = envelope.sender.id
+            if msg_type is MessageType.RUN_ACK:
+                payload = RunAckPayload.model_validate(envelope.payload)
+                await self._publish(
+                    self._projection.handle_ack(node_id, payload)
+                )
+                return True
+            if msg_type is MessageType.RUN_PROGRESS:
+                payload = RunProgressPayload.model_validate(envelope.payload)
+                await self._publish(
+                    self._projection.handle_progress(node_id, payload)
+                )
+                return True
+            if msg_type is MessageType.RUN_CASE_STATUS:
+                payload = RunCaseStatusPayload.model_validate(envelope.payload)
+                await self._publish(
+                    self._projection.handle_case_status(node_id, payload)
+                )
+                return True
+            if msg_type is MessageType.RUN_LOG:
+                payload = RunLogBatch.model_validate(envelope.payload)
+                await self._publish(self._projection.handle_log(node_id, payload))
+                return True
+            if msg_type is MessageType.RUN_RESULT:
+                payload = RunResultPayload.model_validate(envelope.payload)
+                await self._publish(
+                    self._projection.handle_result(node_id, payload)
+                )
+                return True
+        except NodePresenceError as exc:
+            logger.warning("节点在线投影拒绝: %s", exc)
+            return False
+        except Exception as exc:  # noqa: BLE001 - 单条处理失败不影响循环
+            logger.warning(
+                "事件处理失败: type=%s node=%s error=%s",
+                envelope.message_type,
+                envelope.sender.id,
+                exc,
+            )
+            return False
+
+        logger.debug("未处理的入站消息类型: %s", envelope.message_type)
+        return False
+
+    async def _publish(self, result: ProjectionResult) -> None:
+        """把投影结果转为 SSE 领域事件广播（项目范围）。"""
+        if not result.handled:
+            return
+        data = result.payload or {}
+        data["project_id"] = result.project_id
+        data["run_id"] = result.run_id
+        await self._event_bus.publish(result.event_type, data)
