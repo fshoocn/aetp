@@ -46,6 +46,7 @@ from master.application.services.mqtt_runtime import MasterMqttRuntime
 from master.adapters.mqtt.transport import MqttTransport
 from master.workers.outbox_worker import OutboxWorker
 from master.plugins.registry import create_default_registry
+from master.plugins.manager import PluginManager
 
 
 def _init_database(url: str) -> DatabaseInterface:
@@ -85,7 +86,16 @@ class Container(containers.DeclarativeContainer):
     event_bus = providers.Singleton(EventBus)
 
     # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据
-    plugin_registry = providers.Singleton(create_default_registry)
+    plugin_manager = providers.Singleton(PluginManager, root=providers.Callable(runtime_dir))
+    plugin_registry = providers.Singleton(
+        create_default_registry,
+        disabled_task_types=providers.Callable(
+            lambda manager: manager.disabled_task_types(), plugin_manager
+        ),
+        zip_packages=providers.Callable(
+            lambda manager: manager.load_packages(), plugin_manager
+        ),
+    )
 
     # 文件存储：进程级单例（默认本地 data/ 目录；切云存储只换 adapter）
     storage = providers.Singleton(

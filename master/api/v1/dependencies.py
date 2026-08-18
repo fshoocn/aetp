@@ -24,6 +24,8 @@ from master.application.services.task_service import TaskService
 from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.run_retry_service import RunRetryService
 from master.application.services.run_projection_service import RunProjectionService
+from master.plugins.registry import PluginRegistry
+from master.plugins.manager import PluginManager
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
 from master.domain.models import User
@@ -43,6 +45,16 @@ def get_container(request: Request) -> Container:
             detail="应用未初始化",
         )
     return container
+
+
+def get_plugin_registry(
+    container: Annotated[Container, Depends(get_container)],
+) -> PluginRegistry:
+    """获取已加载的受信任任务类型插件注册表。"""
+    return container.plugin_registry()
+
+def get_plugin_manager(container: Annotated[Container, Depends(get_container)]) -> PluginManager:
+    return container.plugin_manager()
 
 
 def get_database(
@@ -205,6 +217,8 @@ RunTriggerServiceDep = Annotated[
 RunProjectionServiceDep = Annotated[
     RunProjectionService, Depends(get_run_projection_service)
 ]
+PluginRegistryDep = Annotated[PluginRegistry, Depends(get_plugin_registry)]
+PluginManagerDep = Annotated[PluginManager, Depends(get_plugin_manager)]
 RunRetryServiceDep = Annotated[RunRetryService, Depends(get_run_retry_service)]
 ArtifactServiceDep = Annotated[ArtifactService, Depends(get_artifact_service)]
 DeviceServiceDep = Annotated[DeviceService, Depends(get_device_service)]

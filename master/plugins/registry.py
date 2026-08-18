@@ -42,7 +42,7 @@ class PluginRegistry:
             raise ValueError(f"任务类型已注册: {task_type}")
         self._packages[task_type] = package
 
-    def discover(self, group: str = "aetp.plugins") -> int:
+    def discover(self, group: str = "aetp.plugins", disabled_task_types: set[str] | None = None) -> int:
         """从已安装受信任包的 entry points 自动发现并注册 Master 侧插件（§10.6）。
 
         插件包在安装元数据中声明 entry point（如
@@ -63,6 +63,8 @@ class PluginRegistry:
                 raise PluginLoadError(
                     f"插件加载失败: {ep.name} ({ep.value}): {exc}"
                 ) from exc
+            if plugin.metadata.task_type in (disabled_task_types or set()):
+                continue
             self.register(plugin)
             count += 1
         return count
@@ -124,10 +126,17 @@ class PluginRegistry:
         return package.agent_package_ref()
 
 
-def create_default_registry() -> PluginRegistry:
+def create_default_registry(
+    disabled_task_types: set[str] | None = None,
+    zip_packages: list[PluginPackage] | None = None,
+) -> PluginRegistry:
     """创建 Master 默认注册表并加载已安装受信任插件。"""
     registry = PluginRegistry()
-    registry.discover()
+    registry.discover(disabled_task_types=disabled_task_types)
+    for package in zip_packages or []:
+        if package.metadata.task_type in (disabled_task_types or set()):
+            continue
+        registry.register(package)
     return registry
 
 

@@ -12,6 +12,7 @@ from master.api.v1.routes.runs import router as runs_router
 from master.api.v1.routes.assets import router as assets_router
 from master.api.v1.routes.events import router as events_router
 from master.api.v1.routes.internal import router as internal_router
+from master.api.v1.routes.plugins import router as plugins_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
@@ -24,3 +25,4 @@ router.include_router(runs_router)
 router.include_router(assets_router)
 router.include_router(events_router)
 router.include_router(internal_router)
+router.include_router(plugins_router)
