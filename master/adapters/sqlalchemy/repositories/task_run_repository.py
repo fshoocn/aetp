@@ -30,6 +30,8 @@ def _to_domain(orm: TaskRunORM) -> TaskRun:
         status=RunStatus(orm.status),
         started_at=orm.started_at,
         finished_at=orm.finished_at,
+        log_complete=orm.log_complete,
+        last_log_sequence=orm.last_log_sequence,
         created_at=orm.created_at,
         updated_at=orm.updated_at,
     )
@@ -71,6 +73,8 @@ class TaskRunRepositoryImpl(TaskRunRepository):
             status=run.status.value,
             started_at=run.started_at,
             finished_at=run.finished_at,
+            log_complete=run.log_complete,
+            last_log_sequence=run.last_log_sequence,
         )
         self._s.add(orm)
         self._s.flush()
@@ -147,6 +151,8 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         orm.finished_at = run.finished_at
         orm.integration_id = run.integration_id
         orm.trigger_context = run.trigger_context
+        orm.log_complete = run.log_complete
+        orm.last_log_sequence = run.last_log_sequence
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)

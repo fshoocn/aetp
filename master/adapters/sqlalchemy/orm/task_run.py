@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -83,6 +84,14 @@ class TaskRun(Base, TimestampMixin):
     started_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     # sym:finished_at 进入终态的时间
     finished_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    # sym:log_complete 日志围栏：Agent 发布 run.log-complete 后置位（P6.6）
+    log_complete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # sym:last_log_sequence 围栏时记录的末条日志 sequence
+    last_log_sequence: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
 
     # sym:project 所属项目 ORM 关系
     project: Mapped["Project"] = relationship()

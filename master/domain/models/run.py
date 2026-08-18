@@ -59,6 +59,11 @@ class TaskRun:
     started_at: datetime | None = None
     # sym:finished_at 进入终态的时间
     finished_at: datetime | None = None
+    # sym:log_complete 日志围栏：Agent 发布 run.log-complete 后置位，
+    #   Master 此后拒绝该 run 的任何日志条目（P6.6）
+    log_complete: bool = False
+    # sym:last_log_sequence 围栏时记录的末条日志 sequence
+    last_log_sequence: int | None = None
     # sym:created_at 创建时间（UTC）
     created_at: datetime = field(default_factory=utcnow)
     # sym:updated_at 最后更新时间（UTC）
