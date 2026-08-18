@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from master.api.v1.dependencies import (
+    ArtifactServiceDep,
     EventBusDep,
     RunTriggerServiceDep,
     UowFactoryDep,
 )
 from master.api.v1.permissions import ProjectAccessDep, ProjectOperatorDep
 from master.api.v1.schemas import (
+    RunArtifactOut,
     RunDetailOut,
     RunLogOut,
     RunOut,
@@ -166,6 +169,42 @@ def get_run_logs(
         )
         for log in logs
     ]
+
+
+@router.get("/{run_id}/artifacts", response_model=list[RunArtifactOut])
+def list_run_artifacts(
+    project_id: str,
+    run_id: str,
+    _access: ProjectAccessDep,
+    artifact_service: ArtifactServiceDep,
+) -> list[RunArtifactOut]:
+    """列出 Run 的结束产物（报告/日志归档/数据）。"""
+    artifacts = artifact_service.list_by_run(run_id, project_id)
+    return [RunArtifactOut.model_validate(a) for a in artifacts]
+
+
+@router.get("/{run_id}/artifacts/{artifact_id}/download")
+def download_run_artifact(
+    project_id: str,
+    run_id: str,
+    artifact_id: str,
+    _access: ProjectAccessDep,
+    artifact_service: ArtifactServiceDep,
+) -> StreamingResponse:
+    """下载 Run 产物（项目范围，校验 run 归属）。"""
+    artifact = artifact_service.get_by_artifact_id(artifact_id, project_id)
+    if artifact is None or artifact.run_id != run_id:
+        raise HTTPException(status_code=404, detail="产物不存在")
+    return StreamingResponse(
+        artifact_service.open(artifact),
+        media_type="application/octet-stream",
+        headers={
+            "X-Checksum-Sha256": artifact.sha256,
+            "Content-Disposition": (
+                f'attachment; filename="{artifact.file_ref.rsplit("/", 1)[-1]}"'
+            ),
+        },
+    )
 
 
 def _now():

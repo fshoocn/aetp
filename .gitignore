@@ -22,6 +22,8 @@ htmlcov/
 **/data/*.db
 **/data/*.sqlite
 **/*.sqlite3
+**/data/artifacts/
+**/data/scripts/
 
 # ---- 日志 ----
 **/logs/

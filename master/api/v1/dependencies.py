@@ -12,6 +12,7 @@ from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.auth_service import AuthService
+from master.application.services.artifact_service import ArtifactService
 from master.application.services.device_service import DeviceService
 from master.application.services.node_service import NodeService
 from master.application.services.project_member_service import ProjectMemberService
@@ -90,6 +91,13 @@ def get_run_projection_service(
 ) -> RunProjectionService:
     """从容器解析 Run 投影服务（P6.4）。"""
     return container.run_projection_service()
+
+
+def get_artifact_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> ArtifactService:
+    """从容器解析产物服务（P6.6）。"""
+    return container.artifact_service()
 
 
 def get_device_service(
@@ -189,6 +197,7 @@ RunTriggerServiceDep = Annotated[
 RunProjectionServiceDep = Annotated[
     RunProjectionService, Depends(get_run_projection_service)
 ]
+ArtifactServiceDep = Annotated[ArtifactService, Depends(get_artifact_service)]
 DeviceServiceDep = Annotated[DeviceService, Depends(get_device_service)]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 ProjectMemberServiceDep = Annotated[

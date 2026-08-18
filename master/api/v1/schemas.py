@@ -168,6 +168,22 @@ class RunLogOut(BaseModel):
     occurred_at: datetime | None = None
 
 
+class RunArtifactOut(BaseModel):
+    """Run 结束产物响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    artifact_id: str
+    run_id: str
+    shard_id: str | None = None
+    node_id: str | None = None
+    kind: str
+    file_ref: str
+    size: int
+    sha256: str
+    uploaded_at: datetime | None = None
+
+
 class ProjectCreateRequest(BaseModel):
     """创建项目请求。"""
 

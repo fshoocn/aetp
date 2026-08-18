@@ -24,6 +24,8 @@ from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.adapters.storage.local_storage import LocalStorage
 from master.application.services.auth_service import AuthService
+from master.application.services.artifact_storage_service import ArtifactStorageService
+from master.application.services.artifact_service import ArtifactService
 from master.application.services.capability_service import CapabilityService
 from master.application.services.device_service import DeviceService
 from master.application.services.project_service import ProjectService
@@ -93,6 +95,18 @@ class Container(containers.DeclarativeContainer):
     # 脚本文件存储服务（P4.7：上传/下载统一走 Storage 端口）
     script_storage_service = providers.Factory(
         ScriptStorageService, storage=storage
+    )
+
+    # 产物文件存储服务（P6.6：run_artifacts 文件读写统一走 Storage 端口）
+    artifact_storage_service = providers.Factory(
+        ArtifactStorageService, storage=storage
+    )
+
+    # 产物登记/查询服务（P6.6：写引用 + 项目范围查询）
+    artifact_service = providers.Factory(
+        ArtifactService,
+        uow_factory=uow_factory,
+        storage=artifact_storage_service,
     )
 
     # 认证服务
