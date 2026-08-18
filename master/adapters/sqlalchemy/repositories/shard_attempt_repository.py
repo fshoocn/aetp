@@ -73,6 +73,15 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
         ).scalars().one_or_none()
         return _to_domain(orm) if orm is not None else None
 
+    def get_by_attempt_id(self, attempt_id: str) -> ShardAttempt | None:
+        """按 attempt 业务标识查询（dispatch_id == attempt_id，§8.4）。"""
+        orm = self._s.execute(
+            select(ShardAttemptORM)
+            .options(joinedload(ShardAttemptORM.shard))
+            .where(ShardAttemptORM.attempt_id == attempt_id)
+        ).scalars().one_or_none()
+        return _to_domain(orm) if orm is not None else None
+
     def list_by_shard(self, shard_id: str) -> list[ShardAttempt]:
         stmt = (
             select(ShardAttemptORM)

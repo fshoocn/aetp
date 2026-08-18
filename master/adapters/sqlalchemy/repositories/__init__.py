@@ -15,6 +15,7 @@ from .project_repository import ProjectRepositoryImpl
 from .refresh_token_repository import RefreshTokenRepositoryImpl
 from .run_artifact_repository import RunArtifactRepositoryImpl
 from .run_case_result_repository import RunCaseResultRepositoryImpl
+from .run_log_repository import RunLogRepositoryImpl
 from .run_result_repository import RunResultRepositoryImpl
 from .run_shard_repository import RunShardRepositoryImpl
 from .script_case_repository import ScriptCaseRepositoryImpl
@@ -50,4 +51,5 @@ __all__ = [
     "RunCaseResultRepositoryImpl",
     "RunArtifactRepositoryImpl",
     "RunResultRepositoryImpl",
+    "RunLogRepositoryImpl",
 ]

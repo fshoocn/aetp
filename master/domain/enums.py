@@ -200,6 +200,15 @@ class ArtifactKind(StrEnum):
     DATA = "data"
 
 
+class RunLogLevel(StrEnum):
+    """Run 级任务日志等级（§9.4，与 aetp_protocol.LogLevel 一致）。"""
+
+    DEBUG = "debug"
+    INFO = "info"
+    WARN = "warn"
+    ERROR = "error"
+
+
 class OutboxStatus(StrEnum):
     """Outbox 消息投递状态（事务性 outbox，§6.2/§8.6）。
 

@@ -17,6 +17,7 @@ from .run import (
     ShardAttempt,
     TaskRun,
 )
+from .run_log import RunLog
 from .script_case import ScriptCase
 from .task import Task
 from .task_log import TaskLog
@@ -48,6 +49,7 @@ __all__ = [
     "RunCaseResult",
     "RunArtifact",
     "RunResult",
+    "RunLog",
     "Task",
     "TaskLog",
 ]

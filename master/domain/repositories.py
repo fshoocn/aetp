@@ -29,6 +29,7 @@ from master.domain.models import (
     RefreshToken,
     RunArtifact,
     RunCaseResult,
+    RunLog,
     RunResult,
     RunShard,
     ScriptCase,
@@ -209,6 +210,9 @@ class ShardAttemptRepository(ABC):
     ) -> ShardAttempt | None: ...
 
     @abstractmethod
+    def get_by_attempt_id(self, attempt_id: str) -> ShardAttempt | None: ...
+
+    @abstractmethod
     def list_by_shard(self, shard_id: str) -> list[ShardAttempt]: ...
 
     @abstractmethod
@@ -249,6 +253,25 @@ class RunArtifactRepository(ABC):
 
     @abstractmethod
     def list_by_run(self, run_id: str) -> list[RunArtifact]: ...
+
+
+class RunLogRepository(ABC):
+    """Run 执行日志仓储（P6.4，run_logs 表，(run_id, sequence) 幂等）。"""
+
+    @abstractmethod
+    def add(self, log: RunLog) -> RunLog: ...
+
+    @abstractmethod
+    def add_many(self, logs: list[RunLog]) -> list[RunLog]: ...
+
+    @abstractmethod
+    def exists(self, run_id: str, sequence: int) -> bool: ...
+
+    @abstractmethod
+    def list_by_run(self, run_id: str, *, after_sequence: int = 0) -> list[RunLog]: ...
+
+    @abstractmethod
+    def get_max_sequence(self, run_id: str) -> int: ...
 
 
 class RunResultRepository(ABC):
@@ -513,6 +536,7 @@ class UnitOfWork(ABC):
     shard_attempts: ShardAttemptRepository
     run_case_results: RunCaseResultRepository
     run_artifacts: RunArtifactRepository
+    run_logs: RunLogRepository
     run_results: RunResultRepository
     inbox_messages: InboxMessageRepository
     outbox_messages: OutboxMessageRepository

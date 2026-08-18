@@ -26,6 +26,7 @@ from .project_node_binding import ProjectNodeBinding
 from .refresh_token import RefreshToken
 from .run_artifact import RunArtifact
 from .run_case_result import RunCaseResult
+from .run_log import RunLog
 from .run_result import RunResult
 from .run_shard import RunShard
 from .script_case import ScriptCase
@@ -65,6 +66,7 @@ __all__ = [
     "RunCaseResult",
     "RunArtifact",
     "RunResult",
+    "RunLog",
     "Task",
     "TaskLog",
 ]

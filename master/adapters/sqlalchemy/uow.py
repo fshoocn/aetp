@@ -28,6 +28,7 @@ from master.adapters.sqlalchemy.repositories import (
     RefreshTokenRepositoryImpl,
     RunArtifactRepositoryImpl,
     RunCaseResultRepositoryImpl,
+    RunLogRepositoryImpl,
     RunResultRepositoryImpl,
     RunShardRepositoryImpl,
     ScriptCaseRepositoryImpl,
@@ -60,6 +61,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.shard_attempts = ShardAttemptRepositoryImpl(session)
         self.run_case_results = RunCaseResultRepositoryImpl(session)
         self.run_artifacts = RunArtifactRepositoryImpl(session)
+        self.run_logs = RunLogRepositoryImpl(session)
         self.run_results = RunResultRepositoryImpl(session)
         self.inbox_messages = InboxMessageRepositoryImpl(session)
         self.outbox_messages = OutboxMessageRepositoryImpl(session)
