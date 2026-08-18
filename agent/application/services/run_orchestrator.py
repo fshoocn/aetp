@@ -22,12 +22,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Mapping
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.payloads import RunAssignPayload, RunResultPayload
+from aetp_protocol.payloads import (
+    CaseResultEntry,
+    RunAssignPayload,
+    RunLogCompletePayload,
+    RunResultPayload,
+)
 from aetp_protocol.topics import event_topic
 
 from agent.application.services.execution_service import ExecutionService
@@ -42,6 +48,39 @@ logger = logging.getLogger(__name__)
 def _status_value(status: AgentRunStatus) -> str:
     """把 Agent 本地执行状态映射为 run.result 的 status 值。"""
     return status.value
+
+
+@dataclass
+class _Analysis:
+    """analyze_results 的归一化结果。"""
+
+    failed: bool
+    error: str = ""
+    case_results: list[CaseResultEntry] = field(default_factory=list)
+    passed: bool | None = None
+    metrics: dict = field(default_factory=dict)
+    data: dict = field(default_factory=dict)
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping) -> "_Analysis":
+        raw_cases = mapping.get("case_results") or []
+        case_results: list[CaseResultEntry] = []
+        for item in raw_cases:
+            if isinstance(item, CaseResultEntry):
+                case_results.append(item)
+                continue
+            if isinstance(item, Mapping):
+                case_results.append(CaseResultEntry.model_validate(dict(item)))
+                continue
+            raise ValueError(f"case_results 条目类型非法: {type(item).__name__}")
+        passed = mapping.get("passed")
+        return cls(
+            failed=False,
+            case_results=case_results,
+            passed=None if passed is None else bool(passed),
+            metrics=dict(mapping.get("metrics") or {}),
+            data=dict(mapping.get("data") or {}),
+        )
 
 
 class RunOrchestrator:
@@ -149,6 +188,7 @@ class RunOrchestrator:
         await self._collect_logs(plugin, context)
         await self._flush_logs(context)
         await self._report_result(payload, plugin, context, result)
+        await self._report_log_complete(payload, context)
 
     async def _collect_logs(self, plugin, context: TaskContext) -> None:
         """调用插件可选 collect_logs，整合插件内部日志（§9.5 规则 2）。"""
@@ -195,17 +235,33 @@ class RunOrchestrator:
         context: TaskContext,
         result,
     ) -> None:
-        """组装并上报 run.result（稳定 outbox ID，一个 attempt 一个结果）。"""
-        status = _status_value(result.status)
+        """组装并上报 run.result（稳定 outbox ID，一个 attempt 一个结果）。
+
+        P6.5 语义：执行成功后调用 ``analyze_results`` 产出结构化 case 结果；
+        分析入口抛异常时 result 标记 failed（§9.8：保留原始报告 artifact），
+        不把未分析的结果误报为 succeeded（D-19）。
+        """
         analysis = await self._analyze(plugin, result, context)
-        case_results = analysis.get("case_results") or []
-        passed = bool(
-            analysis.get("passed", result.status is AgentRunStatus.SUCCEEDED)
-        )
-        metrics = analysis.get("metrics") or {}
-        data = analysis.get("data") or {}
-        if result.error and not data.get("error"):
-            data = {**data, "error": result.error}
+
+        if analysis.failed:
+            # 分析失败：无论执行结果如何，最终 result 标记 failed
+            status = "failed"
+            passed = False
+            case_results: list[CaseResultEntry] = []
+            data = {"error": analysis.error or "result analysis failed"}
+            metrics: dict = {}
+        else:
+            status = _status_value(result.status)
+            case_results = analysis.case_results
+            passed = bool(
+                analysis.passed
+                if analysis.passed is not None
+                else result.status is AgentRunStatus.SUCCEEDED
+            )
+            metrics = analysis.metrics
+            data = analysis.data
+            if result.error and not data.get("error"):
+                data = {**data, "error": result.error}
 
         run_result = RunResultPayload(
             run_id=payload.run_id,
@@ -213,7 +269,7 @@ class RunOrchestrator:
             attempt_no=payload.attempt_no,
             status=status,
             passed=passed,
-            case_results=list(case_results),
+            case_results=case_results,
             metrics=dict(metrics),
             data=dict(data),
         )
@@ -234,19 +290,35 @@ class RunOrchestrator:
             status,
         )
 
-    async def _analyze(self, plugin, result, context: TaskContext) -> dict:
-        """调用插件 analyze_results 产出结构化结果；失败不阻断 result 上报。"""
+    async def _analyze(self, plugin, result, context: TaskContext) -> _Analysis:
+        """调用插件 analyze_results 产出结构化 case 结果。
+
+        返回 ``_Analysis``：failed 表示分析入口异常（result 应标记 failed）；
+        无 ``analyze_results`` 方法时视为成功但无结构化结果（passed 取执行态）。
+        """
         analyze = getattr(plugin, "analyze_results", None)
         if analyze is None:
-            return {}
+            return _Analysis(failed=False)
+
         try:
             analysis = await analyze(result.summary, context)
-        except Exception:  # noqa: BLE001 - 分析失败降级为原始摘要，不丢 result
+        except Exception as exc:  # noqa: BLE001 - 分析失败标记 failed，不丢 result
             logger.warning(
                 "插件 analyze_results 失败: run_id=%s", context.run_id, exc_info=True
             )
-            return {}
-        return dict(analysis) if isinstance(analysis, Mapping) else {}
+            return _Analysis(failed=True, error=f"{type(exc).__name__}: {exc}")
+
+        if not isinstance(analysis, Mapping):
+            return _Analysis(
+                failed=True, error="analyze_results 必须返回 Mapping"
+            )
+        try:
+            return _Analysis.from_mapping(analysis)
+        except Exception as exc:  # noqa: BLE001 - 结构化结果非法标记 failed
+            logger.warning(
+                "analyze_results 返回结构非法: run_id=%s", context.run_id, exc_info=True
+            )
+            return _Analysis(failed=True, error=f"非法结果结构: {exc}")
 
     async def _report_abort(self, payload: RunAssignPayload) -> None:
         """编排异常兜底：以 failed 结果上报，避免 Run 悬挂。"""
@@ -267,6 +339,37 @@ class RunOrchestrator:
         outbox_id = f"result:{payload.run_id}:{payload.attempt_no}"
         self._ledger.replace_outbox(
             outbox_id, topic, envelope.model_dump(mode="json")
+        )
+
+    async def _report_log_complete(
+        self, payload: RunAssignPayload, context: TaskContext
+    ) -> None:
+        """发布 run.log-complete 日志围栏（P6.6）。
+
+        记录当前 spool 已发布的最大 sequence 与总条数，写入稳定 outbox ID。
+        发布在 result 之后，Master 收到后拒绝该 run 的任何日志条目。
+        """
+        max_sequence = self._ledger.get_published_log_stats(context.run_id)
+        run_log_complete = RunLogCompletePayload(
+            run_id=context.run_id,
+            last_sequence=max_sequence["last_sequence"],
+            entry_count=max_sequence["entry_count"],
+        )
+        envelope = self._envelope(
+            MessageType.RUN_LOG_COMPLETE,
+            context.run_id,
+            run_log_complete.model_dump(mode="json"),
+        )
+        topic = event_topic(self._settings.node_id, "log-complete")
+        outbox_id = f"log-complete:{context.run_id}"
+        self._ledger.replace_outbox(
+            outbox_id, topic, envelope.model_dump(mode="json")
+        )
+        logger.info(
+            "run.log-complete 已入 outbox: run_id=%s last_sequence=%s count=%s",
+            context.run_id,
+            max_sequence["last_sequence"],
+            max_sequence["entry_count"],
         )
 
     # -- 信封构造 -----------------------------------------------------------

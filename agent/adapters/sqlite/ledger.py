@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 import logging
+from typing import Any, cast
 
 from sqlalchemy import (
     JSON,
@@ -36,7 +37,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import CursorResult, Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
@@ -192,18 +193,21 @@ class SQLiteLedger:
         """
         now = _utcnow()
         with self._session_factory.begin() as session:
-            inserted = session.execute(
-                sqlite_insert(AgentRunORM)
-                .values(
-                    run_id=run_id,
-                    attempt_no=attempt_no,
-                    status=AgentRunStatus.CLAIMED.value,
-                    cancelled=False,
-                    result_summary={},
-                    claimed_at=now,
-                    updated_at=now,
-                )
-                .on_conflict_do_nothing(index_elements=["run_id"])
+            inserted = cast(
+                CursorResult[Any],
+                session.execute(
+                    sqlite_insert(AgentRunORM)
+                    .values(
+                        run_id=run_id,
+                        attempt_no=attempt_no,
+                        status=AgentRunStatus.CLAIMED.value,
+                        cancelled=False,
+                        result_summary={},
+                        claimed_at=now,
+                        updated_at=now,
+                    )
+                    .on_conflict_do_nothing(index_elements=["run_id"])
+                ),
             )
             if inserted.rowcount == 1:
                 return True
@@ -279,17 +283,20 @@ class SQLiteLedger:
     ) -> bool:
         """入站去重：首次记录返回 True，已存在返回 False。"""
         with self._session_factory.begin() as session:
-            result = session.execute(
-                sqlite_insert(AgentInboxORM)
-                .values(
-                    origin_id=origin_id,
-                    message_id=message_id,
-                    message_type=message_type,
-                    received_at=_utcnow(),
-                )
-                .on_conflict_do_nothing(
-                    index_elements=["origin_id", "message_id"]
-                )
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    sqlite_insert(AgentInboxORM)
+                    .values(
+                        origin_id=origin_id,
+                        message_id=message_id,
+                        message_type=message_type,
+                        received_at=_utcnow(),
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["origin_id", "message_id"]
+                    )
+                ),
             )
             return result.rowcount == 1
 
@@ -500,22 +507,41 @@ class SQLiteLedger:
                 .values(published=True)
             )
 
+    def get_published_log_stats(self, run_id: str) -> dict:
+        """返回 run 已发布日志统计：{last_sequence, entry_count}。"""
+        with self._session_factory.begin() as session:
+            published = session.execute(
+                select(TaskLogSpoolORM)
+                .where(
+                    TaskLogSpoolORM.run_id == run_id,
+                    TaskLogSpoolORM.published.is_(True),
+                )
+            ).scalars().all()
+        sequences = [row.sequence for row in published]
+        return {
+            "last_sequence": max(sequences) if sequences else 0,
+            "entry_count": len(sequences),
+        }
+
     # ---- 脚本缓存 ----
 
     def cache_script(self, entry: ScriptCacheEntry) -> bool:
         """写入脚本缓存引用；重复（同 hash）返回 False。"""
         with self._session_factory.begin() as session:
-            result = session.execute(
-                sqlite_insert(ScriptCacheORM)
-                .values(
-                    script_id=entry.script_id,
-                    version=entry.version,
-                    sha256=entry.sha256,
-                    path=entry.path,
-                )
-                .on_conflict_do_nothing(
-                    index_elements=["script_id", "version", "sha256"]
-                )
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    sqlite_insert(ScriptCacheORM)
+                    .values(
+                        script_id=entry.script_id,
+                        version=entry.version,
+                        sha256=entry.sha256,
+                        path=entry.path,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["script_id", "version", "sha256"]
+                    )
+                ),
             )
             return result.rowcount == 1
 

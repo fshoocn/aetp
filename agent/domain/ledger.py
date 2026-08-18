@@ -140,6 +140,13 @@ class Ledger(Protocol):
         """标记任务日志已上报。"""
         ...
 
+    def get_published_log_stats(self, run_id: str) -> dict:
+        """返回 run 已发布日志统计：{last_sequence, entry_count}。
+
+        用于 run.log-complete 围栏声明；无日志时 last_sequence=0。
+        """
+        ...
+
     def cache_script(self, entry: ScriptCacheEntry) -> bool:
         """写入脚本缓存引用；重复返回 False。"""
         ...
