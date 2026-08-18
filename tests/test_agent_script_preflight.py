@@ -38,7 +38,7 @@ _SHA = hashlib.sha256(_DATA).hexdigest()
 
 
 def _now() -> datetime:
-    return datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc)
+    return datetime(2099, 1, 1, tzinfo=timezone.utc)
 
 
 _SETTINGS = AgentSettings(

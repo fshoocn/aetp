@@ -186,7 +186,7 @@ def _message(envelope: Envelope) -> MqttMessage:
 
 
 def _now() -> datetime:
-    return datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc).replace(tzinfo=None)
+    return datetime(2099, 1, 1, tzinfo=timezone.utc).replace(tzinfo=None)
 
 
 def test_assign_script_download_failure_rejects_then_retry_succeeds(tmp_path) -> None:
