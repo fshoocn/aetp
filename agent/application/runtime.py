@@ -32,6 +32,7 @@ from agent.application.services.registration_service import (
     RegistrationService,
     RegistrationTimeoutError,
 )
+from agent.application.services.run_orchestrator import RunOrchestrator
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.script_preflight_service import (
     ScriptPreflightService,
@@ -74,6 +75,13 @@ class AgentRuntime:
         self._execution_service = execution_service or ExecutionService(
             settings=settings, ledger=ledger
         )
+        self._orchestrator = RunOrchestrator(
+            settings=settings,
+            ledger=ledger,
+            execution_service=self._execution_service,
+            plugin_registry=plugin_registry,
+            session_id=lambda: registration.session_id,
+        )
         self._dispatcher = dispatcher or CommandDispatcher(
             settings=settings,
             ledger=ledger,
@@ -82,6 +90,7 @@ class AgentRuntime:
             plugin_installer=plugin_installer,
             script_cache=script_cache,
             execution_service=self._execution_service,
+            orchestrator=self._orchestrator,
             session_id=lambda: registration.session_id,
         )
         self._script_preflight = script_preflight or ScriptPreflightService(

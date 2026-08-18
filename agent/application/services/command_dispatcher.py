@@ -38,6 +38,7 @@ from aetp_protocol.topics import (
 )
 
 from agent.application.services.execution_service import ExecutionService
+from agent.application.services.run_orchestrator import RunOrchestrator
 from agent.application.services.script_cache_service import (
     ScriptCacheError,
     ScriptCacheService,
@@ -71,6 +72,7 @@ class CommandDispatcher:
         plugin_installer: "PluginPackageInstaller | None" = None,
         script_cache: ScriptCacheService | None = None,
         execution_service: ExecutionService | None = None,
+        orchestrator: RunOrchestrator | None = None,
         session_id: Callable[[], str] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -81,6 +83,7 @@ class CommandDispatcher:
         self._plugin_installer = plugin_installer
         self._script_cache = script_cache
         self._execution_service = execution_service
+        self._orchestrator = orchestrator
         self._session_id = session_id or (lambda: self._settings.node_id)
         self._now = now or (lambda: datetime.now(timezone.utc))
 
@@ -239,6 +242,11 @@ class CommandDispatcher:
             payload.attempt_no,
             payload.task_type,
         )
+
+        # P6.4：claim 成功并回 ACK 后，交给编排器后台执行（不阻塞命令处理）。
+        if self._orchestrator is not None:
+            self._orchestrator.start(payload)
+
         return True
 
     # -- run.cancel 处理 ----------------------------------------------------
