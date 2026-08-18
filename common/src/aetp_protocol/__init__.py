@@ -26,10 +26,12 @@ from .errors import (
 from .message_types import MessageType
 from .logs import LogLevel, RunLogBatch, RunLogEntry
 from .payloads import (
+    CaseResultEntry,
     PluginPackageRef,
     RegisterAckPayload,
     RunCancelPayload,
     RunCaseStatusPayload,
+    RunLogCompletePayload,
     RunProgressPayload,
     RunResultPayload,
     ScriptParsePayload,
@@ -99,6 +101,8 @@ __all__ = [
     "RunCaseStatusPayload",
     "RunProgressPayload",
     "RunResultPayload",
+    "RunLogCompletePayload",
+    "CaseResultEntry",
     "ScriptParsePayload",
     "ScriptParseResultPayload",
     "ScriptVerifyPayload",

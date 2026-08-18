@@ -261,6 +261,26 @@ class RunCaseStatusPayload(_Strict):
     status: str
 
 
+class CaseResultEntry(_Strict):
+    """结构化 case 级结果（§8.4 run.result.case_results，D-19）。
+
+    CANoe 类插件运行中无 case 级实时数据，结束后由 Agent 面 ``analyze_results``
+    分析报告产出；pytest 类也可实时上报，但最终结果仍以本结构随 ``run.result``
+    一次性上报。``case_key`` 与脚本用例索引的 ``stable_key`` 一致。
+    """
+
+    # sym:case_key 用例稳定键（= script_cases.stable_key）
+    case_key: str = Field(min_length=1, max_length=256)
+    # sym:status 结果状态（passed/failed/skipped/error）
+    status: str = Field(pattern=r"^(passed|failed|skipped|error)$")
+    # sym:duration_ms 执行耗时（毫秒；仅成功统计 avg_duration_s 数据源，D-21）
+    duration_ms: int | None = Field(default=None, ge=0)
+    # sym:error_summary 失败/错误摘要
+    error_summary: str | None = None
+    # sym:detail 结构化详情（断言信息、堆栈等）
+    detail: dict[str, Any] | None = None
+
+
 class RunResultPayload(_Strict):
     """最终结果（§8.4 run.result；一个 attempt 只接收一个最终结果，D-19）。
 
@@ -279,8 +299,8 @@ class RunResultPayload(_Strict):
     status: str
     # sym:passed 是否全部通过
     passed: bool = False
-    # sym:case_results 结构化 case 结果列表（插件 parse_results 产出，D-19）
-    case_results: list[dict[str, Any]] = Field(default_factory=list)
+    # sym:case_results 结构化 case 结果列表（插件 analyze_results 产出，D-19）
+    case_results: list[CaseResultEntry] = Field(default_factory=list)
     # sym:metrics 汇总指标
     metrics: dict[str, Any] = Field(default_factory=dict)
     # sym:data 汇总数据
@@ -291,3 +311,20 @@ class RunResultPayload(_Strict):
     started_at: datetime | None = None
     # sym:finished_at 结束时间
     finished_at: datetime | None = None
+
+
+class RunLogCompletePayload(_Strict):
+    """日志围栏（§8.4 run.log-complete；P6.6）。
+
+    Agent 在执行结束、flush 完剩余 spool 日志后发布；Master 以此为日志
+    围栏：此后拒绝该 run 的任何日志条目并触发 ``run.log_complete`` SSE。
+    """
+
+    # sym:run_id 对应 Run
+    run_id: str
+    # sym:last_sequence 末条日志 sequence（ge=0，0 表示无日志）
+    last_sequence: int = Field(ge=0)
+    # sym:entry_count 日志总条数
+    entry_count: int = Field(ge=0)
+    # sym:artifact_refs 产物引用（报告/日志归档，随围栏一并声明）
+    artifact_refs: list[dict[str, Any]] = Field(default_factory=list)
