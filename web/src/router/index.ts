@@ -52,6 +52,11 @@ const routes = [
         component: () => import("@/views/Plugins.vue"),
       },
       {
+        path: "project-nodes",
+        name: "ProjectNodes",
+        component: () => import("@/views/ProjectNodes.vue"),
+      },
+      {
         path: "devices",
         name: "Devices",
         component: () => import("@/views/Devices.vue"),

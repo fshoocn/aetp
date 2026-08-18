@@ -18,6 +18,7 @@ export function useTaskEvents(queryClient: QueryClient) {
         queryClient.invalidateQueries({ queryKey: ["runs"] });
         queryClient.invalidateQueries({ queryKey: ["run"] });
         queryClient.invalidateQueries({ queryKey: ["assets", "nodes"] });
+        queryClient.invalidateQueries({ queryKey: ["projectNodes"] });
       }
     });
   });

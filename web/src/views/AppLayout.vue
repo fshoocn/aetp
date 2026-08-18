@@ -30,6 +30,10 @@
           <el-icon><Grid /></el-icon>
           <template #title>插件中心</template>
         </el-menu-item>
+        <el-menu-item v-if="canManageProject" index="/project-nodes">
+          <el-icon><Connection /></el-icon>
+          <template #title>项目节点</template>
+        </el-menu-item>
         <el-menu-item index="/devices">
           <el-icon><Cpu /></el-icon>
           <template #title>节点与设备</template>
@@ -124,7 +128,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, Collection, Cpu, Expand, Fold, Grid, List, Odometer, TrendCharts, UserFilled } from "@element-plus/icons-vue";
+import { ArrowDown, Collection, Connection, Cpu, Expand, Fold, Grid, List, Odometer, TrendCharts, UserFilled } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -144,6 +148,7 @@ const pageTitle = computed(() => ({
   Runs: "运行记录",
   RunDetail: "运行详情",
   Plugins: "插件中心",
+  ProjectNodes: "项目节点",
   Devices: "节点与设备",
   Members: "成员与权限",
   Users: "账户审核",
