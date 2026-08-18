@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
@@ -46,6 +47,14 @@ class _ExecPlugin:
     plugin_version = "1.0.0"
     supported_versions = frozenset({"1.0.0"})
     display_name = "E2E Agent"
+    verify_location = "master"
+    parse_location = "master"
+
+    def verify_script(self, script_dir: str, config) -> list[str]:
+        return []
+
+    def parse_cases(self, script_dir: str, config) -> list:
+        return []
 
     async def execute(self, context):
         await context.log("info", "starting")
@@ -70,7 +79,7 @@ class _ExecPlugin:
 
 
 def _payload(**kw) -> RunAssignPayload:
-    base = dict(
+    base: dict[str, Any] = dict(
         project_id="p1",
         task_id="T-1",
         shard_id="SH-1",
@@ -117,6 +126,7 @@ async def test_orchestrator_executes_and_reports_result(tmp_path) -> None:
     await orchestrator._run(_payload())
 
     run = ledger.get_run("R-1")
+    assert run is not None
     assert run.status is AgentRunStatus.SUCCEEDED
 
     envelopes = _claim_outbox(ledger)
@@ -130,7 +140,7 @@ async def test_orchestrator_executes_and_reports_result(tmp_path) -> None:
     assert result.attempt_no == 1
     assert result.status == "succeeded"
     assert result.passed is True
-    assert [c["case_key"] for c in result.case_results] == ["c0", "c1"]
+    assert [c.case_key for c in result.case_results] == ["c0", "c1"]
 
 
 @pytest.mark.asyncio
