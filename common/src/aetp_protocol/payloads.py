@@ -262,10 +262,17 @@ class RunCaseStatusPayload(_Strict):
 
 
 class RunResultPayload(_Strict):
-    """最终结果（§8.4 run.result；一个 attempt 只接收一个最终结果，D-19）。"""
+    """最终结果（§8.4 run.result；一个 attempt 只接收一个最终结果，D-19）。
+
+    ``shard_id`` + ``attempt_no`` 唯一锁定一个 Attempt：attempt_no 是
+    Shard 内序号（多 Shard 各自独立递增），仅靠 run_id + attempt_no 无法
+    唯一定位，必须携带 shard_id。
+    """
 
     # sym:run_id 对应 Run
     run_id: str
+    # sym:shard_id 所属 Shard（与 attempt_no 共同锁定 Attempt）
+    shard_id: str
     # sym:attempt_no 派发尝试序号
     attempt_no: int
     # sym:status 结果状态（succeeded/failed/cancelled/timed_out）
