@@ -27,10 +27,12 @@ import { computed, ref } from "vue";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Connection, Cpu, Refresh, SetUp } from "@element-plus/icons-vue";
 import { aetpApi } from "@/api/endpoints";
+import { useTaskEvents } from "@/composables/useTaskEvents";
 
 const onlyOnline = ref(false);
 const queryClient = useQueryClient();
-const query = useQuery({ queryKey: ["assets", "nodes", onlyOnline], queryFn: () => aetpApi.assets.nodes(onlyOnline.value, true) });
+useTaskEvents(queryClient);
+const query = useQuery({ queryKey: ["assets", "nodes", onlyOnline], queryFn: () => aetpApi.assets.nodes(onlyOnline.value ? true : undefined, true), refetchInterval: 5000 });
 const nodes = computed(() => query.data.value ?? []);
 const visibleNodes = computed(() => nodes.value);
 const loading = computed(() => query.isLoading.value || query.isFetching.value);

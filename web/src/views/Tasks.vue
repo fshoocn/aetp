@@ -23,7 +23,7 @@
         <el-table-column label="目标设备" min-width="180"><template #default="{ row }"><div class="device-cell"><el-icon><Cpu /></el-icon><span>{{ row.device_id }}</span></div></template></el-table-column>
         <el-table-column label="状态" width="130"><template #default="{ row }"><el-tag :type="statusTag(row.status)" effect="light">{{ statusText(row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="创建时间" min-width="180"><template #default="{ row }">{{ fmt(row.created_at) }}</template></el-table-column>
-        <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="primary" @click.stop="gotoTask(row)">查看</el-button></template></el-table-column>
+        <el-table-column label="操作" width="170"><template #default="{ row }"><el-button link type="primary" @click.stop="gotoTask(row)">查看</el-button><el-button v-if="canDispatch" link type="success" :loading="triggeringTaskId === row.task_id" @click.stop="triggerRun(row)">运行</el-button></template></el-table-column>
       </el-table>
       <el-empty v-if="!loading && tasks.length === 0" description="当前筛选条件下没有任务" />
       <div v-if="tasks.length" class="pagination-row"><span>第 {{ page }} 页</span><el-pagination background layout="prev, pager, next" :current-page="page" :page-size="pageSize" :total="total" @current-change="changePage" /></div>
@@ -44,7 +44,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { FormInstance, FormRules } from "element-plus";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { CircleCheck, Cpu, Plus, Refresh, Search } from "@element-plus/icons-vue";
 import { aetpApi, type Task } from "@/api/endpoints";
@@ -77,6 +77,7 @@ const createForm = reactive({ deviceId: "", commandText: "{}" });
 const formRules: FormRules = { deviceId: [{ required: true, message: "请选择目标设备", trigger: "change" }], commandText: [{ required: true, message: "请输入 JSON 参数", trigger: "blur" }] };
 const mutation = useMutation({ mutationFn: () => aetpApi.tasks.create(projectId.value, createForm.deviceId, JSON.parse(createForm.commandText)), onSuccess: () => { ElMessage.success("任务已创建"); createVisible.value = false; queryClient.invalidateQueries({ queryKey: ["tasks"] }); }, onError: (error: Error) => ElMessage.error(error.message) });
 const creating = computed(() => mutation.isPending.value);
+const triggeringTaskId = ref<string | null>(null);
 function openCreate() { createForm.deviceId = ""; createForm.commandText = "{}"; createVisible.value = true; }
 async function createTask() { if (!formRef.value) return; const valid = await formRef.value.validate().catch(() => false); if (!valid) return; try { JSON.parse(createForm.commandText); } catch { ElMessage.error("命令参数必须是合法 JSON"); return; } mutation.mutate(); }
 function applyFilters() { page.value = 1; queryClient.invalidateQueries({ queryKey: ["tasks", "list"] }); }
@@ -84,6 +85,7 @@ function resetFilters() { filters.status = ""; filters.deviceId = ""; page.value
 function changePage(value: number) { page.value = value; }
 function refresh() { queryClient.invalidateQueries({ queryKey: ["tasks"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
 function gotoTask(row: Task) { router.push(`/tasks/${row.task_id}`); }
+async function triggerRun(row: Task) { try { await ElMessageBox.confirm(`确认立即运行任务 ${row.task_id}？`, "下发确认", { type: "warning" }); } catch { return; } triggeringTaskId.value = row.task_id; try { const run = await aetpApi.runs.trigger(projectId.value, row.task_id); ElMessage.success("Run 已创建并进入调度"); router.push(`/runs/${run.run_id}`); } catch (error) { ElMessage.error((error as Error).message); } finally { triggeringTaskId.value = null; } }
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
 function statusText(status: string) { return ({ pending: "待处理", dispatching: "派发中", running: "运行中", cancelling: "取消中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时" } as Record<string, string>)[status] || status; }
 function statusTag(status: string) { return ({ succeeded: "success", running: "warning", cancelling: "warning", dispatching: "info", pending: "info", failed: "danger", timed_out: "danger", cancelled: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }

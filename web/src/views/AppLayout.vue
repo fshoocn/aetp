@@ -22,6 +22,14 @@
           <el-icon><List /></el-icon>
           <template #title>任务队列</template>
         </el-menu-item>
+        <el-menu-item index="/runs">
+          <el-icon><TrendCharts /></el-icon>
+          <template #title>运行记录</template>
+        </el-menu-item>
+        <el-menu-item index="/plugins">
+          <el-icon><Grid /></el-icon>
+          <template #title>插件中心</template>
+        </el-menu-item>
         <el-menu-item index="/devices">
           <el-icon><Cpu /></el-icon>
           <template #title>节点与设备</template>
@@ -116,7 +124,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, Collection, Cpu, Expand, Fold, List, Odometer, UserFilled } from "@element-plus/icons-vue";
+import { ArrowDown, Collection, Cpu, Expand, Fold, Grid, List, Odometer, TrendCharts, UserFilled } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -133,6 +141,9 @@ const pageTitle = computed(() => ({
   Projects: "项目管理",
   Tasks: "任务队列",
   TaskDetail: "任务详情",
+  Runs: "运行记录",
+  RunDetail: "运行详情",
+  Plugins: "插件中心",
   Devices: "节点与设备",
   Members: "成员与权限",
   Users: "账户审核",

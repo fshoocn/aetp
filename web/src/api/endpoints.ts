@@ -128,6 +128,74 @@ export interface TaskQuery {
   offset?: number;
 }
 
+export interface Run {
+  run_id: string;
+  project_id: string;
+  task_id: string;
+  status: string;
+  trigger_type: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface RunShard {
+  shard_id: string;
+  shard_index: number;
+  case_keys: string[];
+  status: string;
+  final_node: string | null;
+}
+
+export interface RunDetail extends Run {
+  shards: RunShard[];
+  result: Record<string, unknown> | null;
+}
+
+export interface RunLog {
+  id: number;
+  run_id: string;
+  node_id: string;
+  sequence: number;
+  level: string;
+  message: string;
+  detail: Record<string, unknown> | null;
+  occurred_at: string | null;
+}
+
+export interface RunArtifact {
+  artifact_id: string;
+  run_id: string;
+  shard_id: string | null;
+  node_id: string | null;
+  kind: string;
+  file_ref: string;
+  size: number;
+  sha256: string;
+  uploaded_at: string | null;
+}
+
+export interface TaskTypePlugin {
+  task_type: string;
+  display_name: string;
+  plugin_version: string;
+  supported_versions: string[];
+  config_schema: Record<string, unknown>;
+  upload_spec: Record<string, unknown>;
+  agent_available: boolean;
+  agent_package: { package_name: string; version: string; entry_point: string } | null;
+}
+
+export interface ManagedPlugin {
+  plugin_id: string;
+  filename: string;
+  task_type: string;
+  version: string;
+  sha256: string;
+  enabled: boolean;
+  installed: boolean;
+}
+
 export const aetpApi = {
   auth: {
     login(username: string, password: string) {
@@ -211,6 +279,36 @@ export const aetpApi = {
     },
   },
 
+  runs: {
+    list(projectId: string, limit = 100, offset = 0) {
+      return api.get<Run[]>(`${API_V1}/projects/${projectId}/runs?limit=${limit}&offset=${offset}`);
+    },
+    trigger(projectId: string, taskId: string, caseFilter?: string[]) {
+      return api.post<Run>(`${API_V1}/projects/${projectId}/runs`, {
+        task_id: taskId,
+        case_filter: caseFilter?.length ? caseFilter : null,
+      });
+    },
+    get(projectId: string, runId: string) {
+      return api.get<RunDetail>(`${API_V1}/projects/${projectId}/runs/${runId}`);
+    },
+    logs(projectId: string, runId: string, afterSequence = 0) {
+      return api.get<RunLog[]>(`${API_V1}/projects/${projectId}/runs/${runId}/logs?after_sequence=${afterSequence}`);
+    },
+    artifacts(projectId: string, runId: string) {
+      return api.get<RunArtifact[]>(`${API_V1}/projects/${projectId}/runs/${runId}/artifacts`);
+    },
+    downloadArtifact(projectId: string, runId: string, artifactId: string) {
+      return api.blob(`${API_V1}/projects/${projectId}/runs/${runId}/artifacts/${artifactId}/download`);
+    },
+    retry(projectId: string, runId: string) {
+      return api.post<Run>(`${API_V1}/projects/${projectId}/runs/${runId}/retry`);
+    },
+    retryFailed(projectId: string, runId: string) {
+      return api.post<Run>(`${API_V1}/projects/${projectId}/runs/${runId}/retry-failed`);
+    },
+  },
+
   projects: {
     list() {
       return api.get<Project[]>(`${API_V1}/projects`);
@@ -264,6 +362,19 @@ export const aetpApi = {
       const query = online === undefined ? "" : `?online=${online}`;
       return api.get<Device[]>(`${API_V1}/devices${query}`);
     },
+  },
+
+  plugins: {
+    list() {
+      return api.get<TaskTypePlugin[]>(`${API_V1}/task-types`);
+    },
+    managed() { return api.get<ManagedPlugin[]>(`${API_V1}/task-types/managed`); },
+    upload(file: File) {
+      return api.upload<ManagedPlugin>(`${API_V1}/task-types/managed`, file);
+    },
+    install(pluginId: string) { return api.post<ManagedPlugin>(`${API_V1}/task-types/managed/${encodeURIComponent(pluginId)}/install`); },
+    setEnabled(pluginId: string, enabled: boolean) { return api.patch<ManagedPlugin>(`${API_V1}/task-types/managed/${encodeURIComponent(pluginId)}?enabled=${enabled}`); },
+    remove(pluginId: string) { return api.delete(`${API_V1}/task-types/managed/${encodeURIComponent(pluginId)}`); },
   },
 
   admin: {

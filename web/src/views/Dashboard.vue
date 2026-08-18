@@ -18,23 +18,23 @@
     <el-alert v-if="!projectId" title="请选择项目" description="从顶部项目选择器选择一个项目后，这里会显示对应的任务与设备。" type="info" show-icon :closable="false" class="page-alert" />
 
     <el-row v-loading="loading" :gutter="14" class="stat-row">
-      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="任务总数" :value="stats.totalTasks"><template #prefix><el-icon class="stat-icon blue"><List /></el-icon></template></el-statistic><span class="stat-caption">当前项目任务记录</span></el-card></el-col>
-      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="执行中" :value="stats.runningTasks"><template #prefix><el-icon class="stat-icon amber"><Timer /></el-icon></template></el-statistic><span class="stat-caption">等待或正在运行</span></el-card></el-col>
-      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="在线设备" :value="stats.onlineDevices"><template #prefix><el-icon class="stat-icon green"><Connection /></el-icon></template></el-statistic><span class="stat-caption">项目节点下的设备</span></el-card></el-col>
+      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="运行总数" :value="stats.totalRuns"><template #prefix><el-icon class="stat-icon blue"><List /></el-icon></template></el-statistic><span class="stat-caption">当前项目 Run 记录</span></el-card></el-col>
+      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="执行中" :value="stats.runningRuns"><template #prefix><el-icon class="stat-icon amber"><Timer /></el-icon></template></el-statistic><span class="stat-caption">等待、派发或正在运行</span></el-card></el-col>
+      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="在线节点" :value="stats.onlineNodes"><template #prefix><el-icon class="stat-icon green"><Connection /></el-icon></template></el-statistic><span class="stat-caption">Master 已注册节点</span></el-card></el-col>
       <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="设备在线率" :value="stats.deviceRate" suffix="%"><template #prefix><el-icon class="stat-icon cyan"><DataLine /></el-icon></template></el-statistic><el-progress :percentage="stats.deviceRate" :show-text="false" :stroke-width="5" color="#17a2a4" /></el-card></el-col>
     </el-row>
 
     <el-row :gutter="14" class="content-row">
       <el-col :xs="24" :lg="16">
         <el-card class="table-card" shadow="never">
-          <template #header><div class="card-heading"><div><strong>最近任务</strong><span>按最新创建时间排列</span></div><el-button text type="primary" @click="router.push('/tasks')">查看全部 <el-icon><ArrowRight /></el-icon></el-button></div></template>
-          <el-table :data="recentTasks" row-key="task_id" @row-click="gotoTask">
-            <el-table-column prop="task_id" label="任务 ID" min-width="170" />
-            <el-table-column prop="device_id" label="目标设备" min-width="150" />
+          <template #header><div class="card-heading"><div><strong>最近运行</strong><span>按最新创建时间排列</span></div><el-button text type="primary" @click="router.push('/runs')">查看全部 <el-icon><ArrowRight /></el-icon></el-button></div></template>
+          <el-table :data="recentRuns" row-key="run_id" @row-click="gotoRun">
+            <el-table-column prop="run_id" label="Run ID" min-width="210" />
+            <el-table-column prop="task_id" label="任务 ID" min-width="150" />
             <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag :type="statusTag(row.status)" effect="light" size="small">{{ statusText(row.status) }}</el-tag></template></el-table-column>
             <el-table-column label="创建时间" min-width="170"><template #default="{ row }">{{ fmt(row.created_at) }}</template></el-table-column>
           </el-table>
-          <el-empty v-if="!loading && recentTasks.length === 0" description="当前项目还没有任务" />
+          <el-empty v-if="!loading && recentRuns.length === 0" description="当前项目还没有运行记录" />
         </el-card>
       </el-col>
       <el-col :xs="24" :lg="8">
@@ -55,7 +55,7 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { ArrowRight, Connection, DataLine, List, Refresh, Timer } from "@element-plus/icons-vue";
-import { aetpApi, type Task } from "@/api/endpoints";
+import { aetpApi, type Run } from "@/api/endpoints";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
 
@@ -65,19 +65,21 @@ const queryClient = useQueryClient();
 useTaskEvents(queryClient);
 const projectId = computed(() => projectStore.currentProjectId ?? "");
 const currentProject = computed(() => projectStore.projects.find((project) => project.project_id === projectId.value));
-const tasksQuery = useQuery({ queryKey: ["tasks", "dashboard", projectId], queryFn: () => aetpApi.tasks.list(projectId.value, { limit: 200 }), enabled: computed(() => !!projectId.value) });
-const devicesQuery = useQuery({ queryKey: ["devices", "dashboard", projectId], queryFn: () => aetpApi.devices.list(projectId.value), enabled: computed(() => !!projectId.value) });
-const loading = computed(() => tasksQuery.isLoading.value || devicesQuery.isLoading.value);
-const queryError = computed(() => (tasksQuery.error.value || devicesQuery.error.value)?.message || "");
-const allTasks = computed(() => tasksQuery.data.value ?? []);
+const runsQuery = useQuery({ queryKey: ["runs", "dashboard", projectId], queryFn: () => aetpApi.runs.list(projectId.value, 200), enabled: computed(() => !!projectId.value), refetchInterval: 5000 });
+const nodesQuery = useQuery({ queryKey: ["assets", "nodes", "dashboard"], queryFn: () => aetpApi.assets.nodes(undefined, true), refetchInterval: 5000 });
+const devicesQuery = useQuery({ queryKey: ["devices", "dashboard", projectId], queryFn: () => aetpApi.devices.list(projectId.value), enabled: computed(() => !!projectId.value), refetchInterval: 5000 });
+const loading = computed(() => runsQuery.isLoading.value || nodesQuery.isLoading.value || devicesQuery.isLoading.value);
+const queryError = computed(() => (runsQuery.error.value || nodesQuery.error.value || devicesQuery.error.value)?.message || "");
+const allRuns = computed(() => runsQuery.data.value ?? []);
+const allNodes = computed(() => nodesQuery.data.value ?? []);
 const allDevices = computed(() => devicesQuery.data.value ?? []);
-const recentTasks = computed(() => allTasks.value.slice(0, 8));
-const stats = computed(() => { const total = allDevices.value.length; const online = allDevices.value.filter((device) => device.online).length; return { totalTasks: allTasks.value.length, runningTasks: allTasks.value.filter((task) => ["pending", "dispatching", "running", "cancelling"].includes(task.status)).length, onlineDevices: online, deviceRate: total ? Math.round((online / total) * 100) : 0 }; });
-function refresh() { queryClient.invalidateQueries({ queryKey: ["tasks"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
-function gotoTask(row: Task) { router.push(`/tasks/${row.task_id}`); }
+const recentRuns = computed(() => allRuns.value.slice(0, 8));
+const stats = computed(() => { const total = allDevices.value.length; const online = allDevices.value.filter((device) => device.online).length; return { totalRuns: allRuns.value.length, runningRuns: allRuns.value.filter((run) => ["created", "dispatched", "acked", "running"].includes(run.status)).length, onlineNodes: allNodes.value.filter((node) => node.online).length, onlineDevices: online, deviceRate: total ? Math.round((online / total) * 100) : 0 }; });
+function refresh() { queryClient.invalidateQueries({ queryKey: ["runs"] }); queryClient.invalidateQueries({ queryKey: ["assets", "nodes"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
+function gotoRun(row: Run) { router.push(`/runs/${row.run_id}`); }
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
-function statusText(status: string) { return ({ pending: "待处理", dispatching: "派发中", running: "运行中", cancelling: "取消中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时" } as Record<string, string>)[status] || status; }
-function statusTag(status: string) { return ({ succeeded: "success", running: "warning", cancelling: "warning", dispatching: "info", pending: "info", failed: "danger", timed_out: "danger", cancelled: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
+function statusText(status: string) { return ({ created: "已创建", dispatched: "已派发", acked: "已确认", running: "运行中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时", lost: "丢失" } as Record<string, string>)[status] || status; }
+function statusTag(status: string) { return ({ succeeded: "success", running: "warning", dispatched: "info", acked: "info", created: "info", failed: "danger", timed_out: "danger", cancelled: "info", lost: "danger" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
 </script>
 
 <style scoped>

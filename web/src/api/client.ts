@@ -123,6 +123,18 @@ async function request<T>(
   return resp.json();
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const token = getToken();
+  const resp = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new ApiError(resp.status, extractDetail(body, `HTTP ${resp.status}`));
+  }
+  return resp.blob();
+}
+
 export const api = {
   get<T>(path: string): Promise<T> {
     return request<T>(path);
@@ -141,5 +153,16 @@ export const api = {
   },
   delete<T = void>(path: string): Promise<T> {
     return request<T>(path, { method: "DELETE" });
+  },
+  blob(path: string): Promise<Blob> {
+    return requestBlob(path);
+  },
+  async upload<T>(path: string, file: File): Promise<T> {
+    const token = getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const resp = await fetch(`${BASE}${path}`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: form });
+    if (!resp.ok) { const body = await resp.json().catch(() => ({})); throw new ApiError(resp.status, extractDetail(body, `HTTP ${resp.status}`)); }
+    return resp.json() as Promise<T>;
   },
 };

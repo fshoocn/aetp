@@ -36,6 +36,22 @@ const routes = [
         props: true,
       },
       {
+        path: "runs",
+        name: "Runs",
+        component: () => import("@/views/Runs.vue"),
+      },
+      {
+        path: "runs/:runId",
+        name: "RunDetail",
+        component: () => import("@/views/RunDetail.vue"),
+        props: true,
+      },
+      {
+        path: "plugins",
+        name: "Plugins",
+        component: () => import("@/views/Plugins.vue"),
+      },
+      {
         path: "devices",
         name: "Devices",
         component: () => import("@/views/Devices.vue"),
