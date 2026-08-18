@@ -40,6 +40,7 @@ from master.application.services.script_download_service import ScriptDownloadSe
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.run_projection_service import RunProjectionService
 from master.application.services.run_trigger_service import RunTriggerService
+from master.application.services.run_retry_service import RunRetryService
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
 from master.adapters.mqtt.transport import MqttTransport
@@ -177,6 +178,13 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         plugin_registry=plugin_registry,
         scheduler=shard_scheduler_service,
+    )
+
+    # Run 重试服务（P6.7：retry=新 Run；retry-failed=失败 case 新 Run，D-20）
+    run_retry_service = providers.Factory(
+        RunRetryService,
+        uow_factory=uow_factory,
+        trigger_service=run_trigger_service,
     )
 
     # 入站 Agent 事件路由（P6.4：严格 Envelope 校验后投影/在线处理）

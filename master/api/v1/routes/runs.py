@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from master.api.v1.dependencies import (
     ArtifactServiceDep,
     EventBusDep,
+    RunRetryServiceDep,
     RunTriggerServiceDep,
     UowFactoryDep,
 )
@@ -212,3 +213,74 @@ def _now():
     from master.domain.time import utcnow
 
     return utcnow()
+
+
+@router.post("/{run_id}/retry", response_model=RunOut, status_code=status.HTTP_201_CREATED)
+async def retry_run(
+    project_id: str,
+    run_id: str,
+    access: ProjectOperatorDep,
+    retry_service: RunRetryServiceDep,
+    event_bus: EventBusDep,
+) -> RunOut:
+    """基于失败 Run 完整重跑（新 Run，trigger_type=retry，D-20）。"""
+    result = await retry_service.retry(
+        run_id,
+        project_id=project_id,
+        triggered_by_user_id=access.user.persisted_id,
+    )
+    await event_bus.publish(
+        "run.created",
+        {
+            "run_id": result.new_run_id,
+            "task_id": result.task_id,
+            "project_id": result.project_id,
+            "original_run_id": result.original_run_id,
+        },
+    )
+    return RunOut(
+        run_id=result.new_run_id,
+        project_id=result.project_id,
+        task_id=result.task_id,
+        status="created",
+        trigger_type="retry",
+        created_at=_now(),
+    )
+
+
+@router.post(
+    "/{run_id}/retry-failed",
+    response_model=RunOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def retry_failed_run(
+    project_id: str,
+    run_id: str,
+    access: ProjectOperatorDep,
+    retry_service: RunRetryServiceDep,
+    event_bus: EventBusDep,
+) -> RunOut:
+    """仅重跑失败 case（新 Run，case 集合=原 Run 失败 case，D-20）。"""
+    result = await retry_service.retry_failed(
+        run_id,
+        project_id=project_id,
+        triggered_by_user_id=access.user.persisted_id,
+    )
+    await event_bus.publish(
+        "run.created",
+        {
+            "run_id": result.new_run_id,
+            "task_id": result.task_id,
+            "project_id": result.project_id,
+            "original_run_id": result.original_run_id,
+            "retried_case_keys": list(result.retried_case_keys),
+        },
+    )
+    return RunOut(
+        run_id=result.new_run_id,
+        project_id=result.project_id,
+        task_id=result.task_id,
+        status="created",
+        trigger_type="retry",
+        created_at=_now(),
+    )

@@ -22,6 +22,7 @@ from master.application.services.script_download_service import ScriptDownloadSe
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.task_service import TaskService
 from master.application.services.run_trigger_service import RunTriggerService
+from master.application.services.run_retry_service import RunRetryService
 from master.application.services.run_projection_service import RunProjectionService
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
@@ -91,6 +92,13 @@ def get_run_projection_service(
 ) -> RunProjectionService:
     """从容器解析 Run 投影服务（P6.4）。"""
     return container.run_projection_service()
+
+
+def get_run_retry_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> RunRetryService:
+    """从容器解析 Run 重试服务（P6.7）。"""
+    return container.run_retry_service()
 
 
 def get_artifact_service(
@@ -197,6 +205,7 @@ RunTriggerServiceDep = Annotated[
 RunProjectionServiceDep = Annotated[
     RunProjectionService, Depends(get_run_projection_service)
 ]
+RunRetryServiceDep = Annotated[RunRetryService, Depends(get_run_retry_service)]
 ArtifactServiceDep = Annotated[ArtifactService, Depends(get_artifact_service)]
 DeviceServiceDep = Annotated[DeviceService, Depends(get_device_service)]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]

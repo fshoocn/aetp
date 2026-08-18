@@ -66,6 +66,7 @@ class RunTriggerService:
         triggered_by_user_id: int | None = None,
         case_filter: list[str] | None = None,
         trigger_type: TriggerType = TriggerType.MANUAL_WEB,
+        trigger_context: dict | None = None,
     ) -> TriggerResult:
         """触发一次 Run（分割 + 创建 + 派发）。"""
         # 1. 加载上下文（不跨事务保留 ORM，逐段读取）
@@ -135,6 +136,7 @@ class RunTriggerService:
                     split_policy=dict(task.split_policy or {}),
                     trigger_type=trigger_type,
                     triggered_by_user_id=triggered_by_user_id,
+                    trigger_context=dict(trigger_context) if trigger_context else None,
                     status=RunStatus.CREATED,
                 )
             )
