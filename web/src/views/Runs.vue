@@ -27,6 +27,7 @@ import { Refresh } from "@element-plus/icons-vue";
 import { aetpApi, type Run } from "@/api/endpoints";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
+import { runStatusText, runStatusTag, triggerText } from "@/utils/statusMaps";
 const router = useRouter(); const projectStore = useProjectStore(); const queryClient = useQueryClient(); useTaskEvents(queryClient);
 const projectId = computed(() => projectStore.currentProjectId ?? "");
 const query = useQuery({ queryKey: ["runs", "list", projectId], queryFn: () => aetpApi.runs.list(projectId.value), enabled: computed(() => !!projectId.value) });
@@ -34,9 +35,8 @@ const runs = computed(() => query.data.value ?? []); const loading = computed(()
 function refresh() { queryClient.invalidateQueries({ queryKey: ["runs"] }); }
 function openRun(run: Run) { router.push(`/runs/${run.run_id}`); }
 function fmt(value: string) { return new Date(value).toLocaleString("zh-CN", { hour12: false }); }
-function triggerText(value: string) { return ({ manual_web: "手动", api: "API", retry: "重试", recovery: "恢复" } as Record<string, string>)[value] || value; }
-function statusText(value: string) { return ({ created: "已创建", dispatched: "已派发", acked: "已确认", running: "运行中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时", lost: "丢失" } as Record<string, string>)[value] || value; }
-function statusTag(value: string) { return ({ succeeded: "success", running: "warning", failed: "danger", timed_out: "danger", cancelled: "info", dispatched: "info", acked: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[value] || "info"; }
+const statusText = runStatusText;
+const statusTag = runStatusTag;
 </script>
 
 <style scoped>.runs-page { max-width: 1480px; margin: 0 auto; }.page-heading { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:22px; }.eyebrow { color:var(--aetp-cyan); font-size:10px; font-weight:800; letter-spacing:.16em; }.page-heading h1 { margin:8px 0 6px; font-size:28px; }.page-heading p { margin:0; color:var(--aetp-muted); font-size:13px; }@media (max-width:760px) {.page-heading { align-items:flex-start; flex-direction:column; gap:15px; }}</style>

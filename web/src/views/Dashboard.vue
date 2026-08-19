@@ -58,6 +58,7 @@ import { ArrowRight, Connection, DataLine, List, Refresh, Timer } from "@element
 import { aetpApi, type Run } from "@/api/endpoints";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
+import { runStatusText, runStatusTag } from "@/utils/statusMaps";
 
 const router = useRouter();
 const projectStore = useProjectStore();
@@ -78,8 +79,8 @@ const stats = computed(() => { const total = allDevices.value.length; const onli
 function refresh() { queryClient.invalidateQueries({ queryKey: ["runs"] }); queryClient.invalidateQueries({ queryKey: ["assets", "nodes"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
 function gotoRun(row: Run) { router.push(`/runs/${row.run_id}`); }
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
-function statusText(status: string) { return ({ created: "已创建", dispatched: "已派发", acked: "已确认", running: "运行中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时", lost: "丢失" } as Record<string, string>)[status] || status; }
-function statusTag(status: string) { return ({ succeeded: "success", running: "warning", dispatched: "info", acked: "info", created: "info", failed: "danger", timed_out: "danger", cancelled: "info", lost: "danger" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
+const statusText = runStatusText;
+const statusTag = runStatusTag;
 </script>
 
 <style scoped>

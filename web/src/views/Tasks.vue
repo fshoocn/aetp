@@ -51,6 +51,7 @@ import { aetpApi, type Task } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
+import { taskStatusText, taskStatusTag } from "@/utils/statusMaps";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -86,9 +87,11 @@ function changePage(value: number) { page.value = value; }
 function refresh() { queryClient.invalidateQueries({ queryKey: ["tasks"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
 function gotoTask(row: Task) { router.push(`/tasks/${row.task_id}`); }
 async function triggerRun(row: Task) { try { await ElMessageBox.confirm(`确认立即运行任务 ${row.task_id}？`, "下发确认", { type: "warning" }); } catch { return; } triggeringTaskId.value = row.task_id; try { const run = await aetpApi.runs.trigger(projectId.value, row.task_id); ElMessage.success("Run 已创建并进入调度"); router.push(`/runs/${run.run_id}`); } catch (error) { ElMessage.error((error as Error).message); } finally { triggeringTaskId.value = null; } }
+const statusText = taskStatusText;
+const statusTag = taskStatusTag;
+
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
-function statusText(status: string) { return ({ pending: "待处理", dispatching: "派发中", running: "运行中", cancelling: "取消中", succeeded: "成功", failed: "失败", cancelled: "已取消", timed_out: "超时" } as Record<string, string>)[status] || status; }
-function statusTag(status: string) { return ({ succeeded: "success", running: "warning", cancelling: "warning", dispatching: "info", pending: "info", failed: "danger", timed_out: "danger", cancelled: "info" } as Record<string, "success" | "danger" | "warning" | "info">)[status] || "info"; }
+
 watch(() => projectId.value, () => { page.value = 1; });
 </script>
 

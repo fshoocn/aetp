@@ -52,6 +52,7 @@ import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { aetpApi } from "@/api/endpoints";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
+import { taskStatusText, taskStatusTag } from "@/utils/statusMaps";
 
 const props = defineProps<{ taskId: string }>();
 const projectStore = useProjectStore();
@@ -88,31 +89,11 @@ function prettyJson(v: unknown): string {
 }
 
 function statusText(s: string) {
-  const map: Record<string, string> = {
-    pending: "待派发",
-    dispatching: "派发中",
-    running: "运行中",
-    cancelling: "取消中",
-    succeeded: "成功",
-    failed: "失败",
-    cancelled: "已取消",
-    timed_out: "超时",
-  };
-  return map[s] ?? s;
+  return taskStatusText(s);
 }
 
 function statusTag(s: string) {
-  const map: Record<string, "success" | "danger" | "warning" | "info"> = {
-    pending: "info",
-    dispatching: "info",
-    running: "warning",
-    cancelling: "warning",
-    succeeded: "success",
-    failed: "danger",
-    cancelled: "info",
-    timed_out: "danger",
-  };
-  return map[s] ?? "info";
+  return taskStatusTag(s);
 }
 
 function fmt(ts: string) {
