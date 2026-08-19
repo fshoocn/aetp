@@ -79,6 +79,19 @@ class ScheduleResult:
     pending_shard_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class SchedulerConfig:
+    """Shard 调度器外部回调配置，聚合可选参数。"""
+
+    download_url_builder: Callable[[str], str] | None = None
+    artifact_upload_url_builder: (
+        Callable[[str, str, str, str], str] | None
+    ) = None
+    plugin_ref_builder: (
+        Callable[[str, str], PluginPackageRef | None] | None
+    ) = None
+
+
 class ShardSchedulerService:
     """将一个 Run 的可调度 Shard 物化为 Attempt + run.assign Outbox。"""
 
@@ -89,19 +102,16 @@ class ShardSchedulerService:
         scheduler: ShardScheduler | None = None,
         capability_service: CapabilityService | None = None,
         master_id: str = "aetp-master",
-        download_url_builder: Callable[[str], str] | None = None,
-        artifact_upload_url_builder: Callable[[str, str, str, str], str]
-        | None = None,
-        plugin_ref_builder: Callable[[str, str], PluginPackageRef | None]
-        | None = None,
+        config: SchedulerConfig | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._scheduler = scheduler or ShardScheduler()
         self._capability = capability_service or CapabilityService()
         self._master_id = master_id
-        self._download_url_builder = download_url_builder
-        self._artifact_upload_url_builder = artifact_upload_url_builder
-        self._plugin_ref_builder = plugin_ref_builder
+        cfg = config or SchedulerConfig()
+        self._download_url_builder = cfg.download_url_builder
+        self._artifact_upload_url_builder = cfg.artifact_upload_url_builder
+        self._plugin_ref_builder = cfg.plugin_ref_builder
 
     def schedule_run(self, run_id: str) -> ScheduleResult:
         """为 Run 尽可能派发 pending Shard。
@@ -119,8 +129,15 @@ class ShardSchedulerService:
 
             scheduled: list[ScheduledShard] = []
             pending: list[str] = []
+
+            # 批量预加载所有 attempts，按 shard_id 分组，避免 N+1 查询
+            all_attempts = uow.shard_attempts.list_by_run(run.run_id)
+            attempts_by_shard: dict[str, list[ShardAttempt]] = {}
+            for a in all_attempts:
+                attempts_by_shard.setdefault(a.shard_id, []).append(a)
+
             for shard in uow.run_shards.list_by_run(run.run_id):
-                attempts = uow.shard_attempts.list_by_shard(shard.shard_id)
+                attempts = attempts_by_shard.get(shard.shard_id, [])
                 if not self._is_dispatchable(shard, attempts):
                     continue
 

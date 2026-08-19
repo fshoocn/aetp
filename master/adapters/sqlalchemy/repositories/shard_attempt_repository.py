@@ -96,6 +96,23 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
+    def list_by_run(self, run_id: str) -> list[ShardAttempt]:
+        """按 run_id 一次查回所有 attempt，避免 N+1 查询。"""
+        from master.adapters.sqlalchemy.orm import TaskRun as TaskRunORM
+        stmt = (
+            select(ShardAttemptORM)
+            .options(joinedload(ShardAttemptORM.shard))
+            .join(ShardAttemptORM.shard)
+            .where(
+                RunShardORM.run_pk
+                == select(TaskRunORM.id)
+                .where(TaskRunORM.run_id == run_id)
+                .scalar_subquery()
+            )
+            .order_by(ShardAttemptORM.shard_pk, ShardAttemptORM.attempt_no)
+        )
+        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+
     def update(self, attempt: ShardAttempt) -> ShardAttempt:
         orm = self._s.get(ShardAttemptORM, attempt.id)
         if orm is None:

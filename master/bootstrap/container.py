@@ -36,7 +36,7 @@ from master.application.services.node_service import NodeService
 from master.application.services.node_presence_service import NodePresenceService
 from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
-from master.application.services.shard_scheduler_service import ShardSchedulerService
+from master.application.services.shard_scheduler_service import SchedulerConfig, ShardSchedulerService
 from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.plugin_download_service import PluginDownloadService
 from master.application.services.script_service import ScriptService
@@ -216,9 +216,12 @@ class Container(containers.DeclarativeContainer):
         ShardSchedulerService,
         uow_factory=uow_factory,
         capability_service=capability_service,
-        download_url_builder=script_download_service.provided.build_download_url,
-        artifact_upload_url_builder=providers.Object(_artifact_upload_url),
-        plugin_ref_builder=providers.Object(_plugin_ref_from_registry),
+        config=providers.Factory(
+            SchedulerConfig,
+            download_url_builder=script_download_service.provided.build_download_url,
+            artifact_upload_url_builder=providers.Object(_artifact_upload_url),
+            plugin_ref_builder=providers.Object(_plugin_ref_from_registry),
+        ),
     )
 
     # Run 投影服务（P6.4：ack/progress/log/result → Run 执行域投影）
