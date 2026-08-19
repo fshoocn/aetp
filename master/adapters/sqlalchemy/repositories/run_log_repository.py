@@ -81,6 +81,23 @@ class RunLogRepositoryImpl(RunLogRepository):
         ).scalar_one_or_none()
         return orm is not None
 
+    def existing_sequences(
+        self, run_id: str, sequences: list[int]
+    ) -> set[int]:
+        """批量查询已存在的 sequence 集合，避免逐条 exists N+1。"""
+        if not sequences:
+            return set()
+        rows = self._s.execute(
+            select(RunLogORM.sequence).where(
+                RunLogORM.run_pk
+                == select(TaskRunORM.id)
+                .where(TaskRunORM.run_id == run_id)
+                .scalar_subquery(),
+                RunLogORM.sequence.in_(sequences),
+            )
+        ).scalars().all()
+        return set(rows)
+
     def list_by_run(self, run_id: str, *, after_sequence: int = 0) -> list[RunLog]:
         stmt = (
             select(RunLogORM)

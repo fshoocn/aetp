@@ -216,6 +216,9 @@ class ShardAttemptRepository(ABC):
     def list_by_shard(self, shard_id: str) -> list[ShardAttempt]: ...
 
     @abstractmethod
+    def list_by_run(self, run_id: str) -> list[ShardAttempt]: ...
+
+    @abstractmethod
     def update(self, attempt: ShardAttempt) -> ShardAttempt: ...
 
 
@@ -266,6 +269,11 @@ class RunLogRepository(ABC):
 
     @abstractmethod
     def exists(self, run_id: str, sequence: int) -> bool: ...
+
+    @abstractmethod
+    def existing_sequences(
+        self, run_id: str, sequences: list[int]
+    ) -> set[int]: ...
 
     @abstractmethod
     def list_by_run(self, run_id: str, *, after_sequence: int = 0) -> list[RunLog]: ...

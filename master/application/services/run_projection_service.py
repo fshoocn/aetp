@@ -217,11 +217,19 @@ class RunProjectionService:
             else:
                 entries = payload.entries
 
-            inserted = 0
-            for entry in entries:
-                if uow.run_logs.exists(payload.run_id, entry.sequence):
-                    continue
-                uow.run_logs.add(
+            # 批量查询已存在的 sequence，避免逐条 exists N+1
+            sequences = [e.sequence for e in entries]
+            existing = uow.run_logs.existing_sequences(
+                payload.run_id, sequences
+            )
+            new_entries = [
+                e for e in entries if e.sequence not in existing
+            ]
+            if not new_entries:
+                return ProjectionResult(False)
+
+            uow.run_logs.add_many(
+                [
                     RunLog(
                         run_id=payload.run_id,
                         shard_id=None,
@@ -232,10 +240,9 @@ class RunProjectionService:
                         detail=dict(entry.detail or {}),
                         occurred_at=entry.occurred_at,
                     )
-                )
-                inserted += 1
-            if inserted == 0:
-                return ProjectionResult(False)
+                    for entry in new_entries
+                ]
+            )
             return ProjectionResult(
                 True,
                 event_type="run.log",
@@ -317,52 +324,14 @@ class RunProjectionService:
             if attempt_status is None:
                 return ProjectionResult(False)
 
-            # 状态机：acked → running → 终态（Agent 无独立 running 消息）
-            if attempt.status is ShardAttemptStatus.ACKED:
-                assert_transition(attempt.status, ShardAttemptStatus.RUNNING)
-                attempt.status = ShardAttemptStatus.RUNNING
-                attempt.started_at = attempt.started_at or utcnow()
-                uow.shard_attempts.update(attempt)
-            assert_transition(attempt.status, attempt_status)
-            attempt.status = attempt_status
-            attempt.finished_at = payload.finished_at or utcnow()
-            uow.shard_attempts.update(attempt)
-
-            # Shard 终态 + 释放设备（dispatching → running → 终态）
-            shard = uow.run_shards.get_by_shard_id(payload.shard_id)
-            if shard is not None:
-                shard_status = _SHARD_TERMINAL.get(payload.status)
-                if shard_status is not None and shard.status not in {
-                    ShardStatus.SUCCEEDED,
-                    ShardStatus.FAILED,
-                    ShardStatus.CANCELLED,
-                    ShardStatus.TIMED_OUT,
-                }:
-                    if shard.status is not ShardStatus.RUNNING:
-                        assert_transition(shard.status, ShardStatus.RUNNING)
-                        shard.status = ShardStatus.RUNNING
-                        uow.run_shards.update(shard)
-                    assert_transition(shard.status, shard_status)
-                    shard.status = shard_status
-                    shard.final_node = node_id
-                    uow.run_shards.update(shard)
-                for device_id in attempt.device_ids:
-                    device = uow.devices.get_by_id(device_id)
-                    if device is not None:
-                        device.status = (
-                            DeviceStatus.ONLINE
-                            if device.online
-                            else DeviceStatus.OFFLINE
-                        )
-                        uow.devices.update(device)
-
-            # case 级结果（D-19：结构化 case 结果由插件分析上报）
+            self._finalize_attempt(uow, attempt, attempt_status, payload)
+            self._finalize_shard_and_release_devices(
+                uow, payload.shard_id, node_id, payload.status, attempt.device_ids
+            )
             self._persist_case_results(
                 uow, run.run_id, payload.shard_id, payload.attempt_no,
                 payload.case_results,
             )
-
-            # Run 级汇总投影（一 Run 一行）
             self._project_run_result(uow, run, node_id, payload)
 
             return ProjectionResult(
@@ -372,6 +341,55 @@ class RunProjectionService:
                 project_id=run.project_id,
                 payload=payload.model_dump(mode="json"),
             )
+
+    def _finalize_attempt(
+        self, uow, attempt, attempt_status, payload: RunResultPayload
+    ) -> None:
+        """推进 attempt 状态：acked → running → 终态。"""
+        if attempt.status is ShardAttemptStatus.ACKED:
+            assert_transition(attempt.status, ShardAttemptStatus.RUNNING)
+            attempt.status = ShardAttemptStatus.RUNNING
+            attempt.started_at = attempt.started_at or utcnow()
+            uow.shard_attempts.update(attempt)
+        assert_transition(attempt.status, attempt_status)
+        attempt.status = attempt_status
+        attempt.finished_at = payload.finished_at or utcnow()
+        uow.shard_attempts.update(attempt)
+
+    def _finalize_shard_and_release_devices(
+        self,
+        uow,
+        shard_id: str,
+        node_id: str,
+        status_str: str,
+        device_ids: list[str],
+    ) -> None:
+        """推进 Shard 到终态并释放占用的设备。"""
+        shard = uow.run_shards.get_by_shard_id(shard_id)
+        if shard is None:
+            return
+        shard_status = _SHARD_TERMINAL.get(status_str)
+        if shard_status is not None and shard.status not in {
+            ShardStatus.SUCCEEDED,
+            ShardStatus.FAILED,
+            ShardStatus.CANCELLED,
+            ShardStatus.TIMED_OUT,
+        }:
+            if shard.status is not ShardStatus.RUNNING:
+                assert_transition(shard.status, ShardStatus.RUNNING)
+                shard.status = ShardStatus.RUNNING
+                uow.run_shards.update(shard)
+            assert_transition(shard.status, shard_status)
+            shard.status = shard_status
+            shard.final_node = node_id
+            uow.run_shards.update(shard)
+        for device_id in device_ids:
+            device = uow.devices.get_by_id(device_id)
+            if device is not None:
+                device.status = (
+                    DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
+                )
+                uow.devices.update(device)
 
     # -- 内部 ---------------------------------------------------------------
 
