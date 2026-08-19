@@ -508,6 +508,9 @@ export const aetpApi = {
     retryFailed(projectId: string, runId: string) {
       return api.post<Run>(`${API_V1}/projects/${projectId}/runs/${runId}/retry-failed`);
     },
+    cancel(projectId: string, runId: string) {
+      return api.post<Run>(`${API_V1}/projects/${projectId}/runs/${runId}/cancel`);
+    },
   },
 
   scripts: {
