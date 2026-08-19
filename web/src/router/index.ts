@@ -47,6 +47,16 @@ const routes = [
         props: true,
       },
       {
+        path: "scripts",
+        name: "Scripts",
+        component: () => import("@/views/Scripts.vue"),
+      },
+      {
+        path: "test-tasks",
+        name: "TestTasks",
+        component: () => import("@/views/TestTasks.vue"),
+      },
+      {
         path: "plugins",
         name: "Plugins",
         component: () => import("@/views/Plugins.vue"),

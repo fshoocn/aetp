@@ -14,6 +14,20 @@
     <el-card v-if="projectId" v-loading="loading" shadow="never">
       <template #header><div class="card-heading"><div><strong>已绑定节点</strong><span>{{ projectStore.currentProject?.name || '当前项目' }}</span></div><el-tag effect="light">{{ bindings.length }} 个节点</el-tag></div></template>
       <el-table :data="bindings" row-key="node_id">
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="cap-panel">
+              <div class="cap-panel-title">节点能力</div>
+              <div v-if="hasCaps(row)" class="cap-grid">
+                <div v-for="cap in capabilityList(row)" :key="cap.key" class="cap-item">
+                  <span class="cap-key">{{ cap.key }}</span>
+                  <span class="cap-value">{{ cap.value }}</span>
+                </div>
+              </div>
+              <div v-else class="cap-empty">节点未上报能力（Agent 启动自动扫描 system/language/serial）</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="节点" min-width="230">
           <template #default="{ row }"><div class="node-cell"><span class="node-mark"><el-icon><Cpu /></el-icon></span><div><strong>{{ row.name || row.node_id }}</strong><small>{{ row.node_id }}</small></div></div></template>
         </el-table-column>
@@ -99,6 +113,44 @@ function openBind() { /* 嵌入式界面，无需弹窗 */ }
 function bind(row: Node) { bindMutation.mutate(row.node_id); }
 function toggle(row: ProjectNodeBinding, enabled: boolean) { toggleMutation.mutate({ nodeId: row.node_id, enabled }); }
 async function remove(row: ProjectNodeBinding) { try { await ElMessageBox.confirm(`确认解绑节点 ${row.node_id}？`, "解绑节点", { type: "warning" }); removeMutation.mutate(row.node_id); } catch { /* cancelled */ } }
+
+// ---- 能力树展示 ----
+interface CapabilityEntry { key: string; value: string; }
+function hasCaps(row: { capabilities?: Record<string, unknown> }): boolean {
+  const caps = row.capabilities || {};
+  return Object.keys(caps).length > 0 && Object.values(caps).some((v) => v != null);
+}
+function capabilityList(row: { capabilities?: Record<string, unknown> }): CapabilityEntry[] {
+  const entries: CapabilityEntry[] = [];
+  const caps = row.capabilities || {};
+  const vehicle = caps.vehicle as { vendors?: Array<{ name: string; buses?: Array<{ bus_type: string; channels?: Array<{ name: string; enabled?: boolean }> }> }> } | null;
+  if (vehicle?.vendors?.length) {
+    for (const vendor of vehicle.vendors) {
+      for (const bus of vendor.buses || []) {
+        const enabled = (bus.channels || []).filter((c) => c.enabled !== false);
+        entries.push({ key: `vehicle.${vendor.name}.${bus.bus_type}`, value: enabled.map((c) => c.name).join(", ") || "-" });
+      }
+    }
+  }
+  const language = caps.language as { runtimes?: Array<{ name: string; version: string }> } | null;
+  if (language?.runtimes?.length) {
+    entries.push({ key: "language", value: language.runtimes.map((r) => `${r.name} ${r.version}`).join("、") });
+  }
+  const system = caps.system as { operating_system?: { name: string; version: string } | null; memory_mb?: number | null; cpu_cores?: number | null } | null;
+  if (system) {
+    if (system.operating_system) entries.push({ key: "system.os", value: `${system.operating_system.name} ${system.operating_system.version}` });
+    if (system.memory_mb != null) entries.push({ key: "system.memory", value: `${system.memory_mb} MB` });
+    if (system.cpu_cores != null) entries.push({ key: "system.cpu", value: `${system.cpu_cores} 核` });
+  }
+  const serial = caps.serial as { ports?: Array<{ function: string; port: string; enabled?: boolean }> } | null;
+  if (serial?.ports?.length) {
+    entries.push({
+      key: "serial",
+      value: serial.ports.map((p) => `${p.function}=${p.port}${p.enabled === false ? "(禁用)" : ""}`).join("、"),
+    });
+  }
+  return entries;
+}
 </script>
 
 <style scoped>
@@ -119,5 +171,12 @@ async function remove(row: ProjectNodeBinding) { try { await ElMessageBox.confir
 .node-cell div { display: flex; flex-direction: column; gap: 3px; }
 .node-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+.cap-panel { padding: 3px 28px 12px 56px; }
+.cap-panel-title { color: #596a78; font-size: 12px; font-weight: 650; margin-bottom: 10px; }
+.cap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 14px; }
+.cap-item { display: flex; align-items: center; gap: 10px; background: #f7f9fb; border: 1px solid #edf1f4; border-radius: 6px; padding: 7px 12px; }
+.cap-key { color: #42566a; font-size: 12px; font-weight: 650; white-space: nowrap; }
+.cap-value { color: #2c3e50; font-size: 12px; word-break: break-all; }
+.cap-empty { color: #96a3ac; font-size: 12px; padding: 6px 0 2px; }
 @media (max-width: 760px) { .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }.heading-actions { width: 100%; justify-content: space-between; } }
 </style>

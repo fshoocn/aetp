@@ -18,8 +18,16 @@
           <el-icon><Collection /></el-icon>
           <template #title>项目管理</template>
         </el-menu-item>
-        <el-menu-item index="/tasks">
+        <el-menu-item index="/scripts">
+          <el-icon><Document /></el-icon>
+          <template #title>脚本库</template>
+        </el-menu-item>
+        <el-menu-item index="/test-tasks">
           <el-icon><List /></el-icon>
+          <template #title>任务定义</template>
+        </el-menu-item>
+        <el-menu-item index="/tasks">
+          <el-icon><Tickets /></el-icon>
           <template #title>任务队列</template>
         </el-menu-item>
         <el-menu-item index="/runs">
@@ -128,7 +136,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, Collection, Connection, Cpu, Expand, Fold, Grid, List, Odometer, TrendCharts, UserFilled } from "@element-plus/icons-vue";
+import { ArrowDown, Collection, Connection, Cpu, Document, Expand, Fold, Grid, List, Odometer, Tickets, TrendCharts, UserFilled } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -143,6 +151,8 @@ const currentProjectId = ref<string | null>(projectStore.currentProjectId);
 const pageTitle = computed(() => ({
   Dashboard: "项目总览",
   Projects: "项目管理",
+  Scripts: "脚本库",
+  TestTasks: "任务定义",
   Tasks: "任务队列",
   TaskDetail: "任务详情",
   Runs: "运行记录",

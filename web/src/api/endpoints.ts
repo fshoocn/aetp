@@ -70,6 +70,8 @@ export interface Node {
   enabled: boolean;
   tags: unknown[];
   capabilities: Record<string, unknown>;
+  plugin_versions: Record<string, string>;
+  load: Record<string, unknown>;
   protocol_version: string;
   last_seen_at: string | null;
   devices: Device[];
@@ -125,6 +127,8 @@ export interface ProjectNodeBinding {
   assigned_by: number;
   created_at: string;
   updated_at: string;
+  capabilities: Record<string, unknown>;
+  plugin_versions: Record<string, string>;
   devices: Device[];
 }
 
@@ -166,6 +170,7 @@ export interface RunShard {
 export interface RunDetail extends Run {
   shards: RunShard[];
   result: Record<string, unknown> | null;
+  case_results: RunCaseResult[];
 }
 
 export interface RunLog {
@@ -210,6 +215,82 @@ export interface ManagedPlugin {
   sha256: string;
   enabled: boolean;
   installed: boolean;
+}
+
+// ---- P7.3 脚本库 ----
+export interface TestScript {
+  script_id: string;
+  project_id: string;
+  task_type: string;
+  name: string;
+  version: number;
+  file_ref: string;
+  size: number;
+  sha256: string;
+  parse_status: "pending" | "parsing" | "parsed" | "failed";
+  parse_location: string;
+  result_parse_location: string;
+  plugin_version: string;
+  created_by: number | null;
+  last_parsed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ScriptCase {
+  case_id: string;
+  script_id: string;
+  stable_key: string;
+  name: string;
+  parent_path: string;
+  tags: string[];
+  params: Record<string, unknown>;
+  avg_duration_s: number | null;
+  duration_samples: number;
+  order_index: number;
+  deleted: boolean;
+}
+
+// ---- P7.4 任务定义 ----
+export interface TestTask {
+  task_id: string;
+  project_id: string;
+  script_id: string;
+  script_version: number;
+  task_type: string;
+  name: string;
+  default_case_selection: string[];
+  node_ids: string[];
+  split_policy: Record<string, unknown>;
+  retry_policy: Record<string, unknown>;
+  timeout_s: number;
+  enabled: boolean;
+  priority: number;
+  created_by: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface TestTaskCreateRequest {
+  name: string;
+  script_id: string;
+  default_case_selection?: string[];
+  node_ids?: string[];
+  split_policy?: Record<string, unknown>;
+  retry_policy?: Record<string, unknown>;
+  timeout_s?: number;
+  priority?: number;
+}
+
+export interface RunCaseResult {
+  run_id: string;
+  shard_id: string;
+  case_key: string;
+  attempt_no: number;
+  status: string;
+  duration_ms: number | null;
+  error_summary: string | null;
+  detail: Record<string, unknown> | null;
 }
 
 export const aetpApi = {
@@ -322,6 +403,51 @@ export const aetpApi = {
     },
     retryFailed(projectId: string, runId: string) {
       return api.post<Run>(`${API_V1}/projects/${projectId}/runs/${runId}/retry-failed`);
+    },
+  },
+
+  scripts: {
+    list(projectId: string) {
+      return api.get<TestScript[]>(`${API_V1}/projects/${projectId}/scripts`);
+    },
+    get(projectId: string, scriptId: string) {
+      return api.get<TestScript>(`${API_V1}/projects/${projectId}/scripts/${scriptId}`);
+    },
+    cases(projectId: string, scriptId: string) {
+      return api.get<ScriptCase[]>(`${API_V1}/projects/${projectId}/scripts/${scriptId}/cases`);
+    },
+    upload(projectId: string, file: File, taskType: string, name: string, config: Record<string, unknown>) {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("task_type", taskType);
+      form.append("name", name);
+      form.append("config", JSON.stringify(config));
+      return api.upload<TestScript>(`${API_V1}/projects/${projectId}/scripts`, form);
+    },
+    reparse(projectId: string, scriptId: string) {
+      return api.post<TestScript>(`${API_V1}/projects/${projectId}/scripts/${scriptId}/parse`);
+    },
+    download(projectId: string, scriptId: string) {
+      return api.blob(`${API_V1}/projects/${projectId}/scripts/${scriptId}/download`);
+    },
+  },
+
+  testTasks: {
+    list(projectId: string, enabled?: boolean) {
+      const query = enabled === undefined ? "" : `?enabled=${enabled}`;
+      return api.get<TestTask[]>(`${API_V1}/projects/${projectId}/test-tasks${query}`);
+    },
+    get(projectId: string, taskId: string) {
+      return api.get<TestTask>(`${API_V1}/projects/${projectId}/test-tasks/${taskId}`);
+    },
+    create(projectId: string, request: TestTaskCreateRequest) {
+      return api.post<TestTask>(`${API_V1}/projects/${projectId}/test-tasks`, request);
+    },
+    update(projectId: string, taskId: string, request: Partial<TestTaskCreateRequest> & { enabled?: boolean }) {
+      return api.patch<TestTask>(`${API_V1}/projects/${projectId}/test-tasks/${taskId}`, request);
+    },
+    remove(projectId: string, taskId: string) {
+      return api.delete(`${API_V1}/projects/${projectId}/test-tasks/${taskId}`);
     },
   },
 
