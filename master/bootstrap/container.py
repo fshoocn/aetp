@@ -49,6 +49,7 @@ from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.run_retry_service import RunRetryService
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
+from master.application.services.notification_service import NotificationService
 from master.adapters.mqtt.transport import MqttTransport
 from master.workers.outbox_worker import OutboxWorker
 from master.plugins.registry import create_default_registry
@@ -273,6 +274,12 @@ class Container(containers.DeclarativeContainer):
         RunRetryService,
         uow_factory=uow_factory,
         trigger_service=run_trigger_service,
+    )
+
+    # 通知管理服务（P7.6：通知端点、事件订阅、投递状态；密钥不回显）
+    notification_service = providers.Factory(
+        NotificationService,
+        uow_factory=uow_factory,
     )
 
     # 入站 Agent 事件路由（P6.4：严格 Envelope 校验后投影/在线处理）

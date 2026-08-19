@@ -16,6 +16,11 @@ from master.api.v1.routes.assets import router as assets_router
 from master.api.v1.routes.events import router as events_router
 from master.api.v1.routes.internal import router as internal_router
 from master.api.v1.routes.plugins import router as plugins_router
+from master.api.v1.routes.notifications import (
+    endpoints_router as notification_endpoints_router,
+    subscriptions_router as event_subscriptions_router,
+    deliveries_router as event_deliveries_router,
+)
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
@@ -32,3 +37,6 @@ router.include_router(assets_router)
 router.include_router(events_router)
 router.include_router(internal_router)
 router.include_router(plugins_router)
+router.include_router(notification_endpoints_router)
+router.include_router(event_subscriptions_router)
+router.include_router(event_deliveries_router)

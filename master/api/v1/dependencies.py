@@ -28,6 +28,7 @@ from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
 from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.run_retry_service import RunRetryService
+from master.application.services.notification_service import NotificationService
 from master.application.services.run_projection_service import RunProjectionService
 from master.plugins.registry import PluginRegistry
 from master.plugins.manager import PluginManager
@@ -285,3 +286,15 @@ ScriptVerificationServiceDep = Annotated[
     ScriptVerificationService, Depends(get_script_verification_service)
 ]
 TestTaskServiceDep = Annotated[TestTaskService, Depends(get_test_task_service)]
+
+
+def get_notification_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> NotificationService:
+    """从容器解析通知管理服务（P7.6）。"""
+    return container.notification_service()
+
+
+NotificationServiceDep = Annotated[
+    NotificationService, Depends(get_notification_service)
+]

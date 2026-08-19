@@ -113,3 +113,23 @@ def require_project_operator(access: ProjectAccessDep) -> ProjectAccess:
 
 ProjectManagerDep = Annotated[ProjectAccess, Depends(require_project_manager)]
 ProjectOperatorDep = Annotated[ProjectAccess, Depends(require_project_operator)]
+
+
+def require_project_owner(access: ProjectAccessDep) -> ProjectAccess:
+    """要求项目 owner 或平台管理员。"""
+    if access.is_platform_admin:
+        return access
+    if access.project_role != ProjectRole.OWNER:
+        logger.warning(
+            "项目 owner 权限拒绝: user_id=%s, role=%s",
+            access.user.id,
+            access.project_role,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要项目 owner 权限",
+        )
+    return access
+
+
+ProjectOwnerDep = Annotated[ProjectAccess, Depends(require_project_owner)]
