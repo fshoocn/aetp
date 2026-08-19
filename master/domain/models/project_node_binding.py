@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from aetp_protocol.capabilities import NodeCapabilities
+
 from master.domain.models.device import Device
 
 
@@ -40,4 +42,6 @@ class ProjectNodeBindingView:
     assigned_by: int
     created_at: datetime
     updated_at: datetime
+    capabilities: NodeCapabilities = field(default_factory=NodeCapabilities)
+    plugin_versions: dict[str, str] = field(default_factory=dict)
     devices: list[Device] = field(default_factory=list)

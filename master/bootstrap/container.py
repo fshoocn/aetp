@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dependency_injector import containers, providers
+from urllib.parse import quote, urlencode
 
 from master.config import get_settings, runtime_dir
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
@@ -37,6 +38,8 @@ from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
 from master.application.services.shard_scheduler_service import ShardSchedulerService
 from master.application.services.script_download_service import ScriptDownloadService
+from master.application.services.plugin_download_service import PluginDownloadService
+from master.application.services.script_service import ScriptService
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.run_projection_service import RunProjectionService
 from master.application.services.run_trigger_service import RunTriggerService
@@ -69,6 +72,26 @@ def _plugin_ref_from_registry(
     return Container.plugin_registry().agent_package_ref(task_type)
 
 
+def _artifact_upload_url(
+    run_id: str, project_id: str, node_id: str, shard_id: str
+) -> str:
+    """构造 Agent 上传 Run 产物的内部地址。"""
+    base_url = get_settings().public_base_url.rstrip("/")
+    if not base_url:
+        return ""
+    query = urlencode(
+        {
+            "project_id": project_id,
+            "node_id": node_id,
+            "shard_id": shard_id,
+        }
+    )
+    return (
+        f"{base_url}/api/v1/internal/runs/{quote(run_id, safe='')}/artifacts"
+        f"?{query}"
+    )
+
+
 class Container(containers.DeclarativeContainer):
     """AETP Master 应用容器。"""
 
@@ -86,7 +109,19 @@ class Container(containers.DeclarativeContainer):
     event_bus = providers.Singleton(EventBus)
 
     # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据
-    plugin_manager = providers.Singleton(PluginManager, root=providers.Callable(runtime_dir))
+    plugin_download_service = providers.Factory(
+        PluginDownloadService,
+        secret=providers.Callable(_internal_signing_secret),
+        base_url=providers.Callable(lambda: get_settings().public_base_url),
+        ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
+    )
+    plugin_manager = providers.Singleton(
+        PluginManager,
+        # 存储目录在 data/plugins 下（与脚本/产物存储一致），
+        # 绝不可用 master/plugins 源码目录，避免污染 Python 包
+        root=providers.Callable(lambda: runtime_dir() / "data"),
+        agent_download_builder=plugin_download_service.provided.build_download_url,
+    )
     plugin_registry = providers.Singleton(
         create_default_registry,
         disabled_task_types=providers.Callable(
@@ -106,6 +141,14 @@ class Container(containers.DeclarativeContainer):
     # 脚本文件存储服务（P4.7：上传/下载统一走 Storage 端口）
     script_storage_service = providers.Factory(
         ScriptStorageService, storage=storage
+    )
+
+    # 脚本上传/解析服务（P7.3：upload_spec 校验 → verify → parse → 写库）
+    script_service = providers.Factory(
+        ScriptService,
+        uow_factory=uow_factory,
+        plugin_registry=plugin_registry,
+        storage=script_storage_service,
     )
 
     # 产物文件存储服务（P6.6：run_artifacts 文件读写统一走 Storage 端口）
@@ -174,6 +217,7 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         capability_service=capability_service,
         download_url_builder=script_download_service.provided.build_download_url,
+        artifact_upload_url_builder=providers.Object(_artifact_upload_url),
         plugin_ref_builder=providers.Object(_plugin_ref_from_registry),
     )
 

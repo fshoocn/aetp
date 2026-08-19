@@ -16,9 +16,9 @@ import sys
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from aetp_protocol.plugin import PluginPackage
+from aetp_protocol.plugin import AgentPackageSpec, PluginPackage
 
 
 @dataclass
@@ -37,11 +37,17 @@ class PluginManager:
 
     MAX_SIZE = 100 * 1024 * 1024
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        agent_download_builder: Callable[[str], str] | None = None,
+    ) -> None:
         self.root = root / "plugins"
         self.archives = self.root / "archives"
         self.install_dir = self.root / "packages"
         self.manifest_path = self.root / "manifest.json"
+        self._agent_download_builder = agent_download_builder
         self.archives.mkdir(parents=True, exist_ok=True)
         self.install_dir.mkdir(parents=True, exist_ok=True)
 
@@ -111,7 +117,12 @@ class PluginManager:
         self._save(records)
 
     def load_packages(self) -> list[PluginPackage]:
-        """加载已安装且启用的 ZIP 插件；仅在 Master 启动时调用。"""
+        """加载已安装且启用的 ZIP 插件；仅在 Master 启动时调用。
+
+        为每个已安装插件注入 ``agent_package``（可分发元数据）：Agent 派发
+        时携带 ``plugin_ref``（签名下载 URL + sha256 + entry_point），
+        Agent 检查本地版本、缺失时下载安装（§18.8）。
+        """
         packages: list[PluginPackage] = []
         for record in self.list():
             if not record.enabled or not record.installed:
@@ -120,8 +131,39 @@ class PluginManager:
             package = self._load_main(destination, record.plugin_id)
             if not isinstance(package, PluginPackage):
                 raise ValueError(f"插件 {record.plugin_id} 的 main.py 未导出有效 package")
+            package = self._with_agent_package(package, record)
             packages.append(package)
         return packages
+
+    def _with_agent_package(
+        self, package: PluginPackage, record: ManagedPlugin
+    ) -> PluginPackage:
+        """为已安装 ZIP 插件构造可分发 Agent 包元数据（含签名下载 URL）。"""
+        if package.metadata.agent_package is not None:
+            return package
+        download_url = (
+            self._agent_download_builder(record.plugin_id)
+            if self._agent_download_builder is not None
+            else ""
+        )
+        metadata = package.metadata
+        import dataclasses
+
+        metadata = dataclasses.replace(
+            metadata,
+            agent_package=AgentPackageSpec(
+                package_name=record.filename,
+                version=record.version,
+                download_url=download_url,
+                sha256=record.sha256,
+                entry_point="main.py:package",
+            ),
+        )
+        return PluginPackage(
+            metadata=metadata,
+            master=package.master,
+            agent=package.agent,
+        )
 
     def disabled_task_types(self) -> set[str]:
         return {item.task_type for item in self.list() if not item.enabled}

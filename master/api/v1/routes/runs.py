@@ -15,6 +15,7 @@ from master.api.v1.dependencies import (
 from master.api.v1.permissions import ProjectAccessDep, ProjectOperatorDep
 from master.api.v1.schemas import (
     RunArtifactOut,
+    RunCaseResultOut,
     RunDetailOut,
     RunLogOut,
     RunOut,
@@ -100,13 +101,14 @@ def get_run(
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
 ) -> RunDetailOut:
-    """查询 Run 详情（含 Shard 与汇总结果）。"""
+    """查询 Run 详情（含 Shard、汇总结果与 case×attempt 结果矩阵，P7.5）。"""
     with uow_factory() as uow:
         run = uow.task_runs.get_by_run_id(run_id, project_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run 不存在")
         shards = uow.run_shards.list_by_run(run_id)
         result = uow.run_results.get_by_run_id(run_id)
+        case_results = uow.run_case_results.list_by_run(run_id)
     return RunDetailOut(
         run_id=run.run_id,
         project_id=run.project_id,
@@ -140,6 +142,19 @@ def get_run(
             if result is not None
             else None
         ),
+        case_results=[
+            RunCaseResultOut(
+                run_id=c.run_id,
+                shard_id=c.shard_id,
+                case_key=c.case_key,
+                attempt_no=c.attempt_no,
+                status=c.status.value,
+                duration_ms=c.duration_ms,
+                error_summary=c.error_summary,
+                detail=c.detail,
+            )
+            for c in case_results
+        ],
     )
 
 

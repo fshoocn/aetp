@@ -202,13 +202,23 @@ class RunProjectionService:
             if run is None:
                 return ProjectionResult(False)
             if run.log_complete:
-                logger.debug(
-                    "日志围栏已关闭，拒绝日志: run_id=%s", payload.run_id
-                )
-                return ProjectionResult(False)
+                last_sequence = run.last_log_sequence or 0
+                entries = [
+                    entry
+                    for entry in payload.entries
+                    if entry.sequence <= last_sequence
+                ]
+                if not entries:
+                    logger.debug(
+                        "日志围栏已关闭，拒绝超范围日志: run_id=%s",
+                        payload.run_id,
+                    )
+                    return ProjectionResult(False)
+            else:
+                entries = payload.entries
 
             inserted = 0
-            for entry in payload.entries:
+            for entry in entries:
                 if uow.run_logs.exists(payload.run_id, entry.sequence):
                     continue
                 uow.run_logs.add(

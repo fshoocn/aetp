@@ -90,6 +90,8 @@ class ShardSchedulerService:
         capability_service: CapabilityService | None = None,
         master_id: str = "aetp-master",
         download_url_builder: Callable[[str], str] | None = None,
+        artifact_upload_url_builder: Callable[[str, str, str, str], str]
+        | None = None,
         plugin_ref_builder: Callable[[str, str], PluginPackageRef | None]
         | None = None,
     ) -> None:
@@ -98,6 +100,7 @@ class ShardSchedulerService:
         self._capability = capability_service or CapabilityService()
         self._master_id = master_id
         self._download_url_builder = download_url_builder
+        self._artifact_upload_url_builder = artifact_upload_url_builder
         self._plugin_ref_builder = plugin_ref_builder
 
     def schedule_run(self, run_id: str) -> ScheduleResult:
@@ -338,6 +341,14 @@ class ShardSchedulerService:
             script_ref["download_url"] = self._download_url_builder(
                 script.script_id
             )
+        artifact_upload_url = None
+        if self._artifact_upload_url_builder is not None:
+            artifact_upload_url = self._artifact_upload_url_builder(
+                run.run_id,
+                run.project_id,
+                assignment.node.node_id,
+                shard.shard_id,
+            ) or None
         plugin_ref = (
             self._plugin_ref_builder(task.task_type, script.plugin_version)
             if self._plugin_ref_builder is not None
@@ -366,6 +377,7 @@ class ShardSchedulerService:
             plugin_version=script.plugin_version,
             plugin_ref=plugin_ref,
             script_ref=script_ref,
+            artifact_upload_url=artifact_upload_url,
             case_keys=list(shard.case_keys),
             execution_params=dict(shard.execution_params),
             timeout_s=task.timeout_s,

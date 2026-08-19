@@ -19,8 +19,11 @@ from master.application.services.project_member_service import ProjectMemberServ
 from master.application.services.project_node_binding_service import ProjectNodeBindingService
 from master.application.services.project_service import ProjectService
 from master.application.services.script_download_service import ScriptDownloadService
+from master.application.services.plugin_download_service import PluginDownloadService
+from master.application.services.script_service import ScriptService
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.task_service import TaskService
+from master.application.services.test_task_service import TestTaskService
 from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.run_retry_service import RunRetryService
 from master.application.services.run_projection_service import RunProjectionService
@@ -162,11 +165,32 @@ def get_script_download_service(
     return container.script_download_service()
 
 
+def get_plugin_download_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> PluginDownloadService:
+    """从容器解析插件签名下载服务（P5.5）。"""
+    return container.plugin_download_service()
+
+
 def get_script_storage_service(
     container: Annotated[Container, Depends(get_container)],
 ) -> ScriptStorageService:
     """从容器解析脚本文件存储服务（P4.7）。"""
     return container.script_storage_service()
+
+
+def get_script_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> ScriptService:
+    """从容器解析脚本上传/解析服务（P7.3）。"""
+    return container.script_service()
+
+
+def get_test_task_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> TestTaskService:
+    """从容器解析测试任务定义服务（P4.5/P7.4）。"""
+    return container.test_task_service()
 
 
 def get_current_user(
@@ -233,6 +257,11 @@ NodeServiceDep = Annotated[NodeService, Depends(get_node_service)]
 ScriptDownloadServiceDep = Annotated[
     ScriptDownloadService, Depends(get_script_download_service)
 ]
+PluginDownloadServiceDep = Annotated[
+    PluginDownloadService, Depends(get_plugin_download_service)
+]
 ScriptStorageServiceDep = Annotated[
     ScriptStorageService, Depends(get_script_storage_service)
 ]
+ScriptServiceDep = Annotated[ScriptService, Depends(get_script_service)]
+TestTaskServiceDep = Annotated[TestTaskService, Depends(get_test_task_service)]

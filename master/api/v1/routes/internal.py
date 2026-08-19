@@ -4,8 +4,11 @@ P4.7 脚本签名下载：Agent 携带 ``run.assign`` 中签发的限时
 ``download_url`` 访问，校验 HMAC 签名与过期后返回脚本包，响应头附
 ``X-Checksum-Sha256`` 供 Agent 校验内容哈希（§7.4/§18.8）。
 
-文件读写统一经 ``ScriptStorageService``（Storage 端口），不直接
-访问文件系统，便于将来切换到 OSS/S3。
+P5.5 插件签名下载：Agent 检查本地插件版本缺失/不兼容时，携带 ``plugin_ref``
+中的限时 ``download_url`` 下载同一插件包的 ZIP 分发，校验 sha256 后安装
+（§18.8）。
+
+文件读写统一经 ``Storage`` 端口/受控插件目录，不直接访问文件系统。
 """
 
 from __future__ import annotations
@@ -15,6 +18,8 @@ from fastapi.responses import StreamingResponse
 
 from master.api.v1.dependencies import (
     ArtifactServiceDep,
+    PluginDownloadServiceDep,
+    PluginManagerDep,
     ScriptDownloadServiceDep,
     ScriptStorageServiceDep,
     UowFactoryDep,
@@ -57,6 +62,50 @@ def download_script(
         headers={
             "X-Checksum-Sha256": script.sha256,
             "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.get("/plugins/{plugin_id}/download")
+def download_plugin(
+    plugin_id: str,
+    expires: int,
+    signature: str,
+    plugin_manager: PluginManagerDep,
+    download_service: PluginDownloadServiceDep,
+) -> StreamingResponse:
+    """按签名 URL 下载已安装插件包的 ZIP 分发（Agent 校验 sha256 后安装）。
+
+    §18.8：Agent 收到 ``run.assign`` 时检查本地插件版本，缺失或版本不兼容
+    时经本端点下载同一插件包，校验 SHA-256 后加载执行。
+    """
+    if not download_service.verify(plugin_id, expires, signature):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="签名无效或已过期",
+        )
+    record = None
+    for item in plugin_manager.list():
+        if item.plugin_id == plugin_id:
+            record = item
+            break
+    if record is None or not record.installed or not record.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="插件不存在或未安装",
+        )
+    archive = plugin_manager.archives / f"{record.sha256}.zip"
+    if not archive.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="插件包文件缺失",
+        )
+    return StreamingResponse(
+        open(archive, "rb"),
+        media_type="application/zip",
+        headers={
+            "X-Checksum-Sha256": record.sha256,
+            "Content-Disposition": f'attachment; filename="{record.filename}"',
         },
     )
 

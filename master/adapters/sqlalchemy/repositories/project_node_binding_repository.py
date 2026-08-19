@@ -132,6 +132,8 @@ class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
     def _to_view(
         binding: BindingORM, node: NodeORM, project_id: str
     ) -> ProjectNodeBindingView:
+        from aetp_protocol.capabilities import NodeCapabilities
+
         return ProjectNodeBindingView(
             id=binding.id,
             project_id=project_id,
@@ -145,5 +147,9 @@ class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
             assigned_by=binding.assigned_by,
             created_at=binding.created_at,
             updated_at=binding.updated_at,
+            capabilities=NodeCapabilities.model_validate(
+                node.capabilities or {}
+            ),
+            plugin_versions=dict(node.plugin_versions or {}),
             devices=[_device_to_domain(d) for d in (node.devices or [])],
         )

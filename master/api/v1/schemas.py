@@ -139,10 +139,24 @@ class RunOut(BaseModel):
 
 
 class RunDetailOut(RunOut):
-    """Run 详情（含汇总结果与分片）。"""
+    """Run 详情（含汇总结果、分片与 case×attempt 结果矩阵，P7.5）。"""
 
     shards: list["ShardOut"] = Field(default_factory=list)
     result: dict | None = None
+    case_results: list["RunCaseResultOut"] = Field(default_factory=list)
+
+
+class RunCaseResultOut(BaseModel):
+    """case 级执行结果（D-20：按 attempt 全量保留，历史失败可见）。"""
+
+    run_id: str
+    shard_id: str
+    case_key: str
+    attempt_no: int
+    status: str
+    duration_ms: int | None = None
+    error_summary: str | None = None
+    detail: dict | None = None
 
 
 class ShardOut(BaseModel):
@@ -273,6 +287,8 @@ class NodeOut(BaseModel):
     enabled: bool
     tags: list = Field(default_factory=list)
     capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
+    plugin_versions: dict[str, str] = Field(default_factory=dict)
+    load: dict = Field(default_factory=dict)
     protocol_version: str
     last_seen_at: datetime | None
     devices: list[NodeDeviceOut]
@@ -295,6 +311,8 @@ class ProjectNodeBindingOut(BaseModel):
     assigned_by: int
     created_at: datetime
     updated_at: datetime
+    capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
+    plugin_versions: dict[str, str] = Field(default_factory=dict)
     devices: list[NodeDeviceOut]
 
 
@@ -332,3 +350,112 @@ class UserApprovalRequest(BaseModel):
 
     account_status: AccountStatus | None = None
     platform_role: PlatformRole | None = None
+
+
+# ---------------------------------------------------------------------------
+# P7.3 脚本库（test_scripts / script_cases）
+# ---------------------------------------------------------------------------
+
+
+class ScriptUploadRequest(BaseModel):
+    """脚本上传请求（multipart 表单字段，文件本体由 UploadFile 携带）。"""
+
+    task_type: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    config: str = Field(default="{}", max_length=65536)
+
+
+class ScriptOut(BaseModel):
+    """脚本版本响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    script_id: str
+    project_id: str
+    task_type: str
+    name: str
+    version: int
+    file_ref: str
+    size: int
+    sha256: str
+    parse_status: str
+    parse_location: str
+    result_parse_location: str
+    plugin_version: str
+    created_by: int | None = None
+    last_parsed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ScriptCaseOut(BaseModel):
+    """脚本用例索引项响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    case_id: str
+    script_id: str
+    stable_key: str
+    name: str
+    parent_path: str = ""
+    tags: list[str] = Field(default_factory=list)
+    params: dict = Field(default_factory=dict)
+    avg_duration_s: float | None = None
+    duration_samples: int = 0
+    order_index: int = 0
+    deleted: bool = False
+
+
+# ---------------------------------------------------------------------------
+# P7.4 任务定义（test_tasks）CRUD
+# ---------------------------------------------------------------------------
+
+
+class TestTaskCreateRequest(BaseModel):
+    """创建任务定义请求（引用脚本版本 + 默认勾选用例 + 节点/分割/重试策略）。"""
+
+    name: str = Field(min_length=1, max_length=128)
+    script_id: str = Field(min_length=1, max_length=64)
+    default_case_selection: list[str] = Field(default_factory=list)
+    node_ids: list[str] = Field(default_factory=list)
+    split_policy: dict = Field(default_factory=dict)
+    retry_policy: dict = Field(default_factory=dict)
+    timeout_s: int = Field(default=0, ge=0)
+    priority: int = Field(default=0, ge=0)
+
+
+class TestTaskUpdateRequest(BaseModel):
+    """更新任务定义请求（全量字段，缺失则保持原值）。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    script_id: str | None = Field(default=None, min_length=1, max_length=64)
+    default_case_selection: list[str] | None = None
+    node_ids: list[str] | None = None
+    split_policy: dict | None = None
+    retry_policy: dict | None = None
+    timeout_s: int | None = Field(default=None, ge=0)
+    enabled: bool | None = None
+    priority: int | None = Field(default=None, ge=0)
+
+
+class TestTaskOut(BaseModel):
+    """任务定义响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    task_id: str
+    project_id: str
+    script_id: str
+    script_version: int
+    task_type: str
+    name: str
+    default_case_selection: list[str] = Field(default_factory=list)
+    node_ids: list[str] = Field(default_factory=list)
+    split_policy: dict = Field(default_factory=dict)
+    retry_policy: dict = Field(default_factory=dict)
+    timeout_s: int = 0
+    enabled: bool = True
+    priority: int = 0
+    created_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
