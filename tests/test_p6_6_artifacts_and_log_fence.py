@@ -96,6 +96,41 @@ def test_log_complete_idempotent(client) -> None:
     assert second.handled is False
 
 
+def test_log_complete_accepts_late_logs_within_declared_range(client) -> None:
+    container = client.app.state.container
+    run_id = _seed_run(container)
+    service = container.run_projection_service()
+
+    service.handle_log_complete(
+        "node-a",
+        RunLogCompletePayload(run_id=run_id, last_sequence=2, entry_count=2),
+    )
+
+    late = service.handle_log(
+        "node-a",
+        RunLogBatch(
+            run_id=run_id,
+            first_sequence=1,
+            entries=[_log_entry(run_id, 1, "late but declared")],
+        ),
+    )
+    assert late.handled is True
+
+    out_of_range = service.handle_log(
+        "node-a",
+        RunLogBatch(
+            run_id=run_id,
+            first_sequence=3,
+            entries=[_log_entry(run_id, 3, "too late")],
+        ),
+    )
+    assert out_of_range.handled is False
+
+    with _uow(container) as uow:
+        logs = uow.run_logs.list_by_run(run_id)
+        assert [log.sequence for log in logs] == [1]
+
+
 # ---------------------------------------------------------------------------
 # 产物登记
 # ---------------------------------------------------------------------------

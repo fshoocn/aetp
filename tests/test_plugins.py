@@ -204,6 +204,140 @@ def test_registry_builds_agent_package_ref() -> None:
     assert ref.entry_point == "aetp_packaged:Plugin"
 
 
+def test_plugin_manager_load_packages_injects_agent_package(tmp_path):
+    """已安装 ZIP 插件 load_packages 时注入 agent_package（含签名下载 URL）。"""
+    import zipfile
+
+    from master.plugins.manager import PluginManager
+
+    # 构造一个最小 ZIP 插件（plugin.json + main.py）
+    zip_bytes = _build_test_plugin_zip()
+
+    manager = PluginManager(
+        tmp_path,
+        agent_download_builder=lambda plugin_id: (
+            f"https://master.example/internal/plugins/{plugin_id}/download"
+        ),
+    )
+    record = manager.upload("test_plugin.zip", zip_bytes)
+    assert record.task_type == "zip_test"
+    manager.install(record.plugin_id)
+
+    packages = manager.load_packages()
+    assert len(packages) == 1
+    package = packages[0]
+    assert package.metadata.agent_package is not None
+    assert package.metadata.agent_package.sha256 == record.sha256
+    assert package.metadata.agent_package.version == "1.0.0"
+    assert package.metadata.agent_package.entry_point == "main.py:package"
+    assert record.plugin_id in package.metadata.agent_package.download_url
+
+
+def test_plugin_download_endpoint_signed(client, tmp_path):
+    """内部插件下载端点：签名 URL 可下载已安装插件 ZIP（Agent 侧用）。"""
+    import io
+    import zipfile
+
+    from master.plugins.manager import PluginManager
+
+    container = client.app.state.container
+    manager = container.plugin_manager()
+    # 使用临时 PluginManager 根目录，避免测试移动/清空真实 master/data/plugins。
+    original_paths = (
+        manager.root,
+        manager.archives,
+        manager.install_dir,
+        manager.manifest_path,
+    )
+    root = tmp_path / "plugins"
+    manager.root = root
+    manager.archives = root / "archives"
+    manager.install_dir = root / "packages"
+    manager.manifest_path = root / "manifest.json"
+    manager.archives.mkdir(parents=True, exist_ok=True)
+    manager.install_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        zip_bytes = _build_test_plugin_zip()
+        record = manager.upload("test_plugin.zip", zip_bytes)
+        manager.install(record.plugin_id)
+
+        download_service = container.plugin_download_service()
+        url = download_service.build_download_url(record.plugin_id)
+        # url 形如 /api/v1/internal/plugins/{id}/download?expires=...&signature=...
+        path = url[url.index("/api/v1"):]
+
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert resp.headers["X-Checksum-Sha256"] == record.sha256
+        content = resp.content
+        # 校验内容确实是 zip 且含 main.py
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            assert "main.py" in archive.namelist()
+
+        # 错误签名被拒
+        bad = client.get(
+            f"/api/v1/internal/plugins/{record.plugin_id}/download"
+            f"?expires=9999999999&signature={'0' * 64}"
+        )
+        assert bad.status_code == 403
+    finally:
+        (
+            manager.root,
+            manager.archives,
+            manager.install_dir,
+            manager.manifest_path,
+        ) = original_paths
+
+
+def test_plugin_manager_restores_installed_plugin_after_restart(tmp_path):
+    """重建 Manager 后应从 manifest/packages 恢复已安装插件。"""
+    from master.plugins.manager import PluginManager
+
+    manager = PluginManager(tmp_path)
+    record = manager.upload("test_plugin.zip", _build_test_plugin_zip())
+    manager.install(record.plugin_id)
+
+    restarted = PluginManager(tmp_path)
+    packages = restarted.load_packages()
+
+    assert restarted.manifest_path.is_file()
+    assert [package.metadata.task_type for package in packages] == ["zip_test"]
+
+
+def _build_test_plugin_zip() -> bytes:
+    """构造最小 ZIP 插件包：plugin.json + main.py（导出 package）。"""
+    import io
+    import zipfile
+
+    plugin_json = (
+        '{"task_type": "zip_test", "plugin_version": "1.0.0", '
+        '"display_name": "Zip Test"}'
+    )
+    main_py = (
+        "from aetp_protocol.plugin import PluginMetadata, PluginPackage\n"
+        "from aetp_protocol.capabilities import HardwareRequirements\n"
+        "class M:\n"
+        "    task_type='zip_test'; display_name='Zip Test'\n"
+        "    plugin_version='1.0.0'; supported_versions=frozenset({'1.0.0'})\n"
+        "    config_schema={}; upload_spec={}\n"
+        "    def verify_script(self, d, c): return []\n"
+        "    async def parse_cases(self, d, c): return []\n"
+        "    async def split_shards(self, c, p, cfg): return []\n"
+        "    def build_task_definition(self, c, cs): return None\n"
+        "    def result_schema(self, c): return {}\n"
+        "    def hardware_requirements(self, c, cs): return HardwareRequirements()\n"
+        "package = PluginPackage(\n"
+        "  metadata=PluginMetadata(task_type='zip_test', plugin_version='1.0.0',\n"
+        "    supported_versions=frozenset({'1.0.0'})),\n"
+        "  master=M(), agent=object())\n"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("plugin.json", plugin_json)
+        archive.writestr("main.py", main_py)
+    return buffer.getvalue()
+
+
 class AgentSurface:
     task_type = "shared_task"
     plugin_version = "1.0.0"

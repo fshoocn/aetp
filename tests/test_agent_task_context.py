@@ -101,6 +101,18 @@ async def test_capture_log_marks_stream(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_empty_captured_log_is_ignored(tmp_path) -> None:
+    ctx, _ledger = _make_context(tmp_path)
+    await ctx.capture_log("stdout", "")
+    await ctx.capture_log("stdout", "line")
+
+    pending = ctx.collect_pending_logs(10)
+    assert len(pending) == 1
+    assert pending[0].sequence == 1
+    assert pending[0].message == "line"
+
+
+@pytest.mark.asyncio
 async def test_log_rejects_invalid_level(tmp_path) -> None:
     ctx, _ledger = _make_context(tmp_path)
     with pytest.raises(ValueError, match="非法日志等级"):
