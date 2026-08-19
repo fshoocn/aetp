@@ -61,6 +61,49 @@ class MasterMessageRouter:
         self._node_presence = node_presence
         self._projection = projection
         self._event_bus = event_bus
+        # 路由表：MessageType → (Payload 类型, 处理函数)
+        # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
+        self._handlers: dict[
+            MessageType,
+            tuple[type, Callable[..., object]],
+        ] = {
+            MessageType.NODE_REGISTER: (
+                NodeRegisterPayload,
+                lambda e, p: self._node_presence.handle_register(envelope=e, payload=p),
+            ),
+            MessageType.NODE_HEARTBEAT: (
+                NodeHeartbeatPayload,
+                lambda e, p: self._node_presence.handle_heartbeat(envelope=e, payload=p),
+            ),
+            MessageType.PRESENCE: (
+                PresencePayload,
+                lambda e, p: self._node_presence.handle_presence(envelope=e, payload=p),
+            ),
+            MessageType.RUN_ACK: (
+                RunAckPayload,
+                lambda e, p: self._projection.handle_ack(e.sender.id, p),
+            ),
+            MessageType.RUN_PROGRESS: (
+                RunProgressPayload,
+                lambda e, p: self._projection.handle_progress(e.sender.id, p),
+            ),
+            MessageType.RUN_CASE_STATUS: (
+                RunCaseStatusPayload,
+                lambda e, p: self._projection.handle_case_status(e.sender.id, p),
+            ),
+            MessageType.RUN_LOG: (
+                RunLogBatch,
+                lambda e, p: self._projection.handle_log(e.sender.id, p),
+            ),
+            MessageType.RUN_RESULT: (
+                RunResultPayload,
+                lambda e, p: self._projection.handle_result(e.sender.id, p),
+            ),
+            MessageType.RUN_LOG_COMPLETE: (
+                RunLogCompletePayload,
+                lambda e, p: self._projection.handle_log_complete(e.sender.id, p),
+            ),
+        }
 
     async def handle(self, message: MqttMessage) -> bool:
         """处理一条入站消息；成功返回 True。"""
@@ -77,62 +120,19 @@ class MasterMessageRouter:
             return False
 
         msg_type = MessageType(envelope.message_type)
-        try:
-            if msg_type is MessageType.NODE_REGISTER:
-                payload = NodeRegisterPayload.model_validate(envelope.payload)
-                self._node_presence.handle_register(
-                    envelope=envelope, payload=payload
-                )
-                return True
-            if msg_type is MessageType.NODE_HEARTBEAT:
-                payload = NodeHeartbeatPayload.model_validate(envelope.payload)
-                self._node_presence.handle_heartbeat(
-                    envelope=envelope, payload=payload
-                )
-                return True
-            if msg_type is MessageType.PRESENCE:
-                payload = PresencePayload.model_validate(envelope.payload)
-                self._node_presence.handle_presence(
-                    envelope=envelope, payload=payload
-                )
-                return True
+        handler_entry = self._handlers.get(msg_type)
+        if handler_entry is None:
+            logger.debug("未处理的入站消息类型: %s", envelope.message_type)
+            return False
 
-            # Run 执行域事件
-            node_id = envelope.sender.id
-            if msg_type is MessageType.RUN_ACK:
-                payload = RunAckPayload.model_validate(envelope.payload)
-                await self._publish(
-                    self._projection.handle_ack(node_id, payload)
-                )
-                return True
-            if msg_type is MessageType.RUN_PROGRESS:
-                payload = RunProgressPayload.model_validate(envelope.payload)
-                await self._publish(
-                    self._projection.handle_progress(node_id, payload)
-                )
-                return True
-            if msg_type is MessageType.RUN_CASE_STATUS:
-                payload = RunCaseStatusPayload.model_validate(envelope.payload)
-                await self._publish(
-                    self._projection.handle_case_status(node_id, payload)
-                )
-                return True
-            if msg_type is MessageType.RUN_LOG:
-                payload = RunLogBatch.model_validate(envelope.payload)
-                await self._publish(self._projection.handle_log(node_id, payload))
-                return True
-            if msg_type is MessageType.RUN_RESULT:
-                payload = RunResultPayload.model_validate(envelope.payload)
-                await self._publish(
-                    self._projection.handle_result(node_id, payload)
-                )
-                return True
-            if msg_type is MessageType.RUN_LOG_COMPLETE:
-                payload = RunLogCompletePayload.model_validate(envelope.payload)
-                await self._publish(
-                    self._projection.handle_log_complete(node_id, payload)
-                )
-                return True
+        payload_cls, handler = handler_entry
+        try:
+            payload = payload_cls.model_validate(envelope.payload)
+            result = handler(envelope, payload)
+            # Run 事件需要 publish SSE（结果类型为 ProjectionResult）
+            if isinstance(result, ProjectionResult) and result.handled:
+                await self._publish(result)
+            return True
         except NodePresenceError as exc:
             logger.warning("节点在线投影拒绝: %s", exc)
             return False
@@ -144,9 +144,6 @@ class MasterMessageRouter:
                 exc,
             )
             return False
-
-        logger.debug("未处理的入站消息类型: %s", envelope.message_type)
-        return False
 
     async def _publish(self, result: ProjectionResult) -> None:
         """把投影结果转为 SSE 领域事件广播（项目范围）。"""
