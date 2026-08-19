@@ -97,7 +97,8 @@ class RunTriggerService:
 
         # 2. 构建 CaseInfo（case_selection 覆盖默认，D-15）
         selected = case_filter if case_filter is not None else task.default_case_selection
-        selected_set = set(selected) if selected is not None else None
+        # P7.4 兼容语义：空默认用例集合表示该脚本的全部用例。
+        selected_set = set(selected) if selected else None
         case_infos: list[CaseInfo] = []
         for case in cases:
             if case.deleted:

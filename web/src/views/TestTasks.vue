@@ -46,10 +46,11 @@
         <el-table-column label="状态" width="100">
           <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" effect="light">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
+        <el-table-column label="操作" width="270" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="trigger(row)">运行</el-button>
             <el-button v-if="canManage" link type="warning" @click.stop="openEdit(row)">编辑</el-button>
+            <el-button v-if="canManage" link type="info" @click.stop="toggleEnabled(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
             <el-button v-if="canManage" link type="danger" @click.stop="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -76,7 +77,7 @@
           <el-col :span="12">
             <el-form-item label="绑定节点">
               <el-select v-model="form.nodeIds" multiple filterable placeholder="候选 = 项目绑定节点" style="width: 100%">
-                <el-option v-for="b in bindings" :key="b.node_id" :label="`${b.name || b.node_id} · ${b.node_id}`" :value="b.node_id" />
+                <el-option v-for="b in bindings" :key="b.node_id" :disabled="!b.enabled || !b.node_enabled" :label="`${b.name || b.node_id} · ${b.node_id}${b.online ? '' : '（离线）'}`" :value="b.node_id" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -123,15 +124,27 @@
             </el-form-item>
           </el-col>
         </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="失败用例重试次数">
+              <el-input-number v-model="form.caseRetry" :min="0" :max="10" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="调度优先级">
+              <el-input-number v-model="form.priority" :min="0" :max="1000" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
         <el-form-item label="默认勾选用例（可全选 / 过滤）">
           <div class="case-selector">
             <div class="case-selector-bar">
               <el-input v-model="caseKeyword" placeholder="过滤用例" clearable size="small" style="width: 220px" />
-              <el-button size="small" @click="selectAllCases">全选</el-button>
+              <el-button size="small" @click="selectAllCases">全选当前结果</el-button>
               <el-button size="small" @click="selectNoneCases">清空</el-button>
               <el-tag effect="plain" size="small">{{ form.caseKeys.length }} 已选</el-tag>
             </div>
-            <el-table :data="filteredCases" size="small" max-height="280" @selection-change="onCaseSelection">
+            <el-table ref="caseTable" :data="filteredCases" row-key="stable_key" size="small" max-height="280" @selection-change="onCaseSelection">
               <el-table-column type="selection" width="46" :reserve-selection="false" />
               <el-table-column prop="stable_key" label="稳定键" min-width="240">
                 <template #default="{ row }">
@@ -158,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -206,9 +219,12 @@ function refresh() { qc.invalidateQueries({ queryKey: ["testTasks"] }); qc.inval
 const editorVisible = ref(false);
 const editing = ref<TestTask | null>(null);
 const formRef = ref<FormInstance>();
+const caseTable = ref<{ clearSelection: () => void; toggleRowSelection: (row: ScriptCase, selected?: boolean) => void }>();
 const caseKeyword = ref("");
 const casesPerShard = ref(20);
 const targetDurationS = ref(300);
+const selectAllWhenLoaded = ref(false);
+const syncingSelection = ref(false);
 const form = reactive({
   name: "",
   scriptId: "",
@@ -216,6 +232,8 @@ const form = reactive({
   splitType: "none",
   timeoutS: 0,
   retryPolicy: "none",
+  caseRetry: 0,
+  priority: 0,
   caseKeys: [] as string[],
 });
 const formRules: FormRules = {
@@ -231,7 +249,13 @@ const scriptCasesQuery = useQuery({
 });
 const allCases = computed(() => scriptCasesQuery.data.value ?? []);
 const caseLoading = computed(() => scriptCasesQuery.isLoading.value);
-const hasDurationData = computed(() => allCases.value.some((c) => c.avg_duration_s != null));
+const selectedCases = computed(() => {
+  const selected = new Set(form.caseKeys);
+  return selected.size
+    ? allCases.value.filter((item) => selected.has(item.stable_key))
+    : allCases.value;
+});
+const hasDurationData = computed(() => selectedCases.value.some((c) => c.avg_duration_s != null));
 const filteredCases = computed(() => {
   const kw = caseKeyword.value.trim().toLowerCase();
   if (!kw) return allCases.value;
@@ -241,15 +265,43 @@ const filteredCases = computed(() => {
 function onScriptChange() {
   form.caseKeys = [];
   caseKeyword.value = "";
+  selectAllWhenLoaded.value = true;
 }
-function onCaseSelection(rows: ScriptCase[]) { form.caseKeys = rows.map((r) => r.stable_key); }
-function selectAllCases() { form.caseKeys = allCases.value.map((c) => c.stable_key); }
-function selectNoneCases() { form.caseKeys = []; }
+function onCaseSelection(rows: ScriptCase[]) {
+  if (syncingSelection.value) return;
+  const visibleKeys = new Set(filteredCases.value.map((item) => item.stable_key));
+  const selectedVisible = new Set(rows.map((row) => row.stable_key));
+  form.caseKeys = [
+    ...form.caseKeys.filter((key) => !visibleKeys.has(key)),
+    ...filteredCases.value.filter((item) => selectedVisible.has(item.stable_key)).map((item) => item.stable_key),
+  ];
+}
+function syncCaseSelection() {
+  void nextTick(() => {
+    syncingSelection.value = true;
+    caseTable.value?.clearSelection();
+    for (const item of filteredCases.value) {
+      if (form.caseKeys.includes(item.stable_key)) caseTable.value?.toggleRowSelection(item, true);
+    }
+    syncingSelection.value = false;
+  });
+}
+function selectAllCases() {
+  const selected = new Set(form.caseKeys);
+  filteredCases.value.forEach((item) => selected.add(item.stable_key));
+  form.caseKeys = [...selected];
+  syncCaseSelection();
+}
+function selectNoneCases() {
+  form.caseKeys = [];
+  syncCaseSelection();
+}
 
 function openCreate() {
   editing.value = null;
   form.name = ""; form.scriptId = ""; form.nodeIds = []; form.splitType = "none";
-  form.timeoutS = 0; form.retryPolicy = "none"; form.caseKeys = []; caseKeyword.value = "";
+  form.timeoutS = 0; form.retryPolicy = "none"; form.caseRetry = 0; form.priority = 0; form.caseKeys = []; caseKeyword.value = "";
+  selectAllWhenLoaded.value = false;
   casesPerShard.value = 20; targetDurationS.value = 300;
   editorVisible.value = true;
 }
@@ -264,7 +316,11 @@ function openEdit(task: TestTask) {
   const policy = task.split_policy as Record<string, unknown>;
   casesPerShard.value = typeof policy.cases_per_shard === "number" ? policy.cases_per_shard : 20;
   targetDurationS.value = typeof policy.target_duration_s === "number" ? policy.target_duration_s : 300;
-  form.retryPolicy = (task.retry_policy?.max_attempts as number) > 1 ? "failover" : "none";
+  const maxAttempts = typeof task.retry_policy?.max_attempts === "number" ? task.retry_policy.max_attempts : 1;
+  form.retryPolicy = maxAttempts >= 3 ? "failover2" : maxAttempts > 1 ? "failover" : "none";
+  form.caseRetry = typeof task.retry_policy?.case_retry === "number" ? task.retry_policy.case_retry : 0;
+  form.priority = task.priority;
+  selectAllWhenLoaded.value = false;
   caseKeyword.value = "";
   editorVisible.value = true;
 }
@@ -281,13 +337,15 @@ const saveMutation = useMutation({
       split_policy: splitPolicy,
       retry_policy: retryPolicy,
       timeout_s: form.timeoutS,
+      priority: form.priority,
     };
     return editing.value
       ? aetpApi.testTasks.update(projectId.value, editing.value.task_id, payload)
       : aetpApi.testTasks.create(projectId.value, payload);
   },
-  onSuccess: () => {
-    ElMessage.success(editing.value ? "任务定义已更新" : "任务定义已创建");
+  onSuccess: (task) => {
+    if (task.validation_warning) ElMessage.warning(task.validation_warning);
+    else ElMessage.success(editing.value ? "任务定义已更新" : "任务定义已创建");
     editorVisible.value = false;
     refresh();
   },
@@ -301,9 +359,9 @@ function buildSplitPolicy(): Record<string, unknown> {
   return { type: "none" };
 }
 function buildRetryPolicy(): Record<string, unknown> {
-  if (form.retryPolicy === "failover") return { max_attempts: 2, failover_nodes: true };
-  if (form.retryPolicy === "failover2") return { max_attempts: 3, failover_nodes: true };
-  return { max_attempts: 1, failover_nodes: false };
+  if (form.retryPolicy === "failover") return { max_attempts: 2, failover_nodes: true, case_retry: form.caseRetry };
+  if (form.retryPolicy === "failover2") return { max_attempts: 3, failover_nodes: true, case_retry: form.caseRetry };
+  return { max_attempts: 1, failover_nodes: false, case_retry: form.caseRetry };
 }
 async function submit() {
   if (!formRef.value) return;
@@ -311,6 +369,10 @@ async function submit() {
   if (!valid) return;
   if (form.splitType === "by_time" && !hasDurationData.value) {
     ElMessage.warning("全部用例无耗时数据，无法使用按时间分割（D-21）");
+    return;
+  }
+  if (!form.caseKeys.length && allCases.value.length) {
+    ElMessage.warning("请至少选择一个默认用例");
     return;
   }
   saveMutation.mutate();
@@ -339,6 +401,16 @@ const removeMutation = useMutation({
   onSuccess: () => { ElMessage.success("任务定义已删除（停用）"); refresh(); },
   onError: (e: Error) => ElMessage.error(e.message),
 });
+const toggleMutation = useMutation({
+  mutationFn: (task: TestTask) => aetpApi.testTasks.update(projectId.value, task.task_id, { enabled: !task.enabled }),
+  onSuccess: (task) => { ElMessage.success(task.enabled ? "任务定义已启用" : "任务定义已停用"); refresh(); },
+  onError: (e: Error) => ElMessage.error(e.message),
+});
+async function toggleEnabled(row: TestTask) {
+  const action = row.enabled ? "停用" : "启用";
+  try { await ElMessageBox.confirm(`确认${action}任务定义 ${row.name}？`, `${action}确认`, { type: "warning" }); } catch { return; }
+  toggleMutation.mutate(row);
+}
 async function remove(row: TestTask) {
   try { await ElMessageBox.confirm(`确认删除任务定义 ${row.name}？`, "删除确认", { type: "warning" }); } catch { return; }
   removeMutation.mutate(row.task_id);
@@ -352,6 +424,15 @@ function splitText(policy: Record<string, unknown>) {
   return "不分割";
 }
 
+watch(allCases, (cases) => {
+  if (selectAllWhenLoaded.value && cases.length) {
+    form.caseKeys = cases.map((item) => item.stable_key);
+    selectAllWhenLoaded.value = false;
+  }
+  syncCaseSelection();
+});
+watch(filteredCases, syncCaseSelection);
+watch(editorVisible, (visible) => { if (visible) syncCaseSelection(); });
 watch(() => projectId.value, () => { refresh(); });
 </script>
 

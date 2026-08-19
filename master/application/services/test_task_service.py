@@ -155,6 +155,9 @@ class TestTaskService:
         created_by: int,
     ) -> TestTask:
         """创建任务定义（§18.4：脚本已解析、case 存在、节点 ⊆ 项目绑定）。"""
+        selected_nodes = list(node_ids or [])
+        self.validate_node_selection(project_id, selected_nodes, script_id)
+
         with self._uow_factory() as uow:
             script = uow.test_scripts.get_by_script_id(script_id)
             if script is None or script.project_id != project_id:
@@ -166,30 +169,14 @@ class TestTaskService:
             if uow.test_tasks.find_by_name(project_id, name) is not None:
                 raise ValueError(f"任务定义已存在: {name}")
 
-            # 校验勾选的 case 必须存在于脚本用例索引（§18.4）
-            selected = default_case_selection or []
-            if selected:
-                existing = {
-                    c.stable_key
-                    for c in uow.script_cases.list_by_script(script_id)
-                }
-                invalid = [k for k in selected if k not in existing]
-                if invalid:
-                    raise ValueError(
-                        f"勾选的用例不存在于脚本索引: {', '.join(invalid[:5])}"
-                    )
-
-            # 节点 ⊆ 项目绑定（D-23 第一层硬校验）
-            node_ids = node_ids or []
-            if node_ids:
-                bound = {
-                    b.node_id for b in uow.bindings.list_with_nodes(project_id)
-                }
-                invalid_nodes = [n for n in node_ids if n not in bound]
-                if invalid_nodes:
-                    raise ProjectAccessDeniedError(
-                        f"节点不在项目绑定范围（D-23）: {', '.join(sorted(invalid_nodes))}"
-                    )
+            cases = uow.script_cases.list_by_script(script_id)
+            selected = self._normalize_case_selection(
+                default_case_selection, cases
+            )
+            normalized_split = self._normalize_split_policy(
+                split_policy, cases, selected
+            )
+            normalized_retry = self._normalize_retry_policy(retry_policy)
 
             task = uow.test_tasks.add(
                 TestTask(
@@ -200,9 +187,9 @@ class TestTaskService:
                     task_type=script.task_type,
                     name=name,
                     default_case_selection=selected,
-                    node_ids=node_ids,
-                    split_policy=split_policy or {},
-                    retry_policy=retry_policy or {},
+                    node_ids=selected_nodes,
+                    split_policy=normalized_split,
+                    retry_policy=normalized_retry,
                     timeout_s=timeout_s,
                     priority=priority,
                     enabled=True,
@@ -233,37 +220,54 @@ class TestTaskService:
             if task is None:
                 raise TaskNotFoundError(f"任务定义不存在: {task_id}")
 
-            # 脚本切换：校验新脚本属于项目且已解析
-            if script_id is not None and script_id != task.script_id:
-                script = uow.test_scripts.get_by_script_id(script_id)
-                if script is None or script.project_id != project_id:
-                    raise ScriptNotFoundError(
-                        f"脚本不存在或不属于当前项目: {script_id}"
-                    )
-                if script.parse_status != ScriptParseStatus.PARSED:
-                    raise ValueError("脚本尚未解析完成，无法切换")
-                task.script_id = script_id
+            target_script_id = script_id or task.script_id
+            script = uow.test_scripts.get_by_script_id(target_script_id)
+            if script is None or script.project_id != project_id:
+                raise ScriptNotFoundError(
+                    f"脚本不存在或不属于当前项目: {target_script_id}"
+                )
+            if script.parse_status != ScriptParseStatus.PARSED:
+                raise ValueError("脚本尚未解析完成，无法切换")
+            cases = uow.script_cases.list_by_script(target_script_id)
+            target_selection = (
+                default_case_selection
+                if default_case_selection is not None
+                else task.default_case_selection
+            )
+            normalized_selection = self._normalize_case_selection(
+                target_selection, cases
+            )
+            normalized_split = self._normalize_split_policy(
+                split_policy if split_policy is not None else task.split_policy,
+                cases,
+                normalized_selection,
+            )
+            normalized_retry = self._normalize_retry_policy(
+                retry_policy if retry_policy is not None else task.retry_policy
+            )
+            target_nodes = list(node_ids) if node_ids is not None else list(task.node_ids)
+            self.validate_node_selection(project_id, target_nodes, target_script_id)
+
+            if name is not None and name != task.name:
+                existing = uow.test_tasks.find_by_name(project_id, name)
+                if existing is not None and existing.task_id != task.task_id:
+                    raise ValueError(f"任务定义已存在: {name}")
+
+            # 脚本、用例、策略和节点的最终状态已在当前事务中确定；
+            # 节点能力匹配已在写入前复用统一校验入口，避免保存绕过 D-23。
+            script_changed = target_script_id != task.script_id
+            target_script_id = script.script_id
+            task.script_id = target_script_id
+            if script_changed:
                 task.script_version = script.version
                 task.task_type = script.task_type
 
             if name is not None:
                 task.name = name
-            if default_case_selection is not None:
-                task.default_case_selection = default_case_selection
-            if node_ids is not None:
-                bound = {
-                    b.node_id for b in uow.bindings.list_with_nodes(project_id)
-                }
-                invalid_nodes = [n for n in node_ids if n not in bound]
-                if invalid_nodes:
-                    raise ProjectAccessDeniedError(
-                        f"节点不在项目绑定范围（D-23）: {', '.join(sorted(invalid_nodes))}"
-                    )
-                task.node_ids = node_ids
-            if split_policy is not None:
-                task.split_policy = split_policy
-            if retry_policy is not None:
-                task.retry_policy = retry_policy
+            task.default_case_selection = normalized_selection
+            task.node_ids = target_nodes
+            task.split_policy = normalized_split
+            task.retry_policy = normalized_retry
             if timeout_s is not None:
                 task.timeout_s = timeout_s
             if enabled is not None:
@@ -294,3 +298,65 @@ class TestTaskService:
                 raise TaskNotFoundError(f"任务定义不存在: {task_id}")
             task.enabled = False
             uow.test_tasks.update(task)
+
+    @staticmethod
+    def _normalize_case_selection(selection, cases) -> list[str]:
+        """校验 stable_key；空集合表示运行该脚本的全部用例。"""
+        requested = list(dict.fromkeys(selection or []))
+        available = {case.stable_key for case in cases}
+        invalid = [key for key in requested if key not in available]
+        if invalid:
+            raise ValueError(
+                f"勾选的用例不存在于脚本索引: {', '.join(invalid[:5])}"
+            )
+        return requested
+
+    @staticmethod
+    def _normalize_split_policy(policy: dict | None, cases, selected: list[str]) -> dict:
+        value = dict(policy or {})
+        split_type = value.get("type", "none")
+        if split_type == "none":
+            return {"type": "none"}
+        if split_type == "custom":
+            return value
+        if split_type == "by_case_count":
+            count = value.get("cases_per_shard")
+            if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                raise ValueError("by_case_count 的 cases_per_shard 必须是大于 0 的整数")
+            return {"type": split_type, "cases_per_shard": count}
+        if split_type == "by_time":
+            target = value.get("target_duration_s")
+            if isinstance(target, bool) or not isinstance(target, (int, float)) or target <= 0:
+                raise ValueError("by_time 的 target_duration_s 必须大于 0")
+            selected_set = set(selected)
+            considered = (
+                [case for case in cases if case.stable_key in selected_set]
+                if selected_set
+                else list(cases)
+            )
+            if not any(case.avg_duration_s is not None for case in considered):
+                raise ValueError("全部用例无耗时数据，无法使用按时间分割（D-21）")
+            return {"type": split_type, "target_duration_s": target}
+        raise ValueError(f"不支持的分割策略: {split_type}")
+
+    @staticmethod
+    def _normalize_retry_policy(policy: dict | None) -> dict:
+        value = dict(policy or {})
+        max_attempts = value.get("max_attempts", 1)
+        case_retry = value.get("case_retry", 0)
+        failover_nodes = value.get("failover_nodes", False)
+        if (
+            isinstance(max_attempts, bool)
+            or not isinstance(max_attempts, int)
+            or not 1 <= max_attempts <= 10
+        ):
+            raise ValueError("retry_policy.max_attempts 必须是 1 到 10 的整数")
+        if isinstance(case_retry, bool) or not isinstance(case_retry, int) or not 0 <= case_retry <= 10:
+            raise ValueError("retry_policy.case_retry 必须是 0 到 10 的整数")
+        if not isinstance(failover_nodes, bool):
+            raise ValueError("retry_policy.failover_nodes 必须是布尔值")
+        return {
+            "max_attempts": max_attempts,
+            "failover_nodes": failover_nodes,
+            "case_retry": case_retry,
+        }

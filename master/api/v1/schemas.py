@@ -406,6 +406,32 @@ class ScriptCaseOut(BaseModel):
     deleted: bool = False
 
 
+class ScriptVerifyRequest(BaseModel):
+    """请求 Agent 在指定项目节点执行插件验证。"""
+
+    node_id: str = Field(min_length=1, max_length=64)
+    config: dict = Field(default_factory=dict)
+
+
+class ScriptVerifyDispatchOut(BaseModel):
+    """验证下发回执。"""
+
+    verify_id: str
+    project_id: str
+    script_id: str
+    node_id: str
+    status: str
+
+
+class ScriptVerifyResultOut(BaseModel):
+    """Agent 验证结果。"""
+
+    verify_id: str
+    script_id: str
+    node_id: str
+    errors: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # P7.4 任务定义（test_tasks）CRUD
 # ---------------------------------------------------------------------------
@@ -456,6 +482,7 @@ class TestTaskOut(BaseModel):
     timeout_s: int = 0
     enabled: bool = True
     priority: int = 0
+    validation_warning: str | None = None
     created_by: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

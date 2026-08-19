@@ -18,6 +18,7 @@ from master.api.v1.dependencies import (
 )
 from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep
 from master.api.v1.schemas import TestTaskCreateRequest, TestTaskOut, TestTaskUpdateRequest
+from master.application.services.test_task_service import TestTaskService
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,15 @@ router = APIRouter(
     prefix="/projects/{project_id}/test-tasks",
     tags=["v1-project-test-tasks"],
 )
+
+
+def _task_out(task, service: TestTaskService) -> TestTaskOut:
+    """把保存时的节点能力软校验结果带回 Web。"""
+    output = TestTaskOut.model_validate(task)
+    validation = service.validate_node_selection(
+        task.project_id, task.node_ids, task.script_id
+    )
+    return output.model_copy(update={"validation_warning": validation.warning})
 
 
 @router.get("", response_model=list[TestTaskOut])
@@ -65,7 +75,7 @@ def create_test_task(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    return TestTaskOut.model_validate(task)
+    return _task_out(task, service)
 
 
 @router.get("/{task_id}", response_model=TestTaskOut)
@@ -79,7 +89,7 @@ def get_test_task(
     task = service.get_task(task_id, project_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务定义不存在")
-    return TestTaskOut.model_validate(task)
+    return _task_out(task, service)
 
 
 @router.patch("/{task_id}", response_model=TestTaskOut)
