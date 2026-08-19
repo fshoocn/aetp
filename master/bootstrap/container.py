@@ -51,6 +51,7 @@ from master.application.services.run_cancel_service import RunCancelService
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
 from master.application.services.notification_service import NotificationService
+from master.application.services.schedule_service import ScheduleService
 from master.adapters.mqtt.transport import MqttTransport
 from master.workers.outbox_worker import OutboxWorker
 from master.plugins.registry import create_default_registry
@@ -287,6 +288,13 @@ class Container(containers.DeclarativeContainer):
     notification_service = providers.Factory(
         NotificationService,
         uow_factory=uow_factory,
+    )
+
+    # 任务调度计划服务（P8.2：cron/interval 互斥，D-18）
+    schedule_service = providers.Factory(
+        ScheduleService,
+        uow_factory=uow_factory,
+        trigger_service=run_trigger_service,
     )
 
     # 入站 Agent 事件路由（P6.4：严格 Envelope 校验后投影/在线处理）

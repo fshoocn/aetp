@@ -21,6 +21,7 @@ from master.api.v1.routes.notifications import (
     subscriptions_router as event_subscriptions_router,
     deliveries_router as event_deliveries_router,
 )
+from master.api.v1.routes.schedules import router as schedules_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
@@ -40,3 +41,4 @@ router.include_router(plugins_router)
 router.include_router(notification_endpoints_router)
 router.include_router(event_subscriptions_router)
 router.include_router(event_deliveries_router)
+router.include_router(schedules_router)

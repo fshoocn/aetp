@@ -30,6 +30,7 @@ from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.run_retry_service import RunRetryService
 from master.application.services.run_cancel_service import RunCancelService
 from master.application.services.notification_service import NotificationService
+from master.application.services.schedule_service import ScheduleService
 from master.application.services.run_projection_service import RunProjectionService
 from master.plugins.registry import PluginRegistry
 from master.plugins.manager import PluginManager
@@ -306,4 +307,16 @@ def get_notification_service(
 
 NotificationServiceDep = Annotated[
     NotificationService, Depends(get_notification_service)
+]
+
+
+def get_schedule_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> ScheduleService:
+    """从容器解析调度计划服务（P8.2）。"""
+    return container.schedule_service()
+
+
+ScheduleServiceDep = Annotated[
+    ScheduleService, Depends(get_schedule_service)
 ]

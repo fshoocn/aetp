@@ -590,3 +590,43 @@ class DeliveryOut(BaseModel):
     error_message: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# P8.2 任务调度计划
+# ---------------------------------------------------------------------------
+
+
+class ScheduleCreateRequest(BaseModel):
+    """创建调度计划请求（cron 与 interval 互斥）。"""
+
+    cron_expression: str | None = Field(default=None, max_length=128)
+    interval_seconds: int | None = Field(default=None, ge=1)
+    timezone: str = Field(default="UTC", max_length=64)
+    enabled: bool = True
+
+
+class ScheduleUpdateRequest(BaseModel):
+    """更新调度计划请求。"""
+
+    cron_expression: str | None = None
+    interval_seconds: int | None = Field(default=None, ge=1)
+    timezone: str | None = Field(default=None, max_length=64)
+    enabled: bool | None = None
+
+
+class ScheduleOut(BaseModel):
+    """调度计划响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    schedule_id: str
+    task_id: str
+    cron_expression: str | None = None
+    interval_seconds: int | None = None
+    timezone: str = "UTC"
+    enabled: bool = True
+    next_run_at: datetime | None = None
+    last_run_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
