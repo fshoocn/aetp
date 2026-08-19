@@ -28,7 +28,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
@@ -47,6 +47,9 @@ from agent.application.services.task_context import TaskContext
 from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
 from agent.domain.ledger import Ledger
+
+if TYPE_CHECKING:
+    from agent.plugins import AgentPluginRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +100,7 @@ class RunOrchestrator:
         settings: AgentSettings,
         ledger: Ledger,
         execution_service: ExecutionService,
-        plugin_registry,
+        plugin_registry: "AgentPluginRegistry | None" = None,
         *,
         script_cache: ScriptCacheService | None = None,
         artifact_uploader: ArtifactUploadService | None = None,
@@ -132,6 +135,14 @@ class RunOrchestrator:
         plugin = self._resolve_plugin(payload)
         context = self._build_context(payload)
 
+        # 异步解包脚本（避免阻塞事件循环）
+        if self._script_cache is not None:
+            script_ref = dict(payload.script_ref or {})
+            script_ref = await asyncio.to_thread(
+                self._enrich_script_ref, script_ref
+            )
+            context = self._build_context_with_ref(payload, script_ref)
+
         try:
             result = await self._execution_service.execute(
                 run_id,
@@ -160,6 +171,13 @@ class RunOrchestrator:
         return self._plugin_registry.require(payload.task_type)
 
     def _build_context(self, payload: RunAssignPayload) -> TaskContext:
+        """构造执行上下文（脚本路径未经解包，异步阶段会替换）。"""
+        run_id = payload.run_id
+        return self._build_context_with_ref(payload, dict(payload.script_ref or {}))
+
+    def _build_context_with_ref(
+        self, payload: RunAssignPayload, script_ref: dict
+    ) -> TaskContext:
         """构造执行上下文；params 取 Shard 专属执行参数（§8.4）。"""
         run_id = payload.run_id
         return TaskContext(
@@ -171,7 +189,7 @@ class RunOrchestrator:
             run_id=run_id,
             node_id=self._settings.node_id,
             params=dict(payload.execution_params or {}),
-            script_ref=self._enrich_script_ref(dict(payload.script_ref or {})),
+            script_ref=script_ref,
             case_keys=list(payload.case_keys),
             is_cancelled=lambda: self._execution_service.is_cancelled(run_id),
             session_id=self._session_id,
@@ -201,11 +219,7 @@ class RunOrchestrator:
             tmp_dir = Path(
                 tempfile.mkdtemp(prefix="aetp-run-script-", dir=str(workspace))
             )
-            if zipfile.is_zipfile(source):
-                with zipfile.ZipFile(source) as archive:
-                    archive.extractall(tmp_dir)
-            else:
-                shutil.copy2(source, tmp_dir / "test_script.py")
+            self._extract_script_sync(source, tmp_dir)
             self._script_dirs.add(tmp_dir)
             script_ref["path"] = str(tmp_dir)
         except Exception as exc:  # noqa: BLE001 - 解包失败不阻塞执行
@@ -223,6 +237,15 @@ class RunOrchestrator:
             except Exception:  # noqa: BLE001
                 pass
         return script_ref
+
+    @staticmethod
+    def _extract_script_sync(source: Path, tmp_dir: Path) -> None:
+        """同步解包脚本（zip 解压或单文件复制）。"""
+        if zipfile.is_zipfile(source):
+            with zipfile.ZipFile(source) as archive:
+                archive.extractall(tmp_dir)
+        else:
+            shutil.copy2(source, tmp_dir / "test_script.py")
 
     def _cleanup_script_dirs(self) -> None:
         """清理本次 Run 解包出的临时脚本目录。"""
