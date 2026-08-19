@@ -39,6 +39,7 @@ from master.adapters.sqlalchemy.repositories import (
     TaskLogRepositoryImpl,
     TaskRepositoryImpl,
     TaskRunRepositoryImpl,
+    TaskScheduleRepositoryImpl,
     TestScriptRepositoryImpl,
     TestTaskRepositoryImpl,
     UserRepositoryImpl,
@@ -81,6 +82,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.notification_endpoints = NotificationEndpointRepositoryImpl(session)
         self.event_subscriptions = EventSubscriptionRepositoryImpl(session)
         self.event_deliveries = EventDeliveryRepositoryImpl(session)
+        self.task_schedules = TaskScheduleRepositoryImpl(session)
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:

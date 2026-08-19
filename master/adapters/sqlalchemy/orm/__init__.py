@@ -37,6 +37,7 @@ from .shard_attempt import ShardAttempt
 from .task import Task
 from .task_log import TaskLog
 from .task_run import TaskRun
+from .task_schedule import TaskSchedule
 from .test_script import TestScript
 from .test_task import TestTask
 from .user import User
@@ -75,4 +76,5 @@ __all__ = [
     "RunLog",
     "Task",
     "TaskLog",
+    "TaskSchedule",
 ]

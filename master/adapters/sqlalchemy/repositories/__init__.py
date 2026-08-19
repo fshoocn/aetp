@@ -26,6 +26,7 @@ from .shard_attempt_repository import ShardAttemptRepositoryImpl
 from .task_log_repository import TaskLogRepositoryImpl
 from .task_repository import TaskRepositoryImpl
 from .task_run_repository import TaskRunRepositoryImpl
+from .task_schedule_repository import TaskScheduleRepositoryImpl
 from .test_script_repository import TestScriptRepositoryImpl
 from .test_task_repository import TestTaskRepositoryImpl
 from .user_repository import UserRepositoryImpl
@@ -58,4 +59,5 @@ __all__ = [
     "RunArtifactRepositoryImpl",
     "RunResultRepositoryImpl",
     "RunLogRepositoryImpl",
+    "TaskScheduleRepositoryImpl",
 ]

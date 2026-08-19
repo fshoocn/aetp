@@ -46,6 +46,7 @@ from master.domain.models.notification import (
     EventSubscription,
     NotificationEndpoint,
 )
+from master.domain.models.task_schedule import TaskSchedule
 
 
 class UserRepository(ABC):
@@ -575,6 +576,7 @@ class UnitOfWork(ABC):
     notification_endpoints: "NotificationEndpointRepository"
     event_subscriptions: "EventSubscriptionRepository"
     event_deliveries: "EventDeliveryRepository"
+    task_schedules: "TaskScheduleRepository"
 
     @abstractmethod
     def __enter__(self) -> "UnitOfWork": ...
@@ -648,3 +650,27 @@ class EventDeliveryRepository(ABC):
 
     @abstractmethod
     def update(self, delivery: EventDelivery) -> EventDelivery: ...
+
+
+class TaskScheduleRepository(ABC):
+    """任务调度计划仓储（P8.2，D-18）。"""
+
+    @abstractmethod
+    def get_by_schedule_id(self, schedule_id: str) -> TaskSchedule | None: ...
+
+    @abstractmethod
+    def list_by_task(self, task_id: str) -> list[TaskSchedule]: ...
+
+    @abstractmethod
+    def list_due(
+        self, *, now: datetime, limit: int = 100
+    ) -> list[TaskSchedule]: ...
+
+    @abstractmethod
+    def add(self, schedule: TaskSchedule) -> TaskSchedule: ...
+
+    @abstractmethod
+    def update(self, schedule: TaskSchedule) -> TaskSchedule: ...
+
+    @abstractmethod
+    def delete(self, schedule_id: str) -> None: ...
