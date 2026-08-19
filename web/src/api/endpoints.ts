@@ -325,6 +325,78 @@ export interface RunCaseResult {
   detail: Record<string, unknown> | null;
 }
 
+// ---- P7.6 通知端点 / 事件订阅 / 投递 ----
+
+export interface NotificationEndpointOut {
+  endpoint_id: string;
+  project_id: string;
+  channel_type: string;
+  name: string;
+  config: Record<string, unknown>;
+  has_secret: boolean;
+  enabled: boolean;
+  created_by: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface EventSubscriptionOut {
+  subscription_id: string;
+  project_id: string;
+  endpoint_id: string;
+  event_types: string[];
+  filter_json: Record<string, unknown>;
+  throttle_policy: Record<string, unknown>;
+  enabled: boolean;
+  created_by: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface EventDeliveryOut {
+  delivery_id: string;
+  project_id: string;
+  event_id: string;
+  subscription_id: string;
+  endpoint_id: string;
+  status: string;
+  attempts: number;
+  next_attempt_at: string | null;
+  sent_at: string | null;
+  response_summary: string | null;
+  error_message: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface EndpointCreateRequest {
+  channel_type: string;
+  name: string;
+  config?: Record<string, unknown>;
+  secret_value?: string;
+}
+
+export interface EndpointUpdateRequest {
+  name?: string;
+  config?: Record<string, unknown>;
+  secret_value?: string;
+  enabled?: boolean;
+}
+
+export interface SubscriptionCreateRequest {
+  endpoint_id: string;
+  event_types: string[];
+  filter_json?: Record<string, unknown>;
+  throttle_policy?: Record<string, unknown>;
+}
+
+export interface SubscriptionUpdateRequest {
+  event_types?: string[];
+  filter_json?: Record<string, unknown>;
+  throttle_policy?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
 export const aetpApi = {
   auth: {
     login(username: string, password: string) {
@@ -603,6 +675,40 @@ export const aetpApi = {
       request: Partial<Pick<AdminUser, "account_status" | "platform_role">>
     ) {
       return api.patch<AdminUser>(`${API_V1}/users/${userId}`, request);
+    },
+  },
+
+  notifications: {
+    listEndpoints(projectId: string) {
+      return api.get<NotificationEndpointOut[]>(`${API_V1}/projects/${projectId}/notification-endpoints`);
+    },
+    createEndpoint(projectId: string, body: EndpointCreateRequest) {
+      return api.post<NotificationEndpointOut>(`${API_V1}/projects/${projectId}/notification-endpoints`, body);
+    },
+    updateEndpoint(projectId: string, endpointId: string, body: EndpointUpdateRequest) {
+      return api.patch<NotificationEndpointOut>(`${API_V1}/projects/${projectId}/notification-endpoints/${endpointId}`, body);
+    },
+    deleteEndpoint(projectId: string, endpointId: string) {
+      return api.delete(`${API_V1}/projects/${projectId}/notification-endpoints/${endpointId}`);
+    },
+    listSubscriptions(projectId: string) {
+      return api.get<EventSubscriptionOut[]>(`${API_V1}/projects/${projectId}/event-subscriptions`);
+    },
+    createSubscription(projectId: string, body: SubscriptionCreateRequest) {
+      return api.post<EventSubscriptionOut>(`${API_V1}/projects/${projectId}/event-subscriptions`, body);
+    },
+    updateSubscription(projectId: string, subscriptionId: string, body: SubscriptionUpdateRequest) {
+      return api.patch<EventSubscriptionOut>(`${API_V1}/projects/${projectId}/event-subscriptions/${subscriptionId}`, body);
+    },
+    deleteSubscription(projectId: string, subscriptionId: string) {
+      return api.delete(`${API_V1}/projects/${projectId}/event-subscriptions/${subscriptionId}`);
+    },
+    listDeliveries(projectId: string, status?: string) {
+      const query = status ? `?status_filter=${status}` : "";
+      return api.get<EventDeliveryOut[]>(`${API_V1}/projects/${projectId}/event-deliveries${query}`);
+    },
+    retryDelivery(projectId: string, deliveryId: string) {
+      return api.post<EventDeliveryOut>(`${API_V1}/projects/${projectId}/event-deliveries/${deliveryId}/retry`);
     },
   },
 };

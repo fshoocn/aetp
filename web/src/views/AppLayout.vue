@@ -50,6 +50,10 @@
           <el-icon><UserFilled /></el-icon>
           <template #title>成员与权限</template>
         </el-menu-item>
+        <el-menu-item v-if="canManageProject" index="/notifications">
+          <el-icon><Bell /></el-icon>
+          <template #title>通知与订阅</template>
+        </el-menu-item>
         <el-menu-item v-if="auth.user?.platform_role === 'admin'" index="/users">
           <el-icon><UserFilled /></el-icon>
           <template #title>账户审核</template>
@@ -136,7 +140,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, Collection, Connection, Cpu, Document, Expand, Fold, Grid, List, Odometer, Tickets, TrendCharts, UserFilled } from "@element-plus/icons-vue";
+import { ArrowDown, Bell, Collection, Connection, Cpu, Document, Expand, Fold, Grid, List, Odometer, Tickets, TrendCharts, UserFilled } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -161,6 +165,7 @@ const pageTitle = computed(() => ({
   ProjectNodes: "项目节点",
   Devices: "节点与设备",
   Members: "成员与权限",
+  Notifications: "通知与订阅",
   Users: "账户审核",
 }[String(route.name)] || "工作区"));
 const roleLabel = computed(() => auth.user?.platform_role === "admin" ? "平台管理员" : "项目成员");
