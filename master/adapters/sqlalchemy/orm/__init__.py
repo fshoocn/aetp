@@ -16,9 +16,12 @@ from .base import (
 )
 from .device import Device
 from .domain_event import DomainEvent
+from .event_delivery import EventDelivery
+from .event_subscription import EventSubscription
 from .inbox_message import InboxMessage
 from .node import Node
 from .node_session import NodeSession
+from .notification_endpoint import NotificationEndpoint
 from .outbox_message import OutboxMessage
 from .project import Project
 from .project_member import ProjectMember
@@ -48,7 +51,10 @@ __all__ = [
     "User",
     "AuditLog",
     "DomainEvent",
+    "EventDelivery",
+    "EventSubscription",
     "InboxMessage",
+    "NotificationEndpoint",
     "OutboxMessage",
     "Device",
     "Node",

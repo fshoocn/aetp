@@ -264,3 +264,26 @@ class DisconnectReason(StrEnum):
     NORMAL_SHUTDOWN = "normal_shutdown"
     SESSION_REPLACED = "session_replaced"
     EXPIRED = "expired"
+
+
+class NotificationChannelType(StrEnum):
+    """通知端点通道类型（§10.5）。"""
+
+    EMAIL = "email"
+    GENERIC_WEBHOOK = "generic_webhook"
+    FEISHU = "feishu"
+    DINGTALK = "dingtalk"
+    SLACK = "slack"
+    TEAMS = "teams"
+    CONSOLE_TEST = "console_test"
+
+
+class DeliveryStatus(StrEnum):
+    """投递状态（§10.5，§10.6）。"""
+
+    PENDING = "pending"
+    SENDING = "sending"
+    SUCCEEDED = "succeeded"
+    RETRYING = "retrying"
+    EXHAUSTED = "exhausted"
+    CANCELLED = "cancelled"
