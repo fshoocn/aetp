@@ -12,8 +12,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import uuid
+import zipfile
 from datetime import datetime, timezone
 
 import pytest
@@ -29,6 +31,7 @@ from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.script_preflight_service import (
     ScriptPreflightService,
 )
+from agent.application.services.script_archive import extract_zip_safely
 from agent.config import AgentSettings
 from agent.plugins.execution import AgentPluginRegistry
 from common.transport import MqttMessage
@@ -62,7 +65,21 @@ class AgentSidePlugin:
     verify_location = "agent"
     parse_location = "agent"
 
+    async def execute(self, context):
+        raise NotImplementedError
+
+    async def cancel(self) -> None:
+        pass
+
+    async def analyze_results(self, execution_result, context):
+        return {}
+
+    async def collect_logs(self, context) -> None:
+        pass
+
     def verify_script(self, script_dir, config):
+        if config.get("crash"):
+            raise RuntimeError("COM 初始化异常")
         if config.get("broken"):
             return ["COM 加载失败"]
         return []
@@ -81,9 +98,29 @@ class MasterOnlyPlugin:
     plugin_version = "1.0.0"
     supported_versions = frozenset({"1.0.0"})
     display_name = "pytest"
+    verify_location = "master"
+    parse_location = "master"
+
+    async def execute(self, context):
+        raise NotImplementedError
+
+    async def cancel(self) -> None:
+        pass
+
+    async def analyze_results(self, execution_result, context):
+        return {}
+
+    async def collect_logs(self, context) -> None:
+        pass
+
+    def verify_script(self, script_dir, config):
+        return []
+
+    def parse_cases(self, script_dir, config):
+        return []
 
 
-def _service(tmp_path, *, registry, registered=True, fetcher=None) -> ScriptPreflightService:
+def _service(tmp_path, *, registry, registered=True, fetcher=None) -> tuple[ScriptPreflightService, SQLiteLedger]:
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
     script_cache = ScriptCacheService(
         tmp_path / "scripts", ledger, fetcher=fetcher or (lambda url: _DATA)
@@ -189,6 +226,18 @@ def test_verify_with_errors_returns_errors(tmp_path) -> None:
     assert result.payload["errors"] == ["COM 加载失败"]
 
 
+def test_verify_plugin_exception_returns_error_result(tmp_path) -> None:
+    registry = AgentPluginRegistry()
+    registry.register_installed(AgentSidePlugin())
+    service, ledger = _service(tmp_path, registry=registry)
+
+    env = _verify_envelope(config={"crash": True})
+    assert service.handle_verify(command_topic("bench-001", "verify"), env) is True
+
+    result = _claim_result(ledger, "verify-result")
+    assert any("RuntimeError: COM 初始化异常" in error for error in result.payload["errors"])
+
+
 def test_verify_rejected_when_not_registered(tmp_path) -> None:
     registry = AgentPluginRegistry()
     registry.register_installed(AgentSidePlugin())
@@ -262,6 +311,15 @@ def test_parse_plugin_without_agent_capability_returns_error(tmp_path) -> None:
 
     result = _claim_result(ledger, "parse-result")
     assert any("PLUGIN_NOT_FOUND" in e for e in result.payload["errors"])
+
+
+def test_script_zip_rejects_directory_traversal(tmp_path) -> None:
+    archive_path = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("../outside.txt", "blocked")
+
+    with pytest.raises(ValueError, match="不安全路径"):
+        extract_zip_safely(archive_path, tmp_path / "target")
 
 
 # -----------------------------------------------------------------------

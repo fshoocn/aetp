@@ -116,6 +116,8 @@ class ScriptVerifyPayload(_Strict):
     verify_id: str
     # sym:script_id 脚本业务标识
     script_id: str
+    # sym:project_id 项目业务标识（验证结果回传时用于项目事件归属）
+    project_id: str = ""
     # sym:version 脚本版本
     version: int
     # sym:task_type 任务类型（Agent 选插件）
@@ -135,6 +137,8 @@ class ScriptVerifyResultPayload(_Strict):
     verify_id: str
     # sym:script_id 脚本业务标识
     script_id: str
+    # sym:project_id 项目业务标识
+    project_id: str = ""
     # sym:errors 验证错误列表（空 = 通过）
     errors: list[str] = Field(default_factory=list)
 

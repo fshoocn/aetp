@@ -42,6 +42,7 @@ from master.application.services.plugin_download_service import PluginDownloadSe
 from master.application.services.case_duration_service import CaseDurationStatsService
 from master.application.services.event_publisher import EventPublisher
 from master.application.services.script_service import ScriptService
+from master.application.services.script_verification_service import ScriptVerificationService
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.run_projection_service import RunProjectionService
 from master.application.services.run_trigger_service import RunTriggerService
@@ -223,6 +224,14 @@ class Container(containers.DeclarativeContainer):
         ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
     )
 
+    # Agent 脚本验证下发服务（P7.2：复用脚本签名下载和 Agent script.verify）
+    script_verification_service = providers.Factory(
+        ScriptVerificationService,
+        uow_factory=uow_factory,
+        plugin_registry=plugin_registry,
+        script_download=script_download_service,
+    )
+
     # 测试任务定义服务（P4.5 延伸：创建/编辑时的节点筛选，D-23 软校验）
     test_task_service = providers.Factory(
         TestTaskService,
@@ -272,6 +281,7 @@ class Container(containers.DeclarativeContainer):
         node_presence=node_presence_service,
         projection=run_projection_service,
         event_publisher=event_publisher,
+        verification=script_verification_service,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）

@@ -13,7 +13,7 @@ pytest_plugin.zip
 在 `plugins/pytest_plugin` 目录执行：
 
 ```powershell
-Compress-Archive -Path plugin.json,main.py -DestinationPath ..\pytest_plugin.zip -Force
+Compress-Archive -Path plugin.json,main.py,ui -DestinationPath ..\pytest_plugin.zip -Force
 ```
 
 或使用 Python：
@@ -29,6 +29,8 @@ Compress-Archive -Path plugin.json,main.py -DestinationPath ..\pytest_plugin.zip
 - 配置：`pytest_args`、`python_executable`、`timeout_s`、`cases_per_shard`、`artifact_paths`。
 - `artifact_paths` 使用相对脚本目录的路径或 glob；JUnit XML 自动上传，声明的附件也会上传到 Master。
 - Web Run 详情页的 case 行可展开查看 stdout/stderr，结束产物区域可下载报告和附件。
+- 配置页面位于插件包 `ui/index.html`，由 Web iframe 宿主加载；页面通过 `postMessage`
+	接收节点能力与验证上下文，不依赖平台 Web 源码。
 - 任务类型：`pytest`。
 - 版本：`1.0.0`。
 

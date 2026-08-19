@@ -43,6 +43,7 @@ from aetp_protocol.topics import event_topic
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.artifact_upload_service import ArtifactUploadService
 from agent.application.services.script_cache_service import ScriptCacheService
+from agent.application.services.script_archive import extract_zip_safely
 from agent.application.services.task_context import TaskContext
 from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
@@ -242,8 +243,7 @@ class RunOrchestrator:
     def _extract_script_sync(source: Path, tmp_dir: Path) -> None:
         """同步解包脚本（zip 解压或单文件复制）。"""
         if zipfile.is_zipfile(source):
-            with zipfile.ZipFile(source) as archive:
-                archive.extractall(tmp_dir)
+                extract_zip_safely(source, tmp_dir)
         else:
             shutil.copy2(source, tmp_dir / "test_script.py")
 

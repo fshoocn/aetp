@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pytest 配置</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", sans-serif; color: #24313a; background: #f7fafc; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; }
+    h2 { margin: 0 0 6px; font-size: 18px; }
+    p { margin: 0 0 14px; color: #667783; font-size: 12px; line-height: 1.5; }
+    label { display: block; margin: 14px 0 6px; font-size: 12px; font-weight: 700; }
+    input, select { width: 100%; min-height: 34px; border: 1px solid #cbd7df; border-radius: 5px; padding: 7px 9px; background: #fff; color: inherit; }
+    input[type="file"] { padding: 5px; }
+    button { min-height: 32px; border: 1px solid #236bbd; border-radius: 5px; padding: 0 12px; background: #236bbd; color: #fff; cursor: pointer; }
+    button.secondary { border-color: #cbd7df; background: #fff; color: #236bbd; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row input { flex: 1; }
+    .hint { margin-top: 5px; color: #85939d; font-size: 11px; }
+    .node { margin-top: 16px; border-top: 1px solid #dfe7ec; padding-top: 12px; }
+    .capabilities { max-height: 112px; overflow: auto; margin-top: 8px; padding: 8px; border-radius: 5px; background: #edf3f7; white-space: pre-wrap; font: 11px/1.4 ui-monospace, monospace; }
+    .status { margin-top: 12px; padding: 8px 10px; border-radius: 5px; background: #eaf3ff; color: #236bbd; font-size: 12px; }
+    .status.error { background: #fff0f0; color: #c45656; }
+    .status.ok { background: #edf9f3; color: #2b8a5a; }
+    .upload { margin: 16px 0 18px; padding-bottom: 16px; border-bottom: 1px solid #dfe7ec; }
+    .upload button { margin-top: 10px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <section>
+    <h2>pytest 配置</h2>
+    <p>配置由 pytest 插件包提供。脚本 print、logging、JUnit 报告和声明的附件由 Agent 统一采集。</p>
+    <div class="upload">
+      <label for="script-name">脚本名称</label>
+      <input id="script-name" placeholder="如冒烟测试或 CAN 回归">
+      <label for="script-file">脚本文件</label>
+      <input id="script-file" type="file" accept=".py,.zip">
+      <div class="hint" id="upload-hint">请选择 .py 或 .zip 脚本文件。</div>
+      <button id="upload" type="button" disabled>上传脚本</button>
+    </div>
+    <label for="pytest-args">pytest 参数</label>
+    <div id="pytest-args"></div>
+    <button class="secondary" id="add-arg" type="button">添加参数</button>
+
+    <label for="python-executable">Python 解释器</label>
+    <input id="python-executable" placeholder="留空使用 Agent 当前 Python">
+
+    <label for="timeout">执行超时（秒）</label>
+    <input id="timeout" type="number" min="1" step="1">
+
+    <label for="artifacts">附件路径或 Glob</label>
+    <div id="artifacts"></div>
+    <button class="secondary" id="add-artifact" type="button">添加附件路径</button>
+
+    <div class="node">
+      <label for="node">验证节点</label>
+      <select id="node"><option value="">不执行台架验证</option></select>
+      <div class="hint" id="verification-hint">上传脚本后可向插件声明的 Agent 验证节点下发验证。</div>
+      <pre class="capabilities" id="capabilities">等待 Master 配置上下文...</pre>
+      <button id="verify" type="button" disabled>下发 Agent 验证</button>
+    </div>
+    <div id="status" class="status hidden"></div>
+  </section>
+
+  <script>
+    (() => {
+      const state = { context: null, config: {}, nodeId: "", scriptId: "", name: "", file: null, uploading: false };
+      const args = document.getElementById("pytest-args");
+      const artifacts = document.getElementById("artifacts");
+      const scriptName = document.getElementById("script-name");
+      const scriptFile = document.getElementById("script-file");
+      const uploadHint = document.getElementById("upload-hint");
+      const upload = document.getElementById("upload");
+      const python = document.getElementById("python-executable");
+      const timeout = document.getElementById("timeout");
+      const node = document.getElementById("node");
+      const capabilities = document.getElementById("capabilities");
+      const verify = document.getElementById("verify");
+      const status = document.getElementById("status");
+
+      function send(type, payload) {
+        window.parent.postMessage({ type, payload }, window.location.origin);
+      }
+      function setStatus(message, kind) {
+        status.textContent = message;
+        status.className = `status ${kind || ""}`;
+      }
+      function listValue(key) {
+        return Array.isArray(state.config[key]) ? state.config[key].map(String) : [];
+      }
+      function renderUpload() {
+        scriptName.value = state.name;
+        const spec = state.context?.upload_spec || {};
+        const extensions = Array.isArray(spec.extensions) ? spec.extensions.map(String) : [];
+        const maxSizeMb = Number(spec.max_size_mb || 0);
+        scriptFile.accept = extensions.join(",");
+        uploadHint.textContent = `${extensions.join(", ") || "任意文件"}${maxSizeMb ? ` · 最大 ${maxSizeMb} MB` : ""}`;
+        upload.disabled = state.uploading || !state.name.trim() || !state.file;
+        upload.textContent = state.uploading ? "正在上传..." : "上传脚本";
+      }
+      function renderList(container, key, placeholder) {
+        container.replaceChildren();
+        listValue(key).forEach((value, index) => {
+          const row = document.createElement("div");
+          row.className = "row";
+          const input = document.createElement("input");
+          input.value = value;
+          input.placeholder = placeholder;
+          input.addEventListener("input", () => {
+            const values = listValue(key);
+            values[index] = input.value;
+            state.config[key] = values;
+            sendConfig();
+          });
+          const remove = document.createElement("button");
+          remove.className = "secondary";
+          remove.type = "button";
+          remove.textContent = "删除";
+          remove.addEventListener("click", () => {
+            state.config[key] = listValue(key).filter((_, itemIndex) => itemIndex !== index);
+            render();
+            sendConfig();
+          });
+          row.append(input, remove);
+          container.append(row);
+        });
+      }
+      function renderNodes() {
+        node.replaceChildren(new Option("不执行台架验证", ""));
+        const nodes = state.context?.nodes || [];
+        nodes.forEach((item) => {
+          const option = new Option(`${item.name || item.node_id} · ${item.node_id}`, item.node_id);
+          option.disabled = !item.enabled || !item.online;
+          node.append(option);
+        });
+        node.value = state.nodeId;
+        const verification = state.context?.verification || {};
+        verify.disabled = !state.scriptId || !verification.supported || !state.nodeId;
+        document.getElementById("verification-hint").textContent = verification.supported
+          ? (state.scriptId ? "已选择脚本和节点，可以下发 Agent 验证。" : "上传脚本后可以下发 Agent 验证。")
+          : "该插件在 Master 完成脚本验证，无需下发 Agent 命令。";
+        const selected = nodes.find((item) => item.node_id === state.nodeId);
+        capabilities.textContent = selected ? JSON.stringify(selected.capabilities || {}, null, 2) : "请选择验证节点查看能力";
+      }
+      function render() {
+        renderUpload();
+        renderList(args, "pytest_args", "例如 -q");
+        renderList(artifacts, "artifact_paths", "例如 reports/*.html");
+        python.value = typeof state.config.python_executable === "string" ? state.config.python_executable : "";
+        timeout.value = state.config.timeout_s == null ? "" : String(state.config.timeout_s);
+        renderNodes();
+      }
+      function sendConfig() {
+        send("aetp.plugin.config", { config: state.config, node_id: state.nodeId });
+      }
+      function applyContext(context) {
+        state.context = context || {};
+        state.config = { ...(context?.config || {}) };
+        state.scriptId = context?.script_id || "";
+        render();
+      }
+      scriptName.addEventListener("input", () => { state.name = scriptName.value; renderUpload(); });
+      scriptFile.addEventListener("change", () => {
+        const file = scriptFile.files?.[0] || null;
+        const maxSizeMb = Number(state.context?.upload_spec?.max_size_mb || 0);
+        if (file && maxSizeMb && file.size > maxSizeMb * 1024 * 1024) {
+          state.file = null;
+          scriptFile.value = "";
+          setStatus(`文件超过 ${maxSizeMb} MB 限制`, "error");
+        } else {
+          state.file = file;
+        }
+        renderUpload();
+      });
+      upload.addEventListener("click", () => {
+        if (!state.file || !state.name.trim() || state.uploading) return;
+        state.uploading = true;
+        renderUpload();
+        setStatus("正在上传并解析脚本...", "");
+        send("aetp.plugin.upload", {
+          name: state.name.trim(),
+          filename: state.file.name,
+          file: state.file,
+          config: state.config,
+        });
+      });
+      python.addEventListener("input", () => { state.config.python_executable = python.value; sendConfig(); });
+      timeout.addEventListener("input", () => { state.config.timeout_s = timeout.value ? Number(timeout.value) : undefined; sendConfig(); });
+      node.addEventListener("change", () => { state.nodeId = node.value; renderNodes(); sendConfig(); });
+      document.getElementById("add-arg").addEventListener("click", () => { state.config.pytest_args = [...listValue("pytest_args"), ""]; render(); sendConfig(); });
+      document.getElementById("add-artifact").addEventListener("click", () => { state.config.artifact_paths = [...listValue("artifact_paths"), ""]; render(); sendConfig(); });
+      verify.addEventListener("click", () => {
+        const requestId = `verify-${Date.now()}`;
+        setStatus("验证请求已发送，等待 Master/Agent 回执...", "");
+        send("aetp.plugin.verify", { request_id: requestId, script_id: state.scriptId, node_id: state.nodeId, config: state.config });
+      });
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent || event.origin !== window.location.origin) return;
+        const message = event.data || {};
+        if (message.type === "aetp.plugin.context") applyContext(message.payload?.context);
+        if (message.type === "aetp.plugin.upload-result") {
+          state.uploading = false;
+          if (message.payload?.status === "success") {
+            state.scriptId = message.payload?.script?.script_id || state.scriptId;
+            const verification = state.context?.verification || {};
+            setStatus(
+              verification.supported
+                ? "脚本已上传并解析成功。现在可以选择节点执行 Agent 验证。"
+                : "脚本已上传并完成 Master 验证。",
+              "ok",
+            );
+          } else {
+            const errors = Array.isArray(message.payload?.errors) ? message.payload.errors.join("；") : "脚本上传失败";
+            setStatus(errors, "error");
+          }
+          render();
+        }
+        if (message.type === "aetp.plugin.verify-dispatch") setStatus(message.payload?.message || "验证已下发", "");
+        if (message.type === "aetp.plugin.verify-result") setStatus(message.payload?.errors?.length ? message.payload.errors.join("；") : "Agent 验证通过", message.payload?.errors?.length ? "error" : "ok");
+      });
+      send("aetp.plugin.ready", { protocol_version: 1 });
+    })();
+  </script>
+</body>
+</html>

@@ -92,6 +92,7 @@ class PluginManager:
             raise ValueError("main.py 必须导出 PluginPackage 类型的 package")
         if loaded.metadata.task_type != record.task_type or loaded.metadata.plugin_version != record.version:
             raise ValueError("main.py 的 PluginPackage 元数据与 plugin.json 不一致")
+        self._validate_ui_assets(destination, loaded)
         record.installed = True
         records = self._load()
         records[plugin_id] = record
@@ -131,9 +132,40 @@ class PluginManager:
             package = self._load_main(destination, record.plugin_id)
             if not isinstance(package, PluginPackage):
                 raise ValueError(f"插件 {record.plugin_id} 的 main.py 未导出有效 package")
+            self._validate_ui_assets(destination, package)
             package = self._with_agent_package(package, record)
             packages.append(package)
         return packages
+
+    def ui_asset(self, task_type: str, relative_path: str) -> Path:
+        """返回已安装插件 UI 目录内的安全静态资源路径。"""
+        record = next(
+            (
+                item
+                for item in self.list()
+                if item.task_type == task_type and item.enabled and item.installed
+            ),
+            None,
+        )
+        if record is None:
+            raise FileNotFoundError(f"插件 UI 不存在: {task_type}")
+        destination = self.install_dir / self._safe_id(record.plugin_id)
+        ui_root = (destination / "ui").resolve()
+        candidate = (ui_root / relative_path).resolve()
+        if ui_root not in candidate.parents or not candidate.is_file():
+            raise FileNotFoundError(f"插件 UI 资源不存在: {task_type}/{relative_path}")
+        return candidate
+
+    @staticmethod
+    def _validate_ui_assets(destination: Path, package: PluginPackage) -> None:
+        """若插件声明 UI 入口，安装时确保入口存在且位于 ui/ 内。"""
+        entry = package.metadata.ui.get("entry")
+        if not entry:
+            return
+        ui_root = (destination / "ui").resolve()
+        candidate = (ui_root / str(entry)).resolve()
+        if ui_root not in candidate.parents or not candidate.is_file():
+            raise ValueError(f"插件 UI 入口不存在或越界: {entry}")
 
     def _with_agent_package(
         self, package: PluginPackage, record: ManagedPlugin

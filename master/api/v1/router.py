@@ -11,6 +11,7 @@ from master.api.v1.routes.project_tasks import router as project_tasks_router
 from master.api.v1.routes.runs import router as runs_router
 from master.api.v1.routes.scripts import router as scripts_router
 from master.api.v1.routes.test_tasks import router as test_tasks_router
+from master.api.v1.routes.task_types import router as project_task_types_router
 from master.api.v1.routes.assets import router as assets_router
 from master.api.v1.routes.events import router as events_router
 from master.api.v1.routes.internal import router as internal_router
@@ -24,6 +25,7 @@ router.include_router(nodes_router)
 router.include_router(project_devices_router)
 router.include_router(project_tasks_router)
 router.include_router(test_tasks_router)
+router.include_router(project_task_types_router)
 router.include_router(runs_router)
 router.include_router(scripts_router)
 router.include_router(assets_router)

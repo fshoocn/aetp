@@ -22,6 +22,7 @@ from master.application.services.project_service import ProjectService
 from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.plugin_download_service import PluginDownloadService
 from master.application.services.script_service import ScriptService
+from master.application.services.script_verification_service import ScriptVerificationService
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
@@ -194,6 +195,13 @@ def get_script_service(
     return container.script_service()
 
 
+def get_script_verification_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> ScriptVerificationService:
+    """获取 Agent 脚本验证下发服务。"""
+    return container.script_verification_service()
+
+
 def get_test_task_service(
     container: Annotated[Container, Depends(get_container)],
 ) -> TestTaskService:
@@ -273,4 +281,7 @@ ScriptStorageServiceDep = Annotated[
     ScriptStorageService, Depends(get_script_storage_service)
 ]
 ScriptServiceDep = Annotated[ScriptService, Depends(get_script_service)]
+ScriptVerificationServiceDep = Annotated[
+    ScriptVerificationService, Depends(get_script_verification_service)
+]
 TestTaskServiceDep = Annotated[TestTaskService, Depends(get_test_task_service)]

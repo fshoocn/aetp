@@ -41,6 +41,7 @@ from agent.application.services.script_cache_service import (
     ScriptCacheError,
     ScriptCacheService,
 )
+from agent.application.services.script_archive import extract_zip_safely
 from agent.config import AgentSettings
 from agent.domain.ledger import Ledger
 from agent.plugins.errors import (
@@ -116,7 +117,7 @@ class ScriptPreflightService:
         topic: str,
         envelope: Envelope,
         expected_type: MessageType,
-        runner: Callable[[Path, str, dict], list[dict] | list[str]],
+        runner: Callable[..., list[dict] | list[str]],
     ) -> bool:
         """通用：注册检查 → 目标校验 → 去重 → 下载解包 → 插件执行 → 回传。"""
         if not self._is_registered():
@@ -144,6 +145,8 @@ class ScriptPreflightService:
             )
             return True
 
+        script_id = str(envelope.payload.get("script_id", ""))
+        script_dir: Path | None = None
         try:
             script_id, _version, task_type, plugin_version, script_ref, config = (
                 self._parse_command_payload(envelope, expected_type)
@@ -159,11 +162,24 @@ class ScriptPreflightService:
             logger.warning("脚本预检失败（下载/校验）: %s", exc)
             self._enqueue_error_result(envelope, script_id, errors=[f"{exc.code}: {exc}"])
             return True
+        except Exception as exc:  # noqa: BLE001 - 插件/台架异常必须回传结果
+            logger.exception("脚本预检执行异常: script_id=%s", script_id)
+            self._enqueue_error_result(
+                envelope,
+                script_id,
+                errors=[f"SCRIPT_VERIFY_FAILED: {type(exc).__name__}: {exc}"],
+            )
+            return True
+        finally:
+            if script_dir is not None:
+                shutil.rmtree(script_dir, ignore_errors=True)
 
         if expected_type is MessageType.SCRIPT_VERIFY:
-            self._enqueue_verify_result(envelope, script_id, errors=result)
+            errors: list[str] = [e for e in result if isinstance(e, str)]
+            self._enqueue_verify_result(envelope, script_id, errors=errors)
         else:
-            self._enqueue_parse_result(envelope, script_id, cases=result)
+            cases: list[dict] = [e for e in result if isinstance(e, dict)]
+            self._enqueue_parse_result(envelope, script_id, cases=cases)
         return True
 
     # -- payload 解析 -------------------------------------------------------
@@ -208,7 +224,7 @@ class ScriptPreflightService:
             )
         try:
             return self._plugin_registry.require_compatible(
-                task_type, plugin_version or None
+                task_type, plugin_version
             )
         except (PluginNotFoundError, PluginVersionMismatchError) as exc:
             code = (
@@ -231,8 +247,7 @@ class ScriptPreflightService:
         tmp_dir = Path(tempfile.mkdtemp(prefix="aetp-script-"))
         try:
             if zipfile.is_zipfile(source):
-                with zipfile.ZipFile(source) as archive:
-                    archive.extractall(tmp_dir)
+                extract_zip_safely(source, tmp_dir)
             else:
                 shutil.copy2(source, tmp_dir / "test_script.py")
         except Exception as exc:  # noqa: BLE001 - 解包失败统一映射
@@ -253,10 +268,7 @@ class ScriptPreflightService:
                 f"插件未声明台架侧验证能力: task_type={getattr(plugin, 'task_type', '?')}",
                 code="PLUGIN_NOT_FOUND",
             )
-        try:
-            return list(verify(str(script_dir), config))
-        finally:
-            shutil.rmtree(script_dir, ignore_errors=True)
+        return list(verify(str(script_dir), config))
 
     def _run_parse(
         self, script_dir: Path, plugin, config: dict
@@ -267,13 +279,8 @@ class ScriptPreflightService:
                 f"插件未声明台架侧解析能力: task_type={getattr(plugin, 'task_type', '?')}",
                 code="PLUGIN_NOT_FOUND",
             )
-        try:
-            cases = parse(str(script_dir), config)
-            return [
-                self._case_to_dict(case) for case in cases
-            ]
-        finally:
-            shutil.rmtree(script_dir, ignore_errors=True)
+        cases = parse(str(script_dir), config)
+        return [self._case_to_dict(case) for case in cases]
 
     @staticmethod
     def _case_to_dict(case) -> dict:
@@ -294,6 +301,7 @@ class ScriptPreflightService:
         payload = ScriptVerifyResultPayload(
             verify_id=envelope.payload.get("verify_id", ""),
             script_id=script_id,
+            project_id=envelope.payload.get("project_id", ""),
             errors=list(errors),
         )
         self._enqueue_event(

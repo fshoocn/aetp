@@ -28,6 +28,7 @@ from aetp_protocol.payloads import (
     RunLogCompletePayload,
     RunProgressPayload,
     RunResultPayload,
+    ScriptVerifyResultPayload,
 )
 from aetp_protocol.topics import (
     parse_topic,
@@ -44,6 +45,10 @@ from master.application.services.run_projection_service import (
     RunProjectionService,
 )
 from master.application.services.event_publisher import EventPublisher
+from master.application.services.script_verification_service import (
+    ScriptVerificationResult,
+    ScriptVerificationService,
+)
 from common.transport import MqttMessage
 
 logger = logging.getLogger(__name__)
@@ -57,10 +62,12 @@ class MasterMessageRouter:
         node_presence: NodePresenceService,
         projection: RunProjectionService,
         event_publisher: EventPublisher,
+        verification: ScriptVerificationService,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
         self._event_publisher = event_publisher
+        self._verification = verification
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -103,6 +110,10 @@ class MasterMessageRouter:
                 RunLogCompletePayload,
                 lambda e, p: self._projection.handle_log_complete(e.sender.id, p),
             ),
+            MessageType.SCRIPT_VERIFY_RESULT: (
+                ScriptVerifyResultPayload,
+                lambda e, p: self._verification.handle_result(e.sender.id, p),
+            ),
         }
 
     async def handle(self, message: MqttMessage) -> bool:
@@ -132,6 +143,8 @@ class MasterMessageRouter:
             # Run 事件需要 publish SSE（结果类型为 ProjectionResult）
             if isinstance(result, ProjectionResult) and result.handled:
                 await self._publish(result)
+            elif isinstance(result, ScriptVerificationResult):
+                await self._event_publisher.broadcast(result.event)
             return True
         except NodePresenceError as exc:
             logger.warning("节点在线投影拒绝: %s", exc)

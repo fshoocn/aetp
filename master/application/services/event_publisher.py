@@ -55,15 +55,19 @@ class EventPublisher:
         with self._uow_factory() as uow:
             persisted = uow.domain_events.add(event)
 
-        await self._event_bus.publish(
-            persisted.event_type,
-            persisted.payload,
-            event_id=persisted.event_id,
-            sequence=persisted.sequence,
-            project_id=persisted.project_id,
-            occurred_at=persisted.occurred_at,
-        )
+        await self.broadcast(persisted)
         return persisted
+
+    async def broadcast(self, event: DomainEvent) -> None:
+        """广播已经持久化的领域事件，不再次写入数据库。"""
+        await self._event_bus.publish(
+            event.event_type,
+            event.payload,
+            event_id=event.event_id,
+            sequence=event.sequence,
+            project_id=event.project_id,
+            occurred_at=event.occurred_at,
+        )
 
 
 def _string_value(payload: Mapping[str, Any], key: str) -> str | None:

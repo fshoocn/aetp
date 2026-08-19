@@ -123,6 +123,17 @@ def test_registry_register_get_list_and_duplicate() -> None:
         registry.register(package)
 
 
+def test_plugin_metadata_keeps_ui_config_page_metadata() -> None:
+    metadata = PluginMetadata(
+        task_type="ui_plugin",
+        plugin_version="1.0.0",
+        supported_versions=frozenset({"1.0.0"}),
+        ui={"config_page": "ui_plugin", "min_frontend_version": "0.1.0"},
+    )
+    assert metadata.ui["config_page"] == "ui_plugin"
+    assert metadata.ui["min_frontend_version"] == "0.1.0"
+
+
 def test_registry_version_compatibility_and_errors() -> None:
     registry = PluginRegistry()
     registry.register(
@@ -387,7 +398,9 @@ def test_same_plugin_package_is_registered_on_master_and_agent() -> None:
     assert agent_registry.require("shared_task").task_type == "shared_task"
     assert master_registry.require_compatible("shared_task", "1.0.0")
     assert agent_registry.require_compatible("shared_task", "1.0.0")
-    assert master_registry.agent_package_ref("shared_task").version == "1.0.0"
+    package_ref = master_registry.agent_package_ref("shared_task")
+    assert package_ref is not None
+    assert package_ref.version == "1.0.0"
 
 
 def test_shared_plugin_package_rejects_metadata_version_mismatch() -> None:

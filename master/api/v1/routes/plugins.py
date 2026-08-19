@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from master.api.v1.dependencies import CurrentUser, PluginManagerDep, PluginRegistryDep
 from master.api.v1.permissions import PlatformAdminDep
@@ -25,6 +28,7 @@ def list_task_types(_current_user: CurrentUser, registry: PluginRegistryDep) -> 
             "supported_versions": sorted(package.metadata.supported_versions),
             "config_schema": package.metadata.config_schema,
             "upload_spec": package.metadata.upload_spec,
+            "ui": _ui_metadata(package.metadata.task_type, package.metadata.ui),
             "agent_available": package.agent is not None,
             "agent_package": (
                 {
@@ -38,6 +42,29 @@ def list_task_types(_current_user: CurrentUser, registry: PluginRegistryDep) -> 
         }
         for package in registry.list()
     ]
+
+
+def _ui_metadata(task_type: str, metadata: dict) -> dict:
+    ui = dict(metadata or {})
+    entry = ui.get("entry")
+    if isinstance(entry, str) and entry:
+        ui["url"] = f"/api/v1/task-types/{quote(task_type, safe='')}/ui/{quote(entry, safe='/')}"
+    return ui
+
+
+@router.get("/{task_type}/ui/{path:path}")
+def plugin_ui_asset(
+    task_type: str,
+    path: str,
+    _current_user: CurrentUser,
+    manager: PluginManagerDep,
+) -> FileResponse:
+    """托管插件 ZIP 内的 UI 资源，不把插件页面编译进 Web 主应用。"""
+    try:
+        asset = manager.ui_asset(task_type, path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(asset)
 
 
 @router.get("/managed")

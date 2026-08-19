@@ -288,6 +288,12 @@ package = PluginPackage(
         display_name="pytest 自动化测试",
         config_schema=dict(PytestMasterPlugin.config_schema),
         upload_spec=dict(PytestMasterPlugin.upload_spec),
+        ui={
+            "config_page": "pytest",
+            "entry": "index.html",
+            "min_frontend_version": "0.1.0",
+            "protocol_version": 1,
+        },
     ),
     master=PytestMasterPlugin(),
     agent=PytestAgentPlugin(),

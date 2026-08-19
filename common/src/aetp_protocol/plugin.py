@@ -160,6 +160,8 @@ class PluginMetadata:
     display_name: str = ""
     config_schema: dict[str, Any] = field(default_factory=dict)
     upload_spec: dict[str, Any] = field(default_factory=dict)
+    # P7.2：前端专用配置页标识与最低前端版本
+    ui: dict[str, Any] = field(default_factory=dict)
     agent_package: AgentPackageSpec | None = None
 
 
