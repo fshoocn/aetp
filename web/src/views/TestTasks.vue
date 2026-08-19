@@ -46,9 +46,10 @@
         <el-table-column label="状态" width="100">
           <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" effect="light">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="270" fixed="right">
+        <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="trigger(row)">运行</el-button>
+            <el-button link type="success" @click.stop="openSchedules(row)">调度计划</el-button>
             <el-button v-if="canManage" link type="warning" @click.stop="openEdit(row)">编辑</el-button>
             <el-button v-if="canManage" link type="info" @click.stop="toggleEnabled(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
             <el-button v-if="canManage" link type="danger" @click.stop="remove(row)">删除</el-button>
@@ -167,6 +168,70 @@
         <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 调度计划弹窗 -->
+    <el-dialog v-model="scheduleVisible" title="调度计划" width="680px" destroy-on-close>
+      <div class="schedule-section">
+        <div class="schedule-header">
+          <strong>{{ scheduleTask?.name || '' }}</strong>
+          <el-button v-if="canManage" size="small" type="primary" @click="openScheduleCreate">新建计划</el-button>
+        </div>
+        <el-table :data="schedules" size="small">
+          <el-table-column label="类型" width="120">
+            <template #default="{ row }">
+              <el-tag effect="plain" size="small">{{ row.cron_expression ? 'Cron' : '间隔' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="表达式/间隔" min-width="180">
+            <template #default="{ row }">
+              <span class="mono">{{ row.cron_expression || (row.interval_seconds ? `${row.interval_seconds}s` : '-') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="时区" width="100" prop="timezone" />
+          <el-table-column label="下次执行" width="170">
+            <template #default="{ row }">{{ row.next_run_at ? fmt(row.next_run_at) : '-' }}</template>
+          </el-table-column>
+          <el-table-column label="上次执行" width="170">
+            <template #default="{ row }">{{ row.last_run_at ? fmt(row.last_run_at) : '-' }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'info'" effect="light" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="130" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="canManage" link type="info" @click.stop="toggleSchedule(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
+              <el-button v-if="canManage" link type="danger" @click.stop="removeSchedule(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="schedules.length === 0" description="尚未创建调度计划" />
+      </div>
+    </el-dialog>
+
+    <!-- 新建调度计划弹窗 -->
+    <el-dialog v-model="scheduleFormVisible" title="新建调度计划" width="500px" destroy-on-close>
+      <el-form :model="scheduleForm" label-position="top">
+        <el-form-item label="调度模式">
+          <el-radio-group v-model="scheduleForm.mode">
+            <el-radio value="interval">固定间隔</el-radio>
+            <el-radio value="cron">Cron 表达式</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="scheduleForm.mode === 'interval'" label="间隔（秒）">
+          <el-input-number v-model="scheduleForm.intervalSeconds" :min="1" style="width: 100%" />
+        </el-form-item>
+        <el-form-item v-if="scheduleForm.mode === 'cron'" label="Cron 表达式">
+          <el-input v-model="scheduleForm.cronExpression" placeholder="如 */5 * * * *（每 5 分钟）" />
+          <div class="cron-hint">格式：分 时 日 月 周</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="scheduleFormVisible = false">取消</el-button>
+        <el-button type="primary" :loading="scheduleSaving" @click="saveSchedule">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -177,7 +242,7 @@ import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { List, Plus, Refresh } from "@element-plus/icons-vue";
-import { aetpApi, type TestScript, type ScriptCase, type TestTask } from "@/api/endpoints";
+import { aetpApi, type TestScript, type ScriptCase, type TestTask, type TaskScheduleOut } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
@@ -423,6 +488,7 @@ function splitText(policy: Record<string, unknown>) {
   if (type === "by_time") return `按时间 (${policy.target_duration_s ?? '-'}s)`;
   return "不分割";
 }
+function fmt(v: string) { return new Date(v).toLocaleString("zh-CN", { hour12: false }); }
 
 watch(allCases, (cases) => {
   if (selectAllWhenLoaded.value && cases.length) {
@@ -434,6 +500,62 @@ watch(allCases, (cases) => {
 watch(filteredCases, syncCaseSelection);
 watch(editorVisible, (visible) => { if (visible) syncCaseSelection(); });
 watch(() => projectId.value, () => { refresh(); });
+
+// ---- 调度计划 ----
+const scheduleVisible = ref(false);
+const scheduleTask = ref<TestTask | null>(null);
+const scheduleFormVisible = ref(false);
+const scheduleSaving = ref(false);
+const scheduleForm = reactive({ mode: "interval", intervalSeconds: 3600, cronExpression: "" });
+
+const schedulesQuery = useQuery({
+  queryKey: ["schedules", projectId, () => scheduleTask.value?.task_id ?? ""],
+  queryFn: () => aetpApi.schedules.list(projectId.value, scheduleTask.value!.task_id),
+  enabled: computed(() => scheduleVisible.value && !!scheduleTask.value),
+});
+const schedules = computed(() => schedulesQuery.data.value ?? []);
+
+function openSchedules(row: TestTask) {
+  scheduleTask.value = row;
+  scheduleVisible.value = true;
+  qc.invalidateQueries({ queryKey: ["schedules"] });
+}
+function openScheduleCreate() {
+  scheduleForm.mode = "interval";
+  scheduleForm.intervalSeconds = 3600;
+  scheduleForm.cronExpression = "";
+  scheduleFormVisible.value = true;
+}
+async function saveSchedule() {
+  if (!scheduleTask.value) return;
+  scheduleSaving.value = true;
+  try {
+    await aetpApi.schedules.create(projectId.value, scheduleTask.value.task_id, {
+      cron_expression: scheduleForm.mode === "cron" ? scheduleForm.cronExpression : undefined,
+      interval_seconds: scheduleForm.mode === "interval" ? scheduleForm.intervalSeconds : undefined,
+    });
+    ElMessage.success("调度计划已创建");
+    scheduleFormVisible.value = false;
+    qc.invalidateQueries({ queryKey: ["schedules"] });
+  } catch (e) { ElMessage.error((e as Error).message); } finally { scheduleSaving.value = false; }
+}
+async function toggleSchedule(row: { schedule_id: string; enabled: boolean }) {
+  if (!scheduleTask.value) return;
+  try {
+    await aetpApi.schedules.update(projectId.value, scheduleTask.value.task_id, row.schedule_id, { enabled: !row.enabled });
+    ElMessage.success(row.enabled ? "计划已停用" : "计划已启用");
+    qc.invalidateQueries({ queryKey: ["schedules"] });
+  } catch (e) { ElMessage.error((e as Error).message); }
+}
+async function removeSchedule(row: { schedule_id: string }) {
+  if (!scheduleTask.value) return;
+  try { await ElMessageBox.confirm("确认删除此调度计划？", "删除计划", { type: "warning" }); } catch { return; }
+  try {
+    await aetpApi.schedules.remove(projectId.value, scheduleTask.value.task_id, row.schedule_id);
+    ElMessage.success("计划已删除");
+    qc.invalidateQueries({ queryKey: ["schedules"] });
+  } catch (e) { ElMessage.error((e as Error).message); }
+}
 </script>
 
 <style scoped>
@@ -457,5 +579,9 @@ watch(() => projectId.value, () => { refresh(); });
 .case-selector-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .case-cell { display: flex; flex-direction: column; gap: 2px; }
 .case-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
+.schedule-section { min-height: 200px; }
+.schedule-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.cron-hint { margin-top: 4px; color: var(--aetp-muted); font-size: 11px; }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; }
 @media (max-width: 760px) { .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }.heading-actions { width: 100%; justify-content: space-between; } }
 </style>

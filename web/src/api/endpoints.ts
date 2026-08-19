@@ -397,6 +397,35 @@ export interface SubscriptionUpdateRequest {
   enabled?: boolean;
 }
 
+// ---- P8.2 任务调度计划 ----
+
+export interface TaskScheduleOut {
+  schedule_id: string;
+  task_id: string;
+  cron_expression: string | null;
+  interval_seconds: number | null;
+  timezone: string;
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ScheduleCreateRequest {
+  cron_expression?: string;
+  interval_seconds?: number;
+  timezone?: string;
+  enabled?: boolean;
+}
+
+export interface ScheduleUpdateRequest {
+  cron_expression?: string;
+  interval_seconds?: number;
+  timezone?: string;
+  enabled?: boolean;
+}
+
 export const aetpApi = {
   auth: {
     login(username: string, password: string) {
@@ -712,6 +741,21 @@ export const aetpApi = {
     },
     retryDelivery(projectId: string, deliveryId: string) {
       return api.post<EventDeliveryOut>(`${API_V1}/projects/${projectId}/event-deliveries/${deliveryId}/retry`);
+    },
+  },
+
+  schedules: {
+    list(projectId: string, taskId: string) {
+      return api.get<TaskScheduleOut[]>(`${API_V1}/projects/${projectId}/tasks/${taskId}/schedules`);
+    },
+    create(projectId: string, taskId: string, body: ScheduleCreateRequest) {
+      return api.post<TaskScheduleOut>(`${API_V1}/projects/${projectId}/tasks/${taskId}/schedules`, body);
+    },
+    update(projectId: string, taskId: string, scheduleId: string, body: ScheduleUpdateRequest) {
+      return api.patch<TaskScheduleOut>(`${API_V1}/projects/${projectId}/tasks/${taskId}/schedules/${scheduleId}`, body);
+    },
+    remove(projectId: string, taskId: string, scheduleId: string) {
+      return api.delete(`${API_V1}/projects/${projectId}/tasks/${taskId}/schedules/${scheduleId}`);
     },
   },
 };
