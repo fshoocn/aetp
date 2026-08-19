@@ -74,47 +74,67 @@ class AgentRuntime:
         self._transport = transport
         self._ledger = ledger
         self._registration = registration
-        self._execution_service = execution_service or ExecutionService(
-            settings=settings, ledger=ledger
-        )
-        self._orchestrator = RunOrchestrator(
-            settings=settings,
-            ledger=ledger,
-            execution_service=self._execution_service,
-            plugin_registry=plugin_registry,
-            script_cache=script_cache,
-            artifact_uploader=artifact_uploader,
-            session_id=lambda: registration.session_id,
-        )
-        self._dispatcher = dispatcher or CommandDispatcher(
-            settings=settings,
-            ledger=ledger,
-            is_registered=lambda: registration.registered,
-            plugin_registry=plugin_registry,
-            plugin_installer=plugin_installer,
-            script_cache=script_cache,
-            execution_service=self._execution_service,
-            orchestrator=self._orchestrator,
-            session_id=lambda: registration.session_id,
-        )
-        self._script_preflight = script_preflight or ScriptPreflightService(
-            settings=settings,
-            ledger=ledger,
-            script_cache=script_cache,
-            plugin_registry=plugin_registry,
-            is_registered=lambda: registration.registered,
-            session_id=lambda: registration.session_id,
-        )
+        self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._outbox_backoff = ExponentialBackoff()
-        self._sleep = sleep or asyncio.sleep
+
+        # 子组件组装（延迟构建，避免构造函数过重）
+        self._execution_service = execution_service
+        self._plugin_registry = plugin_registry
+        self._plugin_installer = plugin_installer
+        self._script_cache = script_cache
+        self._artifact_uploader = artifact_uploader
+        self._orchestrator: RunOrchestrator | None = None
+        self._dispatcher_obj: CommandDispatcher | None = dispatcher
+        self._script_preflight_obj: ScriptPreflightService | None = script_preflight
+
+    def _ensure_components(self) -> None:
+        """延迟构建子组件（首次使用时调用）。"""
+        if self._execution_service is None:
+            self._execution_service = ExecutionService(
+                settings=self._settings, ledger=self._ledger
+            )
+        if self._orchestrator is None:
+            self._orchestrator = RunOrchestrator(
+                settings=self._settings,
+                ledger=self._ledger,
+                execution_service=self._execution_service,
+                plugin_registry=self._plugin_registry,
+                script_cache=self._script_cache,
+                artifact_uploader=self._artifact_uploader,
+                session_id=lambda: self._registration.session_id,
+            )
+        if self._dispatcher_obj is None:
+            self._dispatcher_obj = CommandDispatcher(
+                settings=self._settings,
+                ledger=self._ledger,
+                is_registered=lambda: self._registration.registered,
+                plugin_registry=self._plugin_registry,
+                plugin_installer=self._plugin_installer,
+                script_cache=self._script_cache,
+                execution_service=self._execution_service,
+                orchestrator=self._orchestrator,
+                session_id=lambda: self._registration.session_id,
+            )
+        if self._script_preflight_obj is None and self._script_cache is not None:
+            self._script_preflight_obj = ScriptPreflightService(
+                settings=self._settings,
+                ledger=self._ledger,
+                script_cache=self._script_cache,
+                plugin_registry=self._plugin_registry,
+                is_registered=lambda: self._registration.registered,
+                session_id=lambda: self._registration.session_id,
+            )
+        assert self._dispatcher_obj is not None
+        assert self._orchestrator is not None
 
     async def start(self) -> None:
         """启动 Agent 主生命周期（幂等）。"""
         if self._outbox_task is not None:
             return
+        self._ensure_components()
         self._stop_event.clear()
         self._transport.on_message(self._handle_message)
         self._transport.on_connection_change(self._handle_connection_change)
@@ -185,17 +205,18 @@ class AgentRuntime:
 
     async def _handle_message(self, message: MqttMessage) -> None:  # noqa: C901
         """路由入站消息到 register-ack / 命令分发器 / 脚本预检（P5.4/P5.7）。"""
+        assert self._dispatcher_obj is not None, "组件未初始化，请先调用 start()"
         if self._registration.handle_register_ack(message):
             return
         # P5.7：script.verify / script.parse 命令路由到脚本预检服务
         if self._route_script_preflight(message):
             return
         # P5.4：run.assign / run.cancel 命令路由
-        self._dispatcher.handle_command(message)
+        self._dispatcher_obj.handle_command(message)
 
     def _route_script_preflight(self, message: MqttMessage) -> bool:
         """解析入站命令；若为 script.verify/script.parse 则交给预检服务。"""
-        if self._script_preflight is None:
+        if self._script_preflight_obj is None:
             return False
         try:
             envelope = Envelope.model_validate(
@@ -205,10 +226,10 @@ class AgentRuntime:
             return False
         msg_type = envelope.message_type
         if msg_type == MessageType.SCRIPT_VERIFY.value:
-            self._script_preflight.handle_verify(message.topic, envelope)
+            self._script_preflight_obj.handle_verify(message.topic, envelope)
             return True
         if msg_type == MessageType.SCRIPT_PARSE.value:
-            self._script_preflight.handle_parse(message.topic, envelope)
+            self._script_preflight_obj.handle_parse(message.topic, envelope)
             return True
         return False
 
