@@ -25,6 +25,9 @@ from master.application.errors import ScriptNotFoundError, TaskNotFoundError
 from master.application.services.shard_scheduler_service import (
     ShardSchedulerService,
 )
+from master.application.services.case_duration_service import (
+    CaseDurationStatsService,
+)
 from master.domain.enums import RunStatus, ShardStatus, TriggerType
 from master.domain.models import RunShard, TaskRun
 from master.domain.repositories import UnitOfWork
@@ -53,10 +56,12 @@ class RunTriggerService:
         uow_factory: Callable[[], UnitOfWork],
         plugin_registry: PluginRegistry,
         scheduler: ShardSchedulerService,
+        duration_stats: CaseDurationStatsService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._plugin_registry = plugin_registry
         self._scheduler = scheduler
+        self._duration_stats = duration_stats or CaseDurationStatsService()
 
     async def trigger(
         self,
@@ -112,9 +117,14 @@ class RunTriggerService:
 
         # 3. 插件分割（split_shards 为 async 契约）
         package = self._plugin_registry.require(task.task_type)
+        split_policy = dict(task.split_policy or {})
+        if split_policy.get("type") == "by_time":
+            split_policy.setdefault(
+                "default_duration_s", self._duration_stats.default_duration_s
+            )
         shard_specs = await package.master.split_shards(
             case_infos,
-            dict(task.split_policy or {}),
+            split_policy,
             dict(script.config or {}),
         )
 
@@ -133,7 +143,7 @@ class RunTriggerService:
                     task_id=task_id,
                     script_ref=script_ref,
                     case_selection=[c.stable_key for c in case_infos],
-                    split_policy=dict(task.split_policy or {}),
+                    split_policy=split_policy,
                     trigger_type=trigger_type,
                     triggered_by_user_id=triggered_by_user_id,
                     trigger_context=dict(trigger_context) if trigger_context else None,

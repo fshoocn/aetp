@@ -46,6 +46,9 @@ from master.domain.models import RunCaseResult, RunLog, RunResult
 from master.domain.repositories import UnitOfWork
 from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
+from master.application.services.case_duration_service import (
+    CaseDurationStatsService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +95,13 @@ class ProjectionResult:
 class RunProjectionService:
     """把 Agent 事实投影到 Run 执行域（纯 UoW 依赖，可单测）。"""
 
-    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[[], UnitOfWork],
+        duration_stats: CaseDurationStatsService | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._duration_stats = duration_stats or CaseDurationStatsService()
 
     # -- ACK ----------------------------------------------------------------
 
@@ -329,7 +337,7 @@ class RunProjectionService:
                 uow, payload.shard_id, node_id, payload.status, attempt.device_ids
             )
             self._persist_case_results(
-                uow, run.run_id, payload.shard_id, payload.attempt_no,
+                uow, run, payload.shard_id, payload.attempt_no,
                 payload.case_results,
             )
             self._project_run_result(uow, run, node_id, payload)
@@ -398,7 +406,7 @@ class RunProjectionService:
         return uow.shard_attempts.get_by_shard_attempt(shard_id, attempt_no)
 
     def _persist_case_results(
-        self, uow, run_id: str, shard_id: str, attempt_no: int, case_results: list
+        self, uow, run, shard_id: str, attempt_no: int, case_results: list
     ) -> None:
         """落库结构化 case 结果（D-19：按 attempt 全量保留，不覆盖）。"""
         for item in case_results or []:
@@ -421,14 +429,14 @@ class RunProjectionService:
             )
             detail = item.detail if isinstance(item, CaseResultEntry) else item.get("detail")
             existing = uow.run_case_results.get_by_key(
-                run_id, shard_id, case_key, attempt_no
+                run.run_id, shard_id, case_key, attempt_no
             )
             if existing is not None:
                 continue
             uow.run_case_results.add_many(
                 [
                     RunCaseResult(
-                        run_id=run_id,
+                        run_id=run.run_id,
                         shard_id=shard_id,
                         case_key=case_key,
                         attempt_no=attempt_no,
@@ -439,6 +447,19 @@ class RunProjectionService:
                     )
                 ]
             )
+            if status is CaseStatus.PASSED:
+                script_id = str((run.script_ref or {}).get("script_id", ""))
+                if script_id:
+                    self._duration_stats.record_success(
+                        uow,
+                        script_id=script_id,
+                        project_id=run.project_id,
+                        run_id=run.run_id,
+                        shard_id=shard_id,
+                        attempt_no=attempt_no,
+                        case_key=case_key,
+                        duration_ms=duration_ms,
+                    )
 
     def _project_run_result(
         self, uow, run, node_id: str, payload: RunResultPayload

@@ -39,6 +39,7 @@ from master.application.services.test_task_service import TestTaskService
 from master.application.services.shard_scheduler_service import SchedulerConfig, ShardSchedulerService
 from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.plugin_download_service import PluginDownloadService
+from master.application.services.case_duration_service import CaseDurationStatsService
 from master.application.services.script_service import ScriptService
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.run_projection_service import RunProjectionService
@@ -129,6 +130,17 @@ class Container(containers.DeclarativeContainer):
         ),
         zip_packages=providers.Callable(
             lambda manager: manager.load_packages(), plugin_manager
+        ),
+    )
+
+    # P6.8：成功 case 耗时滚动统计与 by-time 缺省耗时策略
+    case_duration_stats = providers.Singleton(
+        CaseDurationStatsService,
+        default_duration_s=providers.Callable(
+            lambda: get_settings().case_duration_default_s
+        ),
+        anomaly_percent=providers.Callable(
+            lambda: get_settings().case_duration_anomaly_percent
         ),
     )
 
@@ -226,7 +238,9 @@ class Container(containers.DeclarativeContainer):
 
     # Run 投影服务（P6.4：ack/progress/log/result → Run 执行域投影）
     run_projection_service = providers.Factory(
-        RunProjectionService, uow_factory=uow_factory
+        RunProjectionService,
+        uow_factory=uow_factory,
+        duration_stats=case_duration_stats,
     )
 
     # Run 触发服务（P6.4：任务定义 → 插件分割 → Run/Shards → 派发）
@@ -235,6 +249,7 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         plugin_registry=plugin_registry,
         scheduler=shard_scheduler_service,
+        duration_stats=case_duration_stats,
     )
 
     # Run 重试服务（P6.7：retry=新 Run；retry-failed=失败 case 新 Run，D-20）
