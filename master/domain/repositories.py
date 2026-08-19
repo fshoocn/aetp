@@ -41,6 +41,11 @@ from master.domain.models import (
     TestTask,
     User,
 )
+from master.domain.models.notification import (
+    EventDelivery,
+    EventSubscription,
+    NotificationEndpoint,
+)
 
 
 class UserRepository(ABC):
@@ -567,9 +572,79 @@ class UnitOfWork(ABC):
     bindings: ProjectNodeBindingRepository
     tasks: TaskRepository
     task_logs: TaskLogRepository
+    notification_endpoints: "NotificationEndpointRepository"
+    event_subscriptions: "EventSubscriptionRepository"
+    event_deliveries: "EventDeliveryRepository"
 
     @abstractmethod
     def __enter__(self) -> "UnitOfWork": ...
 
     @abstractmethod
     def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+
+class NotificationEndpointRepository(ABC):
+    """通知端点仓储（P7.6，§10.5）。"""
+
+    @abstractmethod
+    def get_by_endpoint_id(self, endpoint_id: str) -> NotificationEndpoint | None: ...
+
+    @abstractmethod
+    def list_by_project(
+        self, project_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[NotificationEndpoint]: ...
+
+    @abstractmethod
+    def add(self, endpoint: NotificationEndpoint) -> NotificationEndpoint: ...
+
+    @abstractmethod
+    def update(self, endpoint: NotificationEndpoint) -> NotificationEndpoint: ...
+
+    @abstractmethod
+    def delete(self, endpoint_id: str) -> None: ...
+
+
+class EventSubscriptionRepository(ABC):
+    """事件订阅仓储（P7.6，§10.5）。"""
+
+    @abstractmethod
+    def get_by_subscription_id(
+        self, subscription_id: str
+    ) -> EventSubscription | None: ...
+
+    @abstractmethod
+    def list_by_project(
+        self, project_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[EventSubscription]: ...
+
+    @abstractmethod
+    def add(self, subscription: EventSubscription) -> EventSubscription: ...
+
+    @abstractmethod
+    def update(self, subscription: EventSubscription) -> EventSubscription: ...
+
+    @abstractmethod
+    def delete(self, subscription_id: str) -> None: ...
+
+
+class EventDeliveryRepository(ABC):
+    """投递记录仓储（P7.6，§10.5）。"""
+
+    @abstractmethod
+    def get_by_delivery_id(self, delivery_id: str) -> EventDelivery | None: ...
+
+    @abstractmethod
+    def list_by_project(
+        self,
+        project_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[EventDelivery]: ...
+
+    @abstractmethod
+    def add(self, delivery: EventDelivery) -> EventDelivery: ...
+
+    @abstractmethod
+    def update(self, delivery: EventDelivery) -> EventDelivery: ...

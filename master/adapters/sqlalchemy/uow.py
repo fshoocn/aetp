@@ -18,9 +18,12 @@ from master.adapters.sqlalchemy.repositories import (
     AuditLogRepositoryImpl,
     DeviceRepositoryImpl,
     DomainEventRepositoryImpl,
+    EventDeliveryRepositoryImpl,
+    EventSubscriptionRepositoryImpl,
     InboxMessageRepositoryImpl,
     NodeRepositoryImpl,
     NodeSessionRepositoryImpl,
+    NotificationEndpointRepositoryImpl,
     OutboxMessageRepositoryImpl,
     ProjectMemberRepositoryImpl,
     ProjectNodeBindingRepositoryImpl,
@@ -75,6 +78,9 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.bindings = ProjectNodeBindingRepositoryImpl(session)
         self.tasks = TaskRepositoryImpl(session)
         self.task_logs = TaskLogRepositoryImpl(session)
+        self.notification_endpoints = NotificationEndpointRepositoryImpl(session)
+        self.event_subscriptions = EventSubscriptionRepositoryImpl(session)
+        self.event_deliveries = EventDeliveryRepositoryImpl(session)
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:

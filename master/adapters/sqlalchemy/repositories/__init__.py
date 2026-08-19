@@ -5,9 +5,12 @@ from __future__ import annotations
 from .audit_log_repository import AuditLogRepositoryImpl
 from .device_repository import DeviceRepositoryImpl
 from .domain_event_repository import DomainEventRepositoryImpl
+from .event_delivery_repository import EventDeliveryRepositoryImpl
+from .event_subscription_repository import EventSubscriptionRepositoryImpl
 from .inbox_message_repository import InboxMessageRepositoryImpl
 from .node_repository import NodeRepositoryImpl
 from .node_session_repository import NodeSessionRepositoryImpl
+from .notification_endpoint_repository import NotificationEndpointRepositoryImpl
 from .outbox_message_repository import OutboxMessageRepositoryImpl
 from .project_member_repository import ProjectMemberRepositoryImpl
 from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
@@ -31,7 +34,10 @@ __all__ = [
     "UserRepositoryImpl",
     "AuditLogRepositoryImpl",
     "DomainEventRepositoryImpl",
+    "EventDeliveryRepositoryImpl",
+    "EventSubscriptionRepositoryImpl",
     "InboxMessageRepositoryImpl",
+    "NotificationEndpointRepositoryImpl",
     "OutboxMessageRepositoryImpl",
     "ProjectRepositoryImpl",
     "RefreshTokenRepositoryImpl",
