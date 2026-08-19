@@ -27,6 +27,14 @@ htmlcov/
 
 **/plugins/
 
+# 仓库内置 pytest 插件源码（运行时插件目录仍保持忽略）
+!/plugins/
+!/plugins/pytest_plugin/
+!/plugins/pytest_plugin/**
+/plugins/pytest_plugin/__pycache__/
+/plugins/pytest_plugin/**/*.pyc
+/plugins/pytest_plugin.zip
+
 # ---- 日志 ----
 **/logs/
 **/*.log
