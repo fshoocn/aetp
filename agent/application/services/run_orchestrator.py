@@ -21,9 +21,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+import tempfile
 import uuid
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Mapping
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
@@ -37,6 +41,8 @@ from aetp_protocol.payloads import (
 from aetp_protocol.topics import event_topic
 
 from agent.application.services.execution_service import ExecutionService
+from agent.application.services.artifact_upload_service import ArtifactUploadService
+from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.task_context import TaskContext
 from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
@@ -93,6 +99,8 @@ class RunOrchestrator:
         execution_service: ExecutionService,
         plugin_registry,
         *,
+        script_cache: ScriptCacheService | None = None,
+        artifact_uploader: ArtifactUploadService | None = None,
         session_id: Callable[[], str] | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -100,9 +108,13 @@ class RunOrchestrator:
         self._ledger = ledger
         self._execution_service = execution_service
         self._plugin_registry = plugin_registry
+        self._script_cache = script_cache
+        self._artifact_uploader = artifact_uploader
         self._session_id = session_id or (lambda: settings.node_id)
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._tasks: set[asyncio.Task[None]] = set()
+        # 本次 Run 解包出的临时脚本目录，Run 结束后清理
+        self._script_dirs: set[Path] = set()
 
     # -- 入口 ---------------------------------------------------------------
 
@@ -127,7 +139,8 @@ class RunOrchestrator:
                 context,
                 timeout_s=payload.timeout_s,
             )
-            await self._finalize(payload, plugin, context, result)
+            artifact_refs = await self._upload_artifacts(payload, result)
+            await self._finalize(payload, plugin, context, result, artifact_refs)
         except Exception:  # noqa: BLE001 - 闭环兜底：任何异常都不让任务静默丢失
             logger.exception(
                 "Run 执行编排异常: run_id=%s attempt=%s",
@@ -135,6 +148,8 @@ class RunOrchestrator:
                 payload.attempt_no,
             )
             await self._report_abort(payload)
+        finally:
+            self._cleanup_script_dirs()
 
     # -- 插件解析 -----------------------------------------------------------
 
@@ -157,26 +172,122 @@ class RunOrchestrator:
             node_id=self._settings.node_id,
             params=dict(payload.execution_params or {}),
             script_ref=self._enrich_script_ref(dict(payload.script_ref or {})),
+            case_keys=list(payload.case_keys),
             is_cancelled=lambda: self._execution_service.is_cancelled(run_id),
             session_id=self._session_id,
             now=self._now,
         )
 
     def _enrich_script_ref(self, script_ref: dict) -> dict:
-        """把本地缓存路径注入 script_ref，供插件定位脚本包（§9.8）。"""
+        """把脚本包解包成目录并注入 script_ref.path，供插件定位脚本（§9.8）。
+
+        脚本缓存存的是**单个文件**（zip 或 .py 包），而插件 ``execute`` 期望
+        ``script_dir`` 是**解压后的目录**（含 test_*.py 等）。这里复用
+        ``ScriptCacheService`` 确保缓存后解包到临时目录，把目录路径注入
+        ``script_ref["path"]``；Run 结束后由 ``_cleanup_script_dirs`` 清理。
+        """
+        if self._script_cache is None:
+            return script_ref
         try:
-            cached = self._ledger.get_cached_script(
-                script_ref.get("script_id", ""),
-                script_ref.get("version", 1),
-                script_ref.get("sha256", ""),
+            entry = self._script_cache.ensure_cached(script_ref)
+            source = Path(entry.path)
+            if not source.is_file():
+                logger.warning(
+                    "缓存脚本文件缺失: %s", source
+                )
+                return script_ref
+            workspace = Path(self._settings.script_cache_dir).resolve().parent / "runs"
+            workspace.mkdir(parents=True, exist_ok=True)
+            tmp_dir = Path(
+                tempfile.mkdtemp(prefix="aetp-run-script-", dir=str(workspace))
             )
-        except Exception:  # noqa: BLE001 - 缓存查询失败不阻塞执行
-            cached = None
-        if cached is not None:
-            script_ref["path"] = cached.path
+            if zipfile.is_zipfile(source):
+                with zipfile.ZipFile(source) as archive:
+                    archive.extractall(tmp_dir)
+            else:
+                shutil.copy2(source, tmp_dir / "test_script.py")
+            self._script_dirs.add(tmp_dir)
+            script_ref["path"] = str(tmp_dir)
+        except Exception as exc:  # noqa: BLE001 - 解包失败不阻塞执行
+            logger.warning(
+                "脚本解包失败，回退缓存文件路径: %s", exc
+            )
+            try:
+                cached = self._ledger.get_cached_script(
+                    script_ref.get("script_id", ""),
+                    script_ref.get("version", 1),
+                    script_ref.get("sha256", ""),
+                )
+                if cached is not None:
+                    script_ref["path"] = cached.path
+            except Exception:  # noqa: BLE001
+                pass
         return script_ref
 
+    def _cleanup_script_dirs(self) -> None:
+        """清理本次 Run 解包出的临时脚本目录。"""
+        for path in self._script_dirs:
+            shutil.rmtree(path, ignore_errors=True)
+        self._script_dirs.clear()
+
     # -- 收尾：日志 + 结果 ---------------------------------------------------
+
+    async def _upload_artifacts(self, payload: RunAssignPayload, result) -> list[dict]:
+        """上传插件执行结果声明的本地产物，失败不阻断结果上报。"""
+        if self._artifact_uploader is None or not payload.artifact_upload_url:
+            return []
+        summary = result.summary or {}
+        candidates: list[tuple[str, str, str | None]] = []
+        report_path = summary.get("report_path")
+        if isinstance(report_path, str) and report_path:
+            candidates.append((report_path, "report", "pytest-junit.xml"))
+        raw_paths = summary.get("artifact_paths") or []
+        if isinstance(raw_paths, list):
+            for item in raw_paths:
+                if isinstance(item, str):
+                    candidates.append((item, "data", None))
+                elif isinstance(item, Mapping):
+                    path = item.get("path")
+                    if isinstance(path, str) and path:
+                        candidates.append(
+                            (
+                                path,
+                                str(item.get("kind") or "data"),
+                                item.get("filename")
+                                if isinstance(item.get("filename"), str)
+                                else None,
+                            )
+                        )
+
+        uploaded: list[dict] = []
+        seen: set[str] = set()
+        for raw_path, kind, filename in candidates:
+            path = str(Path(raw_path).resolve())
+            if path in seen:
+                continue
+            seen.add(path)
+            try:
+                reference = await self._artifact_uploader.upload(
+                    payload.artifact_upload_url,
+                    path,
+                    kind=kind,
+                    filename=filename,
+                )
+            except Exception as exc:  # noqa: BLE001 - 产物失败不阻断结果上报
+                logger.warning(
+                    "Run 产物上传失败: run_id=%s path=%s error=%s",
+                    payload.run_id,
+                    path,
+                    exc,
+                )
+                continue
+            uploaded.append(reference)
+            logger.info(
+                "Run 产物已上传: run_id=%s artifact_id=%s",
+                payload.run_id,
+                reference.get("artifact_id", ""),
+            )
+        return uploaded
 
     async def _finalize(
         self,
@@ -184,11 +295,12 @@ class RunOrchestrator:
         plugin,
         context: TaskContext,
         result,
+        artifact_refs: list[dict],
     ) -> None:
         await self._collect_logs(plugin, context)
         await self._flush_logs(context)
-        await self._report_result(payload, plugin, context, result)
-        await self._report_log_complete(payload, context)
+        await self._report_result(payload, plugin, context, result, artifact_refs)
+        await self._report_log_complete(payload, context, artifact_refs)
 
     async def _collect_logs(self, plugin, context: TaskContext) -> None:
         """调用插件可选 collect_logs，整合插件内部日志（§9.5 规则 2）。"""
@@ -234,6 +346,7 @@ class RunOrchestrator:
         plugin,
         context: TaskContext,
         result,
+        artifact_refs: list[dict],
     ) -> None:
         """组装并上报 run.result（稳定 outbox ID，一个 attempt 一个结果）。
 
@@ -241,7 +354,11 @@ class RunOrchestrator:
         分析入口抛异常时 result 标记 failed（§9.8：保留原始报告 artifact），
         不把未分析的结果误报为 succeeded（D-19）。
         """
-        analysis = await self._analyze(plugin, result, context)
+        analysis = (
+            await self._analyze(plugin, result, context)
+            if result.status is AgentRunStatus.SUCCEEDED
+            else _Analysis(failed=False)
+        )
 
         if analysis.failed:
             # 分析失败：无论执行结果如何，最终 result 标记 failed
@@ -251,7 +368,12 @@ class RunOrchestrator:
             data = {"error": analysis.error or "result analysis failed"}
             metrics: dict = {}
         else:
-            status = _status_value(result.status)
+            status = (
+                "failed"
+                if result.status is AgentRunStatus.SUCCEEDED
+                and analysis.passed is False
+                else _status_value(result.status)
+            )
             case_results = analysis.case_results
             passed = bool(
                 analysis.passed
@@ -272,6 +394,7 @@ class RunOrchestrator:
             case_results=case_results,
             metrics=dict(metrics),
             data=dict(data),
+            artifact_refs=list(artifact_refs),
         )
         envelope = self._envelope(
             MessageType.RUN_RESULT,
@@ -342,7 +465,10 @@ class RunOrchestrator:
         )
 
     async def _report_log_complete(
-        self, payload: RunAssignPayload, context: TaskContext
+        self,
+        payload: RunAssignPayload,
+        context: TaskContext,
+        artifact_refs: list[dict],
     ) -> None:
         """发布 run.log-complete 日志围栏（P6.6）。
 
@@ -354,6 +480,7 @@ class RunOrchestrator:
             run_id=context.run_id,
             last_sequence=max_sequence["last_sequence"],
             entry_count=max_sequence["entry_count"],
+            artifact_refs=list(artifact_refs),
         )
         envelope = self._envelope(
             MessageType.RUN_LOG_COMPLETE,

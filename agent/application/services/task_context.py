@@ -71,6 +71,7 @@ class TaskContext:
         node_id: str | None = None,
         params: Mapping[str, Any] | None = None,
         script_ref: Mapping[str, Any] | None = None,
+        case_keys: list[str] | None = None,
         is_cancelled: Callable[[], bool] | None = None,
         session_id: Callable[[], str] | None = None,
         now: Callable[[], datetime] | None = None,
@@ -84,6 +85,7 @@ class TaskContext:
         self.node_id = node_id or settings.node_id
         self.params: Mapping[str, Any] = dict(params or {})
         self.script_ref: Mapping[str, Any] = dict(script_ref or {})
+        self.case_keys = list(case_keys or [])
         self._is_cancelled = is_cancelled or (lambda: False)
         self._session_id = session_id or (lambda: self._settings.node_id)
         self._now = now or (lambda: datetime.now(timezone.utc))
@@ -115,6 +117,8 @@ class TaskContext:
         detail: Mapping[str, Any] | None = None,
     ) -> None:
         """追加一条任务日志到 spool（(run_id, sequence) 幂等）。"""
+        if not message:
+            return
         self._sequence += 1
         entry = TaskLogSpoolEntry(
             run_id=self.run_id,

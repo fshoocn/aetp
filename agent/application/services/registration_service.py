@@ -207,6 +207,11 @@ class RegistrationService:
         """校验 register-ack 并标记已注册；无效返回 False。"""
         try:
             topic_info = parse_topic(message.topic)
+        except Exception:  # noqa: BLE001 - 非命令主题交由其他路由处理
+            return False
+        if topic_info.direction != "commands" or topic_info.segment != "register-ack":
+            return False
+        try:
             envelope = Envelope.model_validate(
                 json.loads(message.payload.decode("utf-8"))
             )

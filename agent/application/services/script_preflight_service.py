@@ -234,7 +234,7 @@ class ScriptPreflightService:
                 with zipfile.ZipFile(source) as archive:
                     archive.extractall(tmp_dir)
             else:
-                shutil.copy2(source, tmp_dir / source.name)
+                shutil.copy2(source, tmp_dir / "test_script.py")
         except Exception as exc:  # noqa: BLE001 - 解包失败统一映射
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise ScriptPreflightError(

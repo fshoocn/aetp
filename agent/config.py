@@ -63,6 +63,10 @@ class AgentSettings:
     mqtt_use_tls: bool = True
     # ---- 本地账本 ----
     ledger_url: str = "sqlite:///data/agent.db"
+    # ---- 能力自动扫描（P5，§18.5）----
+    # 串口映射文件（功能名 -> 端口号）；相对路径以 .env 所在目录为基准；
+    # 未配置时尝试 Agent 运行目录下的 serial_ports.json；找不到则跳过串口能力
+    serial_map_file: Path | None = None
     # ---- Agent 执行插件 ----
     plugin_dir: Path = Path("data/plugins")
     # ---- 脚本本地缓存（P5.6：下载后按 hash 组织目录）----
@@ -154,6 +158,14 @@ class AgentSettings:
         if not script_cache_dir.is_absolute():
             script_cache_dir = base_dir / script_cache_dir
 
+        raw_serial_map_file = values.get("AETP_AGENT_SERIAL_MAP_FILE")
+        serial_map_file = None
+        if raw_serial_map_file:
+            p = Path(raw_serial_map_file)
+            if not p.is_absolute():
+                p = base_dir / p
+            serial_map_file = p
+
         return cls(
             node_id=node_id,
             name=values.get("AETP_AGENT_NAME", cls.name),
@@ -173,6 +185,7 @@ class AgentSettings:
                 values.get("AETP_AGENT_MQTT_USE_TLS"), cls.mqtt_use_tls
             ),
             ledger_url=values.get("AETP_AGENT_LEDGER_URL", cls.ledger_url),
+            serial_map_file=serial_map_file,
             plugin_dir=plugin_dir,
             script_cache_dir=script_cache_dir,
             max_concurrent_runs=parse_int(

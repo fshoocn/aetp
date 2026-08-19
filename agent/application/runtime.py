@@ -26,6 +26,7 @@ from aetp_protocol.message_types import MessageType
 from aetp_protocol.topics import command_topic
 
 from agent.application.services.command_dispatcher import CommandDispatcher
+from agent.application.services.artifact_upload_service import ArtifactUploadService
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import (
     RegistrationRejectedError,
@@ -64,6 +65,7 @@ class AgentRuntime:
         plugin_registry: "AgentPluginRegistry | None" = None,
         plugin_installer: "PluginPackageInstaller | None" = None,
         script_cache: ScriptCacheService | None = None,
+        artifact_uploader: ArtifactUploadService | None = None,
         script_preflight: ScriptPreflightService | None = None,
         execution_service: ExecutionService | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
@@ -80,6 +82,8 @@ class AgentRuntime:
             ledger=ledger,
             execution_service=self._execution_service,
             plugin_registry=plugin_registry,
+            script_cache=script_cache,
+            artifact_uploader=artifact_uploader,
             session_id=lambda: registration.session_id,
         )
         self._dispatcher = dispatcher or CommandDispatcher(

@@ -203,6 +203,8 @@ class RunAssignPayload(_Strict):
     plugin_ref: PluginPackageRef | None = None
     # sym:script_ref 脚本引用 {script_id, version, sha256, download_url}
     script_ref: dict[str, Any]
+    # sym:artifact_upload_url Agent 上传 Run 产物的内部地址
+    artifact_upload_url: str | None = None
     # sym:case_keys 该 Shard 负责的 case 集合
     case_keys: list[str] = Field(default_factory=list)
     # sym:execution_params 每 Shard 专属执行参数（插件 execute 使用）

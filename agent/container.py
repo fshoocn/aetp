@@ -14,6 +14,8 @@ from dependency_injector import containers, providers
 from agent.adapters.mqtt.transport import AgentMqttTransport
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
+from agent.application.services.capability_loader import scan_capabilities
+from agent.application.services.artifact_upload_service import ArtifactUploadService
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
 from agent.application.services.script_cache_service import ScriptCacheService
@@ -64,6 +66,9 @@ class Container(containers.DeclarativeContainer):
         ledger=ledger,
     )
 
+    # Run 产物上传器（P6.6：JUnit XML/插件声明附件上传到 Master）
+    artifact_uploader = providers.Singleton(ArtifactUploadService)
+
     # 执行服务单例（P6.1：并发上限 + timeout + cancel token + 异常映射）
     execution_service = providers.Singleton(
         ExecutionService,
@@ -77,6 +82,9 @@ class Container(containers.DeclarativeContainer):
         transport=transport,
         ledger=ledger,
         settings=settings,
+        capabilities=providers.Callable(
+            lambda: scan_capabilities(get_settings().serial_map_file)
+        ),
         plugin_registry=plugin_registry,
     )
 
@@ -92,5 +100,6 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
         plugin_installer=plugin_installer,
         script_cache=script_cache,
+        artifact_uploader=artifact_uploader,
         execution_service=execution_service,
     )

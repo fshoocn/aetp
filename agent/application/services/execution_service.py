@@ -153,7 +153,7 @@ class ExecutionService:
             status = AgentRunStatus.FAILED
             summary, error = {}, f"{type(exc).__name__}: {exc}"
             logger.warning(
-                "run 执行失败: run_id=%s error=%s", run_id, exc
+                "run 执行失败: run_id=%s error=%r", run_id, exc
             )
         finally:
             self._tokens.pop(run_id, None)

@@ -20,6 +20,7 @@ import uuid
 import zipfile
 
 from aetp_protocol.payloads import PluginPackageRef
+from aetp_protocol.plugin import PluginPackage
 
 from agent.plugins.errors import PluginInstallError
 from agent.plugins.execution import AgentExecutionPlugin, AgentPluginRegistry
@@ -38,6 +39,26 @@ def _download(url: str) -> bytes:
             return response.read()
     except Exception as exc:  # noqa: BLE001 - 统一映射安装错误
         raise PluginInstallError(f"插件包下载失败: {url}: {exc}") from exc
+
+
+def _find_script_on_path(relative: str):
+    """在 sys.path 中查找文件（如解包目录里的 main.py）。
+
+    ZIP/USB 插件固定入口 ``main.py:package`` 按文件加载；解包目录已
+    加入 sys.path，这里逐项搜索避免依赖进程当前工作目录。
+    """
+    from pathlib import Path
+
+    relative_path = Path(relative)
+    if relative_path.is_absolute() and relative_path.exists():
+        return relative_path
+    for entry in sys.path:
+        if not entry:
+            continue
+        candidate = Path(entry) / relative_path
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"插件入口文件未在 sys.path 中找到: {relative}")
 
 
 class LocalPluginInstaller:
@@ -144,9 +165,36 @@ class LocalPluginInstaller:
         if not module_name or not attribute_name:
             raise PluginInstallError(f"插件入口点为空: {entry_point}")
         try:
-            module = importlib.import_module(module_name)
+            if module_name.endswith(".py"):
+                # ZIP 插件固定入口 main.py:package：按文件加载（§10.6）。
+                # 文件定位：优先在 sys.path 中查找（解包 staging 已加入 sys.path）。
+                script = _find_script_on_path(module_name)
+                module_name = (
+                    f"aetp_agent_installed_{script.stem}_{abs(hash(str(script.parent))) % (10**9)}"
+                )
+                spec = importlib.util.spec_from_file_location(
+                    module_name, script
+                )
+                if spec is None or spec.loader is None:
+                    raise PluginInstallError(
+                        f"插件入口文件加载失败: {module_name}"
+                    )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+            else:
+                module = importlib.import_module(module_name)
             factory = getattr(module, attribute_name)
             plugin = factory() if isinstance(factory, type) else factory
+            # ZIP 插件 main.py:package 导出的是 PluginPackage（含 master+agent 双端）；
+            # Agent 安装器只取 Agent 执行面（§18.2 D-19）。
+            if isinstance(plugin, PluginPackage):
+                if plugin.agent is None:
+                    raise PluginInstallError(
+                        f"插件包缺少 Agent 执行面: {entry_point}"
+                    )
+                plugin = plugin.agent
+        except PluginInstallError:
+            raise
         except Exception as exc:  # noqa: BLE001 - 统一映射
             raise PluginInstallError(
                 f"插件入口点加载失败: {entry_point}: {exc}"

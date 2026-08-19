@@ -1,0 +1,5 @@
+{
+  "relay_board": "COM20",
+  "psu": "COM30",
+  "oscilloscope": "COM40"
+}
