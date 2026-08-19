@@ -77,3 +77,18 @@ def test_env_isolation():
     assert s.mqtt_host == "from-file"
     assert s.mqtt_host != "wrong-from-env"
     env.unlink()
+
+
+def test_case_duration_settings_are_loaded_from_env(tmp_path):
+    """P6.8 默认耗时和异常阈值来自 Master 外置配置。"""
+    from master.config import MasterSettings
+
+    env = tmp_path / "duration.env"
+    env.write_text(
+        "AETP_MASTER_CASE_DURATION_DEFAULT_S=45.5\n"
+        "AETP_MASTER_CASE_DURATION_ANOMALY_PERCENT=75\n",
+        encoding="utf-8",
+    )
+    settings = MasterSettings.from_env_file(env)
+    assert settings.case_duration_default_s == 45.5
+    assert settings.case_duration_anomaly_percent == 75.0

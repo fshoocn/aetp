@@ -19,8 +19,12 @@ from datetime import datetime, timezone
 import pytest
 
 from aetp_protocol.capabilities import HardwareRequirements
-from aetp_protocol.logs import RunLogBatch
-from aetp_protocol.payloads import RunAckPayload, RunResultPayload
+from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
+from aetp_protocol.payloads import (
+    CaseResultEntry,
+    RunAckPayload,
+    RunResultPayload,
+)
 from aetp_protocol.plugin import CaseInfo, PluginMetadata, PluginPackage, ShardSpec
 
 from master.domain.enums import (
@@ -347,8 +351,8 @@ def test_projection_result_finalizes_run_and_releases_devices(client) -> None:
             status="succeeded",
             passed=True,
             case_results=[
-                {"case_key": "c0", "status": "passed", "duration_ms": 12},
-                {"case_key": "c1", "status": "passed", "duration_ms": 15},
+                CaseResultEntry(case_key="c0", status="passed", duration_ms=12),
+                CaseResultEntry(case_key="c1", status="passed", duration_ms=15),
             ],
         ),
     )
@@ -362,6 +366,13 @@ def test_projection_result_finalizes_run_and_releases_devices(client) -> None:
         # case 结果已落库
         cases = uow.run_case_results.list_by_shard(run_id, shard.shard_id)
         assert {c.case_key for c in cases} == {"c0", "c1"}
+        # P6.8：成功 case 耗时回写脚本用例统计
+        c0 = uow.script_cases.get_by_stable_key("S-e2e", "c0")
+        c1 = uow.script_cases.get_by_stable_key("S-e2e", "c1")
+        assert c0 is not None and c0.avg_duration_s == 0.012
+        assert c0.duration_samples == 1
+        assert c1 is not None and c1.avg_duration_s == 0.015
+        assert c1.duration_samples == 1
 
 
 def test_projection_result_idempotent_single_final_result(client) -> None:
@@ -422,26 +433,26 @@ def test_projection_log_batch_idempotent_by_sequence(client) -> None:
         run_id=run_id,
         first_sequence=1,
         entries=[
-            {
-                "project_id": "p1",
-                "task_id": "T-e2e",
-                "run_id": run_id,
-                "node_id": "node-a",
-                "sequence": 1,
-                "level": "info",
-                "message": "hello",
-                "occurred_at": "2026-08-17T12:00:00Z",
-            },
-            {
-                "project_id": "p1",
-                "task_id": "T-e2e",
-                "run_id": run_id,
-                "node_id": "node-a",
-                "sequence": 2,
-                "level": "error",
-                "message": "boom",
-                "occurred_at": "2026-08-17T12:00:01Z",
-            },
+            RunLogEntry(
+                project_id="p1",
+                task_id="T-e2e",
+                run_id=run_id,
+                node_id="node-a",
+                sequence=1,
+                level=LogLevel.INFO,
+                message="hello",
+                occurred_at=datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc),
+            ),
+            RunLogEntry(
+                project_id="p1",
+                task_id="T-e2e",
+                run_id=run_id,
+                node_id="node-a",
+                sequence=2,
+                level=LogLevel.ERROR,
+                message="boom",
+                occurred_at=datetime(2026, 8, 17, 12, 0, 1, tzinfo=timezone.utc),
+            ),
         ],
     )
 
