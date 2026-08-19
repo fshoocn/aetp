@@ -55,7 +55,10 @@ class _UploadPlugin:
         return {"type": "object"}
 
     def hardware_requirements(self, config, cases):
-        return HardwareRequirements()
+        required_tag = config.get("required_tag")
+        return HardwareRequirements(
+            required_tags=(required_tag,) if required_tag else ()
+        )
 
 
 def _register_plugin(container) -> None:
@@ -222,6 +225,70 @@ def test_script_upload_same_hash_idempotent(client):
     assert resp1.json()["version"] == resp2.json()["version"] == 1
 
 
+def test_script_delete_removes_script_cases_and_file(client):
+    """删除脚本版本时同时清理用例索引和存储文件。"""
+    container = client.app.state.container
+    _register_plugin(container)
+    headers = _create_admin(client)
+    project_id = _create_project(client, headers, key="SCRIPT_DELETE")
+
+    resp = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=headers,
+        data={"task_type": "upload_test", "name": "delete-me", "config": "{}"},
+        files={"file": ("delete.py", b"def test_delete():\n    pass\n", "text/x-python")},
+    )
+    assert resp.status_code == 201, resp.text
+    script = resp.json()
+    file_ref = script["file_ref"]
+    assert container.storage().exists(file_ref)
+
+    deleted = client.delete(
+        f"/api/v1/projects/{project_id}/scripts/{script['script_id']}",
+        headers=headers,
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert not container.storage().exists(file_ref)
+    assert client.get(
+        f"/api/v1/projects/{project_id}/scripts/{script['script_id']}",
+        headers=headers,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{project_id}/scripts/{script['script_id']}/cases",
+        headers=headers,
+    ).status_code == 404
+
+
+def test_script_delete_rejects_task_definition_reference(client):
+    """脚本仍被任务定义引用时，删除返回 409。"""
+    container = client.app.state.container
+    _register_plugin(container)
+    headers = _create_admin(client)
+    project_id = _create_project(client, headers, key="SCRIPT_DELETE_REF")
+
+    resp = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=headers,
+        data={"task_type": "upload_test", "name": "referenced", "config": "{}"},
+        files={"file": ("referenced.py", b"def test_ref():\n    pass\n", "text/x-python")},
+    )
+    assert resp.status_code == 201
+    script_id = resp.json()["script_id"]
+    task = client.post(
+        f"/api/v1/projects/{project_id}/test-tasks",
+        headers=headers,
+        json={"name": "keeps-script", "script_id": script_id},
+    )
+    assert task.status_code == 201, task.text
+
+    deleted = client.delete(
+        f"/api/v1/projects/{project_id}/scripts/{script_id}",
+        headers=headers,
+    )
+    assert deleted.status_code == 409
+    assert "任务定义引用" in deleted.json()["detail"]
+
+
 def test_task_definition_crud_and_case_selection(client):
     """任务定义 CRUD：创建（case 勾选校验）→ 查询 → 更新 → 软删除。"""
     container = client.app.state.container
@@ -289,6 +356,22 @@ def test_task_definition_crud_and_case_selection(client):
     assert resp.json()["default_case_selection"] == ["case-c"]
     assert resp.json()["split_policy"]["type"] == "by_time"
 
+    # 编辑时同样校验用例和分割参数
+    resp = client.patch(
+        f"/api/v1/projects/{project_id}/test-tasks/{task_id}",
+        headers=headers,
+        json={"default_case_selection": ["not-exist"]},
+    )
+    assert resp.status_code == 422
+    assert "用例不存在" in resp.json()["detail"]
+    resp = client.patch(
+        f"/api/v1/projects/{project_id}/test-tasks/{task_id}",
+        headers=headers,
+        json={"split_policy": {"type": "by_case_count", "cases_per_shard": 0}},
+    )
+    assert resp.status_code == 422
+    assert "cases_per_shard" in resp.json()["detail"]
+
     # 非法 case 勾选 → 422
     resp = client.post(
         f"/api/v1/projects/{project_id}/test-tasks",
@@ -323,3 +406,47 @@ def test_task_definition_crud_and_case_selection(client):
         f"/api/v1/projects/{project_id}/test-tasks", headers=headers
     )
     assert all(t["task_id"] != task_id or t["enabled"] is False for t in resp.json())
+
+    # 软删除后可以恢复启用
+    resp = client.patch(
+        f"/api/v1/projects/{project_id}/test-tasks/{task_id}",
+        headers=headers,
+        json={"enabled": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is True
+
+
+def test_task_definition_returns_node_capability_warning(client):
+    """节点绑定合法但能力不满足时，保存成功并返回软校验告警。"""
+    container = client.app.state.container
+    _register_plugin(container)
+    headers = _create_admin(client)
+    project_id = _create_project(client, headers, key="TASK_WARNING")
+    _create_node(client)
+    _bind_node(client, headers, project_id)
+
+    script = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=headers,
+        data={
+            "task_type": "upload_test",
+            "name": "needs-tag",
+            "config": json.dumps({"required_tag": "missing-tag"}),
+        },
+        files={"file": ("needs_tag.py", b"def test_tag():\n    pass\n", "text/x-python")},
+    )
+    assert script.status_code == 201
+
+    task = client.post(
+        f"/api/v1/projects/{project_id}/test-tasks",
+        headers=headers,
+        json={
+            "name": "warning-task",
+            "script_id": script.json()["script_id"],
+            "default_case_selection": ["case-a"],
+            "node_ids": ["bench-001"],
+        },
+    )
+    assert task.status_code == 201, task.text
+    assert "NODE_CAPABILITY_MISMATCH" in task.json()["validation_warning"]

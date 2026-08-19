@@ -1,25 +1,48 @@
 <template>
   <div class="scripts-page">
-    <div class="page-heading">
-      <div>
-        <span class="eyebrow">SCRIPT LIBRARY / PROJECT SCOPE</span>
-        <h1>脚本库</h1>
-        <p>上传测试脚本包，Master 插件自动验证并解析用例索引；勾选用例创建任务定义。</p>
+    <header class="scripts-hero">
+      <div class="hero-copy">
+        <span class="eyebrow"><i></i>PROJECT SCRIPT LIBRARY</span>
+        <h1>测试脚本库</h1>
+        <p>集中管理脚本版本、插件配置与用例索引，让每次上传都能直接进入可执行状态。</p>
       </div>
-      <div class="heading-actions">
-        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openUpload">上传脚本</el-button>
-        <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
+      <div class="hero-actions">
+        <el-button v-if="canManage" class="upload-trigger" type="primary" :icon="Plus" @click="openUpload">上传脚本</el-button>
+        <el-button class="refresh-trigger" :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
       </div>
-    </div>
+    </header>
 
     <el-alert v-if="!projectId" title="尚未选择项目" description="请先从顶部选择一个项目。" type="info" show-icon :closable="false" />
     <el-alert v-if="errorMessage" title="脚本库加载失败" :description="errorMessage" type="error" show-icon :closable="false" class="page-alert" />
 
-    <el-card v-if="projectId" v-loading="loading" shadow="never">
+    <section v-if="projectId" class="library-stats">
+      <div class="stats-intro">
+        <span class="section-kicker">LIBRARY PULSE</span>
+        <strong>{{ projectStore.currentProject?.name || '当前项目' }}</strong>
+        <span>脚本资产概览</span>
+      </div>
+      <div class="stat-block">
+        <span>全部脚本</span>
+        <strong>{{ scripts.length }}</strong>
+      </div>
+      <div class="stat-block stat-success">
+        <span>已解析</span>
+        <strong>{{ parsedScripts }}</strong>
+      </div>
+      <div class="stat-block stat-pending">
+        <span>处理中</span>
+        <strong>{{ pendingScripts }}</strong>
+      </div>
+    </section>
+
+    <el-card v-if="projectId" class="scripts-panel" v-loading="loading" shadow="never">
       <template #header>
-        <div class="card-heading">
-          <div><strong>脚本版本</strong><span>{{ projectStore.currentProject?.name || '当前项目' }}</span></div>
-          <el-tag effect="light">{{ scripts.length }} 个</el-tag>
+        <div class="panel-heading">
+          <div>
+            <span class="section-kicker">VERSION CATALOG</span>
+            <strong>脚本版本</strong>
+          </div>
+          <span class="panel-hint">点击脚本行查看用例索引</span>
         </div>
       </template>
       <el-table :data="scripts" row-key="script_id" @row-click="openScript">
@@ -43,54 +66,84 @@
         <el-table-column label="插件版本" width="110"><template #default="{ row }"><span class="mono">{{ row.plugin_version || '-' }}</span></template></el-table-column>
         <el-table-column label="大小" width="100"><template #default="{ row }">{{ formatBytes(row.size) }}</template></el-table-column>
         <el-table-column label="上传时间" min-width="170"><template #default="{ row }">{{ row.created_at ? fmt(row.created_at) : '-' }}</template></el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="viewCases(row)">用例</el-button>
             <el-button v-if="canManage" link type="warning" :loading="reparsingId === row.script_id" @click.stop="reparse(row)">重解析</el-button>
             <el-button link @click.stop="download(row)">下载</el-button>
+            <el-button v-if="canManage" link type="danger" :loading="deletingId === row.script_id" @click.stop="deleteScript(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
       <el-empty v-if="!loading && scripts.length === 0" description="当前项目尚未上传脚本" />
     </el-card>
 
-    <!-- 上传弹窗 -->
-    <el-dialog v-model="uploadVisible" title="上传测试脚本" width="560px" destroy-on-close>
-      <el-alert title="脚本将立即验证并解析用例" description="支持 .py / .zip；解析结果会生成可用例树，勾选后即可创建任务定义。" type="info" show-icon :closable="false" class="dialog-alert" />
-      <el-form ref="formRef" :model="uploadForm" :rules="formRules" label-position="top">
-        <el-form-item label="任务类型" prop="taskType">
-          <el-select v-model="uploadForm.taskType" filterable placeholder="选择任务类型" style="width: 100%">
+    <!-- 插件上传工作台 -->
+    <el-dialog v-model="uploadVisible" class="script-upload-dialog" title="上传测试脚本" width="1180px" destroy-on-close @closed="closePluginUi">
+      <div class="upload-workbench">
+        <aside class="type-rail">
+          <span class="workbench-step">01 / SCRIPT TYPE</span>
+          <h2>先选择脚本类型</h2>
+          <p>类型决定插件配置页、文件格式和验证方式。</p>
+          <el-select v-model="uploadForm.taskType" class="type-select" filterable placeholder="选择任务类型" @change="onTaskTypeChange">
             <el-option v-for="plugin in taskTypes" :key="plugin.task_type" :label="`${plugin.display_name} (${plugin.task_type})`" :value="plugin.task_type" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="脚本名称" prop="name">
-          <el-input v-model="uploadForm.name" placeholder="如 CAN 通信回归" />
-        </el-form-item>
-        <el-form-item label="脚本文件" prop="file">
-          <el-upload
-            drag
-            :auto-upload="false"
-            :limit="1"
-            :on-change="onFileChange"
-            :on-remove="onFileRemove"
-            accept=".py,.zip"
-          >
-            <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-            <div class="el-upload__text">拖拽文件到此处，或 <em>点击选择</em></div>
-            <template #tip>
-              <div class="el-upload__tip">
-                扩展名白名单：{{ currentUploadSpec }}
-              </div>
-            </template>
-          </el-upload>
-        </el-form-item>
-        <el-form-item label="配置参数（JSON）" prop="configText">
-          <el-input v-model="uploadForm.configText" type="textarea" :rows="4" spellcheck="false" placeholder="{}" />
-        </el-form-item>
-      </el-form>
+          <div v-if="currentPlugin" class="selected-plugin">
+            <span class="selected-plugin-icon"><el-icon><Document /></el-icon></span>
+            <div>
+              <strong>{{ currentPlugin.display_name }}</strong>
+              <small>{{ currentPlugin.task_type }} · v{{ currentPlugin.plugin_version }}</small>
+            </div>
+          </div>
+          <div class="rail-note">
+            <span class="rail-note-dot"></span>
+            <span>上传、配置和验证均由插件页面完成</span>
+          </div>
+        </aside>
+
+        <section class="plugin-stage">
+          <div class="stage-heading">
+            <div>
+              <span class="workbench-step">02 / PLUGIN WORKSPACE</span>
+              <h2>{{ currentPlugin?.display_name || '等待选择脚本类型' }}</h2>
+            </div>
+            <el-tag v-if="currentPlugin" effect="plain" round>{{ currentPlugin.task_type }}</el-tag>
+          </div>
+          <div v-if="pluginUiObjectUrl" class="plugin-ui-shell">
+            <div class="plugin-ui-toolbar">
+              <span><i></i>PLUGIN UI</span>
+              <span v-if="contextLoading">同步项目能力中...</span>
+              <span v-else>配置页由插件包提供</span>
+            </div>
+            <div v-loading="pluginUiLoading || contextLoading" class="plugin-ui-frame-wrap">
+              <iframe
+                ref="pluginFrame"
+                :src="pluginUiObjectUrl"
+                title="任务类型插件配置页面"
+                class="plugin-ui-frame"
+                @load="postPluginContext"
+              />
+            </div>
+          </div>
+          <div v-else-if="uploadForm.taskType && pluginUiLoading" class="plugin-state plugin-state-loading">
+            <span class="state-pulse"></span>
+            <strong>正在加载插件工作区</strong>
+            <p>正在读取插件包内的配置与上传页面...</p>
+          </div>
+          <div v-else-if="uploadForm.taskType" class="plugin-state plugin-state-warning">
+            <span class="state-mark">!</span>
+            <strong>该插件没有可用的 UI</strong>
+            <p>请安装包含 <code>ui/index.html</code> 的插件包后再上传。</p>
+          </div>
+          <div v-else class="plugin-state plugin-state-empty">
+            <span class="state-mark">02</span>
+            <strong>选择类型后进入插件工作区</strong>
+            <p>脚本名称、文件选择、配置和上传动作都将在这里完成。</p>
+          </div>
+        </section>
+      </div>
       <template #footer>
-        <el-button @click="uploadVisible = false">取消</el-button>
-        <el-button type="primary" :loading="uploading" @click="submitUpload">上传并解析</el-button>
+        <el-button @click="uploadVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -127,13 +180,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRaw, watch } from "vue";
 import { useRouter } from "vue-router";
-import type { FormInstance, FormRules, UploadFile } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Document, Plus, Refresh, UploadFilled } from "@element-plus/icons-vue";
-import { aetpApi, type TestScript, type ScriptCase, type TaskTypePlugin } from "@/api/endpoints";
+import { Document, Plus, Refresh } from "@element-plus/icons-vue";
+import { aetpApi, type TaskTypeConfigContext, type TestScript, type ScriptCase, type TaskTypePlugin } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
@@ -160,49 +212,175 @@ const scripts = computed(() => scriptsQuery.data.value ?? []);
 const taskTypes = computed(() => taskTypesQuery.data.value ?? []);
 const loading = computed(() => scriptsQuery.isLoading.value);
 const errorMessage = computed(() => scriptsQuery.error.value?.message || "");
+const parsedScripts = computed(() => scripts.value.filter((script) => script.parse_status === "parsed").length);
+const pendingScripts = computed(() => scripts.value.filter((script) => ["pending", "parsing"].includes(script.parse_status)).length);
 
 function refresh() { qc.invalidateQueries({ queryKey: ["scripts"] }); }
 
 // ---- 上传 ----
 const uploadVisible = ref(false);
-const formRef = ref<FormInstance>();
-const uploadForm = reactive({ taskType: "", name: "", configText: "{}" });
-const formRules: FormRules = {
-  taskType: [{ required: true, message: "请选择任务类型", trigger: "change" }],
-  name: [{ required: true, message: "请输入脚本名称", trigger: "blur" }],
-};
-const selectedFile = ref<File | null>(null);
-const currentUploadSpec = computed(() => {
-  const plugin = taskTypes.value.find((p) => p.task_type === uploadForm.taskType);
-  if (!plugin) return "请先选择任务类型";
-  const spec = plugin.upload_spec as { extensions?: string[]; max_size_mb?: number };
-  return `${(spec.extensions || []).join(", ") || "任意"} · 最大 ${spec.max_size_mb ?? 100}MB`;
+const uploadForm = reactive({ taskType: "", scriptId: "", config: {} as Record<string, unknown> });
+const currentPlugin = computed(() => taskTypes.value.find((plugin) => plugin.task_type === uploadForm.taskType) ?? null);
+const pluginUiUrl = computed(() => currentPlugin.value?.ui?.url || "");
+const pluginUiObjectUrl = ref("");
+const pluginUiLoading = ref(false);
+const pluginUploading = ref(false);
+const pluginFrame = ref<HTMLIFrameElement>();
+const pluginContext = ref<TaskTypeConfigContext | null>(null);
+const verifyNodeId = ref("");
+const verifyRequestId = ref("");
+let verifyPollTimer: number | null = null;
+const contextQuery = useQuery({
+  queryKey: ["taskTypeConfigContext", projectId, () => uploadForm.taskType],
+  queryFn: () => aetpApi.plugins.configContext(projectId.value, uploadForm.taskType),
+  enabled: computed(() => uploadVisible.value && !!projectId.value && !!uploadForm.taskType),
 });
-const uploadMutation = useMutation({
-  mutationFn: () => {
-    const config = JSON.parse(uploadForm.configText || "{}");
-    return aetpApi.scripts.upload(projectId.value, selectedFile.value!, uploadForm.taskType, uploadForm.name, config);
-  },
-  onSuccess: () => {
-    ElMessage.success("脚本已上传并解析成功");
-    uploadVisible.value = false;
-    refresh();
-  },
-  onError: (e: Error) => ElMessage.error(e.message),
-});
-const uploading = computed(() => uploadMutation.isPending.value);
+const contextLoading = computed(() => contextQuery.isLoading.value || contextQuery.isFetching.value);
 
-function openUpload() { uploadForm.taskType = ""; uploadForm.name = ""; uploadForm.configText = "{}"; selectedFile.value = null; uploadVisible.value = true; }
-function onFileChange(file: UploadFile) { selectedFile.value = file.raw ?? null; }
-function onFileRemove() { selectedFile.value = null; }
-async function submitUpload() {
-  if (!formRef.value) return;
-  const valid = await formRef.value.validate().catch(() => false);
-  if (!valid) return;
-  if (!selectedFile.value) { ElMessage.warning("请选择脚本文件"); return; }
-  try { JSON.parse(uploadForm.configText || "{}"); } catch { ElMessage.error("配置参数必须是合法 JSON"); return; }
-  uploadMutation.mutate();
+function openUpload() { uploadForm.taskType = ""; uploadForm.scriptId = ""; uploadForm.config = {}; uploadVisible.value = true; }
+function onTaskTypeChange() { uploadForm.scriptId = ""; uploadForm.config = {}; verifyNodeId.value = ""; }
+
+async function loadPluginUi() {
+  closePluginUi();
+  if (!pluginUiUrl.value) return;
+  pluginUiLoading.value = true;
+  try {
+    const blob = await aetpApi.plugins.uiAsset(pluginUiUrl.value);
+    pluginUiObjectUrl.value = URL.createObjectURL(blob);
+  } catch (error) {
+    ElMessage.error(`插件配置页面加载失败: ${(error as Error).message}`);
+  } finally {
+    pluginUiLoading.value = false;
+  }
 }
+function closePluginUi() {
+  if (verifyPollTimer !== null) window.clearTimeout(verifyPollTimer);
+  verifyPollTimer = null;
+  if (pluginUiObjectUrl.value) URL.revokeObjectURL(pluginUiObjectUrl.value);
+  pluginUiObjectUrl.value = "";
+  pluginContext.value = null;
+  verifyRequestId.value = "";
+}
+function postPluginContext() {
+  if (!pluginFrame.value?.contentWindow || !contextQuery.data.value) return;
+  const context = cloneForPostMessage(toRaw(contextQuery.data.value));
+  const config = cloneForPostMessage(toRaw(uploadForm.config));
+  pluginContext.value = context;
+  pluginFrame.value.contentWindow.postMessage(
+    {
+      type: "aetp.plugin.context",
+      payload: {
+        context: {
+          ...context,
+          config,
+          script_id: uploadForm.scriptId,
+        },
+      },
+    },
+    window.location.origin,
+  );
+}
+function sendPluginMessage(type: string, payload: Record<string, unknown>) {
+  const target = pluginFrame.value?.contentWindow;
+  if (!target) return;
+  try {
+    target.postMessage({ type, payload: cloneForPostMessage(toRaw(payload)) }, window.location.origin);
+  } catch (error) {
+    console.warn(`插件消息发送失败: ${type}`, error);
+  }
+}
+function cloneForPostMessage<T>(value: T): T {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+function asConfig(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+function asUploadFile(value: unknown, fallbackName: string): File | null {
+  if (typeof File !== "undefined" && value instanceof File) return value;
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    return new File([value], fallbackName, { type: value.type });
+  }
+  return null;
+}
+async function handlePluginUpload(payload: Record<string, unknown>) {
+  const file = asUploadFile(payload.file, typeof payload.filename === "string" ? payload.filename : "script");
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  if (!file || !name) {
+    sendPluginMessage("aetp.plugin.upload-result", { status: "error", errors: ["请填写脚本名称并选择脚本文件"] });
+    return;
+  }
+  if (!projectId.value || !uploadForm.taskType || pluginUploading.value) return;
+  const config = asConfig(payload.config);
+  uploadForm.config = config;
+  pluginUploading.value = true;
+  let script: TestScript;
+  try {
+    script = await aetpApi.scripts.upload(projectId.value, file, uploadForm.taskType, name, config);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "脚本上传失败";
+    pluginUploading.value = false;
+    sendPluginMessage("aetp.plugin.upload-result", { status: "error", errors: [message] });
+    ElMessage.error(message);
+    return;
+  }
+
+  // API 已成功落库后，后续 UI 同步异常不能再把上传结果改报为失败。
+  uploadForm.scriptId = script.script_id;
+  pluginUploading.value = false;
+  refresh();
+  ElMessage.success("脚本已上传并解析成功");
+  sendPluginMessage("aetp.plugin.upload-result", { status: "success", script });
+  try {
+    await nextTick();
+    postPluginContext();
+  } catch (error) {
+    console.warn("插件上传成功，但上下文同步失败", error);
+  }
+}
+async function onPluginMessage(event: MessageEvent) {
+  if (event.source !== pluginFrame.value?.contentWindow || event.origin !== window.location.origin) return;
+  const message = event.data as { type?: string; payload?: Record<string, unknown> };
+  if (message.type === "aetp.plugin.ready") postPluginContext();
+  if (message.type === "aetp.plugin.config") {
+    uploadForm.config = asConfig(message.payload?.config);
+    verifyNodeId.value = typeof message.payload?.node_id === "string" ? message.payload.node_id : "";
+  }
+  if (message.type === "aetp.plugin.upload") await handlePluginUpload(message.payload || {});
+  if (message.type === "aetp.plugin.verify") {
+    const scriptId = typeof message.payload?.script_id === "string" ? message.payload.script_id : uploadForm.scriptId;
+    const nodeId = typeof message.payload?.node_id === "string" ? message.payload.node_id : verifyNodeId.value;
+    if (!scriptId || !nodeId) {
+      sendPluginMessage("aetp.plugin.verify-result", { errors: ["请先上传脚本并选择验证节点"] });
+      return;
+    }
+    try {
+      const dispatch = await aetpApi.scripts.verify(projectId.value, scriptId, nodeId, uploadForm.config);
+      verifyRequestId.value = dispatch.verify_id;
+      sendPluginMessage("aetp.plugin.verify-dispatch", { message: "验证命令已下发", ...dispatch });
+      pollVerifyResult(scriptId, dispatch.verify_id);
+    } catch (error) {
+      sendPluginMessage("aetp.plugin.verify-result", { errors: [(error as Error).message] });
+    }
+  }
+}
+async function pollVerifyResult(scriptId: string, verifyId: string, attempt = 0) {
+  if (attempt >= 60 || verifyRequestId.value !== verifyId) return;
+  try {
+    const result = await aetpApi.scripts.verifyResult(projectId.value, scriptId, verifyId);
+    sendPluginMessage("aetp.plugin.verify-result", result);
+    verifyPollTimer = null;
+  } catch {
+    verifyPollTimer = window.setTimeout(() => pollVerifyResult(scriptId, verifyId, attempt + 1), 1000);
+  }
+}
+watch(pluginUiUrl, loadPluginUi);
+watch(() => contextQuery.data.value, postPluginContext);
+watch(() => uploadForm.scriptId, postPluginContext);
+onMounted(() => window.addEventListener("message", onPluginMessage));
+onUnmounted(() => { window.removeEventListener("message", onPluginMessage); closePluginUi(); });
 
 // ---- 用例抽屉 ----
 const casesVisible = ref(false);
@@ -225,6 +403,7 @@ function openScript(row: TestScript) { viewCases(row); }
 
 // ---- 重解析 ----
 const reparsingId = ref<string | null>(null);
+const deletingId = ref<string | null>(null);
 const reparseMutation = useMutation({
   mutationFn: (scriptId: string) => aetpApi.scripts.reparse(projectId.value, scriptId),
   onSuccess: () => { ElMessage.success("脚本重解析完成"); refresh(); },
@@ -234,6 +413,28 @@ async function reparse(row: TestScript) {
   try { await ElMessageBox.confirm(`确认重新解析脚本 ${row.name}？`, "重解析确认", { type: "warning" }); } catch { return; }
   reparsingId.value = row.script_id;
   reparseMutation.mutate(row.script_id, { onSettled: () => { reparsingId.value = null; } });
+}
+
+async function deleteScript(row: TestScript) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除脚本「${row.name}」v${row.version}？删除后将同时移除该版本的用例索引，且无法恢复。`,
+      "删除脚本确认",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
+    );
+  } catch {
+    return;
+  }
+  deletingId.value = row.script_id;
+  try {
+    await aetpApi.scripts.remove(projectId.value, row.script_id);
+    ElMessage.success("脚本已删除");
+    refresh();
+  } catch (error) {
+    ElMessage.error((error as Error).message);
+  } finally {
+    deletingId.value = null;
+  }
 }
 
 // ---- 下载 ----
@@ -258,25 +459,94 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
 
 <style scoped>
 .scripts-page { max-width: 1480px; margin: 0 auto; }
-.page-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 22px; }
-.eyebrow { color: var(--aetp-cyan); font-size: 10px; font-weight: 800; letter-spacing: .16em; }
-.page-heading h1 { margin: 8px 0 6px; font-size: 28px; }
-.page-heading p { margin: 0; color: var(--aetp-muted); font-size: 13px; }
-.heading-actions { display: flex; align-items: center; gap: 10px; }
+.scripts-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 18px; padding: 30px 32px 28px; border: 1px solid #d9e6e9; border-radius: 12px; background: linear-gradient(118deg, #f9fcfc 0%, #eef7f7 58%, #f4f8fb 100%); }
+.hero-copy { min-width: 0; }
+.eyebrow, .section-kicker, .workbench-step { color: var(--aetp-cyan); font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+.eyebrow { display: inline-flex; align-items: center; gap: 8px; }
+.eyebrow i, .plugin-ui-toolbar i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--aetp-cyan); box-shadow: 0 0 0 4px rgba(23, 162, 164, .12); }
+.hero-copy h1 { margin: 10px 0 7px; color: var(--aetp-ink); font-size: 30px; letter-spacing: .01em; }
+.hero-copy p { max-width: 600px; margin: 0; color: var(--aetp-muted); font-size: 13px; line-height: 1.7; }
+.hero-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+.upload-trigger { min-width: 116px; }
+.refresh-trigger { border-color: #cbd9de; background: rgba(255, 255, 255, .76); }
 .page-alert { margin-bottom: 14px; }
-.card-heading { display: flex; justify-content: space-between; align-items: center; }
-.card-heading div { display: flex; align-items: baseline; gap: 10px; }
-.card-heading strong { font-size: 15px; }
-.card-heading span { color: var(--aetp-muted); font-size: 11px; }
+.library-stats { display: grid; grid-template-columns: minmax(230px, 1.7fr) repeat(3, minmax(120px, .7fr)); gap: 0; margin-bottom: 14px; overflow: hidden; border: 1px solid var(--aetp-line); border-radius: 10px; background: var(--aetp-panel); }
+.stats-intro, .stat-block { min-height: 86px; padding: 17px 20px; }
+.stats-intro { display: flex; flex-direction: column; justify-content: center; gap: 4px; background: #f7fafb; }
+.stats-intro strong { color: var(--aetp-ink); font-size: 15px; }
+.stats-intro > span:last-child { color: var(--aetp-muted); font-size: 11px; }
+.stat-block { display: flex; flex-direction: column; justify-content: center; gap: 5px; border-left: 1px solid var(--aetp-line); }
+.stat-block span { color: var(--aetp-muted); font-size: 11px; }
+.stat-block strong { color: var(--aetp-ink); font-size: 25px; line-height: 1; }
+.stat-success strong { color: #2f9d71; }
+.stat-pending strong { color: var(--aetp-amber); }
+.scripts-panel { border: 1px solid var(--aetp-line); }
+.scripts-panel :deep(.el-card__header) { padding: 17px 20px; border-bottom-color: var(--aetp-line); }
+.scripts-panel :deep(.el-card__body) { padding: 0; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.panel-heading > div { display: flex; flex-direction: column; gap: 5px; }
+.panel-heading strong { color: var(--aetp-ink); font-size: 15px; }
+.panel-hint { color: var(--aetp-muted); font-size: 11px; }
 .script-cell { display: flex; align-items: center; gap: 10px; }
-.script-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; background: #eaf3ff; color: var(--aetp-blue); }
+.script-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 8px; background: #eaf3ff; color: var(--aetp-blue); }
 .script-cell div { display: flex; flex-direction: column; gap: 3px; }
 .script-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
-.dialog-alert { margin-bottom: 18px; }
 .cases-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: var(--aetp-muted); font-size: 12px; }
 .case-cell { display: flex; flex-direction: column; gap: 2px; }
 .case-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .case-tag { margin-right: 4px; }
-@media (max-width: 760px) { .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }.heading-actions { width: 100%; justify-content: space-between; } }
+
+:deep(.script-upload-dialog.el-dialog) { width: min(1180px, calc(100vw - 40px)); max-width: 1180px; margin-top: 4vh; overflow: hidden; border-radius: 12px; }
+:deep(.script-upload-dialog.el-dialog .el-dialog__header) { margin-right: 0; padding: 20px 24px 17px; border-bottom: 1px solid var(--aetp-line); }
+:deep(.script-upload-dialog.el-dialog .el-dialog__title) { color: var(--aetp-ink); font-size: 17px; font-weight: 750; }
+:deep(.script-upload-dialog.el-dialog .el-dialog__body) { max-height: 86vh; padding: 0; overflow: auto; }
+:deep(.script-upload-dialog.el-dialog .el-dialog__footer) { padding: 14px 24px; border-top: 1px solid var(--aetp-line); background: #fbfcfd; }
+.upload-workbench { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: clamp(610px, 74vh, 790px); background: #f4f7f8; }
+.type-rail { display: flex; flex-direction: column; padding: 28px 24px; color: #eff8f7; background: linear-gradient(155deg, #17343d 0%, #204b54 100%); }
+.type-rail .workbench-step, .type-rail p { color: #a9d4d1; }
+.type-rail h2 { margin: 15px 0 8px; font-size: 23px; line-height: 1.25; }
+.type-rail p { margin: 0 0 24px; font-size: 12px; line-height: 1.7; }
+.type-select { width: 100%; }
+.type-select :deep(.el-input__wrapper) { min-height: 42px; box-shadow: none; }
+.selected-plugin { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 12px; border: 1px solid rgba(178, 228, 222, .22); border-radius: 8px; background: rgba(0, 0, 0, .13); }
+.selected-plugin-icon { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: #9de0d8; background: rgba(157, 224, 216, .13); }
+.selected-plugin div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.selected-plugin strong { overflow: hidden; color: #f4fffd; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.selected-plugin small { overflow: hidden; color: #a9d4d1; font-family: ui-monospace, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.rail-note { display: flex; align-items: flex-start; gap: 9px; margin-top: auto; padding-top: 22px; color: #a9d4d1; font-size: 11px; line-height: 1.6; }
+.rail-note-dot { width: 6px; height: 6px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: #f0c36a; }
+.plugin-stage { display: flex; min-width: 0; flex-direction: column; padding: 24px; background: #f4f7f8; }
+.stage-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; min-height: 55px; margin-bottom: 15px; }
+.stage-heading h2 { margin: 7px 0 0; color: var(--aetp-ink); font-size: 20px; }
+.stage-heading .el-tag { margin-top: 2px; }
+.plugin-ui-shell { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border: 1px solid #d5e1e4; border-radius: 9px; background: #fff; box-shadow: 0 8px 24px rgba(34, 66, 76, .08); }
+.plugin-ui-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 0 13px; border-bottom: 1px solid #e3ecee; color: #789096; background: #fbfdfd; font-size: 10px; letter-spacing: .08em; }
+.plugin-ui-toolbar span { display: inline-flex; align-items: center; gap: 7px; }
+.plugin-ui-toolbar span:last-child { letter-spacing: 0; }
+.plugin-ui-frame-wrap { min-height: 540px; height: clamp(540px, 66vh, 730px); background: #fff; }
+.plugin-ui-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.plugin-state { display: flex; min-height: clamp(540px, 66vh, 730px); flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; border: 1px dashed #cbdadd; border-radius: 9px; background: rgba(255, 255, 255, .6); }
+.plugin-state strong { margin-top: 15px; color: var(--aetp-ink); font-size: 15px; }
+.plugin-state p { max-width: 360px; margin: 8px 0 0; color: var(--aetp-muted); font-size: 12px; line-height: 1.6; }
+.plugin-state code { padding: 2px 5px; border-radius: 4px; color: var(--aetp-blue-deep); background: #eaf3ff; font-family: ui-monospace, monospace; }
+.state-mark { display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid #c8dadd; border-radius: 50%; color: var(--aetp-cyan); background: #edf8f7; font-size: 15px; font-weight: 800; }
+.plugin-state-warning .state-mark { color: var(--aetp-amber); border-color: #efd7a9; background: #fff8e9; }
+.state-pulse { width: 18px; height: 18px; border: 3px solid #c8e5e2; border-top-color: var(--aetp-cyan); border-radius: 50%; animation: script-spin .8s linear infinite; }
+@keyframes script-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 760px) {
+  .scripts-hero { align-items: flex-start; flex-direction: column; gap: 18px; padding: 24px 20px; }
+  .hero-actions { width: 100%; justify-content: space-between; }
+  .library-stats { grid-template-columns: 1fr 1fr; }
+  .stats-intro { grid-column: 1 / -1; }
+  .stat-block:nth-child(3) { border-left: 0; }
+  :deep(.script-upload-dialog.el-dialog) { width: calc(100vw - 24px); margin-top: 12px; }
+  :deep(.script-upload-dialog.el-dialog .el-dialog__body) { max-height: calc(100vh - 120px); }
+  .upload-workbench { display: block; min-height: 0; }
+  .type-rail { padding: 22px 20px; }
+  .rail-note { margin-top: 18px; }
+  .plugin-stage { padding: 20px; }
+  .plugin-ui-frame-wrap, .plugin-state { min-height: 500px; height: 64vh; }
+}
 </style>

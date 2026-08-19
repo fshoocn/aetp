@@ -42,6 +42,10 @@ class ScriptUploadError(ValueError):
     """脚本上传/验证失败（错误消息直接面向用户）。"""
 
 
+class ScriptDeleteError(ValueError):
+    """脚本删除失败（通常是仍被任务定义引用）。"""
+
+
 class ScriptService:
     """脚本上传、验证、解析与用例索引管理。"""
 
@@ -190,6 +194,8 @@ class ScriptService:
         # 重解析：替换用例索引（软删除旧用例，写入新用例；保持 stable_key 稳定）
         with self._uow_factory() as uow:
             script = uow.test_scripts.get_by_script_id(script_id)
+            if script is None:
+                raise ScriptNotFoundError(f"脚本不存在: {script_id}")
             old_cases = uow.script_cases.list_by_script(
                 script_id, include_deleted=True
             )
@@ -241,6 +247,24 @@ class ScriptService:
         logger.info("脚本重解析完成: script_id=%s cases=%d", script_id, len(cases))
         return script
 
+    def delete_script(self, script_id: str, *, project_id: str) -> None:
+        """删除项目脚本及其用例；被任务定义引用时拒绝删除。"""
+        with self._uow_factory() as uow:
+            script = uow.test_scripts.get_by_script_id(script_id)
+            if script is None or script.project_id != project_id:
+                raise ScriptNotFoundError(f"脚本不存在或不属于当前项目: {script_id}")
+            references = uow.test_tasks.count_by_script(script_id)
+            if references:
+                raise ScriptDeleteError(
+                    f"脚本仍被 {references} 个任务定义引用，请先删除或更换任务定义中的脚本版本"
+                )
+            file_ref = script.file_ref
+            uow.script_cases.delete_by_script(script_id)
+            uow.test_scripts.delete(script_id)
+
+        self._storage.delete_script(file_ref)
+        logger.info("脚本删除成功: script_id=%s project_id=%s", script_id, project_id)
+
     # -- 内部 ---------------------------------------------------------------
 
     @staticmethod
@@ -282,7 +306,7 @@ class ScriptService:
             (target / filename).write_bytes(data)
 
     @staticmethod
-    async def _parse_cases(master, script_dir: str, config: dict) -> list[CaseInfo]:
+    async def _parse_cases(master, script_dir: str | Path, config: dict) -> list[CaseInfo]:
         """调用插件 Master 面解析用例（async 契约，直接 await）。"""
         try:
             return list(await master.parse_cases(script_dir, config))

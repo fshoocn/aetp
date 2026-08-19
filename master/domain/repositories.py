@@ -102,6 +102,9 @@ class TestScriptRepository(ABC):
     @abstractmethod
     def update(self, script: TestScript) -> TestScript: ...
 
+    @abstractmethod
+    def delete(self, script_id: str) -> None: ...
+
 
 class ScriptCaseRepository(ABC):
     @abstractmethod
@@ -122,6 +125,9 @@ class ScriptCaseRepository(ABC):
 
     @abstractmethod
     def update(self, case: ScriptCase) -> ScriptCase: ...
+
+    @abstractmethod
+    def delete_by_script(self, script_id: str) -> None: ...
 
 
 class TestTaskRepository(ABC):
@@ -144,6 +150,9 @@ class TestTaskRepository(ABC):
         limit: int = 100,
         offset: int = 0,
     ) -> list[TestTask]: ...
+
+    @abstractmethod
+    def count_by_script(self, script_id: str) -> int: ...
 
     @abstractmethod
     def add(self, task: TestTask) -> TestTask: ...

@@ -203,6 +203,13 @@ export interface TaskTypePlugin {
   supported_versions: string[];
   config_schema: Record<string, unknown>;
   upload_spec: Record<string, unknown>;
+  ui?: {
+    config_page?: string;
+    entry?: string;
+    url?: string;
+    min_frontend_version?: string;
+    protocol_version?: number;
+  };
   agent_available: boolean;
   agent_package: { package_name: string; version: string; entry_point: string } | null;
 }
@@ -215,6 +222,30 @@ export interface ManagedPlugin {
   sha256: string;
   enabled: boolean;
   installed: boolean;
+}
+
+export interface TaskTypeConfigContext {
+  project_id: string;
+  task_type: string;
+  plugin_version: string;
+  config_schema: Record<string, unknown>;
+  upload_spec: Record<string, unknown>;
+  ui: Record<string, unknown>;
+  nodes: Array<{
+    node_id: string;
+    name: string;
+    hostname: string;
+    status: string;
+    online: boolean;
+    enabled: boolean;
+    capabilities: Record<string, unknown>;
+    plugin_versions: Record<string, string>;
+  }>;
+  verification: {
+    supported: boolean;
+    location: string;
+    endpoint_template: string;
+  };
 }
 
 // ---- P7.3 脚本库 ----
@@ -266,6 +297,7 @@ export interface TestTask {
   timeout_s: number;
   enabled: boolean;
   priority: number;
+  validation_warning?: string | null;
   created_by: number | null;
   created_at: string | null;
   updated_at: string | null;
@@ -427,6 +459,20 @@ export const aetpApi = {
     reparse(projectId: string, scriptId: string) {
       return api.post<TestScript>(`${API_V1}/projects/${projectId}/scripts/${scriptId}/parse`);
     },
+    remove(projectId: string, scriptId: string) {
+      return api.delete(`${API_V1}/projects/${projectId}/scripts/${scriptId}`);
+    },
+    verify(projectId: string, scriptId: string, nodeId: string, config: Record<string, unknown>) {
+      return api.post<{ verify_id: string; project_id: string; script_id: string; node_id: string; status: string }>(
+        `${API_V1}/projects/${projectId}/scripts/${scriptId}/verify`,
+        { node_id: nodeId, config },
+      );
+    },
+    verifyResult(projectId: string, scriptId: string, verifyId: string) {
+      return api.get<{ verify_id: string; script_id: string; node_id: string; errors: string[] }>(
+        `${API_V1}/projects/${projectId}/scripts/${scriptId}/verify/${verifyId}`,
+      );
+    },
     download(projectId: string, scriptId: string) {
       return api.blob(`${API_V1}/projects/${projectId}/scripts/${scriptId}/download`);
     },
@@ -528,6 +574,14 @@ export const aetpApi = {
   plugins: {
     list() {
       return api.get<TaskTypePlugin[]>(`${API_V1}/task-types`);
+    },
+    configContext(projectId: string, taskType: string) {
+      return api.get<TaskTypeConfigContext>(
+        `${API_V1}/projects/${projectId}/task-types/${encodeURIComponent(taskType)}/config-context`,
+      );
+    },
+    uiAsset(url: string) {
+      return api.blob(url);
     },
     managed() { return api.get<ManagedPlugin[]>(`${API_V1}/task-types/managed`); },
     upload(file: File) {

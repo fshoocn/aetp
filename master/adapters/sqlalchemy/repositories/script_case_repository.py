@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, joinedload
 
 from master.adapters.sqlalchemy.orm import ScriptCase as ScriptCaseORM
@@ -120,3 +120,12 @@ class ScriptCaseRepositoryImpl(ScriptCaseRepository):
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
+
+    def delete_by_script(self, script_id: str) -> None:
+        script_pk = select(TestScriptORM.id).where(
+            TestScriptORM.script_id == script_id
+        ).scalar_subquery()
+        self._s.execute(
+            delete(ScriptCaseORM).where(ScriptCaseORM.script_pk == script_pk)
+        )
+        self._s.flush()

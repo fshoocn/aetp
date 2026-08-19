@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
@@ -100,6 +100,18 @@ class TestTaskRepositoryImpl(TestTaskRepository):
         if enabled is not None:
             stmt = stmt.where(TestTaskORM.enabled.is_(enabled))
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+
+    def count_by_script(self, script_id: str) -> int:
+        return int(
+            self._s.execute(
+                select(func.count(TestTaskORM.id)).where(
+                    TestTaskORM.script_pk
+                    == select(TestScriptORM.id)
+                    .where(TestScriptORM.script_id == script_id)
+                    .scalar_subquery()
+                )
+            ).scalar_one()
+        )
 
     def add(self, task: TestTask) -> TestTask:
         project_pk = self._s.execute(

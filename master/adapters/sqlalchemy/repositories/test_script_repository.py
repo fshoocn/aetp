@@ -147,3 +147,12 @@ class TestScriptRepositoryImpl(TestScriptRepository):
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
+
+    def delete(self, script_id: str) -> None:
+        orm = self._s.execute(
+            select(TestScriptORM).where(TestScriptORM.script_id == script_id)
+        ).scalars().one_or_none()
+        if orm is None:
+            raise ValueError(f"测试脚本不存在: script_id={script_id}")
+        self._s.delete(orm)
+        self._s.flush()

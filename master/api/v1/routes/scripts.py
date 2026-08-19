@@ -16,11 +16,19 @@ from fastapi.responses import StreamingResponse
 from master.api.v1.dependencies import (
     ScriptServiceDep,
     ScriptStorageServiceDep,
+    ScriptVerificationServiceDep,
     UowFactoryDep,
 )
 from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep
-from master.api.v1.schemas import ScriptCaseOut, ScriptOut
-from master.application.services.script_service import ScriptUploadError
+from master.api.v1.schemas import (
+    ScriptCaseOut,
+    ScriptOut,
+    ScriptVerifyDispatchOut,
+    ScriptVerifyRequest,
+    ScriptVerifyResultOut,
+)
+from master.application.errors import ScriptNotFoundError
+from master.application.services.script_service import ScriptDeleteError, ScriptUploadError
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +162,61 @@ async def reparse_script(
             detail=f"脚本重解析失败: {exc}",
         ) from exc
     return ScriptOut.model_validate(script)
+
+
+@router.delete("/{script_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_script(
+    project_id: str,
+    script_id: str,
+    _access: ProjectManagerDep,
+    script_service: ScriptServiceDep,
+) -> None:
+    """删除项目脚本；仍被任务定义引用时返回 409。"""
+    try:
+        script_service.delete_script(script_id, project_id=project_id)
+    except ScriptNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ScriptDeleteError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{script_id}/verify", response_model=ScriptVerifyDispatchOut)
+def verify_script_on_agent(
+    project_id: str,
+    script_id: str,
+    body: ScriptVerifyRequest,
+    _access: ProjectManagerDep,
+    verification: ScriptVerificationServiceDep,
+) -> ScriptVerifyDispatchOut:
+    """向项目节点下发插件声明的 Agent 侧脚本验证。"""
+    try:
+        result = verification.request(
+            project_id=project_id,
+            script_id=script_id,
+            node_id=body.node_id,
+            config=body.config,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return ScriptVerifyDispatchOut.model_validate(result)
+
+
+@router.get("/{script_id}/verify/{verify_id}", response_model=ScriptVerifyResultOut)
+def get_verify_result(
+    project_id: str,
+    script_id: str,
+    verify_id: str,
+    _access: ProjectAccessDep,
+    verification: ScriptVerificationServiceDep,
+) -> ScriptVerifyResultOut:
+    """查询 Agent 验证结果；结果由 script.verify-result MQTT 事件写入。"""
+    result = verification.get_result(project_id, verify_id)
+    if result is None or result.get("script_id") != script_id:
+        raise HTTPException(status_code=404, detail="验证结果不存在")
+    return ScriptVerifyResultOut.model_validate(result)
 
 
 @router.get("/{script_id}/download")
