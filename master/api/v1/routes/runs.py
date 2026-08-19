@@ -330,6 +330,8 @@ def cancel_run(
 
     with cancel_service._uow_factory() as uow:
         run = uow.task_runs.get_by_run_id(run_id, project_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run 不存在")
     return RunOut(
         run_id=run.run_id,
         project_id=run.project_id,
