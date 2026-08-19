@@ -13,28 +13,42 @@ const RETRY_BASE_MS = 2000;
 const RETRY_MAX_MS = 15000;
 
 export interface DomainEvent {
+  event_id?: string;
+  sequence?: number | null;
+  project_id?: string | null;
   type: string;
   data: Record<string, unknown>;
   ts: string;
 }
 
-export function connectEvents(onEvent: (ev: DomainEvent) => void): () => void {
+export function connectEvents(
+  projectId: string,
+  onEvent: (ev: DomainEvent) => void
+): () => void {
   const token = localStorage.getItem("token");
-  if (!token) return () => {};
+  if (!token || !projectId) return () => {};
 
   let stopped = false;
   let controller: AbortController | null = null;
   let retryTimer: number | null = null;
   let retryMs = RETRY_BASE_MS;
+  let lastEventId = "";
 
   async function connect() {
     if (stopped) return;
     controller = new AbortController();
     try {
-      const resp = await fetch(`${BASE}/api/v1/events`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+      };
+      if (lastEventId) headers["Last-Event-ID"] = lastEventId;
+      const resp = await fetch(
+        `${BASE}/api/v1/events?project_id=${encodeURIComponent(projectId)}`,
+        {
+        headers,
         signal: controller.signal,
-      });
+        }
+      );
       if (!resp.ok || !resp.body) throw new Error(`sse status ${resp.status}`);
       retryMs = RETRY_BASE_MS; // 连接成功，重置退避
 
@@ -50,12 +64,16 @@ export function connectEvents(onEvent: (ev: DomainEvent) => void): () => void {
         while ((idx = buffer.indexOf("\n\n")) >= 0) {
           const chunk = buffer.slice(0, idx);
           buffer = buffer.slice(idx + 2);
+          const idLine = chunk.split("\n").find((l) => l.startsWith("id: "));
           const dataLine = chunk
             .split("\n")
             .find((l) => l.startsWith("data: "));
           if (dataLine) {
             try {
-              onEvent(JSON.parse(dataLine.slice(6)) as DomainEvent);
+              const event = JSON.parse(dataLine.slice(6)) as DomainEvent;
+              if (idLine) lastEventId = idLine.slice(4).trim();
+              else if (event.sequence != null) lastEventId = String(event.sequence);
+              onEvent(event);
             } catch {
               // 忽略无法解析的事件
             }
