@@ -28,6 +28,7 @@ from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
 from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.run_retry_service import RunRetryService
+from master.application.services.run_cancel_service import RunCancelService
 from master.application.services.notification_service import NotificationService
 from master.application.services.run_projection_service import RunProjectionService
 from master.plugins.registry import PluginRegistry
@@ -124,6 +125,13 @@ def get_run_retry_service(
 ) -> RunRetryService:
     """从容器解析 Run 重试服务（P6.7）。"""
     return container.run_retry_service()
+
+
+def get_run_cancel_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> RunCancelService:
+    """从容器解析 Run 取消服务（P8.1）。"""
+    return container.run_cancel_service()
 
 
 def get_artifact_service(
@@ -262,6 +270,7 @@ RunProjectionServiceDep = Annotated[
 PluginRegistryDep = Annotated[PluginRegistry, Depends(get_plugin_registry)]
 PluginManagerDep = Annotated[PluginManager, Depends(get_plugin_manager)]
 RunRetryServiceDep = Annotated[RunRetryService, Depends(get_run_retry_service)]
+RunCancelServiceDep = Annotated[RunCancelService, Depends(get_run_cancel_service)]
 ArtifactServiceDep = Annotated[ArtifactService, Depends(get_artifact_service)]
 DeviceServiceDep = Annotated[DeviceService, Depends(get_device_service)]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]

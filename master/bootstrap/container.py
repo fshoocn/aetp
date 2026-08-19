@@ -47,6 +47,7 @@ from master.application.services.script_storage_service import ScriptStorageServ
 from master.application.services.run_projection_service import RunProjectionService
 from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.run_retry_service import RunRetryService
+from master.application.services.run_cancel_service import RunCancelService
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
 from master.application.services.notification_service import NotificationService
@@ -274,6 +275,12 @@ class Container(containers.DeclarativeContainer):
         RunRetryService,
         uow_factory=uow_factory,
         trigger_service=run_trigger_service,
+    )
+
+    # Run 取消服务（P8.1：向活跃 Shard 节点发 run.cancel，Agent 安全点释放硬件）
+    run_cancel_service = providers.Factory(
+        RunCancelService,
+        uow_factory=uow_factory,
     )
 
     # 通知管理服务（P7.6：通知端点、事件订阅、投递状态；密钥不回显）

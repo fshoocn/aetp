@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from master.api.v1.dependencies import (
     ArtifactServiceDep,
     EventPublisherDep,
+    RunCancelServiceDep,
     RunRetryServiceDep,
     RunTriggerServiceDep,
     UowFactoryDep,
@@ -304,4 +305,38 @@ async def retry_failed_run(
         status="created",
         trigger_type="retry",
         created_at=_now(),
+    )
+
+
+@router.post("/{run_id}/cancel", response_model=RunOut)
+def cancel_run(
+    project_id: str,
+    run_id: str,
+    access: ProjectOperatorDep,
+    cancel_service: RunCancelServiceDep,
+) -> RunOut:
+    """取消一个正在执行的 Run（向活跃 Shard 节点发 run.cancel）。
+
+    Agent 收到取消命令后在安全点释放硬件并报告 cancelled 结果，
+    Run 状态由 Agent 结果投影决定（§5.4：Run 无 cancelling 中间态）。
+    """
+    try:
+        cancel_service.cancel(run_id, project_id=project_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    with cancel_service._uow_factory() as uow:
+        run = uow.task_runs.get_by_run_id(run_id, project_id)
+    return RunOut(
+        run_id=run.run_id,
+        project_id=run.project_id,
+        task_id=run.task_id,
+        status=run.status.value,
+        trigger_type=run.trigger_type.value,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
     )
