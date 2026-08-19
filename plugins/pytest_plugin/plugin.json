@@ -1,0 +1,7 @@
+{
+  "task_type": "pytest",
+  "plugin_version": "1.0.0",
+  "display_name": "pytest 自动化测试",
+  "description": "执行 Python pytest 测试脚本并采集 JUnit XML 结果",
+  "entry": "main.py:package"
+}
