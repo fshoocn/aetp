@@ -76,6 +76,10 @@ class MasterSettings:
     internal_signing_secret: str = ""
     # internal_download_ttl_s 为签名 URL 有效期（秒）
     internal_download_ttl_s: int = 300
+    # P6.8：缺少 case 历史耗时时 by-time 分割使用的默认秒数
+    case_duration_default_s: float = 60.0
+    # P6.8：成功 case 新样本相对均值允许的最大偏离百分比
+    case_duration_anomaly_percent: float = 300.0
     # 刷新令牌有效期（天）；刷新时轮换，登出/改密/禁用账户时撤销
     refresh_token_expire_days: int = 7
     # 数据库自动迁移（Alembic upgrade head）；生产可关闭改为部署脚本手动执行
@@ -122,6 +126,12 @@ class MasterSettings:
         raw_jwt_expire = values.get("AETP_MASTER_JWT_EXPIRE_MINUTES")
         raw_refresh_days = values.get("AETP_MASTER_REFRESH_TOKEN_EXPIRE_DAYS")
         raw_download_ttl = values.get("AETP_MASTER_INTERNAL_DOWNLOAD_TTL_S")
+        raw_case_duration_default = values.get(
+            "AETP_MASTER_CASE_DURATION_DEFAULT_S"
+        )
+        raw_case_duration_anomaly = values.get(
+            "AETP_MASTER_CASE_DURATION_ANOMALY_PERCENT"
+        )
         raw_log_file = values.get("AETP_MASTER_LOG_FILE")
         log_file = Path(raw_log_file) if raw_log_file else cls.log_file
         if not log_file.is_absolute():
@@ -162,6 +172,16 @@ class MasterSettings:
             ),
             internal_download_ttl_s=parse_int(
                 raw_download_ttl, cls.internal_download_ttl_s
+            ),
+            case_duration_default_s=(
+                float(raw_case_duration_default)
+                if raw_case_duration_default not in (None, "")
+                else cls.case_duration_default_s
+            ),
+            case_duration_anomaly_percent=(
+                float(raw_case_duration_anomaly)
+                if raw_case_duration_anomaly not in (None, "")
+                else cls.case_duration_anomaly_percent
             ),
             refresh_token_expire_days=parse_int(
                 raw_refresh_days, cls.refresh_token_expire_days
