@@ -14,6 +14,7 @@ from master.adapters.sse.event_bus import EventBus
 from master.application.services.auth_service import AuthService
 from master.application.services.artifact_service import ArtifactService
 from master.application.services.device_service import DeviceService
+from master.application.services.event_publisher import EventPublisher
 from master.application.services.node_service import NodeService
 from master.application.services.project_member_service import ProjectMemberService
 from master.application.services.project_node_binding_service import ProjectNodeBindingService
@@ -79,6 +80,13 @@ def get_event_bus(
 ) -> EventBus:
     """从容器解析 SSE 事件总线单例。"""
     return container.event_bus()
+
+
+def get_event_publisher(
+    container: Annotated[Container, Depends(get_container)],
+) -> EventPublisher:
+    """获取持久化领域事件发布器（P7.1）。"""
+    return container.event_publisher()
 
 
 def get_auth_service(
@@ -233,6 +241,7 @@ UowFactoryDep = Annotated[
     SqlAlchemyUnitOfWorkFactory, Depends(get_uow_factory)
 ]
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
+EventPublisherDep = Annotated[EventPublisher, Depends(get_event_publisher)]
 AuthDep = Annotated[AuthService, Depends(get_auth_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
 RunTriggerServiceDep = Annotated[

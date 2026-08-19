@@ -20,31 +20,44 @@ class EventBus:
     """轻量级异步事件总线。"""
 
     def __init__(self) -> None:
-        self._subscribers: set[asyncio.Queue] = set()
+        self._subscribers: dict[asyncio.Queue, str] = {}
         self._lock = asyncio.Lock()
 
-    async def publish(self, event_type: str, data: dict[str, Any]) -> None:
-        """广播领域事件给所有订阅者。"""
+    async def publish(
+        self,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        event_id: str = "",
+        sequence: int | None = None,
+        project_id: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> None:
+        """按项目广播领域事件给实时订阅者。"""
         event = DomainEvent(
             type=event_type,
             data=data,
-            ts=datetime.now(timezone.utc).isoformat(),
+            ts=(occurred_at or datetime.now(timezone.utc)).isoformat(),
+            event_id=event_id,
+            sequence=sequence,
+            project_id=project_id,
         )
         async with self._lock:
-            for queue in list(self._subscribers):
-                queue.put_nowait(event)
+            for queue, subscriber_project_id in list(self._subscribers.items()):
+                if project_id is not None and project_id == subscriber_project_id:
+                    queue.put_nowait(event)
 
-    async def subscribe(self) -> asyncio.Queue:
-        """注册一个订阅者队列（收到所有事件，由消费方按 type 过滤）。"""
+    async def subscribe(self, project_id: str) -> asyncio.Queue:
+        """注册一个项目范围订阅者队列。"""
         queue: asyncio.Queue = asyncio.Queue()
         async with self._lock:
-            self._subscribers.add(queue)
+            self._subscribers[queue] = project_id
         return queue
 
     async def unsubscribe(self, queue: asyncio.Queue) -> None:
         """注销订阅者队列。"""
         async with self._lock:
-            self._subscribers.discard(queue)
+            self._subscribers.pop(queue, None)
 
     @property
     def subscriber_count(self) -> int:

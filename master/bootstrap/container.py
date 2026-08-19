@@ -40,6 +40,7 @@ from master.application.services.shard_scheduler_service import SchedulerConfig,
 from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.plugin_download_service import PluginDownloadService
 from master.application.services.case_duration_service import CaseDurationStatsService
+from master.application.services.event_publisher import EventPublisher
 from master.application.services.script_service import ScriptService
 from master.application.services.script_storage_service import ScriptStorageService
 from master.application.services.run_projection_service import RunProjectionService
@@ -108,6 +109,12 @@ class Container(containers.DeclarativeContainer):
 
     # SSE 事件总线：进程级单例
     event_bus = providers.Singleton(EventBus)
+    # P7.1：领域事件先持久化，再广播到项目范围 SSE
+    event_publisher = providers.Singleton(
+        EventPublisher,
+        uow_factory=uow_factory,
+        event_bus=event_bus,
+    )
 
     # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据
     plugin_download_service = providers.Factory(
@@ -264,7 +271,7 @@ class Container(containers.DeclarativeContainer):
         MasterMessageRouter,
         node_presence=node_presence_service,
         projection=run_projection_service,
-        event_bus=event_bus,
+        event_publisher=event_publisher,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）

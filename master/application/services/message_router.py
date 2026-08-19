@@ -43,7 +43,7 @@ from master.application.services.run_projection_service import (
     ProjectionResult,
     RunProjectionService,
 )
-from master.adapters.sse.event_bus import EventBus
+from master.application.services.event_publisher import EventPublisher
 from common.transport import MqttMessage
 
 logger = logging.getLogger(__name__)
@@ -56,11 +56,11 @@ class MasterMessageRouter:
         self,
         node_presence: NodePresenceService,
         projection: RunProjectionService,
-        event_bus: EventBus,
+        event_publisher: EventPublisher,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
-        self._event_bus = event_bus
+        self._event_publisher = event_publisher
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -152,4 +152,9 @@ class MasterMessageRouter:
         data = result.payload or {}
         data["project_id"] = result.project_id
         data["run_id"] = result.run_id
-        await self._event_bus.publish(result.event_type, data)
+        await self._event_publisher.publish(
+            result.event_type,
+            data,
+            project_id=result.project_id,
+            aggregate_id=result.run_id,
+        )

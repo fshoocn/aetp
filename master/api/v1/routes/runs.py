@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from master.api.v1.dependencies import (
     ArtifactServiceDep,
-    EventBusDep,
+    EventPublisherDep,
     RunRetryServiceDep,
     RunTriggerServiceDep,
     UowFactoryDep,
@@ -35,7 +35,7 @@ async def trigger_run(
     body: RunTriggerRequest,
     access: ProjectOperatorDep,
     trigger_service: RunTriggerServiceDep,
-    event_bus: EventBusDep,
+    event_publisher: EventPublisherDep,
 ) -> RunOut:
     """触发一次任务定义执行（Run）。
 
@@ -48,13 +48,15 @@ async def trigger_run(
         triggered_by_user_id=access.user.persisted_id,
         case_filter=body.case_filter,
     )
-    await event_bus.publish(
+    await event_publisher.publish(
         "run.created",
         {
             "run_id": result.run_id,
             "task_id": result.task_id,
             "project_id": result.project_id,
         },
+        project_id=result.project_id,
+        aggregate_id=result.run_id,
     )
     return RunOut(
         run_id=result.run_id,
@@ -236,7 +238,7 @@ async def retry_run(
     run_id: str,
     access: ProjectOperatorDep,
     retry_service: RunRetryServiceDep,
-    event_bus: EventBusDep,
+    event_publisher: EventPublisherDep,
 ) -> RunOut:
     """基于失败 Run 完整重跑（新 Run，trigger_type=retry，D-20）。"""
     result = await retry_service.retry(
@@ -244,7 +246,7 @@ async def retry_run(
         project_id=project_id,
         triggered_by_user_id=access.user.persisted_id,
     )
-    await event_bus.publish(
+    await event_publisher.publish(
         "run.created",
         {
             "run_id": result.new_run_id,
@@ -252,6 +254,8 @@ async def retry_run(
             "project_id": result.project_id,
             "original_run_id": result.original_run_id,
         },
+        project_id=result.project_id,
+        aggregate_id=result.new_run_id,
     )
     return RunOut(
         run_id=result.new_run_id,
@@ -273,7 +277,7 @@ async def retry_failed_run(
     run_id: str,
     access: ProjectOperatorDep,
     retry_service: RunRetryServiceDep,
-    event_bus: EventBusDep,
+    event_publisher: EventPublisherDep,
 ) -> RunOut:
     """仅重跑失败 case（新 Run，case 集合=原 Run 失败 case，D-20）。"""
     result = await retry_service.retry_failed(
@@ -281,7 +285,7 @@ async def retry_failed_run(
         project_id=project_id,
         triggered_by_user_id=access.user.persisted_id,
     )
-    await event_bus.publish(
+    await event_publisher.publish(
         "run.created",
         {
             "run_id": result.new_run_id,
@@ -290,6 +294,8 @@ async def retry_failed_run(
             "original_run_id": result.original_run_id,
             "retried_case_keys": list(result.retried_case_keys),
         },
+        project_id=result.project_id,
+        aggregate_id=result.new_run_id,
     )
     return RunOut(
         run_id=result.new_run_id,

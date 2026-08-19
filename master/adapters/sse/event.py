@@ -18,3 +18,6 @@ class DomainEvent:
     type: str
     data: dict[str, Any]
     ts: str = ""
+    event_id: str = ""
+    sequence: int | None = None
+    project_id: str | None = None

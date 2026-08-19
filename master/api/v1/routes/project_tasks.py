@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from master.api.v1.permissions import ProjectAccessDep, ProjectOperatorDep
 from master.api.v1.schemas import TaskCreate, TaskLogOut, TaskOut
-from master.api.v1.dependencies import EventBusDep, TaskServiceDep
+from master.api.v1.dependencies import EventPublisherDep, TaskServiceDep
 
 router = APIRouter(
     prefix="/projects/{project_id}/tasks",
@@ -43,7 +43,7 @@ async def create_project_task(
     body: TaskCreate,
     access: ProjectOperatorDep,
     service: TaskServiceDep,
-    event_bus: EventBusDep,
+    event_publisher: EventPublisherDep,
 ) -> TaskOut:
     """创建项目任务；目标设备必须属于项目启用节点。
 
@@ -56,9 +56,11 @@ async def create_project_task(
         created_by=access.user.persisted_id,
     )
     out = TaskOut.model_validate(task)
-    await event_bus.publish(
+    await event_publisher.publish(
         "task.created",
         json.loads(out.model_dump_json()),
+        project_id=project_id,
+        aggregate_id=task.task_id,
     )
     return out
 

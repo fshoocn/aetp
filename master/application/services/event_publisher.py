@@ -1,0 +1,71 @@
+"""持久化领域事件并广播到进程内 SSE 总线（P7.1）。"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Callable, Mapping
+
+from master.adapters.sse.event_bus import EventBus
+from master.domain.models import DomainEvent
+from master.domain.repositories import UnitOfWork
+
+
+class EventPublisher:
+    """领域事件发布端口的 Master 实现。
+
+    先提交 ``domain_events``，再广播实时事件；这样 SSE 断线后可以用
+    Last-Event-ID 从数据库恢复，而不会只依赖进程内队列。
+    """
+
+    def __init__(
+        self,
+        uow_factory: Callable[[], UnitOfWork],
+        event_bus: EventBus,
+    ) -> None:
+        self._uow_factory = uow_factory
+        self._event_bus = event_bus
+
+    async def publish(
+        self,
+        event_type: str,
+        data: Mapping[str, Any] | None = None,
+        *,
+        project_id: str | None = None,
+        aggregate_id: str | None = None,
+    ) -> DomainEvent:
+        """持久化并广播一个领域事件。"""
+        payload = dict(data or {})
+        resolved_project_id = project_id or _string_value(payload, "project_id")
+        resolved_aggregate_id = (
+            aggregate_id
+            or _string_value(payload, "run_id")
+            or _string_value(payload, "task_id")
+            or _string_value(payload, "node_id")
+            or event_type
+        )
+        event = DomainEvent(
+            event_id=uuid.uuid4().hex,
+            project_id=resolved_project_id,
+            event_type=event_type,
+            aggregate_id=resolved_aggregate_id,
+            payload=payload,
+            occurred_at=datetime.now(timezone.utc),
+        )
+        with self._uow_factory() as uow:
+            persisted = uow.domain_events.add(event)
+
+        await self._event_bus.publish(
+            persisted.event_type,
+            persisted.payload,
+            event_id=persisted.event_id,
+            sequence=persisted.sequence,
+            project_id=persisted.project_id,
+            occurred_at=persisted.occurred_at,
+        )
+        return persisted
+
+
+def _string_value(payload: Mapping[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) and value else None
