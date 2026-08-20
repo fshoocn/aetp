@@ -95,3 +95,12 @@ class RunShardRepositoryImpl(RunShardRepository):
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
+
+    def list_by_status(self, *statuses: ShardStatus) -> list[RunShard]:
+        stmt = (
+            select(RunShardORM)
+            .options(joinedload(RunShardORM.run))
+            .where(RunShardORM.status.in_([s.value for s in statuses]))
+            .order_by(RunShardORM.id)
+        )
+        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]

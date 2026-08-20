@@ -27,6 +27,7 @@ from aetp_protocol.payloads import (
 )
 from aetp_protocol.topics import command_topic
 
+from master.application.services.recovery_service import RecoveryService
 from master.domain.enums import DisconnectReason, NodeStatus, OutboxStatus
 from master.domain.models import Node, NodeSession, OutboxMessage
 from master.domain.repositories import UnitOfWork
@@ -47,9 +48,11 @@ class NodePresenceService:
         uow_factory: Callable[[], UnitOfWork],
         *,
         master_id: str = "aetp-master",
+        recovery_service: RecoveryService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._master_id = master_id
+        self._recovery = recovery_service
 
     # -- 注册 ---------------------------------------------------------------
 
@@ -217,6 +220,22 @@ class NodePresenceService:
                 envelope.sender.session_id,
                 payload.reason,
             )
+
+        # LWT 触发：该节点上活跃 Shard 转 waiting_recovery + 释放设备
+        if self._recovery is not None:
+            try:
+                handled = self._recovery.handle_node_offline(payload.node_id)
+                if handled:
+                    logger.info(
+                        "节点离线恢复: node=%s attempts_marked_failed=%d",
+                        payload.node_id,
+                        handled,
+                    )
+            except Exception:
+                logger.exception(
+                    "节点离线恢复失败（不阻塞 LWT 处理）: node=%s",
+                    payload.node_id,
+                )
 
     # -- 内部 ---------------------------------------------------------------
 

@@ -156,3 +156,24 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
+
+    def list_non_terminal(self, limit: int = 1000) -> list[TaskRun]:
+        """查询所有非终态的 Run（启动恢复/超时检测用）。"""
+        stmt = (
+            select(TaskRunORM)
+            .options(
+                joinedload(TaskRunORM.project),
+                joinedload(TaskRunORM.task),
+            )
+            .where(
+                TaskRunORM.status.in_([
+                    RunStatus.CREATED.value,
+                    RunStatus.DISPATCHED.value,
+                    RunStatus.ACKED.value,
+                    RunStatus.RUNNING.value,
+                ])
+            )
+            .order_by(TaskRunORM.id)
+            .limit(limit)
+        )
+        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]

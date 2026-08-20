@@ -127,3 +127,20 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
+
+    def list_active_by_node(self, node_id: str) -> list[ShardAttempt]:
+        """查询指定节点上所有活跃（非终态）的 Attempt。"""
+        stmt = (
+            select(ShardAttemptORM)
+            .options(joinedload(ShardAttemptORM.shard))
+            .where(
+                ShardAttemptORM.node_id == node_id,
+                ShardAttemptORM.status.in_([
+                    ShardAttemptStatus.DISPATCHED.value,
+                    ShardAttemptStatus.ACKED.value,
+                    ShardAttemptStatus.RUNNING.value,
+                ]),
+            )
+            .order_by(ShardAttemptORM.id)
+        )
+        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]

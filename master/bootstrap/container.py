@@ -55,6 +55,7 @@ from master.application.services.schedule_service import ScheduleService
 from master.application.services.ci_integration_service import CiIntegrationService
 from master.application.services.hook_runner import HookRunner, HookRegistry
 from master.application.services.notification_dispatcher import NotificationDispatcher
+from master.application.services.recovery_service import RecoveryService
 from master.adapters.notifications.senders import build_default_registry
 from master.adapters.mqtt.transport import MqttTransport
 from master.workers.outbox_worker import OutboxWorker
@@ -226,9 +227,17 @@ class Container(containers.DeclarativeContainer):
     # Node/Device 平台资产只读查询服务
     node_service = providers.Factory(NodeService, uow_factory=uow_factory)
 
+    # 崩溃恢复服务（§8.6：节点离线恢复 + 启动扫描 + 超时检测）
+    recovery_service = providers.Factory(
+        RecoveryService,
+        uow_factory=uow_factory,
+    )
+
     # 节点在线投影服务（P4.4：注册/心跳/LWT/会话校验）
     node_presence_service = providers.Factory(
-        NodePresenceService, uow_factory=uow_factory
+        NodePresenceService,
+        uow_factory=uow_factory,
+        recovery_service=recovery_service,
     )
 
     # 硬件能力匹配服务（P4.5：谓词匹配/硬校验/候选过滤，无状态）
