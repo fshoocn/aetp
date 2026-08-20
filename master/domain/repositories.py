@@ -52,6 +52,7 @@ from master.domain.models.ci_integration import (
     CiWebhookDelivery,
     ProjectIntegration,
 )
+from master.domain.models.hook_execution import HookExecution
 
 
 class UserRepository(ABC):
@@ -585,6 +586,7 @@ class UnitOfWork(ABC):
     project_integrations: "ProjectIntegrationRepository"
     ci_trigger_bindings: "CiTriggerBindingRepository"
     ci_webhook_deliveries: "CiWebhookDeliveryRepository"
+    hook_executions: "HookExecutionRepository"
 
     @abstractmethod
     def __enter__(self) -> "UnitOfWork": ...
@@ -739,3 +741,19 @@ class CiWebhookDeliveryRepository(ABC):
 
     @abstractmethod
     def update(self, delivery: CiWebhookDelivery) -> CiWebhookDelivery: ...
+
+
+class HookExecutionRepository(ABC):
+    """Hook 执行审计仓储（P8.4，§10.6）。"""
+
+    @abstractmethod
+    def list_by_project(
+        self,
+        project_id: str | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[HookExecution]: ...
+
+    @abstractmethod
+    def add(self, execution: HookExecution) -> HookExecution: ...

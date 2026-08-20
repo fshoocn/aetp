@@ -20,6 +20,7 @@ from .device import Device
 from .domain_event import DomainEvent
 from .event_delivery import EventDelivery
 from .event_subscription import EventSubscription
+from .hook_execution import HookExecution
 from .inbox_message import InboxMessage
 from .node import Node
 from .node_session import NodeSession
@@ -83,4 +84,5 @@ __all__ = [
     "Task",
     "TaskLog",
     "TaskSchedule",
+    "HookExecution",
 ]
