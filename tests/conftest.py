@@ -17,12 +17,14 @@ import master.main as main_mod
 
 @pytest.fixture(autouse=True)
 def _isolated_config() -> Generator[None, None, None]:
-    """每个测试使用独立临时数据库 + 临时 .env，互不干扰。"""
+    """每个测试使用独立临时数据库 + 临时 .env + 临时数据目录，互不干扰。"""
     tmp_dir = Path(tempfile.mkdtemp())
     db_path = tmp_dir / "test.db"
+    data_dir = tmp_dir / "data"
     env_file = tmp_dir / "test.env"
     env_file.write_text(
         f"AETP_MASTER_DATABASE_URL=sqlite:///{db_path}\n"
+        f"AETP_MASTER_DATA_DIR={data_dir}\n"
         f"AETP_MASTER_JWT_SECRET=test-secret-at-least-32-bytes-long-for-pytest\n",
         encoding="utf-8",
     )

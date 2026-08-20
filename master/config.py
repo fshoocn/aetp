@@ -49,6 +49,8 @@ def resolve_sqlite_url(url: str) -> str:
 @dataclass(frozen=True)
 class MasterSettings:
     database_url: str = "sqlite:///data/aetp.db"
+    # 外部数据目录（脚本/产物/插件存储根，默认运行目录下 data/）
+    data_dir: Path | None = None
     mqtt_host: str | None = None
     mqtt_port: int = 8883
     mqtt_username: str | None = None
@@ -137,8 +139,12 @@ class MasterSettings:
         if not log_file.is_absolute():
             log_file = base_dir / log_file
 
+        raw_data_dir = values.get("AETP_MASTER_DATA_DIR")
+        data_dir = Path(raw_data_dir) if raw_data_dir else None
+
         result = cls(
             database_url=values.get("AETP_MASTER_DATABASE_URL", cls.database_url),
+            data_dir=data_dir,
             mqtt_host=values.get("AETP_MASTER_MQTT_HOST"),
             mqtt_port=parse_int(raw_port, cls.mqtt_port),
             mqtt_username=values.get("AETP_MASTER_MQTT_USERNAME"),

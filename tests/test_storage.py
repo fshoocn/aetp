@@ -23,6 +23,34 @@ def test_local_storage_put_open_exists_delete(tmp_path) -> None:
     storage.delete(key)
 
 
+def test_local_storage_delete_prunes_empty_parents(tmp_path) -> None:
+    """删除文件后递归清理空的父目录，不遗留孤儿目录。"""
+    storage = LocalStorage(root=tmp_path)
+    key = "scripts/S-1/2/archive.zip"
+
+    storage.put(key, b"payload")
+    assert (tmp_path / "scripts" / "S-1" / "2").is_dir()
+
+    storage.delete(key)
+    assert not storage.exists(key)
+    # 空父目录被递归清理（scripts/S-1/2 及 scripts/S-1、scripts 都被删）
+    assert not (tmp_path / "scripts" / "S-1" / "2").exists()
+    assert not (tmp_path / "scripts" / "S-1").exists()
+    assert not (tmp_path / "scripts").exists()
+
+
+def test_local_storage_delete_keeps_nonempty_parent(tmp_path) -> None:
+    """父目录还有兄弟文件时，不删除非空父目录。"""
+    storage = LocalStorage(root=tmp_path)
+    storage.put("scripts/S-1/1/a.py", b"a")
+    storage.put("scripts/S-1/1/b.py", b"b")
+
+    storage.delete("scripts/S-1/1/a.py")
+    # 1 目录还有 b.py，不应被删除
+    assert (tmp_path / "scripts" / "S-1" / "1").is_dir()
+    assert storage.exists("scripts/S-1/1/b.py")
+
+
 def test_local_storage_supports_absolute_key(tmp_path) -> None:
     storage = LocalStorage(root=tmp_path)
     abs_path = tmp_path / "other" / "file.bin"

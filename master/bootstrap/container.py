@@ -19,6 +19,7 @@ from dependency_injector import containers, providers
 from urllib.parse import quote, urlencode
 
 from master.config import get_settings, runtime_dir
+from pathlib import Path
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.database_factory import create_database
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
@@ -74,6 +75,14 @@ def _internal_signing_secret() -> str:
     """内部签名下载密钥：独立配置，缺省回退到 JWT 密钥。"""
     settings = get_settings()
     return settings.internal_signing_secret or settings.jwt_secret
+
+
+def _data_dir() -> Path:
+    """外部数据目录：优先配置 data_dir，缺省运行目录下 data/。"""
+    settings = get_settings()
+    if settings.data_dir is not None:
+        return settings.data_dir
+    return runtime_dir() / "data"
 
 
 def _plugin_ref_from_registry(
@@ -147,7 +156,7 @@ class Container(containers.DeclarativeContainer):
         PluginManager,
         # 存储目录在 data/plugins 下（与脚本/产物存储一致），
         # 绝不可用 master/plugins 源码目录，避免污染 Python 包
-        root=providers.Callable(lambda: runtime_dir() / "data"),
+        root=providers.Callable(_data_dir),
         agent_download_builder=plugin_download_service.provided.build_download_url,
     )
     plugin_registry = providers.Singleton(
@@ -174,7 +183,7 @@ class Container(containers.DeclarativeContainer):
     # 文件存储：进程级单例（默认本地 data/ 目录；切云存储只换 adapter）
     storage = providers.Singleton(
         LocalStorage,
-        root=providers.Callable(lambda: runtime_dir() / "data"),
+        root=providers.Callable(_data_dir),
     )
 
     # 脚本文件存储服务（P4.7：上传/下载统一走 Storage 端口）

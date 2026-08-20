@@ -37,3 +37,17 @@ class LocalStorage:
         path = self._path(key)
         if path.is_file():
             path.unlink()
+        # 向上递归清理空父目录，避免删除后留下孤儿目录
+        self._prune_empty_parents(path.parent)
+
+    def _prune_empty_parents(self, directory: Path) -> None:
+        """自底向上删除空的父目录，遇到非空目录或 root 即停。"""
+        root = self._root.resolve()
+        current = directory.resolve()
+        while current != root and current.is_relative_to(root):
+            try:
+                current.rmdir()
+            except OSError:
+                # 目录非空或已不存在：停止
+                return
+            current = current.parent
