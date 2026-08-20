@@ -266,6 +266,7 @@ export interface TestScript {
   last_parsed_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  file_missing: boolean;
 }
 
 export interface ScriptCase {

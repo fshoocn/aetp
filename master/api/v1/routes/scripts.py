@@ -39,6 +39,16 @@ router = APIRouter(
 )
 
 
+def _to_script_out(script, storage_service) -> ScriptOut:
+    """把脚本实体转为响应，并标记文件是否在存储中缺失。"""
+    output = ScriptOut.model_validate(script)
+    if script.file_ref:
+        output = output.model_copy(
+            update={"file_missing": not storage_service.script_exists(script.file_ref)}
+        )
+    return output
+
+
 @router.post("", response_model=ScriptOut, status_code=status.HTTP_201_CREATED)
 async def upload_script(
     project_id: str,
@@ -93,12 +103,12 @@ async def upload_script(
         ) from exc
     return ScriptOut.model_validate(script)
 
-
 @router.get("", response_model=list[ScriptOut])
 def list_scripts(
     project_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
+    storage_service: ScriptStorageServiceDep,
     limit: int = 100,
     offset: int = 0,
 ) -> list[ScriptOut]:
@@ -107,7 +117,7 @@ def list_scripts(
         scripts = uow.test_scripts.list_by_project(
             project_id, limit=limit, offset=offset
         )
-    return [ScriptOut.model_validate(s) for s in scripts]
+    return [_to_script_out(s, storage_service) for s in scripts]
 
 
 @router.get("/{script_id}", response_model=ScriptOut)
@@ -116,13 +126,14 @@ def get_script(
     script_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
+    storage_service: ScriptStorageServiceDep,
 ) -> ScriptOut:
     """查询脚本详情（项目范围）。"""
     with uow_factory() as uow:
         script = uow.test_scripts.get_by_script_id(script_id)
         if script is None or script.project_id != project_id:
             raise HTTPException(status_code=404, detail="脚本不存在")
-    return ScriptOut.model_validate(script)
+    return _to_script_out(script, storage_service)
 
 
 @router.get("/{script_id}/cases", response_model=list[ScriptCaseOut])

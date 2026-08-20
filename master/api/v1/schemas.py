@@ -386,6 +386,8 @@ class ScriptOut(BaseModel):
     last_parsed_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # sym:file_missing 脚本文件在存储中缺失（手动删除/损坏），下发会失败
+    file_missing: bool = False
 
 
 class ScriptCaseOut(BaseModel):

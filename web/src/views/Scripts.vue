@@ -54,6 +54,7 @@
                 <strong>{{ row.name }}</strong>
                 <small>{{ row.script_id }} · v{{ row.version }}</small>
               </div>
+              <el-tag v-if="row.file_missing" type="danger" size="small" effect="dark">文件缺失</el-tag>
             </div>
           </template>
         </el-table-column>
@@ -488,6 +489,7 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
 .panel-heading strong { color: var(--aetp-ink); font-size: 15px; }
 .panel-hint { color: var(--aetp-muted); font-size: 11px; }
 .script-cell { display: flex; align-items: center; gap: 10px; }
+.script-cell .el-tag { margin-left: auto; }
 .script-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 8px; background: #eaf3ff; color: var(--aetp-blue); }
 .script-cell div { display: flex; flex-direction: column; gap: 3px; }
 .script-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
