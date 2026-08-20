@@ -10,8 +10,9 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping
 
 from master.domain.models import DomainEvent
 
@@ -63,24 +64,37 @@ class SecretValue:
     value: str
 
 
-class NotificationSender(Protocol):
-    """通知发送器端口：业务层不依赖具体平台 SDK（D-13）。"""
+class NotificationSender(ABC):
+    """通知发送器端口：业务层不依赖具体平台 SDK（D-13）。
+
+    所有 sender adapter 必须继承此类并实现 send()。
+    channel_type 与 notification_endpoints.channel_type 对应。
+    """
 
     # sym:channel_type 该 sender 支持的通道类型
     channel_type: str
 
+    @abstractmethod
     async def send(
         self,
         message: NotificationMessage,
         endpoint: NotificationEndpoint,
+        *,
+        secret_value: str | None = None,
     ) -> DeliveryReceipt:
-        """发送一条通知；超时必须设上限，不得无限等待（§10.5）。"""
+        """发送一条通知；超时必须设上限，不得无限等待（§10.5）。
+
+        Args:
+            secret_value: 端点密钥明文（由 dispatcher 从 SecretStore 解回），
+                          大部分 sender 忽略即可，仅 HMAC 签名类 sender 使用。
+        """
         ...
 
 
-class SecretStore(Protocol):
+class SecretStore(ABC):
     """密钥存储端口：业务层只持有 secret_ref。"""
 
+    @abstractmethod
     def get(self, secret_ref: str) -> SecretValue:
         """按引用取回密钥值。"""
         ...

@@ -656,6 +656,11 @@ class EventDeliveryRepository(ABC):
     ) -> list[EventDelivery]: ...
 
     @abstractmethod
+    def get_by_event_subscription(
+        self, event_id: str, subscription_id: str
+    ) -> EventDelivery | None: ...
+
+    @abstractmethod
     def add(self, delivery: EventDelivery) -> EventDelivery: ...
 
     @abstractmethod

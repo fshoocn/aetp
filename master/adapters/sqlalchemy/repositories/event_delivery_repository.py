@@ -91,6 +91,19 @@ class EventDeliveryRepositoryImpl(EventDeliveryRepository):
         self._s.refresh(orm)
         return _to_domain(orm)
 
+    def get_by_event_subscription(
+        self, event_id: str, subscription_id: str
+    ) -> EventDelivery | None:
+        orm = self._s.execute(
+            select(DeliveryORM)
+            .options(joinedload(DeliveryORM.project))
+            .where(
+                DeliveryORM.event_id == event_id,
+                DeliveryORM.subscription_id == subscription_id,
+            )
+        ).scalars().one_or_none()
+        return _to_domain(orm) if orm is not None else None
+
     def update(self, delivery: EventDelivery) -> EventDelivery:
         orm = self._s.get(DeliveryORM, delivery.id)
         if orm is None:
