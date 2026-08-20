@@ -10,12 +10,12 @@ from typing import Any
 class DomainEvent:
     """SSE 推送的领域事件载荷。
 
-    type: 事件类型（如 task.created / task.updated）
+    event_type: 事件类型（如 task.created / task.updated）
     data: 业务数据（已序列化为 JSON 安全结构）
     ts: 事件产生时间（ISO 8601）
     """
 
-    type: str
+    event_type: str
     data: dict[str, Any]
     ts: str = ""
     event_id: str = ""

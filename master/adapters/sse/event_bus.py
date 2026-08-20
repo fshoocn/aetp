@@ -35,7 +35,7 @@ class EventBus:
     ) -> None:
         """按项目广播领域事件给实时订阅者。"""
         event = DomainEvent(
-            type=event_type,
+            event_type=event_type,
             data=data,
             ts=(occurred_at or datetime.now(timezone.utc)).isoformat(),
             event_id=event_id,

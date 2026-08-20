@@ -20,7 +20,8 @@ from fastapi.responses import StreamingResponse
 
 from master.api.v1.dependencies import EventBusDep, UowFactoryDep
 from master.api.v1.permissions import ProjectAccessDep
-from master.domain.models import DomainEvent
+from master.adapters.sse.event import DomainEvent
+from master.domain.models import DomainEvent as PersistedEvent
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +61,16 @@ async def stream_events(
                     limit=1000,
                 )
             current_sequence = last_sequence
-            for event in replay:
-                yield _format_event(event)
-                current_sequence = max(current_sequence, event.sequence or 0)
+            for persisted in replay:
+                yield _format_event(_to_sse(persisted))
+                current_sequence = max(current_sequence, persisted.sequence or 0)
 
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=_KEEPALIVE_SECONDS)
-                    if event.type == "server.shutdown":
+                    if event.event_type == "server.shutdown":
                         # 生命周期关闭前由 Master 主动通知 SSE 客户端结束流，
                         # 避免 Uvicorn 只能通过取消任务强行切断长连接。
                         break
@@ -98,6 +99,18 @@ async def stream_events(
     )
 
 
+def _to_sse(event: PersistedEvent) -> DomainEvent:
+    """持久化领域事件 → SSE 推送载荷。"""
+    return DomainEvent(
+        event_type=event.event_type,
+        data=event.payload,
+        ts=event.occurred_at.isoformat() if event.occurred_at else "",
+        event_id=event.event_id,
+        sequence=event.sequence,
+        project_id=event.project_id,
+    )
+
+
 def _format_event(event: DomainEvent) -> str:
     """编码标准 SSE event/id/data 字段。"""
     payload = json.dumps(
@@ -106,10 +119,9 @@ def _format_event(event: DomainEvent) -> str:
             "sequence": event.sequence,
             "project_id": event.project_id,
             "type": event.event_type,
-            "data": event.payload,
-            "ts": event.occurred_at.isoformat(),
+            "data": event.data,
+            "ts": event.ts,
         },
         ensure_ascii=False,
     )
-    event_id = str(event.sequence or event.event_id)
-    return f"id: {event_id}\nevent: {event.event_type}\ndata: {payload}\n\n"
+    return f"id: {str(event.sequence or event.event_id)}\nevent: {event.event_type}\ndata: {payload}\n\n"
