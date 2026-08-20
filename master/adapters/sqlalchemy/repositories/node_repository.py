@@ -108,3 +108,27 @@ class NodeRepositoryImpl(NodeRepository):
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
+
+    def mark_all_offline(self) -> int:
+        """把所有节点投影重置为 offline（Master 启动恢复用）。
+
+        掉线期间的 online 状态不可信，统一重置为 offline，等待 Agent
+        心跳重新刷新，避免调度器在心跳到达前误判节点在线。
+
+        Returns:
+            重置的节点数量
+        """
+        from typing import Any
+
+        from sqlalchemy import update as sa_update
+        from sqlalchemy.engine import Result
+        result: Result[Any] = self._s.execute(
+            sa_update(NodeORM).values(
+                online=False,
+                status=NodeStatus.OFFLINE.value,
+            )
+        )
+        count = int(getattr(result, "rowcount", 0) or 0)
+        if count:
+            self._s.flush()
+        return count

@@ -14,6 +14,7 @@ from typing import Callable
 
 from master.domain.enums import (
     DeviceStatus,
+    DisconnectReason,
     RunStatus,
     ShardAttemptStatus,
     ShardStatus,
@@ -98,9 +99,22 @@ class RecoveryService:
             各类处理的数量统计
         """
         now = utcnow()
-        stats = {"stale_runs": 0, "orphan_shards": 0}
+        stats = {"stale_runs": 0, "orphan_shards": 0, "offline_nodes": 0, "closed_sessions": 0}
 
         with self._uow_factory() as uow:
+            # 0. 重置节点投影 + 关闭遗留会话（掉线期间状态不可信）
+            stats["offline_nodes"] = uow.nodes.mark_all_offline()
+            stats["closed_sessions"] = uow.node_sessions.close_all_open(
+                reason=DisconnectReason.EXPIRED,
+                at=now,
+            )
+            if stats["offline_nodes"] or stats["closed_sessions"]:
+                logger.warning(
+                    "启动恢复：重置节点投影 nodes=%d sessions=%d",
+                    stats["offline_nodes"],
+                    stats["closed_sessions"],
+                )
+
             # 扫描所有非终态 Run
             non_terminal_runs = uow.task_runs.list_non_terminal(limit=5000)
             if not non_terminal_runs:

@@ -119,10 +119,10 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("未配置 MQTT broker，跳过 Master MQTT 运行时")
 
-    # 启动恢复：扫描遗留非终态 Run，超时标记 + 孤儿 Shard 转 waiting_recovery
+    # 启动恢复：重置节点投影/会话 + 扫描遗留非终态 Run，超时标记 + 孤儿 Shard 转 waiting_recovery
     recovery = container.recovery_service()
     stats = recovery.startup_recovery()
-    if stats["stale_runs"] or stats["orphan_shards"]:
+    if any(stats.values()):
         logger.warning("启动恢复完成: %s", stats)
     else:
         logger.info("启动恢复：无需恢复")
