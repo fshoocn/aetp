@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import hashlib
-import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import RunAssignPayload
@@ -66,7 +64,7 @@ def test_ensure_cached_downloads_verifies_and_caches(tmp_path) -> None:
     assert entry.version == 1
     assert entry.sha256 == _SHA
     assert len(calls) == 1
-    assert (tmp_path / "scripts" / _SHA / f"S-1-v1.bin").read_bytes() == _DATA
+    assert (tmp_path / "scripts" / _SHA / "S-1-v1.bin").read_bytes() == _DATA
 
     cached = _ledger(tmp_path).get_cached_script("S-1", 1, _SHA)
     assert cached is not None
@@ -186,7 +184,7 @@ def _message(envelope: Envelope) -> MqttMessage:
 
 
 def _now() -> datetime:
-    return datetime(2099, 1, 1, tzinfo=timezone.utc).replace(tzinfo=None)
+    return datetime(2099, 1, 1, tzinfo=UTC).replace(tzinfo=None)
 
 
 def test_assign_script_download_failure_rejects_then_retry_succeeds(tmp_path) -> None:

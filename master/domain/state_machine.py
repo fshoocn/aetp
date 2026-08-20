@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from typing import Iterable, TypeVar, Union
+from collections.abc import Iterable
+from typing import TypeVar
 
 from master.domain.enums import (
     RunStatus,
@@ -27,7 +28,7 @@ from master.domain.enums import (
     TaskStatus,
 )
 
-_Status = Union[TaskStatus, RunStatus, ShardStatus, ShardAttemptStatus]
+_Status = TaskStatus | RunStatus | ShardStatus | ShardAttemptStatus
 _StatusT = TypeVar("_StatusT", bound=_Status)
 
 

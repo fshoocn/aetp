@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from aetp_protocol.capabilities import (
     DeviceRequirement,
@@ -38,7 +38,7 @@ def _node(
         online=online,
         enabled=enabled,
         capabilities=NodeCapabilities(),
-        last_seen_at=datetime(2026, 1, 1, 0, 0, last_seen_second, tzinfo=timezone.utc),
+        last_seen_at=datetime(2026, 1, 1, 0, 0, last_seen_second, tzinfo=UTC),
         devices=list(devices),
     )
     return NodeSchedulingState(node=node)

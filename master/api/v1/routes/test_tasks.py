@@ -17,7 +17,11 @@ from master.api.v1.dependencies import (
     TestTaskServiceDep,
 )
 from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep
-from master.api.v1.schemas import TestTaskCreateRequest, TestTaskOut, TestTaskUpdateRequest
+from master.api.v1.schemas import (
+    TestTaskCreateRequest,
+    TestTaskOut,
+    TestTaskUpdateRequest,
+)
 from master.application.services.test_task_service import TestTaskService
 
 logger = logging.getLogger(__name__)

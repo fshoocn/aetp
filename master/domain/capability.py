@@ -15,18 +15,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Protocol, Sequence
+from typing import Protocol
 
 from aetp_protocol.capabilities import (
     BusRequirement,
     HardwareRequirements,
-    LanguageRequirement,
-    NumericConstraint,
     NodeCapabilities,
-    SerialPortRequirement,
-    SystemRequirement,
-    VehicleRequirement,
+    NumericConstraint,
     Version,
     VersionConstraint,
 )
@@ -359,9 +356,7 @@ def _matches_version(actual: Version, requirement: VersionConstraint) -> bool:
         return False
     if requirement.minimum is not None and actual_parts < _version_parts(requirement.minimum):
         return False
-    if requirement.maximum is not None and actual_parts > _version_parts(requirement.maximum):
-        return False
-    return True
+    return not (requirement.maximum is not None and actual_parts > _version_parts(requirement.maximum))
 
 
 def _version_parts(version: Version) -> tuple[int, ...]:

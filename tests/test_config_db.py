@@ -13,7 +13,7 @@ def test_health_check(client):
 
 def test_config_singleton_mode():
     """验证配置组合根行为：首次加载后 get_settings() 返回相同实例。"""
-    import master.config as config
+    from master import config
 
     config.reset_settings()
     s1 = config.configure()
@@ -34,7 +34,7 @@ def test_database_sqlite_url_resolution():
 
 def test_database_connect_skips_migration_without_configuration():
     """未初始化进程配置时，数据库对象应明确跳过自动迁移。"""
-    import master.config as config
+    from master import config
     from master.adapters.sqlalchemy.database_factory import create_database
 
     config.reset_settings()
@@ -68,6 +68,7 @@ def test_env_isolation():
     import os
     import tempfile
     from pathlib import Path
+
     from master.config import MasterSettings
 
     os.environ["AETP_MASTER_MQTT_HOST"] = "wrong-from-env"

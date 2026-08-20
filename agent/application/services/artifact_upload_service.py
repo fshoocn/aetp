@@ -86,7 +86,7 @@ class ArtifactUploadService:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=60) as response:  # noqa: S310 - Master URL is assigned by Master
+            with urlopen(request, timeout=60) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")

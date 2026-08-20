@@ -30,4 +30,4 @@ class RunLog:
 
 
 # 防止 pytest 将 RunLog 误识别为测试类。
-setattr(RunLog, "__test__", False)
+RunLog.__test__ = False

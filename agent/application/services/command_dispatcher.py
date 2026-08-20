@@ -19,14 +19,13 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.errors import (
     InvalidSenderError,
-    ProtocolError,
-    TopicMismatchError,
 )
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import RunAckPayload, RunAssignPayload, RunCancelPayload
@@ -44,8 +43,8 @@ from agent.application.services.script_cache_service import (
     ScriptCacheService,
 )
 from agent.config import AgentSettings
-from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
-from agent.domain.ledger import AgentRun, Ledger
+from agent.domain.enums import AgentRunStatus
+from agent.domain.ledger import Ledger
 from agent.plugins.errors import (
     PluginInstallError,
     PluginNotFoundError,
@@ -68,8 +67,8 @@ class CommandDispatcher:
         ledger: Ledger,
         *,
         is_registered: Callable[[], bool],
-        plugin_registry: "AgentPluginRegistry | None" = None,
-        plugin_installer: "PluginPackageInstaller | None" = None,
+        plugin_registry: AgentPluginRegistry | None = None,
+        plugin_installer: PluginPackageInstaller | None = None,
         script_cache: ScriptCacheService | None = None,
         execution_service: ExecutionService | None = None,
         orchestrator: RunOrchestrator | None = None,
@@ -85,7 +84,7 @@ class CommandDispatcher:
         self._execution_service = execution_service
         self._orchestrator = orchestrator
         self._session_id = session_id or (lambda: self._settings.node_id)
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
 
     # -- 公共接口 -----------------------------------------------------------
 
@@ -99,7 +98,7 @@ class CommandDispatcher:
             envelope = self._parse_and_validate(message.topic, message.payload)
             if envelope is None:
                 return False
-        except Exception:  # noqa: BLE001 - 协议错误静默忽略
+        except Exception:
             logger.warning(
                 "命令校验失败: topic=%s", message.topic, exc_info=True
             )

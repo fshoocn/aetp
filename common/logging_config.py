@@ -25,7 +25,7 @@ def _parse_level(level: str | int) -> int:
         return level
     value = getattr(logging, level.strip().upper(), None)
     if not isinstance(value, int):
-        raise ValueError(f"不支持的日志级别: {level!r}")
+        raise TypeError(f"不支持的日志级别: {level!r}")
     return value
 
 

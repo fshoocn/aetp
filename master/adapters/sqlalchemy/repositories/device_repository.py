@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+from aetp_protocol.capabilities import PhysicalDeviceCapability
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-from aetp_protocol.capabilities import PhysicalDeviceCapability
 
 from master.adapters.sqlalchemy.orm import Device as DeviceORM
 from master.adapters.sqlalchemy.orm import Node as NodeORM

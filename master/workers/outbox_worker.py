@@ -15,8 +15,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
+from contextlib import suppress
 from datetime import timedelta
-from typing import Callable
 
 from common.backoff import ExponentialBackoff
 from common.transport import Transport
@@ -66,10 +67,8 @@ class OutboxWorker:
         self._running = False
         if self._task is not None:
             self._task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
         logger.info("Outbox worker 停止")
 
@@ -77,7 +76,7 @@ class OutboxWorker:
         while self._running:
             try:
                 await self.run_once()
-            except Exception:  # noqa: BLE001 - 轮询异常不终止循环
+            except Exception:
                 logger.exception("Outbox worker 轮询异常")
             await asyncio.sleep(self._poll_interval_s)
 

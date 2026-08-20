@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-
 from aetp_protocol.capabilities import HardwareRequirements
+from sqlalchemy.exc import IntegrityError
 
 from master.domain.enums import (
     AccountStatus,
@@ -133,10 +132,9 @@ def test_get_by_hash_idempotency(client):
 def test_duplicate_project_name_version_raises(client):
     container = client.app.state.container
     user_id = _seed_user_and_project(container)
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.test_scripts.add(_make_script(user_id, name="reg", version=1))
-            uow.test_scripts.add(_make_script(user_id, name="reg", version=1))
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.test_scripts.add(_make_script(user_id, name="reg", version=1))
+        uow.test_scripts.add(_make_script(user_id, name="reg", version=1))
 
 
 def test_same_name_different_version_allowed(client):
@@ -212,14 +210,13 @@ def test_case_duplicate_stable_key_raises(client):
     user_id = _seed_user_and_project(container)
     with _uow(container) as uow:
         script = uow.test_scripts.add(_make_script(user_id))
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.script_cases.add_many(
-                [
-                    _make_case(script.script_id, "same"),
-                    _make_case(script.script_id, "same"),
-                ]
-            )
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.script_cases.add_many(
+            [
+                _make_case(script.script_id, "same"),
+                _make_case(script.script_id, "same"),
+            ]
+        )
 
 
 def test_case_update_duration_stats(client):

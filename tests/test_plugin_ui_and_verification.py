@@ -5,15 +5,15 @@ import json
 import zipfile
 
 import pytest
-
 from aetp_protocol.capabilities import HardwareRequirements
 from aetp_protocol.envelope import Envelope
 from aetp_protocol.payloads import ScriptVerifyResultPayload
 from aetp_protocol.plugin import PluginMetadata, PluginPackage
 
-from agent.domain.enums import AgentRunStatus
 from master.application.services.script_download_service import ScriptDownloadService
-from master.application.services.script_verification_service import ScriptVerificationService
+from master.application.services.script_verification_service import (
+    ScriptVerificationService,
+)
 from master.domain.enums import (
     AccountStatus,
     NodeStatus,
@@ -26,7 +26,6 @@ from master.domain.models import (
     Node,
     Project,
     ProjectNodeBinding,
-    ScriptCase,
     TestScript,
     User,
 )
@@ -52,7 +51,11 @@ def _build_ui_plugin_zip() -> bytes:
         "    def result_schema(self, c): return {}\n"
         "    def hardware_requirements(self, c, cs): return HardwareRequirements()\n"
         "class Agent: pass\n"
-        "package=PluginPackage(metadata=PluginMetadata(task_type='ui_task', plugin_version='1.0.0', supported_versions=frozenset({'1.0.0'}), ui={'entry':'index.html','protocol_version':1}), master=Master(), agent=Agent())\n"
+        "package=PluginPackage(\n"
+        "  metadata=PluginMetadata(task_type='ui_task', plugin_version='1.0.0',"
+        " supported_versions=frozenset({'1.0.0'}),"
+        " ui={'entry':'index.html','protocol_version':1}),"
+        " master=Master(), agent=Agent())\n"
     )
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -131,8 +134,8 @@ def test_script_verification_dispatches_and_persists_result(client) -> None:
         task_type = "verify_task"
         plugin_version = "1.0.0"
         supported_versions = frozenset({"1.0.0"})
-        config_schema = {"type": "object"}
-        upload_spec = {"extensions": [".py"]}
+        config_schema = {"type": "object"}  # noqa: RUF012
+        upload_spec = {"extensions": [".py"]}  # noqa: RUF012
 
         def verify_script(self, _directory, _config):
             return []

@@ -16,8 +16,10 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from contextlib import suppress
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from aetp_protocol.capabilities import NodeCapabilities
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
@@ -65,7 +67,7 @@ class RegistrationService:
         session_id: str | None = None,
         capabilities=None,
         tags: tuple[str, ...] = (),
-        plugin_registry: "AgentPluginRegistry | None" = None,
+        plugin_registry: AgentPluginRegistry | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._transport = transport
@@ -75,7 +77,7 @@ class RegistrationService:
         self._capabilities = capabilities
         self._tags = list(tags)
         self._plugin_registry = plugin_registry
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
         self._registered = False
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._register_ack_event = asyncio.Event()
@@ -196,7 +198,7 @@ class RegistrationService:
                 self._register_ack_event.wait(),
                 timeout=self._settings.registration_timeout_s,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise RegistrationTimeoutError(
                 f"等待 register-ack 超时: node={self._settings.node_id}"
             ) from exc
@@ -269,7 +271,6 @@ class RegistrationService:
         ``running_shards`` = 执行中的 Run 数；``queued_shards`` = 已 claim
         待执行；``active_run_ids`` = 活动 run_id 列表（离线恢复现场，§8.6）。
         """
-        from agent.domain.enums import AgentRunStatus
 
         active = self._ledger.list_active_runs()
         running_ids = [
@@ -336,8 +337,6 @@ class RegistrationService:
         """停止心跳循环（幂等）。"""
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
             self._heartbeat_task = None

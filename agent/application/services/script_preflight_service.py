@@ -17,15 +17,15 @@ Agent 不写 ``script_cases``、不判定 ``parse_status``——主用例索引�
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timezone
 import shutil
 import tempfile
-from pathlib import Path
-from typing import TYPE_CHECKING, Callable
 import uuid
 import zipfile
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
@@ -37,11 +37,11 @@ from aetp_protocol.payloads import (
 )
 from aetp_protocol.topics import event_topic, parse_topic
 
+from agent.application.services.script_archive import extract_zip_safely
 from agent.application.services.script_cache_service import (
     ScriptCacheError,
     ScriptCacheService,
 )
-from agent.application.services.script_archive import extract_zip_safely
 from agent.config import AgentSettings
 from agent.domain.ledger import Ledger
 from agent.plugins.errors import (
@@ -76,7 +76,7 @@ class ScriptPreflightService:
         settings: AgentSettings,
         ledger: Ledger,
         script_cache: ScriptCacheService,
-        plugin_registry: "AgentPluginRegistry | None" = None,
+        plugin_registry: AgentPluginRegistry | None = None,
         *,
         is_registered: Callable[[], bool] | None = None,
         session_id: Callable[[], str] | None = None,
@@ -88,7 +88,7 @@ class ScriptPreflightService:
         self._plugin_registry = plugin_registry
         self._is_registered = is_registered or (lambda: True)
         self._session_id = session_id or (lambda: self._settings.node_id)
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
 
     # -- 入口 ---------------------------------------------------------------
 
@@ -162,7 +162,7 @@ class ScriptPreflightService:
             logger.warning("脚本预检失败（下载/校验）: %s", exc)
             self._enqueue_error_result(envelope, script_id, errors=[f"{exc.code}: {exc}"])
             return True
-        except Exception as exc:  # noqa: BLE001 - 插件/台架异常必须回传结果
+        except Exception as exc:
             logger.exception("脚本预检执行异常: script_id=%s", script_id)
             self._enqueue_error_result(
                 envelope,
@@ -208,7 +208,7 @@ class ScriptPreflightService:
                 payload.script_ref,
                 payload.config,
             )
-        except Exception as exc:  # noqa: BLE001 - payload 格式错误
+        except Exception as exc:
             raise ScriptPreflightError(
                 f"脚本预检 payload 校验失败: {exc}",
                 code="SCRIPT_REF_INVALID",
@@ -250,7 +250,7 @@ class ScriptPreflightService:
                 extract_zip_safely(source, tmp_dir)
             else:
                 shutil.copy2(source, tmp_dir / "test_script.py")
-        except Exception as exc:  # noqa: BLE001 - 解包失败统一映射
+        except Exception as exc:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise ScriptPreflightError(
                 f"脚本解包失败: {exc}", code="SCRIPT_DIR_INVALID"

@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Callable
 
 from master.domain.enums import (
     DeviceStatus,
@@ -19,7 +19,6 @@ from master.domain.enums import (
     ShardAttemptStatus,
     ShardStatus,
 )
-from master.domain.models import ShardAttempt
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 

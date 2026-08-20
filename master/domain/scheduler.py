@@ -6,14 +6,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable
 
 from aetp_protocol.capabilities import DeviceRequirement, HardwareRequirements
 
 from master.domain.capability import CapabilityEvaluator
-from master.domain.enums import NodeStatus, ShardAttemptStatus
-from master.domain.models import Node, RunShard, ShardAttempt
+from master.domain.enums import NodeStatus
+from master.domain.models import Node, ShardAttempt
 from master.domain.resources import (
     NodeSchedulingState,
     ResourceAllocator,

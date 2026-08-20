@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Callable, cast
-
-import pytest
+from typing import Self, cast
 
 from common.backoff import ExponentialBackoff
 from common.transport import TransportError
@@ -20,7 +19,6 @@ from master.domain.models import OutboxMessage
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 from master.workers.outbox_worker import OutboxWorker
-
 
 # -- fakes ----------------------------------------------------------------
 
@@ -60,7 +58,7 @@ class FakeUoW:
     def __init__(self, repo: FakeOutboxRepo) -> None:
         self.outbox_messages = repo
 
-    def __enter__(self) -> "FakeUoW":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

@@ -11,7 +11,11 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from master.api.v1.dependencies import NotificationServiceDep
-from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep, ProjectOwnerDep
+from master.api.v1.permissions import (
+    ProjectAccessDep,
+    ProjectManagerDep,
+    ProjectOwnerDep,
+)
 from master.api.v1.schemas import (
     DeliveryOut,
     EndpointCreate,

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import NodeHeartbeatPayload, NodeRegisterPayload
@@ -57,7 +55,7 @@ _SETTINGS = AgentSettings(
 
 
 def _now() -> datetime:
-    return datetime(2026, 8, 17, 8, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 8, 17, 8, 0, 0, tzinfo=UTC)
 
 
 def _ack_envelope(
@@ -99,7 +97,7 @@ def test_register_enqueue_writes_outbox(tmp_path) -> None:
     outbox_id = service.enqueue_register()
 
     due = ledger.claim_due_outbox(
-        10, datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=1)
+        10, datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1)
     )
     assert len(due) == 1
     assert due[0].outbox_id == outbox_id

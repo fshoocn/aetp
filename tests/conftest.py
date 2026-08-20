@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator, cast
+from typing import cast
 
-from fastapi import FastAPI
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text as sa_text
 
-import master.config as config
 import master.main as main_mod
+from master import config
 
 
 @pytest.fixture(autouse=True)

@@ -71,7 +71,7 @@ class RunLogBatch(BaseModel):
     entries: list[RunLogEntry] = Field(min_length=1, max_length=50)
 
     @model_validator(mode="after")
-    def _check_sequences(self) -> "RunLogBatch":
+    def _check_sequences(self) -> RunLogBatch:
         """entries 必须严格按 sequence 递增，first_sequence 等于首条。"""
         if self.entries:
             if self.entries[0].sequence != self.first_sequence:
@@ -79,7 +79,7 @@ class RunLogBatch(BaseModel):
                     "first_sequence 必须等于首条 entry.sequence: "
                     f"{self.first_sequence} != {self.entries[0].sequence}"
                 )
-            for prev, cur in zip(self.entries, self.entries[1:]):
+            for prev, cur in zip(self.entries, self.entries[1:], strict=False):
                 if cur.sequence <= prev.sequence:
                     raise ValueError(
                         "entries 必须按 sequence 严格递增: "

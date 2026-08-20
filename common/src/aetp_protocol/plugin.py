@@ -11,8 +11,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from .capabilities import HardwareRequirements
 from .payloads import PluginPackageRef
@@ -124,7 +125,7 @@ class AgentExecutionPlugin(Protocol):
 
     def parse_cases(
         self, script_dir: str, config: Mapping[str, Any]
-    ) -> list["CaseInfo"]:
+    ) -> list[CaseInfo]:
         """（可选）台架侧用例解析：返回 CaseInfo 事实列表（同步）。"""
         ...
 

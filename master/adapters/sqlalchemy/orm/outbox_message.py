@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     CheckConstraint,
@@ -54,8 +53,8 @@ class OutboxMessage(Base, TimestampMixin):
     # sym:attempts 已尝试发送次数（重试计数）
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # sym:next_attempt_at 下次发送时间（失败退避；(status, next_attempt_at) 索引）
-    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime, nullable=True
     )
     # sym:sent_at 最近一次发送时间
-    sent_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

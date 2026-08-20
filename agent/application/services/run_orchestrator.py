@@ -25,10 +25,11 @@ import shutil
 import tempfile
 import uuid
 import zipfile
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Mapping
+from typing import TYPE_CHECKING
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
@@ -40,10 +41,10 @@ from aetp_protocol.payloads import (
 )
 from aetp_protocol.topics import event_topic
 
-from agent.application.services.execution_service import ExecutionService
 from agent.application.services.artifact_upload_service import ArtifactUploadService
-from agent.application.services.script_cache_service import ScriptCacheService
+from agent.application.services.execution_service import ExecutionService
 from agent.application.services.script_archive import extract_zip_safely
+from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.task_context import TaskContext
 from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
@@ -72,7 +73,7 @@ class _Analysis:
     data: dict = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, mapping: Mapping) -> "_Analysis":
+    def from_mapping(cls, mapping: Mapping) -> _Analysis:
         raw_cases = mapping.get("case_results") or []
         case_results: list[CaseResultEntry] = []
         for item in raw_cases:
@@ -101,7 +102,7 @@ class RunOrchestrator:
         settings: AgentSettings,
         ledger: Ledger,
         execution_service: ExecutionService,
-        plugin_registry: "AgentPluginRegistry | None" = None,
+        plugin_registry: AgentPluginRegistry | None = None,
         *,
         script_cache: ScriptCacheService | None = None,
         artifact_uploader: ArtifactUploadService | None = None,
@@ -115,7 +116,7 @@ class RunOrchestrator:
         self._script_cache = script_cache
         self._artifact_uploader = artifact_uploader
         self._session_id = session_id or (lambda: settings.node_id)
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
         self._tasks: set[asyncio.Task[None]] = set()
         # 本次 Run 解包出的临时脚本目录，Run 结束后清理
         self._script_dirs: set[Path] = set()
@@ -153,7 +154,7 @@ class RunOrchestrator:
             )
             artifact_refs = await self._upload_artifacts(payload, result)
             await self._finalize(payload, plugin, context, result, artifact_refs)
-        except Exception:  # noqa: BLE001 - 闭环兜底：任何异常都不让任务静默丢失
+        except Exception:
             logger.exception(
                 "Run 执行编排异常: run_id=%s attempt=%s",
                 run_id,
@@ -173,7 +174,6 @@ class RunOrchestrator:
 
     def _build_context(self, payload: RunAssignPayload) -> TaskContext:
         """构造执行上下文（脚本路径未经解包，异步阶段会替换）。"""
-        run_id = payload.run_id
         return self._build_context_with_ref(payload, dict(payload.script_ref or {}))
 
     def _build_context_with_ref(
@@ -235,7 +235,7 @@ class RunOrchestrator:
                 )
                 if cached is not None:
                     script_ref["path"] = cached.path
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 - 脚本缓存查询失败不阻断执行，静默降级
                 pass
         return script_ref
 
@@ -332,7 +332,7 @@ class RunOrchestrator:
             return
         try:
             await collect(context)
-        except Exception:  # noqa: BLE001 - 日志整合失败不阻断结果上报
+        except Exception:
             logger.warning(
                 "插件 collect_logs 失败: run_id=%s", context.run_id, exc_info=True
             )
@@ -448,7 +448,7 @@ class RunOrchestrator:
 
         try:
             analysis = await analyze(result.summary, context)
-        except Exception as exc:  # noqa: BLE001 - 分析失败标记 failed，不丢 result
+        except Exception as exc:
             logger.warning(
                 "插件 analyze_results 失败: run_id=%s", context.run_id, exc_info=True
             )
@@ -460,7 +460,7 @@ class RunOrchestrator:
             )
         try:
             return _Analysis.from_mapping(analysis)
-        except Exception as exc:  # noqa: BLE001 - 结构化结果非法标记 failed
+        except Exception as exc:
             logger.warning(
                 "analyze_results 返回结构非法: run_id=%s", context.run_id, exc_info=True
             )

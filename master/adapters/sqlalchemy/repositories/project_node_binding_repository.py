@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+from aetp_protocol.capabilities import PhysicalDeviceCapability
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from master.adapters.sqlalchemy.orm import Device as DeviceORM
 from master.adapters.sqlalchemy.orm import Node as NodeORM
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
 from master.adapters.sqlalchemy.orm import ProjectNodeBinding as BindingORM
-from master.adapters.sqlalchemy.orm import Device as DeviceORM
-from aetp_protocol.capabilities import PhysicalDeviceCapability
 from master.domain.enums import DeviceStatus
 from master.domain.models import (
     Device,

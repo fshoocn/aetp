@@ -75,6 +75,7 @@ __all__ = [
     "RunResult",
     "RunShard",
     "ScriptCase",
+    "SecretValue",
     "ShardAttempt",
     "Task",
     "TaskLog",

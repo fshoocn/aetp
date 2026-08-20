@@ -6,11 +6,6 @@ from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from master.config import get_settings
-from master.domain.enums import AccountStatus
-from master.domain.models import User
-from master.domain.time import utcnow
-
 from master.api.v1.dependencies import AuthDep, CurrentUser
 from master.api.v1.rate_limit import (
     client_ip,
@@ -32,6 +27,10 @@ from master.api.v1.security import (
     hash_refresh_token,
 )
 from master.application.services.auth_service import AuthService
+from master.config import get_settings
+from master.domain.enums import AccountStatus
+from master.domain.models import User
+from master.domain.time import utcnow
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

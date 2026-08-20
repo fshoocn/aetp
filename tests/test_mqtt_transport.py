@@ -113,7 +113,7 @@ def _fake_aiomqtt(fail_first_connect: bool = False):
     """构造 fake aiomqtt 模块：Client 可选首次连接失败。"""
     class FakeClient:
         _counter = 0
-        instances: list[FakeClient] = []
+        instances: list[FakeClient] = []  # noqa: RUF012 - 测试桩实例注册表
 
         def __init__(self, **kwargs):
             FakeClient._counter += 1
@@ -249,7 +249,7 @@ def test_mqtt_transport_reconnect_recovers():
 
 def test_mqtt_transport_dispatch_to_handler():
     """入站消息经 on_message 处理器分发（MqttMessage 转换）。"""
-    fake_mod, FakeClient = _fake_aiomqtt()
+    fake_mod, _FakeClient = _fake_aiomqtt()
     transport = MqttTransport(_SETTINGS, backoff=ExponentialBackoff(jitter_ratio=0.0))
     received: list[MqttMessage] = []
 

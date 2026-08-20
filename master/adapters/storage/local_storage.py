@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import BinaryIO
 
-from master.domain.storage import Storage
-
 
 class LocalStorage:
     """将存储键映射到本地目录下的文件。

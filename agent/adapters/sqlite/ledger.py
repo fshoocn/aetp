@@ -19,20 +19,20 @@ agent_task_log_spool / agent_script_cache。
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
-    delete,
     Integer,
     String,
     UniqueConstraint,
     create_engine,
+    delete,
     select,
     update,
 )
@@ -42,10 +42,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
 from agent.domain.ledger import (
-    AgentInboxEntry,
     AgentOutboxEntry,
     AgentRun,
-    Ledger,
     ScriptCacheEntry,
     TaskLogSpoolEntry,
 )
@@ -55,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
     """naive UTC（SQLite 本地账本统一存 naive UTC）。"""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class _Base(DeclarativeBase):

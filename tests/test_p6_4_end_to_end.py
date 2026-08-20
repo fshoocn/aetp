@@ -17,13 +17,6 @@ import re
 from datetime import UTC, datetime
 
 import pytest
-
-_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-
-def _is_ulid(value: str) -> bool:
-    return bool(_ULID_RE.match(value))
-
 from aetp_protocol.capabilities import HardwareRequirements
 from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
 from aetp_protocol.payloads import (
@@ -58,6 +51,12 @@ from master.domain.models import (
 )
 from master.domain.time import utcnow
 
+_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _is_ulid(value: str) -> bool:
+    return bool(_ULID_RE.match(value))
+
 
 def _uow(container):
     return container.uow_factory()()
@@ -75,8 +74,8 @@ class _SplitPlugin:
     display_name = "E2E Test"
     plugin_version = "1.0.0"
     supported_versions = frozenset({"1.0.0"})
-    config_schema = {"type": "object"}
-    upload_spec = {"extensions": [".py"]}
+    config_schema = {"type": "object"}  # noqa: RUF012 - 测试桩类级共享配置
+    upload_spec = {"extensions": [".py"]}  # noqa: RUF012
 
     def verify_script(self, script_dir, config):
         return []
@@ -181,7 +180,7 @@ def _seed(container, *, node_id: str = "node-a") -> tuple[int, str]:
                     order_index=i,
                 )
             )
-        node = uow.nodes.save(
+        uow.nodes.save(
             Node(
                 id=None,
                 node_id=node_id,
@@ -469,7 +468,7 @@ def test_projection_log_batch_idempotent_by_sequence(client) -> None:
 
     with _uow(container) as uow:
         logs = uow.run_logs.list_by_run(run_id)
-        assert [l.sequence for l in logs] == [1, 2]
+        assert [log.sequence for log in logs] == [1, 2]
         assert uow.run_logs.get_max_sequence(run_id) == 2
 
 

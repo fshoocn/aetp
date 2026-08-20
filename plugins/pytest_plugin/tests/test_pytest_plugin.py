@@ -1,11 +1,12 @@
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import pytest
+from aetp_protocol.plugin import CaseInfo, PluginPackage
+from main import PytestAgentPlugin, PytestMasterPlugin, package
 
 from common.event_loop import run_with_selector
-from main import PytestMasterPlugin, PytestAgentPlugin, package
-from aetp_protocol.plugin import CaseInfo, PluginPackage
 
 
 class _PluginContext:

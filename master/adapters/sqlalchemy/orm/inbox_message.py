@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     Integer,
@@ -41,6 +40,6 @@ class InboxMessage(Base, TimestampMixin):
         UTCDateTime, nullable=False, default=datetime.utcnow
     )
     # sym:processed_at 处理完成时间（非空=已处理）
-    processed_at: Mapped[Optional[datetime]] = mapped_column(
+    processed_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime, nullable=True
     )

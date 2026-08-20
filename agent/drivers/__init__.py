@@ -8,4 +8,4 @@ CAN 卡、示波器）实现一个 Driver，负责探测、占用、配置与释
 from .base import Driver, ResourceMeta
 from .registry import DriverRegistry
 
-__all__ = ["Driver", "ResourceMeta", "DriverRegistry"]
+__all__ = ["Driver", "DriverRegistry", "ResourceMeta"]

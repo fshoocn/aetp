@@ -215,7 +215,7 @@ class ExecutionService:
                     self._run_plugin(plugin, context, token),
                     timeout=timeout_s,
                 )
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 raise ExecutionTimedOut(
                     f"run 执行超时: {timeout_s}s"
                 ) from exc

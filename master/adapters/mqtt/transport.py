@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import ssl
-from typing import Any, cast
+from contextlib import suppress
+from typing import Any
 
 import aiomqtt
 
@@ -75,9 +76,8 @@ class MqttTransport(Transport):
         self._running = False
         if self._task is not None:
             self._task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
                 pass
             self._task = None
         self._client = None
@@ -185,7 +185,7 @@ class MqttTransport(Transport):
             return
         try:
             await handler(connected, session_id)
-        except Exception:  # noqa: BLE001 - 生命周期回调 fail-open
+        except Exception:
             logger.exception("MQTT 连接状态回调失败: connected=%s", connected)
 
     async def _set_disconnected(self) -> None:
@@ -206,5 +206,5 @@ class MqttTransport(Transport):
         qos = getattr(raw, "qos", 1)
         try:
             await handler(MqttMessage(topic=topic, payload=payload, qos=qos))
-        except Exception:  # noqa: BLE001 - fail open：处理器异常只记录，不中断消费
+        except Exception:
             logger.exception("MQTT 消息处理失败: topic=%s", topic)

@@ -6,13 +6,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from aetp_protocol.capabilities import HardwareRequirements
 from aetp_protocol.plugin import (
@@ -89,7 +88,9 @@ class PytestMasterPlugin:
             hardware_requirements=HardwareRequirements(),
         )
 
-    async def split_shards(self, cases: list[CaseInfo], policy: Mapping[str, Any], config: Mapping[str, Any]) -> list[ShardSpec]:
+    async def split_shards(
+        self, cases: list[CaseInfo], policy: Mapping[str, Any], config: Mapping[str, Any]
+    ) -> list[ShardSpec]:
         size = int(policy.get("cases_per_shard", config.get("cases_per_shard", 20)))
         if size <= 0:
             raise ValueError("cases_per_shard 必须大于 0")

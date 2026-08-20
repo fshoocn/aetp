@@ -12,14 +12,12 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ScriptParsePayload, ScriptVerifyPayload
@@ -27,11 +25,11 @@ from aetp_protocol.plugin import CaseInfo
 from aetp_protocol.topics import command_topic
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
+from agent.application.services.script_archive import extract_zip_safely
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.script_preflight_service import (
     ScriptPreflightService,
 )
-from agent.application.services.script_archive import extract_zip_safely
 from agent.config import AgentSettings
 from agent.plugins.execution import AgentPluginRegistry
 from common.transport import MqttMessage
@@ -41,7 +39,7 @@ _SHA = hashlib.sha256(_DATA).hexdigest()
 
 
 def _now() -> datetime:
-    return datetime(2099, 1, 1, tzinfo=timezone.utc)
+    return datetime(2099, 1, 1, tzinfo=UTC)
 
 
 _SETTINGS = AgentSettings(

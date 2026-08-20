@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
@@ -83,7 +83,7 @@ class TestScript(Base, TimestampMixin):
     parse_location: Mapped[str] = mapped_column(
         String(16), nullable=False, default=ScriptParseLocation.MASTER.value
     )
-    # sym:result_parse_location 测试报告解析在哪端执行（agent=Agent 本地解析后上报结构化结果；CANoe 类通常为 agent，D-19）
+    # sym:result_parse_location 报告解析在哪端执行（agent=Agent 本地解析后上报；CANoe 类通常为 agent，D-19）
     result_parse_location: Mapped[str] = mapped_column(
         String(16), nullable=False, default=ScriptParseLocation.MASTER.value
     )
@@ -96,9 +96,9 @@ class TestScript(Base, TimestampMixin):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     # sym:last_parsed_at 最近一次用例解析完成时间（parse_status 到 parsed 的落点）
-    last_parsed_at: Mapped[Optional[datetime]] = mapped_column(
+    last_parsed_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime, nullable=True
     )
 
     # sym:project 所属项目 ORM 关系（查询时反查 project_id）
-    project: Mapped["Project"] = relationship()
+    project: Mapped[Project] = relationship()

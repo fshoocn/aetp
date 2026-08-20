@@ -7,16 +7,15 @@
 from __future__ import annotations
 
 import pytest
-
 from aetp_protocol.capabilities import (
     BusRequirement,
     HardwareChannel,
     HardwareRequirements,
+    NodeCapabilities,
     VehicleBus,
     VehicleCapability,
     VehicleRequirement,
     VehicleVendor,
-    NodeCapabilities,
 )
 
 from master.application.errors import ProjectAccessDeniedError, ScriptNotFoundError
@@ -70,7 +69,7 @@ def _seed(container, *, capabilities=None, tags=None) -> None:
                 updated_at=utcnow(),
             )
         )
-        node = uow.nodes.save(
+        uow.nodes.save(
             Node(
                 id=None,
                 node_id="bench-001",

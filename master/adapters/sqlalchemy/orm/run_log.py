@@ -8,7 +8,7 @@ Run 级日志由 Agent 以 ``run.log``（RunLogBatch）上报，(run_pk, sequenc
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -46,7 +46,7 @@ class RunLog(Base, TimestampMixin):
         ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # sym:shard_pk 所属 Shard 代理主键（Run 级日志可空）
-    shard_pk: Mapped[Optional[int]] = mapped_column(
+    shard_pk: Mapped[int | None] = mapped_column(
         ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True
     )
     # sym:node_id 产生日志的 Agent 节点业务 ID（无 FK 保留业务键）
@@ -58,13 +58,13 @@ class RunLog(Base, TimestampMixin):
     # sym:message 日志正文
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # sym:detail 结构化详情 JSON
-    detail: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # sym:occurred_at 产生时间（UTC）
     occurred_at: Mapped[datetime] = mapped_column(
         UTCDateTime, nullable=False, default=datetime.utcnow
     )
 
     # sym:run 所属 Run ORM 关系
-    run: Mapped["TaskRun"] = relationship()
+    run: Mapped[TaskRun] = relationship()
     # sym:shard 所属 Shard ORM 关系（Run 级日志为空）
-    shard: Mapped[Optional["RunShard"]] = relationship()
+    shard: Mapped[RunShard | None] = relationship()

@@ -6,7 +6,7 @@ import hashlib
 import re
 import time
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from aetp_protocol.capabilities import HardwareRequirements
 
@@ -40,7 +40,7 @@ def test_signed_path_roundtrip() -> None:
 
 def test_signed_path_rejects_expired() -> None:
     secret = "unit-test-secret"
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, tzinfo=UTC)
     path = build_signed_path("S-1", secret, 300, now=now)
     qs = _query(path)
     later = now + timedelta(seconds=301)

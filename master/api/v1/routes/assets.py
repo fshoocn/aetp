@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
-from master.api.v1.schemas import NodeOut
 from master.api.v1.dependencies import CurrentUser, DeviceServiceDep, NodeServiceDep
-from master.api.v1.schemas import DeviceOut
+from master.api.v1.schemas import DeviceOut, NodeOut
 
 router = APIRouter(tags=["v1-assets"])
 

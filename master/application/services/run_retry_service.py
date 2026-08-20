@@ -17,8 +17,8 @@ Run；失败 case 的判定基于 ``run_case_results`` 按 ``(case_key, attempt_
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from master.application.errors import RunNotFoundError
 from master.application.services.run_trigger_service import (

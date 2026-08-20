@@ -60,7 +60,7 @@ async def upload_script(
     task_type: str = Form(min_length=1, max_length=64),
     name: str = Form(min_length=1, max_length=128),
     config: str = Form(default="{}", max_length=65536),
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI 依赖注入惯用写法
 ) -> ScriptOut:
     """上传测试脚本包并触发验证 + 解析（§18.3 步骤 1~3）。
 

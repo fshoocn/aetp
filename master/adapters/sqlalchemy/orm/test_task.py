@@ -77,6 +77,6 @@ class TestTask(Base, TimestampMixin):
     )
 
     # sym:project 所属项目 ORM 关系（查询时反查 project_id）
-    project: Mapped["Project"] = relationship()
+    project: Mapped[Project] = relationship()
     # sym:script 引用脚本版本 ORM 关系（查询时反查 script_id/version）
-    script: Mapped["TestScript"] = relationship()
+    script: Mapped[TestScript] = relationship()

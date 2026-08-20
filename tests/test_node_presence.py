@@ -11,8 +11,8 @@ import uuid
 from aetp_protocol.capabilities import (
     HardwareChannel,
     NodeCapabilities,
-    VehicleCapability,
     VehicleBus,
+    VehicleCapability,
     VehicleVendor,
 )
 from aetp_protocol.envelope import Envelope, Sender, SenderKind

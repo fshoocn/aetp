@@ -7,26 +7,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from master.adapters.notifications.senders import (
     ConsoleSender,
-    GenericWebhookSender,
-    FeishuSender,
     DingtalkSender,
+    EmailSender,
+    FeishuSender,
+    GenericWebhookSender,
+    SenderRegistry,
     SlackSender,
     TeamsSender,
-    EmailSender,
-    SenderRegistry,
     build_default_registry,
 )
+from master.application.services.notification_dispatcher import NotificationDispatcher
+from master.domain.models import DomainEvent
+from master.domain.models.notification import EventDelivery, EventSubscription
+from master.domain.models.notification import NotificationEndpoint as ModelEndpoint
 from master.domain.notifications import (
-    DeliveryReceipt,
     NotificationEndpoint,
     NotificationMessage,
     NotificationSender,
 )
-from master.domain.models import DomainEvent
-from master.application.services.notification_dispatcher import NotificationDispatcher
-from master.domain.models.notification import EventDelivery, EventSubscription, NotificationEndpoint as ModelEndpoint
 from master.domain.time import utcnow
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 

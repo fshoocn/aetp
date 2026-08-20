@@ -5,8 +5,8 @@ from __future__ import annotations
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
-from .database_interface import DatabaseConfig
 from .base_impl import BaseDatabase
+from .database_interface import DatabaseConfig
 
 
 class MySQLDatabase(BaseDatabase):

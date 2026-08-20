@@ -18,9 +18,9 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from master.adapters.sse.event import DomainEvent
 from master.api.v1.dependencies import EventBusDep, UowFactoryDep
 from master.api.v1.permissions import ProjectAccessDep
-from master.adapters.sse.event import DomainEvent
 from master.domain.models import DomainEvent as PersistedEvent
 
 logger = logging.getLogger(__name__)
@@ -81,9 +81,9 @@ async def stream_events(
                         continue
                     yield _format_event(event)
                     current_sequence = max(current_sequence, event.sequence or 0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
-        except asyncio.CancelledError:
+        except asyncio.CancelledError:  # noqa: TRY203 - 优雅关闭必须重新抛出取消信号
             # Uvicorn 优雅关闭超时后会取消 SSE 生成器；必须立即退订，
             # 不能等待下一次 keepalive 或继续持有连接。
             raise
@@ -127,4 +127,4 @@ def _format_event(event: DomainEvent) -> str:
         },
         ensure_ascii=False,
     )
-    return f"id: {str(event.sequence or event.event_id)}\nevent: {event.event_type}\ndata: {payload}\n\n"
+    return f"id: {event.sequence or event.event_id!s}\nevent: {event.event_type}\ndata: {payload}\n\n"

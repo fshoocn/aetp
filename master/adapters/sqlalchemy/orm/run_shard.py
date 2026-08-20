@@ -6,7 +6,7 @@ case 集合；物理设备由 Master 按脚本资源需求原子分配。
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -57,7 +57,7 @@ class RunShard(Base, TimestampMixin):
         JSONType, nullable=False, default=dict
     )
     # sym:estimated_duration_s 预估耗时（秒；null=未知）
-    estimated_duration_s: Mapped[Optional[float]] = mapped_column(
+    estimated_duration_s: Mapped[float | None] = mapped_column(
         Float, nullable=True
     )
     # sym:status Shard 状态（pending/dispatching/running/...，§5.4）
@@ -65,7 +65,7 @@ class RunShard(Base, TimestampMixin):
         String(16), nullable=False, default=ShardStatus.PENDING.value
     )
     # sym:final_node 最终执行节点业务 ID（多 attempt 后取最后有效者）
-    final_node: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    final_node: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # sym:run 所属 Run ORM 关系
-    run: Mapped["TaskRun"] = relationship()
+    run: Mapped[TaskRun] = relationship()

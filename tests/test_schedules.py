@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-from sqlalchemy import text
-
 
 def _create_admin(client, username="sched-admin", password="admin-pass-123") -> dict[str, str]:
     service = client.app.state.container.auth_service()
@@ -52,8 +50,8 @@ def _seed_task(client, headers, project_id, name="sched-task"):
     """直接写入脚本和任务定义，避免外部依赖。"""
     container = client.app.state.container
     with container.uow_factory()() as uow:
+        from master.domain.enums import ScriptParseLocation, ScriptParseStatus
         from master.domain.models import TestScript, TestTask
-        from master.domain.enums import ScriptParseStatus, ScriptParseLocation
 
         uow.test_scripts.add(
             TestScript(

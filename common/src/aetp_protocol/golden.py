@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from aetp_protocol.envelope import PROTOCOL_VERSION, Envelope
-from aetp_protocol.message_types import MessageType
 
 _MESSAGE_ID = "01900000000000000000000001"
 _SESSION_ID = "01900000000000000000000002"

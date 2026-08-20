@@ -137,7 +137,7 @@ class RunTriggerService:
             "sha256": script.sha256,
         }
         with self._uow_factory() as uow:
-            run = uow.task_runs.add(
+            uow.task_runs.add(
                 TaskRun(
                     run_id=run_id,
                     project_id=project_id,

@@ -18,15 +18,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from aetp_protocol.envelope import Envelope
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.topics import command_topic
 
-from agent.application.services.command_dispatcher import CommandDispatcher
 from agent.application.services.artifact_upload_service import ArtifactUploadService
+from agent.application.services.command_dispatcher import CommandDispatcher
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import (
     RegistrationRejectedError,
@@ -62,8 +63,8 @@ class AgentRuntime:
         registration: RegistrationService,
         dispatcher: CommandDispatcher | None = None,
         *,
-        plugin_registry: "AgentPluginRegistry | None" = None,
-        plugin_installer: "PluginPackageInstaller | None" = None,
+        plugin_registry: AgentPluginRegistry | None = None,
+        plugin_installer: PluginPackageInstaller | None = None,
         script_cache: ScriptCacheService | None = None,
         artifact_uploader: ArtifactUploadService | None = None,
         script_preflight: ScriptPreflightService | None = None,
@@ -223,7 +224,7 @@ class AgentRuntime:
                 if not self._stop_event.is_set():
                     await self._transport.connect()
                 return
-            except Exception:  # noqa: BLE001 - 生命周期失败统一交给重连
+            except Exception:
                 logger.exception("Agent 注册等待异常")
                 await self._transport.disconnect()
                 if not self._stop_event.is_set():
@@ -236,7 +237,7 @@ class AgentRuntime:
             self._registration_task.cancel()
             self._registration_task = None
 
-    async def _handle_message(self, message: MqttMessage) -> None:  # noqa: C901
+    async def _handle_message(self, message: MqttMessage) -> None:
         """路由入站消息到 register-ack / 命令分发器 / 脚本预检（P5.4/P5.7）。"""
         assert self._dispatcher_obj is not None, "组件未初始化，请先调用 start()"
         if self._registration.handle_register_ack(message):
@@ -269,7 +270,7 @@ class AgentRuntime:
     async def _outbox_loop(self) -> None:
         """本地 outbox publisher：发送成功标记 sent，失败按租约重试。"""
         while not self._stop_event.is_set():
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = datetime.now(UTC).replace(tzinfo=None)
             entries = self._ledger.claim_due_outbox(100, now)
             for entry in entries:
                 try:

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-
 from aetp_protocol.capabilities import HardwareRequirements
+from sqlalchemy.exc import IntegrityError
 
 from master.domain.enums import (
     AccountStatus,
@@ -236,10 +235,9 @@ def test_run_get_cross_project_not_found(client):
 def test_run_unique_run_id_raises(client):
     container = client.app.state.container
     user_id, task_id = _seed(container)
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.task_runs.add(_make_run(user_id, task_id, run_id="R-1"))
-            uow.task_runs.add(_make_run(user_id, task_id, run_id="R-1"))
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.task_runs.add(_make_run(user_id, task_id, run_id="R-1"))
+        uow.task_runs.add(_make_run(user_id, task_id, run_id="R-1"))
 
 
 def test_run_list_filters(client):
@@ -267,10 +265,9 @@ def test_run_list_filters(client):
 
 def test_run_missing_task_raises(client):
     container = client.app.state.container
-    user_id, task_id = _seed(container)
-    with _uow(container) as uow:
-        with pytest.raises(ValueError, match="任务定义不存在"):
-            uow.task_runs.add(_make_run(user_id, "T-missing"))
+    user_id, _task_id = _seed(container)
+    with _uow(container) as uow, pytest.raises(ValueError, match="任务定义不存在"):
+        uow.task_runs.add(_make_run(user_id, "T-missing"))
 
 
 def test_run_update_status(client):
@@ -314,11 +311,10 @@ def test_shards_duplicate_index_raises(client):
     user_id, task_id = _seed(container)
     with _uow(container) as uow:
         uow.task_runs.add(_make_run(user_id, task_id))
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.run_shards.add_many(
-                [_make_shard("R-1", "SH-1", 0), _make_shard("R-1", "SH-2", 0)]
-            )
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.run_shards.add_many(
+            [_make_shard("R-1", "SH-1", 0), _make_shard("R-1", "SH-2", 0)]
+        )
 
 
 # ---------- shard_attempts ----------
@@ -352,10 +348,9 @@ def test_attempts_duplicate_attempt_no_raises(client):
     with _uow(container) as uow:
         uow.task_runs.add(_make_run(user_id, task_id))
         uow.run_shards.add(_make_shard("R-1", "SH-1", 0))
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.shard_attempts.add(_make_attempt("SH-1", 1))
-            uow.shard_attempts.add(_make_attempt("SH-1", 1))
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.shard_attempts.add(_make_attempt("SH-1", 1))
+        uow.shard_attempts.add(_make_attempt("SH-1", 1))
 
 
 # ---------- run_case_results ----------
@@ -399,14 +394,13 @@ def test_case_results_duplicate_key_raises(client):
     with _uow(container) as uow:
         uow.task_runs.add(_make_run(user_id, task_id))
         uow.run_shards.add(_make_shard("R-1", "SH-1", 0))
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.run_case_results.add_many(
-                [
-                    _make_case_result("R-1", "SH-1", "c0", 1),
-                    _make_case_result("R-1", "SH-1", "c0", 1),
-                ]
-            )
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.run_case_results.add_many(
+            [
+                _make_case_result("R-1", "SH-1", "c0", 1),
+                _make_case_result("R-1", "SH-1", "c0", 1),
+            ]
+        )
 
 
 # ---------- run_artifacts ----------
@@ -469,15 +463,13 @@ def test_run_result_unique_per_run(client):
     user_id, task_id = _seed(container)
     with _uow(container) as uow:
         uow.task_runs.add(_make_run(user_id, task_id))
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.run_results.add(_make_result("R-1", task_id, result_id="RES-1"))
-            uow.run_results.add(_make_result("R-1", task_id, result_id="RES-2"))
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.run_results.add(_make_result("R-1", task_id, result_id="RES-1"))
+        uow.run_results.add(_make_result("R-1", task_id, result_id="RES-2"))
 
 
 def test_run_result_missing_run_raises(client):
     container = client.app.state.container
-    user_id, task_id = _seed(container)
-    with _uow(container) as uow:
-        with pytest.raises(ValueError, match="Run 不存在"):
-            uow.run_results.add(_make_result("R-x", task_id))
+    _user_id, task_id = _seed(container)
+    with _uow(container) as uow, pytest.raises(ValueError, match="Run 不存在"):
+        uow.run_results.add(_make_result("R-x", task_id))

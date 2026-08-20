@@ -41,3 +41,26 @@ exclude = ["tests*", "web*", "migrations*", "common.src*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# 默认启用 E/F（pyflakes+pycodestyle）+ 一组精选规则
+select = [
+    "E", "F", "W",       # pycodestyle / pyflakes
+    "I",                 # isort 导入排序
+    "UP",                # pyupgrade 现代化语法
+    "B",                 # flake8-bugbear 常见陷阱
+    "SIM",               # flake8-simplify 简化
+    "C4",                # flake8-comprehensions 推导式
+]
+ignore = [
+    # 面向用户的参数校验用 ValueError（HTTP 422），非 Python 类型错误
+    "TRY004",
+    # PYI 系列针对 stub 文件；普通业务代码的 __enter__/__exit__ 注解不适用
+    "PYI034", "PYI036",
+    # 测试断言与配置常量大量使用魔法数字，复杂度规则在本项目误报过高
+    "PLR2004",
+]

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
@@ -31,7 +31,7 @@ from common.transport import MqttMessage
 def _now() -> datetime:
     # 用远未来固定时间：账本用真实 _utcnow() 写 next_attempt_at，
     # claim_due_outbox 必须传一个 >= 它的时间才能取到消息，避免随墙钟漂移。
-    return datetime(2099, 1, 1, tzinfo=timezone.utc)
+    return datetime(2099, 1, 1, tzinfo=UTC)
 
 
 _SETTINGS = AgentSettings(
@@ -208,7 +208,7 @@ def test_assign_rejected_when_not_registered(tmp_path) -> None:
 
 
 def test_cancel_rejected_when_not_registered(tmp_path) -> None:
-    dispatcher, ledger = _make_dispatcher(tmp_path, registered=False)
+    dispatcher, _ledger = _make_dispatcher(tmp_path, registered=False)
     env = _run_cancel_envelope()
     topic = command_topic("bench-001", "cancel")
 
@@ -244,7 +244,7 @@ def test_run_cancel_sets_cancelled_flag(tmp_path) -> None:
 
 
 def test_run_cancel_duplicate_is_idempotent(tmp_path) -> None:
-    dispatcher, ledger = _make_dispatcher(tmp_path)
+    dispatcher, _ledger = _make_dispatcher(tmp_path)
     topic_assign = command_topic("bench-001", "assign")
     topic_cancel = command_topic("bench-001", "cancel")
 

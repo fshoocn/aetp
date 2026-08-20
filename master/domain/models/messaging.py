@@ -139,7 +139,7 @@ class AuditLog:
 
 
 # 防止 pytest 将消息域类误识别为测试类（测试文件中会导入本模块）。
-setattr(InboxMessage, "__test__", False)
-setattr(OutboxMessage, "__test__", False)
-setattr(DomainEvent, "__test__", False)
-setattr(AuditLog, "__test__", False)
+InboxMessage.__test__ = False
+OutboxMessage.__test__ = False
+DomainEvent.__test__ = False
+AuditLog.__test__ = False

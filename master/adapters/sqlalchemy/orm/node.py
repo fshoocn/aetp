@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, CheckConstraint, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -45,12 +45,12 @@ class Node(Base, TimestampMixin):
     plugin_supported_versions: Mapped[dict] = mapped_column(
         JSONType, nullable=False, default=dict
     )
-    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+    last_seen_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime, nullable=True
     )
     load: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
 
-    devices: Mapped[list["Device"]] = relationship(
+    devices: Mapped[list[Device]] = relationship(
         back_populates="node",
         passive_deletes=True,
     )

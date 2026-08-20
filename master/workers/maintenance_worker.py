@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 
 from master.application.services.recovery_service import RecoveryService
 from master.application.services.schedule_service import ScheduleService
@@ -52,10 +53,8 @@ class MaintenanceWorker:
         self._running = False
         if self._task is not None:
             self._task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
         logger.info("维护 worker 停止")
 

@@ -7,7 +7,7 @@ Node 表示运行 Agent 的电脑或执行端，Device 表示该 Node 管理的�
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from sqlalchemy.exc import IntegrityError
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from master.api.v1.permissions import ProjectAccessDep
 from master.api.v1.dependencies import DeviceServiceDep
+from master.api.v1.permissions import ProjectAccessDep
 from master.api.v1.schemas import DeviceOut
 
 router = APIRouter(

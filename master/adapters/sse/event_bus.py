@@ -10,7 +10,7 @@ EventBus 提供 pub/sub：
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from master.adapters.sse.event import DomainEvent
@@ -37,7 +37,7 @@ class EventBus:
         event = DomainEvent(
             event_type=event_type,
             data=data,
-            ts=(occurred_at or datetime.now(timezone.utc)).isoformat(),
+            ts=(occurred_at or datetime.now(UTC)).isoformat(),
             event_id=event_id,
             sequence=sequence,
             project_id=project_id,

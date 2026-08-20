@@ -7,7 +7,7 @@ Run 是任务定义的一次执行快照：script_ref / case_selection / split_p
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -56,7 +56,7 @@ class TaskRun(Base, TimestampMixin):
     )
     # sym:task_pk 引用的任务定义代理主键（只引用不复制，FK RESTRICT）
     # nullable: 任务定义删除后置空，Run 依赖自身快照仍可展示历史
-    task_pk: Mapped[Optional[int]] = mapped_column(
+    task_pk: Mapped[int | None] = mapped_column(
         ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     # sym:script_ref 脚本引用快照 {script_id, version, sha256}（§7.5）
@@ -70,33 +70,33 @@ class TaskRun(Base, TimestampMixin):
         String(16), nullable=False, default=TriggerType.MANUAL_WEB.value
     )
     # sym:triggered_by_user_pk 触发用户代理主键（系统触发时为空）
-    triggered_by_user_pk: Mapped[Optional[int]] = mapped_column(
+    triggered_by_user_pk: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
     # sym:integration_id 触发来源 CI 集成标识（非 CI 触发为空；集成表后续阶段建）
-    integration_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    integration_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:trigger_context 触发上下文 JSON（retry 引用原 run_id、webhook 事件等）
-    trigger_context: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
+    trigger_context: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # sym:status Run 总体状态（created/dispatched/acked/running/...，§6.4）
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default=RunStatus.CREATED.value
     )
     # sym:started_at 首次进入 running 的时间
-    started_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # sym:finished_at 进入终态的时间
-    finished_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # sym:log_complete 日志围栏：Agent 发布 run.log-complete 后置位（P6.6）
     log_complete: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
     # sym:last_log_sequence 围栏时记录的末条日志 sequence
-    last_log_sequence: Mapped[Optional[int]] = mapped_column(
+    last_log_sequence: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
 
     # sym:project 所属项目 ORM 关系
-    project: Mapped["Project"] = relationship()
+    project: Mapped[Project] = relationship()
     # sym:task 引用的任务定义 ORM 关系
-    task: Mapped["TestTask"] = relationship()
+    task: Mapped[TestTask] = relationship()
     # sym:triggered_by_user 触发用户 ORM 关系
-    triggered_by_user: Mapped[Optional["User"]] = relationship()
+    triggered_by_user: Mapped[User | None] = relationship()

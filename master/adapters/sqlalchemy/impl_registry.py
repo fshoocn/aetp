@@ -6,15 +6,13 @@
 
 from __future__ import annotations
 
-from typing import Type
-
 from .base_impl import BaseDatabase
 from .mysql_impl import MySQLDatabase
 from .postgres_impl import PostgresDatabase
 from .sqlite_impl import SQLiteDatabase
 
 # scheme -> 实现类
-REGISTRY: dict[str, Type[BaseDatabase]] = {
+REGISTRY: dict[str, type[BaseDatabase]] = {
     "sqlite": SQLiteDatabase,
     "mysql": MySQLDatabase,
     "mariadb": MySQLDatabase,
@@ -25,7 +23,7 @@ REGISTRY: dict[str, Type[BaseDatabase]] = {
 __all__ = [
     "REGISTRY",
     "BaseDatabase",
-    "SQLiteDatabase",
     "MySQLDatabase",
     "PostgresDatabase",
+    "SQLiteDatabase",
 ]

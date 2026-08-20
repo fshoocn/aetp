@@ -10,7 +10,7 @@ from datetime import datetime
 from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, JSONType, TimestampMixin, UTCDateTime
+from .base import Base, TimestampMixin, UTCDateTime
 
 
 class EventDelivery(Base, TimestampMixin):

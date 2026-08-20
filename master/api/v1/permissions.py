@@ -12,8 +12,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 
 from master.api.v1.dependencies import CurrentUser, ProjectMemberServiceDep
-from master.domain.models import User
 from master.domain.enums import PlatformRole, ProjectRole
+from master.domain.models import User
 
 logger = logging.getLogger(__name__)
 

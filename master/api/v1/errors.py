@@ -22,15 +22,14 @@ from master.application.errors import (
     NodeCapabilityMismatchError,
     NodeDisabledError,
     NodeNotFoundError,
-    ProjectKeyAlreadyExistsError,
     ProjectAccessDeniedError,
+    ProjectKeyAlreadyExistsError,
     ProjectNotFoundError,
     RunNotFoundError,
     ScriptNotFoundError,
     TaskNotFoundError,
     UsernameAlreadyExistsError,
 )
-
 
 _STATUS_BY_ERROR: dict[type[ApplicationError], int] = {
     ProjectNotFoundError: 404,

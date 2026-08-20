@@ -19,13 +19,13 @@ import pytest
 from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.payloads import RunLogCompletePayload
 
+from master.domain.time import utcnow
+
 _ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
 
 def _is_ulid(value: str) -> bool:
     return bool(_ULID_RE.match(value))
-
-from master.domain.time import utcnow
 
 
 def _uow(container):
@@ -83,7 +83,7 @@ def test_log_complete_fences_log(client) -> None:
 
     with _uow(container) as uow:
         logs = uow.run_logs.list_by_run(run_id)
-        assert [l.sequence for l in logs] == [1]
+        assert [log.sequence for log in logs] == [1]
 
 
 def test_log_complete_idempotent(client) -> None:

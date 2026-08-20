@@ -13,8 +13,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from master.domain.time import utcnow
-
 
 @dataclass
 class TestTask:
@@ -65,4 +63,4 @@ class TestTask:
 # 防止 pytest 将 TestTask 误识别为测试类（测试文件中会导入本模型）。
 # 用 setattr 按字符串名写入类字典，避免双下划线名称改写（name mangling），
 # 且不会触发 Pylance 对 type[TestTask] 属性赋值的类型检查报错。
-setattr(TestTask, "__test__", False)
+TestTask.__test__ = False

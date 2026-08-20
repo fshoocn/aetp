@@ -90,7 +90,7 @@ def test_admission_hooks_sorted_by_order(client):
     from master.application.services.hook_runner import HookRegistry, HookRunner
 
     registry = HookRegistry(admission_hooks=[_AllowHook(), _DenyHook()])
-    runner = HookRunner(lambda: client.app.state.container.uow_factory()(), registry=registry)
+    HookRunner(lambda: client.app.state.container.uow_factory()(), registry=registry)
 
     hooks = registry.sorted_admission("run.before_create")
     assert [h.name for h in hooks] == ["test-deny", "test-allow"]

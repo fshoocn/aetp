@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-from pathlib import Path
-from typing import Callable, Mapping
-from urllib.request import urlopen
 import uuid
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from urllib.request import urlopen
 
 from agent.domain.ledger import Ledger, ScriptCacheEntry
 
@@ -57,11 +57,11 @@ class ScriptChecksumError(ScriptCacheError):
 def _download(url: str) -> bytes:
     """通过 HTTP(S) 下载脚本包；超时受控，生产不允许无限等待。"""
     try:
-        with urlopen(url, timeout=30) as response:  # noqa: S310 - URL 来自 Master
+        with urlopen(url, timeout=30) as response:
             return response.read()
     except ScriptCacheError:
         raise
-    except Exception as exc:  # noqa: BLE001 - 统一映射下载错误
+    except Exception as exc:
         raise ScriptDownloadError(f"脚本下载失败: {url}: {exc}") from exc
 
 
@@ -97,7 +97,7 @@ class ScriptCacheService:
             data = self._fetcher(download_url)
         except ScriptCacheError:
             raise
-        except Exception as exc:  # noqa: BLE001 - 统一映射下载错误
+        except Exception as exc:
             raise ScriptDownloadError(
                 f"脚本下载失败: {download_url}: {exc}"
             ) from exc

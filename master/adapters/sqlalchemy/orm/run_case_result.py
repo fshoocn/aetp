@@ -6,7 +6,7 @@ pytest 类插件可运行中实时上报；CANoe 类仅结束后由 parse_result
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
@@ -65,13 +65,13 @@ class RunCaseResult(Base, TimestampMixin):
         String(16), nullable=False, default=CaseStatus.PENDING.value
     )
     # sym:duration_ms 执行耗时（毫秒；仅成功统计 avg_duration_s 数据源，D-21）
-    duration_ms: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # sym:error_summary 失败/错误摘要
-    error_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # sym:detail 结构化详情 JSON（断言信息、堆栈等）
-    detail: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
 
     # sym:run 所属 Run ORM 关系
-    run: Mapped["TaskRun"] = relationship()
+    run: Mapped[TaskRun] = relationship()
     # sym:shard 所属 Shard ORM 关系
-    shard: Mapped["RunShard"] = relationship()
+    shard: Mapped[RunShard] = relationship()

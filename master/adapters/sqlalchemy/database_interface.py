@@ -16,9 +16,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Generator
+from typing import Any
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -68,7 +69,7 @@ class DatabaseConfig:
         )
 
     @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> "DatabaseConfig":
+    def from_mapping(cls, data: dict[str, Any]) -> DatabaseConfig:
         """从字典构造配置，自动忽略未知字段。"""
         known = {f.name for f in cls.__dataclass_fields__.values()}
         return cls(**{k: v for k, v in data.items() if k in known})

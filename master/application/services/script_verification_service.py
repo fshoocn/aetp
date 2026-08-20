@@ -113,7 +113,7 @@ class ScriptVerificationService:
                     next_attempt_at=None,
                 )
             )
-            result_event = uow.domain_events.add(
+            uow.domain_events.add(
                 DomainEvent(
                     event_id=new_id(),
                     project_id=project_id,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from aetp_protocol.capabilities import (
     BusRequirement,
     HardwareChannel,
@@ -27,6 +26,7 @@ from aetp_protocol.capabilities import (
     Version,
     VersionConstraint,
 )
+
 from master.domain.capability import (
     AllOf,
     CapabilityEvaluator,

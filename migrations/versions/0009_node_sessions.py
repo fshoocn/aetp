@@ -10,17 +10,17 @@ Revises: 0008_shard_execution_params
 Create Date: 2026-08-13
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 from master.adapters.sqlalchemy.orm.base import JSONType, UTCDateTime
 
 revision: str = "0009_node_sessions"
-down_revision: Union[str, None] = "0008_shard_execution_params"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0008_shard_execution_params"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # batch 操作会再次应用命名约定：ck_nodes_ck_nodes_status
 _DB_CHECK_NAME = "ck_nodes_status"

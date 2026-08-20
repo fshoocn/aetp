@@ -91,9 +91,9 @@ class NodeSessionRepositoryImpl(NodeSessionRepository):
         Returns:
             关闭的会话数量
         """
-        from sqlalchemy import update as sa_update
-
         from typing import Any
+
+        from sqlalchemy import update as sa_update
         from sqlalchemy.engine import Result
         result: Result[Any] = self._s.execute(
             sa_update(NodeSessionORM)

@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Coroutine, TypeVar
-
+from collections.abc import Coroutine
+from typing import TypeVar
 
 T = TypeVar("T")
 

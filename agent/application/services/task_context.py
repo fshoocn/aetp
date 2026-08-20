@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
@@ -88,7 +89,7 @@ class TaskContext:
         self.case_keys = list(case_keys or [])
         self._is_cancelled = is_cancelled or (lambda: False)
         self._session_id = session_id or (lambda: self._settings.node_id)
-        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._now = now or (lambda: datetime.now(UTC))
         # Run 内日志序号：从 1 递增；账本 (run_id, sequence) 唯一约束保证幂等。
         self._sequence = 0
 

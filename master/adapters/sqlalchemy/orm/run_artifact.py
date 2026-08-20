@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
@@ -46,11 +46,11 @@ class RunArtifact(Base, TimestampMixin):
         ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
     # sym:shard_pk 所属 Shard 代理主键（Run 级产物为空）
-    shard_pk: Mapped[Optional[int]] = mapped_column(
+    shard_pk: Mapped[int | None] = mapped_column(
         ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True
     )
     # sym:node_id 上传节点业务 ID
-    node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:kind 产物类型（report/log_archive/data）
     kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default=ArtifactKind.REPORT.value
@@ -67,6 +67,6 @@ class RunArtifact(Base, TimestampMixin):
     )
 
     # sym:run 所属 Run ORM 关系
-    run: Mapped["TaskRun"] = relationship()
+    run: Mapped[TaskRun] = relationship()
     # sym:shard 所属 Shard ORM 关系（Run 级产物为空）
-    shard: Mapped[Optional["RunShard"]] = relationship()
+    shard: Mapped[RunShard | None] = relationship()

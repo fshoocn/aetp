@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from types import TracebackType
+from typing import Self
 
 from sqlalchemy.orm import Session
 
@@ -57,7 +58,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self._database = database
         self._session: Session | None = None
 
-    def __enter__(self) -> SqlAlchemyUnitOfWork:
+    def __enter__(self) -> Self:
         session = self._database.session()
         self._session = session
         self.users = UserRepositoryImpl(session)
@@ -95,7 +96,12 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.hook_executions = HookExecutionRepositoryImpl(session)
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         if self._session is None:
             return
         try:

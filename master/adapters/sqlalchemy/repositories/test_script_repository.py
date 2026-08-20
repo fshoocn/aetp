@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+from aetp_protocol.capabilities import HardwareRequirements
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
-
-from aetp_protocol.capabilities import HardwareRequirements
 
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
 from master.adapters.sqlalchemy.orm import TestScript as TestScriptORM

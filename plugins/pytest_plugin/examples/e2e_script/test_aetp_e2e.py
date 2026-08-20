@@ -47,12 +47,12 @@ def test_aetp_slow_log():
 
 @pytest.mark.skip(reason="AETP E2E：验证 skipped 结果能回传")
 def test_aetp_skipped():
-    assert False
+    raise AssertionError
 
 
 @pytest.mark.xfail(reason="AETP E2E：验证 xfail/失败结果分析")
 def test_aetp_expected_failure():
-    assert False
+    raise AssertionError
 
 
 @pytest.mark.skipif(
@@ -61,4 +61,4 @@ def test_aetp_expected_failure():
 )
 def test_aetp_expected_failure_toggle():
     print("AETP_LOG intentional failure enabled", flush=True)
-    assert False, "intentional failure for AETP result projection test"
+    raise AssertionError("intentional failure for AETP result projection test")

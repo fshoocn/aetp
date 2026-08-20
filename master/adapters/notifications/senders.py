@@ -128,7 +128,7 @@ class GenericWebhookSender(HttpSender):
             body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             signature = hmac.new(
                 secret_value.encode("utf-8"),
-                f"{timestamp}.{body_bytes.decode('utf-8')}".encode("utf-8"),
+                f"{timestamp}.{body_bytes.decode('utf-8')}".encode(),
                 hashlib.sha256,
             ).hexdigest()
             extra_headers["X-AETP-Timestamp"] = timestamp

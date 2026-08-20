@@ -510,24 +510,23 @@ class RunProjectionService:
             for shard in shards
         )
 
-        if run_status is not None and all_terminal:
-            if run.status not in {
-                RunStatus.SUCCEEDED,
-                RunStatus.FAILED,
-                RunStatus.CANCELLED,
-                RunStatus.TIMED_OUT,
-                RunStatus.LOST,
-            }:
-                # 非终态先补齐 running（从 created/dispatched/acked 合法过渡）
-                if run.status is not RunStatus.RUNNING:
-                    assert_transition(run.status, RunStatus.RUNNING)
-                    run.status = RunStatus.RUNNING
-                    run.started_at = run.started_at or utcnow()
-                    uow.task_runs.update(run)
-                assert_transition(run.status, run_status)
-                run.status = run_status
-                run.finished_at = payload.finished_at or utcnow()
+        if run_status is not None and all_terminal and run.status not in {
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.TIMED_OUT,
+            RunStatus.LOST,
+        }:
+            # 非终态先补齐 running（从 created/dispatched/acked 合法过渡）
+            if run.status is not RunStatus.RUNNING:
+                assert_transition(run.status, RunStatus.RUNNING)
+                run.status = RunStatus.RUNNING
+                run.started_at = run.started_at or utcnow()
                 uow.task_runs.update(run)
+            assert_transition(run.status, run_status)
+            run.status = run_status
+            run.finished_at = payload.finished_at or utcnow()
+            uow.task_runs.update(run)
 
         result = uow.run_results.get_by_run_id(run.run_id)
         if result is None:

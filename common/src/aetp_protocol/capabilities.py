@@ -50,12 +50,11 @@ class NumericConstraint(_Strict):
     maximum: float | None = None
 
     @model_validator(mode="after")
-    def _validate_bounds(self) -> "NumericConstraint":
+    def _validate_bounds(self) -> NumericConstraint:
         if self.exact is None and self.minimum is None and self.maximum is None:
             raise ValueError("数值约束至少需要 exact/minimum/maximum 之一")
-        if self.minimum is not None and self.maximum is not None:
-            if self.minimum > self.maximum:
-                raise ValueError("数值约束 minimum 不能大于 maximum")
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("数值约束 minimum 不能大于 maximum")
         if self.exact is not None:
             if self.minimum is not None and self.exact < self.minimum:
                 raise ValueError("数值约束 exact 不能小于 minimum")
@@ -72,7 +71,7 @@ class VersionConstraint(_Strict):
     maximum: Version | None = None
 
     @model_validator(mode="after")
-    def _validate_presence(self) -> "VersionConstraint":
+    def _validate_presence(self) -> VersionConstraint:
         if self.exact is None and self.minimum is None and self.maximum is None:
             raise ValueError("版本约束至少需要 exact/minimum/maximum 之一")
         return self
@@ -93,7 +92,7 @@ class VehicleBus(_Strict):
     channels: tuple[HardwareChannel, ...] = ()
 
     @model_validator(mode="after")
-    def _validate_unique_channels(self) -> "VehicleBus":
+    def _validate_unique_channels(self) -> VehicleBus:
         names = [channel.name for channel in self.channels]
         if len(names) != len(set(names)):
             raise ValueError(f"总线 {self.bus_type} 的通道名称不能重复")
@@ -107,7 +106,7 @@ class VehicleVendor(_Strict):
     buses: tuple[VehicleBus, ...] = ()
 
     @model_validator(mode="after")
-    def _validate_unique_buses(self) -> "VehicleVendor":
+    def _validate_unique_buses(self) -> VehicleVendor:
         names = [bus.bus_type for bus in self.buses]
         if len(names) != len(set(names)):
             raise ValueError(f"厂商 {self.name} 的总线类型不能重复")
@@ -120,7 +119,7 @@ class VehicleCapability(_Strict):
     vendors: tuple[VehicleVendor, ...] = ()
 
     @model_validator(mode="after")
-    def _validate_unique_vendors(self) -> "VehicleCapability":
+    def _validate_unique_vendors(self) -> VehicleCapability:
         names = [vendor.name for vendor in self.vendors]
         if len(names) != len(set(names)):
             raise ValueError("vehicle 能力中的厂商名称不能重复")
@@ -220,7 +219,7 @@ class DeviceRequirement(_Strict):
     allow_switching: bool = False
 
     @model_validator(mode="after")
-    def _validate_device_ids(self) -> "DeviceRequirement":
+    def _validate_device_ids(self) -> DeviceRequirement:
         if len(self.device_ids) > self.quantity:
             raise ValueError("device_ids 数量不能大于 quantity")
         if len(set(self.device_ids)) != len(self.device_ids):
@@ -263,7 +262,7 @@ class BusRequirement(_Strict):
     required_channels: tuple[Identifier, ...] = ()
 
     @model_validator(mode="after")
-    def _validate_requirement(self) -> "BusRequirement":
+    def _validate_requirement(self) -> BusRequirement:
         if self.minimum_channels is None and not self.required_channels:
             raise ValueError("总线需求至少需要 minimum_channels 或 required_channels")
         return self
@@ -280,7 +279,7 @@ class VehicleRequirement(_Strict):
     any_of: tuple[BusRequirement, ...] = ()
 
     @model_validator(mode="after")
-    def _validate_requirement(self) -> "VehicleRequirement":
+    def _validate_requirement(self) -> VehicleRequirement:
         if not self.all_of and not self.any_of:
             raise ValueError("车载需求至少需要 all_of 或 any_of 之一")
         return self

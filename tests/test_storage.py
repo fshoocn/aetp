@@ -33,7 +33,7 @@ def test_local_storage_delete_prunes_empty_parents(tmp_path) -> None:
 
     storage.delete(key)
     assert not storage.exists(key)
-    # 空父目录被递归清理（scripts/S-1/2 及 scripts/S-1、scripts 都被删）
+    # 空父目录被递归清理（scripts/S-1/2、scripts/S-1、scripts 都被删）
     assert not (tmp_path / "scripts" / "S-1" / "2").exists()
     assert not (tmp_path / "scripts" / "S-1").exists()
     assert not (tmp_path / "scripts").exists()

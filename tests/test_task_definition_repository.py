@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-
 from aetp_protocol.capabilities import HardwareRequirements
+from sqlalchemy.exc import IntegrityError
 
 from master.domain.enums import (
     AccountStatus,
@@ -135,10 +134,9 @@ def test_get_by_task_id_cross_project_not_found(client):
 def test_duplicate_name_in_project_raises(client):
     container = client.app.state.container
     user_id, script_id = _seed(container)
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.test_tasks.add(_make_task(user_id, script_id, name="reg"))
-            uow.test_tasks.add(_make_task(user_id, script_id, name="reg"))
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.test_tasks.add(_make_task(user_id, script_id, name="reg"))
+        uow.test_tasks.add(_make_task(user_id, script_id, name="reg"))
 
 
 def test_find_by_name(client):
@@ -172,9 +170,8 @@ def test_list_by_project_pagination_and_enabled_filter(client):
 def test_add_missing_script_version_raises(client):
     container = client.app.state.container
     user_id, script_id = _seed(container)
-    with _uow(container) as uow:
-        with pytest.raises(ValueError, match="脚本版本不存在"):
-            uow.test_tasks.add(_make_task(user_id, script_id, name="bad", script_version=99))
+    with _uow(container) as uow, pytest.raises(ValueError, match="脚本版本不存在"):
+        uow.test_tasks.add(_make_task(user_id, script_id, name="bad", script_version=99))
 
 
 def test_update_switches_script_version(client):

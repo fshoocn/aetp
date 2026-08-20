@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     Index,
@@ -34,7 +33,7 @@ class DomainEvent(Base, TimestampMixin):
     # sym:sequence 全局单调序号（唯一，事件顺序依据；add 时分配 MAX+1）
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     # sym:project_id 所属项目业务标识（平台级事件为空，无 FK 保留业务键）
-    project_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:event_type 事件类型（如 run.created / run.attempt_failed，§10 事件清单）
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     # sym:aggregate_id 关联聚合业务标识（run_id / task_id / node_id 等）

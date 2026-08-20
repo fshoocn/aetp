@@ -211,10 +211,9 @@ def test_domain_event_list_order_and_filters(client):
 
 def test_domain_event_unique_event_id(client):
     container = client.app.state.container
-    with pytest.raises(IntegrityError):
-        with _uow(container) as uow:
-            uow.domain_events.add(_make_event("E-1"))
-            uow.domain_events.add(_make_event("E-1"))
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.domain_events.add(_make_event("E-1"))
+        uow.domain_events.add(_make_event("E-1"))
 
 
 # ---------- audit_logs ----------

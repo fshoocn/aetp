@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.topics import command_topic
@@ -71,7 +70,7 @@ def _ack(correlation_id: str, session_id: str) -> bytes:
     envelope = Envelope(
         message_id=uuid.uuid4().hex,
         message_type=MessageType.REGISTER_ACK.value,
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
         sender=Sender(
             kind=SenderKind.MASTER,
             id="aetp-master",
@@ -225,7 +224,7 @@ async def test_runtime_handles_run_assign_after_registration(tmp_path) -> None:
     assign_envelope = Envelope(
         message_id=uuid.uuid4().hex,
         message_type=MessageType.RUN_ASSIGN.value,
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
         sender=Sender(
             kind=SenderKind.MASTER,
             id="aetp-master",
@@ -286,7 +285,7 @@ async def test_runtime_rejects_assign_before_registration(tmp_path) -> None:
     assign_envelope = Envelope(
         message_id=uuid.uuid4().hex,
         message_type=MessageType.RUN_ASSIGN.value,
-        sent_at=datetime.now(timezone.utc),
+        sent_at=datetime.now(UTC),
         sender=Sender(
             kind=SenderKind.MASTER,
             id="aetp-master",

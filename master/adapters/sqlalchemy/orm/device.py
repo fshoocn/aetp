@@ -7,7 +7,7 @@ node_pk 为所属节点的代理主键外键（int FK，保证参照完整性）
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,7 +27,7 @@ class Device(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     device_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    node_pk: Mapped[Optional[int]] = mapped_column(
+    node_pk: Mapped[int | None] = mapped_column(
         ForeignKey("nodes.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
@@ -41,10 +41,10 @@ class Device(Base, TimestampMixin):
         String(16), nullable=False, default="offline"
     )
     online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+    last_seen_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime, nullable=True
     )
 
-    node: Mapped[Optional["Node"]] = relationship(
+    node: Mapped[Node | None] = relationship(
         back_populates="devices",
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import jwt
 import pytest
 
-import master.config as config
+from master import config
 from master.api.v1.security import (
     WeakSecretError,
     create_access_token,

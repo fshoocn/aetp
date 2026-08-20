@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -53,11 +53,11 @@ class RunResult(Base, TimestampMixin):
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     # sym:task_pk 任务定义代理主键（任务删除后置空，Run 级汇总仍可展示）
-    task_pk: Mapped[Optional[int]] = mapped_column(
+    task_pk: Mapped[int | None] = mapped_column(
         ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     # sym:node_id 最终执行节点业务 ID（多 Shard 场景可为空）
-    node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:passed 是否全部通过（供列表快速展示）
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # sym:status Run 总体状态
@@ -65,17 +65,17 @@ class RunResult(Base, TimestampMixin):
         String(16), nullable=False, default=RunStatus.CREATED.value
     )
     # sym:metrics 汇总指标 JSON（总耗时、通过/失败数等）
-    metrics: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
+    metrics: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # sym:data 汇总数据 JSON
-    data: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
+    data: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # sym:started_at 开始时间（UTC）
-    started_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # sym:finished_at 结束时间（UTC）
-    finished_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
     # sym:run 对应 Run ORM 关系
-    run: Mapped["TaskRun"] = relationship()
+    run: Mapped[TaskRun] = relationship()
     # sym:project 所属项目 ORM 关系
-    project: Mapped["Project"] = relationship()
+    project: Mapped[Project] = relationship()
     # sym:task 任务定义 ORM 关系
-    task: Mapped["TestTask"] = relationship()
+    task: Mapped[TestTask] = relationship()

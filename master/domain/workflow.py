@@ -13,8 +13,8 @@ dispatch→...）建模为**显式 WorkflowSpec**（阶段图），由 WorkflowE
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
 
 
 @dataclass(frozen=True)

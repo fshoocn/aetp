@@ -63,4 +63,4 @@ class TestScript:
 # 用 setattr 而非 TestScript.__test__ = False：后者会触发 Pylance 对
 # type[TestScript] 属性赋值的类型检查报错；setattr 按字符串名写入类字典，
 # 不会被双下划线名称改写（name mangling）干扰，pytest 读取 __dict__ 正常。
-setattr(TestScript, "__test__", False)
+TestScript.__test__ = False

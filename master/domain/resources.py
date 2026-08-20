@@ -13,9 +13,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Iterable, Mapping
 
 from aetp_protocol.capabilities import DeviceRequirement, PhysicalDeviceCapability
 

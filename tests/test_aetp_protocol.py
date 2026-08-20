@@ -7,14 +7,11 @@ golden messages 可解析。
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from aetp_protocol import (
     PROTOCOL_VERSION,
     Envelope,
     MessageType,
     ProtocolError,
-    ProtocolVersionMismatchError,
     Sender,
     SenderKind,
     command_topic,
@@ -35,6 +32,7 @@ from aetp_protocol.payloads import (
     RunAssignPayload,
     RunCancelPayload,
 )
+from pydantic import ValidationError
 
 
 def _sender(kind: str = "agent", node_id: str = "bench-001") -> Sender:

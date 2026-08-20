@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, status
 
 from master.api.v1.dependencies import CiIntegrationServiceDep
-from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep, ProjectOwnerDep
+from master.api.v1.permissions import (
+    ProjectAccessDep,
+    ProjectManagerDep,
+    ProjectOwnerDep,
+)
 from master.api.v1.schemas import (
     BindingCreateRequest,
     BindingOut,
@@ -19,7 +23,6 @@ from master.api.v1.schemas import (
     IntegrationOut,
     IntegrationUpdateRequest,
 )
-from master.domain.time import utcnow
 
 logger = logging.getLogger(__name__)
 

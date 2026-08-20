@@ -20,14 +20,14 @@ Revises: 0002_refresh_tokens
 Create Date: 2026-08-13
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "0003_task_status_rename"
-down_revision: Union[str, None] = "0002_refresh_tokens"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0002_refresh_tokens"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # batch 操作会再次应用命名约定，因此这里传基础 token：
 # ck_<表>_<token> -> ck_tasks_ck_tasks_status（与 0001/ORM 生成的库内名一致）

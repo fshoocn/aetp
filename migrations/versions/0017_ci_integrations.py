@@ -5,8 +5,8 @@ project_integrations / ci_trigger_bindings / ci_webhook_deliveries。
 Revision ID: 0017
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0017"
 down_revision = "0016"

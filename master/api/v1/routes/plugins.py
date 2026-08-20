@@ -14,7 +14,15 @@ router = APIRouter(prefix="/task-types", tags=["v1-task-types"])
 
 
 def _managed(item):
-    return {"plugin_id": item.plugin_id, "filename": item.filename, "task_type": item.task_type, "version": item.version, "sha256": item.sha256, "enabled": item.enabled, "installed": item.installed}
+    return {
+        "plugin_id": item.plugin_id,
+        "filename": item.filename,
+        "task_type": item.task_type,
+        "version": item.version,
+        "sha256": item.sha256,
+        "enabled": item.enabled,
+        "installed": item.installed,
+    }
 
 
 @router.get("")
@@ -73,7 +81,7 @@ def list_managed_plugins(_admin: PlatformAdminDep, manager: PluginManagerDep) ->
 
 
 @router.post("/managed", status_code=status.HTTP_201_CREATED)
-async def upload_plugin(_admin: PlatformAdminDep, manager: PluginManagerDep, file: UploadFile = File(...)) -> dict:
+async def upload_plugin(_admin: PlatformAdminDep, manager: PluginManagerDep, file: UploadFile = File(...)) -> dict:  # noqa: B008 - FastAPI 依赖注入惯用写法
     try:
         record = manager.upload(file.filename or "plugin.whl", await file.read())
     except ValueError as exc:

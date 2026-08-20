@@ -3,28 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any
 
 import pytest
-
 from aetp_protocol.capabilities import (
     BusRequirement,
     HardwareRequirements,
     VehicleRequirement,
 )
 from aetp_protocol.plugin import AgentPackageSpec, PluginMetadata, PluginPackage
+
+from agent.plugins.execution import AgentPluginRegistry
 from master.plugins import (
     CaseInfo,
-    PluginLoadError,
     MasterTaskPlugin,
+    PluginLoadError,
     PluginNotFoundError,
     PluginRegistry,
     PluginVersionMismatchError,
     ShardSpec,
     TaskDefinitionSpec,
 )
-from agent.plugins.execution import AgentPluginRegistry
 
 
 class MasterFakePlugin:
@@ -217,7 +218,6 @@ def test_registry_builds_agent_package_ref() -> None:
 
 def test_plugin_manager_load_packages_injects_agent_package(tmp_path):
     """已安装 ZIP 插件 load_packages 时注入 agent_package（含签名下载 URL）。"""
-    import zipfile
 
     from master.plugins.manager import PluginManager
 
@@ -249,7 +249,6 @@ def test_plugin_download_endpoint_signed(client, tmp_path):
     import io
     import zipfile
 
-    from master.plugins.manager import PluginManager
 
     container = client.app.state.container
     manager = container.plugin_manager()

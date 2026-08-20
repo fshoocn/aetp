@@ -142,7 +142,6 @@ class TestTaskRepositoryImpl(TestTaskRepository):
         Returns:
             {"deleted": 硬删除数, "nullified": 置空数}
         """
-        from sqlalchemy import update as sa_update
         from master.adapters.sqlalchemy.orm import TaskRun as TaskRunORM
 
         result = {"deleted": 0, "nullified": 0}

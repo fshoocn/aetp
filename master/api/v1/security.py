@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -67,7 +67,7 @@ def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> st
     """
     _ensure_secret_checked()
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": subject,
         "iss": settings.jwt_issuer,

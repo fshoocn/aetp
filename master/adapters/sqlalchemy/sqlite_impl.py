@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 
-from .database_interface import DatabaseConfig
 from .base_impl import BaseDatabase
+from .database_interface import DatabaseConfig
 
 
 class SQLiteDatabase(BaseDatabase):
@@ -38,5 +39,5 @@ def _sqlite_pragma_fk(dbapi_connection: Any, _: Any) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 非关键路径，外键 pragma 失败不阻断连接
+        logging.getLogger(__name__).debug("PRAGMA foreign_keys 设置失败: %s", exc)

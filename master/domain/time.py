@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def utcnow() -> datetime:
     """返回当前 UTC 时间（带时区信息）。"""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)

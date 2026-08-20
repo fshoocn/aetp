@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, status
 
+from master.api.v1.dependencies import ProjectNodeBindingServiceDep
 from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep
 from master.api.v1.schemas import (
     ProjectNodeBindingCreateRequest,
     ProjectNodeBindingOut,
     ProjectNodeBindingUpdateRequest,
 )
-from master.api.v1.dependencies import ProjectNodeBindingServiceDep
 
 router = APIRouter(
     prefix="/projects/{project_id}/nodes",

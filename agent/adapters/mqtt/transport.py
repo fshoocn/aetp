@@ -12,10 +12,11 @@ import json
 import logging
 import ssl
 import uuid
-from typing import Any, cast
+from contextlib import suppress
+from datetime import UTC
+from typing import Any
 
 import aiomqtt
-
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import PresencePayload
@@ -89,10 +90,8 @@ class AgentMqttTransport(Transport):
         self._running = False
         if self._task is not None:
             self._task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
         self._client = None
         self._connected = False
@@ -114,9 +113,9 @@ class AgentMqttTransport(Transport):
 
     def _lwt_payload(self) -> bytes:
         """固定 LWT：使用完整 Envelope，携带当前 session（§8.6）。"""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = PresencePayload(
             node_id=self._settings.node_id,
             reason="unexpected_disconnect",
@@ -219,7 +218,7 @@ class AgentMqttTransport(Transport):
             return
         try:
             await handler(connected, session_id)
-        except Exception:  # noqa: BLE001 - 生命周期回调 fail-open
+        except Exception:
             logger.exception("Agent MQTT 连接状态回调失败: connected=%s", connected)
 
     async def _set_disconnected(self) -> None:
@@ -244,5 +243,5 @@ class AgentMqttTransport(Transport):
         qos = getattr(raw, "qos", 1)
         try:
             await handler(MqttMessage(topic=topic, payload=payload, qos=qos))
-        except Exception:  # noqa: BLE001 - fail open：处理器异常只记录，不中断消费
+        except Exception:
             logger.exception("Agent MQTT 消息处理失败: topic=%s", topic)

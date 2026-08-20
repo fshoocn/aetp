@@ -26,4 +26,4 @@ class TaskLog(Base, TimestampMixin):
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
     ts: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
-    task: Mapped["Task"] = relationship()
+    task: Mapped[Task] = relationship()

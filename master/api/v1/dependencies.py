@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Callable
+from collections.abc import Callable
+from typing import Annotated
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
@@ -11,35 +12,39 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
-from master.application.services.auth_service import AuthService
 from master.application.services.artifact_service import ArtifactService
+from master.application.services.auth_service import AuthService
+from master.application.services.ci_integration_service import CiIntegrationService
 from master.application.services.device_service import DeviceService
 from master.application.services.event_publisher import EventPublisher
+from master.application.services.hook_runner import HookRunner
 from master.application.services.node_service import NodeService
-from master.application.services.project_member_service import ProjectMemberService
-from master.application.services.project_node_binding_service import ProjectNodeBindingService
-from master.application.services.project_service import ProjectService
-from master.application.services.script_download_service import ScriptDownloadService
+from master.application.services.notification_service import NotificationService
 from master.application.services.plugin_download_service import PluginDownloadService
+from master.application.services.project_member_service import ProjectMemberService
+from master.application.services.project_node_binding_service import (
+    ProjectNodeBindingService,
+)
+from master.application.services.project_service import ProjectService
+from master.application.services.run_cancel_service import RunCancelService
+from master.application.services.run_projection_service import RunProjectionService
+from master.application.services.run_retry_service import RunRetryService
+from master.application.services.run_trigger_service import RunTriggerService
+from master.application.services.schedule_service import ScheduleService
+from master.application.services.script_download_service import ScriptDownloadService
 from master.application.services.script_service import ScriptService
-from master.application.services.script_verification_service import ScriptVerificationService
 from master.application.services.script_storage_service import ScriptStorageService
+from master.application.services.script_verification_service import (
+    ScriptVerificationService,
+)
 from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
-from master.application.services.run_trigger_service import RunTriggerService
-from master.application.services.run_retry_service import RunRetryService
-from master.application.services.run_cancel_service import RunCancelService
-from master.application.services.notification_service import NotificationService
-from master.application.services.schedule_service import ScheduleService
-from master.application.services.ci_integration_service import CiIntegrationService
-from master.application.services.hook_runner import HookRunner
-from master.application.services.run_projection_service import RunProjectionService
-from master.plugins.registry import PluginRegistry
-from master.plugins.manager import PluginManager
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
 from master.domain.models import User
 from master.domain.repositories import UnitOfWork
+from master.plugins.manager import PluginManager
+from master.plugins.registry import PluginRegistry
 
 from .security import decode_access_token
 
@@ -237,12 +242,12 @@ def get_current_user(
     try:
         payload = decode_access_token(credentials.credentials)
         user_id = int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
+    except (jwt.PyJWTError, KeyError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="令牌无效或已过期",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc
 
     with uow_factory() as uow:
         user = uow.users.get_by_id(user_id)

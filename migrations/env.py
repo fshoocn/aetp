@@ -10,15 +10,15 @@ prepend_sys_path=. 保证）。项目根目录统一由 master.config.PROJECT_RO
 
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
 
-from alembic import context
+from master.adapters.sqlalchemy import orm as _orm  # noqa: F401
 
-from master.config import configure, get_settings, resolve_sqlite_url
 # 导入 ORM 模型，确保所有表注册到 metadata（即表结构唯一事实源）
 from master.adapters.sqlalchemy.orm.base import Base
-from master.adapters.sqlalchemy import orm as _orm  # noqa: F401
+from master.config import configure, get_settings, resolve_sqlite_url
 
 config = context.config
 

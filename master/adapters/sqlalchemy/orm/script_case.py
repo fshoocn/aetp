@@ -6,8 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -20,7 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, JSONType, TimestampMixin, UTCDateTime
+from .base import Base, JSONType, TimestampMixin
 
 if TYPE_CHECKING:
     from .test_script import TestScript
@@ -53,7 +52,7 @@ class ScriptCase(Base, TimestampMixin):
     # sym:params 用例参数（JSON），插件执行时使用
     params: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # sym:avg_duration_s 平均耗时（秒），仅统计成功 case（D-21），by_time 分割依据；null=尚无样本
-    avg_duration_s: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     # sym:duration_samples 耗时统计样本数
     duration_samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # sym:order_index 用例在脚本内的展示/执行顺序
@@ -62,4 +61,4 @@ class ScriptCase(Base, TimestampMixin):
     deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # sym:script 所属脚本版本 ORM 关系（查询时反查 script_id）
-    script: Mapped["TestScript"] = relationship()
+    script: Mapped[TestScript] = relationship()

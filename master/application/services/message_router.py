@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from aetp_protocol.envelope import Envelope
 from aetp_protocol.logs import RunLogBatch
@@ -31,11 +31,12 @@ from aetp_protocol.payloads import (
     ScriptVerifyResultPayload,
 )
 from aetp_protocol.topics import (
-    parse_topic,
     validate_message_type_for_topic,
     validate_sender_for_topic,
 )
 
+from common.transport import MqttMessage
+from master.application.services.event_publisher import EventPublisher
 from master.application.services.node_presence_service import (
     NodePresenceError,
     NodePresenceService,
@@ -44,13 +45,11 @@ from master.application.services.run_projection_service import (
     ProjectionResult,
     RunProjectionService,
 )
-from master.application.services.shard_scheduler_service import ShardSchedulerService
-from master.application.services.event_publisher import EventPublisher
 from master.application.services.script_verification_service import (
     ScriptVerificationResult,
     ScriptVerificationService,
 )
-from common.transport import MqttMessage
+from master.application.services.shard_scheduler_service import ShardSchedulerService
 
 logger = logging.getLogger(__name__)
 

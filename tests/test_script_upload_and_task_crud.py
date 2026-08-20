@@ -9,20 +9,8 @@ from aetp_protocol.plugin import CaseInfo, PluginMetadata, PluginPackage, ShardS
 
 from master.adapters.sqlalchemy.orm import Node as NodeORM
 from master.domain.enums import (
-    AccountStatus,
     NodeStatus,
-    PlatformRole,
-    ProjectStatus,
-    ScriptParseLocation,
-    ScriptParseStatus,
 )
-from master.domain.models import (
-    Project,
-    ProjectNodeBinding,
-    TestScript,
-    User,
-)
-from master.domain.time import utcnow
 
 
 def _uow(container):
@@ -36,8 +24,8 @@ class _UploadPlugin:
     display_name = "Upload Test"
     plugin_version = "1.0.0"
     supported_versions = frozenset({"1.0.0"})
-    config_schema = {"type": "object"}
-    upload_spec = {"extensions": [".py", ".zip"], "max_size_mb": 10}
+    config_schema = {"type": "object"}  # noqa: RUF012
+    upload_spec = {"extensions": [".py", ".zip"], "max_size_mb": 10}  # noqa: RUF012
 
     def verify_script(self, script_dir, config):
         return [] if not config.get("broken") else ["配置了 broken=true"]

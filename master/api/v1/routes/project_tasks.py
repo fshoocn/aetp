@@ -6,9 +6,9 @@ import json
 
 from fastapi import APIRouter, HTTPException, status
 
+from master.api.v1.dependencies import EventPublisherDep, TaskServiceDep
 from master.api.v1.permissions import ProjectAccessDep, ProjectOperatorDep
 from master.api.v1.schemas import TaskCreate, TaskLogOut, TaskOut
-from master.api.v1.dependencies import EventPublisherDep, TaskServiceDep
 
 router = APIRouter(
     prefix="/projects/{project_id}/tasks",

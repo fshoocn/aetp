@@ -21,9 +21,12 @@ from master.domain.enums import TaskStatus
 from master.domain.state_machine import (
     InvalidStateTransitionError,
     assert_transition,
+)
+from master.domain.state_machine import (
     is_terminal as _is_terminal,
 )
 from master.domain.time import utcnow
+
 
 @dataclass
 class Task:
@@ -52,7 +55,7 @@ class Task:
         device_id: str,
         command: dict,
         created_by: int,
-    ) -> "Task":
+    ) -> Task:
         """创建 pending 任务。"""
         now = utcnow()
         return cls(

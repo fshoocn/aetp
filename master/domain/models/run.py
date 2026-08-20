@@ -241,9 +241,9 @@ class RunResult:
 
 
 # 防止 pytest 将 Run 执行域类误识别为测试类（测试文件中会导入本模块）。
-setattr(TaskRun, "__test__", False)
-setattr(RunShard, "__test__", False)
-setattr(ShardAttempt, "__test__", False)
-setattr(RunCaseResult, "__test__", False)
-setattr(RunArtifact, "__test__", False)
-setattr(RunResult, "__test__", False)
+TaskRun.__test__ = False
+RunShard.__test__ = False
+ShardAttempt.__test__ = False
+RunCaseResult.__test__ = False
+RunArtifact.__test__ = False
+RunResult.__test__ = False

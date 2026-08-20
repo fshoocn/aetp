@@ -13,15 +13,15 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from .database_interface import DatabaseConfig, DatabaseInterface
-from master.adapters.sqlalchemy.orm import Base
 from master.config import PROJECT_ROOT
+
+from .database_interface import DatabaseConfig, DatabaseInterface
 
 logger = logging.getLogger(__name__)
 

@@ -12,29 +12,27 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
-
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     CaseResultEntry,
     RunAssignPayload,
     RunResultPayload,
 )
+from pydantic import ValidationError
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.run_orchestrator import RunOrchestrator
 from agent.config import AgentSettings
-from agent.domain.enums import AgentRunStatus
 from agent.plugins import AgentPluginRegistry
 
 
 def _now() -> datetime:
-    return datetime(2099, 1, 1, tzinfo=timezone.utc)
+    return datetime(2099, 1, 1, tzinfo=UTC)
 
 
 _SETTINGS = AgentSettings(
@@ -48,20 +46,20 @@ _SETTINGS = AgentSettings(
 
 
 def _payload(**kw) -> RunAssignPayload:
-    base: dict[str, Any] = dict(
-        project_id="p1",
-        task_id="T-1",
-        shard_id="SH-1",
-        shard_index=0,
-        run_id="R-1",
-        attempt_no=1,
-        dispatch_id="D-1",
-        task_type="t",
-        plugin_version="1.0.0",
-        script_ref={"script_id": "S-1", "version": 1, "sha256": "a" * 64},
-        case_keys=["c0", "c1"],
-        timeout_s=30,
-    )
+    base: dict[str, Any] = {
+        "project_id": "p1",
+        "task_id": "T-1",
+        "shard_id": "SH-1",
+        "shard_index": 0,
+        "run_id": "R-1",
+        "attempt_no": 1,
+        "dispatch_id": "D-1",
+        "task_type": "t",
+        "plugin_version": "1.0.0",
+        "script_ref": {"script_id": "S-1", "version": 1, "sha256": "a" * 64},
+        "case_keys": ["c0", "c1"],
+        "timeout_s": 30,
+    }
     base.update(kw)
     return RunAssignPayload(**base)
 

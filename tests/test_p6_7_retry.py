@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 
 import pytest
 
@@ -74,8 +75,8 @@ def test_failed_case_keys_preserves_history() -> None:
 
 def _seed_run_with_result(container) -> str:
     """复用 P6.4 种子并注入 case 结果（c0 失败、c1 成功）。"""
-    from tests.test_p6_4_end_to_end import _seed, _register_plugin
     from master.domain.models import RunCaseResult
+    from tests.test_p6_4_end_to_end import _register_plugin, _seed
 
     _register_plugin(container)
     user_id, task_id = _seed(container)
@@ -190,7 +191,8 @@ def test_http_retry_failed_endpoint(client, auth_header) -> None:
 
 def _add_tester_member(container) -> None:
     """将 conftest 的 tester 用户加入 p1 作为 operator。"""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from sqlalchemy import text as sa_text
 
     with container.database().session_scope() as s:
@@ -209,6 +211,6 @@ def _add_tester_member(container) -> None:
             {
                 "ppk": project_pk,
                 "uid": tester_id,
-                "now": datetime.now(timezone.utc).replace(tzinfo=None),
+                "now": datetime.now(UTC).replace(tzinfo=None),
             },
         )

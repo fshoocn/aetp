@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
-from io import BytesIO
 import zipfile
+from datetime import UTC, datetime
+from io import BytesIO
 
 import pytest
-
-from aetp_protocol.payloads import PluginPackageRef
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
+from aetp_protocol.payloads import PluginPackageRef
 from aetp_protocol.topics import command_topic
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
@@ -249,13 +248,13 @@ def test_install_failure_can_retry_same_assign_and_replace_rejected_ack(tmp_path
     )
 
     assert dispatcher.handle_command(message) is True
-    rejected = ledger.claim_due_outbox(10, datetime.now(timezone.utc).replace(tzinfo=None))
+    rejected = ledger.claim_due_outbox(10, datetime.now(UTC).replace(tzinfo=None))
     assert rejected[0].payload["payload"]["accepted"] is False
     assert ledger.get_run("R-retry-install") is None
 
     state["available"] = True
     assert dispatcher.handle_command(message) is True
-    accepted = ledger.claim_due_outbox(10, datetime.now(timezone.utc).replace(tzinfo=None))
+    accepted = ledger.claim_due_outbox(10, datetime.now(UTC).replace(tzinfo=None))
     assert accepted[0].payload["payload"]["accepted"] is True
     assert ledger.get_run("R-retry-install") is not None
 

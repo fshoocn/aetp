@@ -11,8 +11,9 @@ Hook 由 bootstrap 容器显式注册；stage 内按 (order, name) 稳定排序�
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from master.domain.models import DomainEvent
 

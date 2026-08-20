@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from aetp_protocol.capabilities import (
     DeviceRequirement,
     HardwareRequirements,
-    NumericConstraint,
     NodeCapabilities,
+    NumericConstraint,
     PhysicalDeviceCapability,
-    SystemCapability,
     SystemRequirement,
 )
 from aetp_protocol.envelope import Envelope
@@ -23,6 +21,8 @@ from master.application.errors import (
 )
 from master.domain.enums import (
     AccountStatus,
+    DeviceStatus,
+    NodeStatus,
     PlatformRole,
     ProjectStatus,
     RunStatus,
@@ -31,8 +31,6 @@ from master.domain.enums import (
     ShardAttemptStatus,
     ShardStatus,
     TriggerType,
-    NodeStatus,
-    DeviceStatus,
 )
 from master.domain.models import (
     Device,
@@ -125,7 +123,7 @@ def _seed(
                     devices=[],
                     load={"queued_shards": index},
                     last_seen_at=datetime(
-                        2026, 1, 1, 0, 0, index, tzinfo=timezone.utc
+                        2026, 1, 1, 0, 0, index, tzinfo=UTC
                     ),
                 )
             )

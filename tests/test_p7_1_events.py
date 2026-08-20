@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import AsyncGenerator
 from typing import cast
+
 from starlette.requests import Request
 
 from master.api.v1.permissions import ProjectAccess
@@ -64,7 +65,7 @@ def test_event_publisher_persists_and_filters_project_subscribers(client) -> Non
             assert received.project_id == "p1"
             try:
                 await asyncio.wait_for(p2.get(), timeout=0.05)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             else:
                 raise AssertionError("p2 不应收到 p1 事件")

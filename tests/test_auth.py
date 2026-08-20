@@ -44,6 +44,7 @@ def test_me_rejects_non_active_account(client, auth_token, auth_header):
 
     with container.database().session_scope() as session:
         from sqlalchemy import select, update
+
         from master.adapters.sqlalchemy.orm import User
 
         user = session.execute(

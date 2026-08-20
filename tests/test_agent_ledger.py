@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
@@ -17,7 +17,7 @@ def _ledger(tmp_path, *, max_spool_bytes: int = 104857600) -> SQLiteLedger:
 
 
 def _future_utc(seconds: int = 60) -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+    return datetime.now(UTC).replace(tzinfo=None) + timedelta(
         seconds=seconds
     )
 

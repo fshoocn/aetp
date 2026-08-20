@@ -7,7 +7,7 @@ Node 和 Device 的运行状态属于平台资产视图，所有已激活用户�
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from master.domain.models import Node
 from master.domain.repositories import UnitOfWork

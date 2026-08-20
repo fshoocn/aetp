@@ -10,21 +10,23 @@ Agent 是独立部署组件，配置**仅从外置 ``.env`` 文件读取**（``A
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from pathlib import Path
 import sys
 import uuid
+from dataclasses import dataclass
+from pathlib import Path
 
 from common.config_utils import (
     load_env_file,
     parse_bool,
     parse_int,
-    resolve_sqlite_url as _resolve_sqlite_url,
     upsert_env_value,
 )
+from common.config_utils import (
+    resolve_sqlite_url as _resolve_sqlite_url,
+)
 
-_settings: "AgentSettings | None" = None
+_settings: AgentSettings | None = None
 logger = logging.getLogger(__name__)
 
 
@@ -86,7 +88,7 @@ class AgentSettings:
     # ---- 实际使用的 env 文件路径（便于排查）----
     env_file: Path | None = None
 
-    def validate(self) -> "AgentSettings":
+    def validate(self) -> AgentSettings:
         """校验运行所需配置；组合根启动前必须调用。"""
         if not self.node_id.strip():
             raise ValueError("AETP_AGENT_NODE_ID 不能为空")
@@ -115,7 +117,7 @@ class AgentSettings:
         return runtime_dir() / ".env"
 
     @classmethod
-    def from_env_file(cls, env_file: str | Path | None = None) -> "AgentSettings":
+    def from_env_file(cls, env_file: str | Path | None = None) -> AgentSettings:
         """从外置 .env 文件读取并构造，首次缺失节点 ID 时写回生成值。"""
         path = (
             Path(env_file).resolve()

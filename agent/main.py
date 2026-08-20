@@ -17,11 +17,10 @@ import logging
 import signal
 import sys
 
-from common.event_loop import run_with_selector
-from common.logging_config import configure_logging
-
 from agent.config import configure
 from agent.container import Container
+from common.event_loop import run_with_selector
+from common.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,6 @@ async def _run(env_file: str | None) -> None:
             loop.add_signal_handler(sig, _signal_handler)
     else:
         # Windows 不支持 add_signal_handler，用 signal.signal + call_soon_threadsafe
-        import threading
 
         def _win_handler(signum, frame):
             if not shutdown_event.is_set():

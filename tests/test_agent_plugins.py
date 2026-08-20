@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import RunAssignPayload
@@ -21,8 +20,8 @@ from agent.application.services.registration_service import RegistrationService
 from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
 from agent.plugins import (
-    AgentTaskContext,
     AgentPluginRegistry,
+    AgentTaskContext,
     PluginNotFoundError,
     PluginVersionMismatchError,
 )
@@ -30,7 +29,7 @@ from common.transport import MqttMessage
 
 
 def _now() -> datetime:
-    return datetime(2099, 1, 1, tzinfo=timezone.utc)
+    return datetime(2099, 1, 1, tzinfo=UTC)
 
 
 _SETTINGS = AgentSettings(

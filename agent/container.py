@@ -14,14 +14,14 @@ from dependency_injector import containers, providers
 from agent.adapters.mqtt.transport import AgentMqttTransport
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
-from agent.application.services.capability_loader import scan_capabilities
 from agent.application.services.artifact_upload_service import ArtifactUploadService
+from agent.application.services.capability_loader import scan_capabilities
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.config import get_settings, resolve_sqlite_url
-from agent.plugins.registry import create_default_registry
 from agent.plugins.installer import LocalPluginInstaller
+from agent.plugins.registry import create_default_registry
 
 
 class Container(containers.DeclarativeContainer):

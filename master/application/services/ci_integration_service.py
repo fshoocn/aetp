@@ -333,7 +333,7 @@ class CiIntegrationService:
                         payload_json=payload_json,
                     )
                     triggered_run_ids.append(run_id)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - 单个绑定触发失败不影响其余绑定（fail-open）
                     errors.append(f"{binding.task_id}: {exc}")
 
             status = "accepted" if not errors else ("partial" if triggered_run_ids else "error")

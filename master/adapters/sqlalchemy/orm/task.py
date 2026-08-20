@@ -8,7 +8,7 @@ command / result 为结构化 JSON 列。
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -56,12 +56,12 @@ class Task(Base, TimestampMixin):
         String(16), nullable=False, default=TaskStatus.PENDING.value
     )
     command: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
-    result: Mapped[Optional[dict]] = mapped_column(JSONType, nullable=True)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(
+    result: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime, nullable=True
     )
 
-    project: Mapped["Project"] = relationship()
-    device: Mapped["Device"] = relationship()
+    project: Mapped[Project] = relationship()
+    device: Mapped[Device] = relationship()

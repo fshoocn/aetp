@@ -13,11 +13,10 @@
 """
 
 import argparse
-import asyncio
 import logging
+
 import uvicorn
 
-from common.event_loop import selector_loop_factory
 from common.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)

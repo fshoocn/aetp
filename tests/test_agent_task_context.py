@@ -11,16 +11,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
-
 from aetp_protocol.envelope import Envelope
 from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import RunCaseStatusPayload, RunProgressPayload
+from pydantic import ValidationError
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.services.execution_service import ExecutionCancelled
@@ -30,7 +28,7 @@ from agent.domain.ledger import TaskLogSpoolEntry
 
 
 def _now() -> datetime:
-    return datetime(2099, 1, 1, tzinfo=timezone.utc)
+    return datetime(2099, 1, 1, tzinfo=UTC)
 
 
 _SETTINGS = AgentSettings(
@@ -66,7 +64,7 @@ def _make_context(
 
 @pytest.mark.asyncio
 async def test_log_writes_spool(tmp_path) -> None:
-    ctx, ledger = _make_context(tmp_path)
+    ctx, _ledger = _make_context(tmp_path)
     await ctx.log("info", "hello")
     await ctx.log("warn", "watch out", {"k": 1})
 
@@ -124,7 +122,7 @@ async def test_log_rejects_invalid_level(tmp_path) -> None:
 # -----------------------------------------------------------------------
 
 def _claim_outbox_envelopes(ledger, count: int) -> list[Envelope]:
-    pending = ledger.claim_due_outbox(count, datetime(2099, 1, 1, tzinfo=timezone.utc).replace(tzinfo=None))
+    pending = ledger.claim_due_outbox(count, datetime(2099, 1, 1, tzinfo=UTC).replace(tzinfo=None))
     return [Envelope.model_validate(e.payload) for e in pending]
 
 
@@ -158,7 +156,7 @@ async def test_case_status_enqueues_run_case_status(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_build_log_batch_strict_sequence(tmp_path) -> None:
-    ctx, ledger = _make_context(tmp_path)
+    ctx, _ledger = _make_context(tmp_path)
     await ctx.log("info", "a")
     await ctx.log("error", "b")
     await ctx.log("debug", "c")
@@ -182,7 +180,7 @@ async def test_build_log_batch_empty_returns_none(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_mark_logs_published(tmp_path) -> None:
-    ctx, ledger = _make_context(tmp_path)
+    ctx, _ledger = _make_context(tmp_path)
     await ctx.log("info", "a")
     entries = ctx.collect_pending_logs(10)
     ctx.mark_logs_published([e.id for e in entries if e.id is not None])
@@ -211,16 +209,16 @@ async def test_raise_if_not_cancelled_passes(tmp_path) -> None:
 # -----------------------------------------------------------------------
 
 def test_run_log_batch_rejects_non_strict_sequence() -> None:
-    entry = dict(
-        project_id="p1",
-        task_id="T-1",
-        run_id="R-1",
-        node_id="bench-001",
-        sequence=2,
-        level="info",
-        message="x",
-        occurred_at="2026-08-17T12:00:00Z",
-    )
+    entry = {
+        "project_id": "p1",
+        "task_id": "T-1",
+        "run_id": "R-1",
+        "node_id": "bench-001",
+        "sequence": 2,
+        "level": "info",
+        "message": "x",
+        "occurred_at": "2026-08-17T12:00:00Z",
+    }
     with pytest.raises(ValidationError):
         RunLogBatch(
             run_id="R-1",
@@ -230,15 +228,15 @@ def test_run_log_batch_rejects_non_strict_sequence() -> None:
 
 
 def test_run_log_batch_rejects_non_increasing() -> None:
-    base = dict(
-        project_id="p1",
-        task_id="T-1",
-        run_id="R-1",
-        node_id="bench-001",
-        level="info",
-        message="x",
-        occurred_at="2026-08-17T12:00:00Z",
-    )
+    base = {
+        "project_id": "p1",
+        "task_id": "T-1",
+        "run_id": "R-1",
+        "node_id": "bench-001",
+        "level": "info",
+        "message": "x",
+        "occurred_at": "2026-08-17T12:00:00Z",
+    }
     entries = [
         RunLogEntry(**{**base, "sequence": 2}),
         RunLogEntry(**{**base, "sequence": 1}),  # 递减
@@ -248,14 +246,14 @@ def test_run_log_batch_rejects_non_increasing() -> None:
 
 
 def test_run_log_batch_rejects_unknown_level() -> None:
-    base = dict(
-        project_id="p1",
-        task_id="T-1",
-        run_id="R-1",
-        node_id="bench-001",
-        sequence=1,
-        message="x",
-        occurred_at="2026-08-17T12:00:00Z",
-    )
+    base = {
+        "project_id": "p1",
+        "task_id": "T-1",
+        "run_id": "R-1",
+        "node_id": "bench-001",
+        "sequence": 1,
+        "message": "x",
+        "occurred_at": "2026-08-17T12:00:00Z",
+    }
     with pytest.raises(ValidationError):
         RunLogEntry(**{**base, "level": "bogus"})

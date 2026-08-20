@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Mapping, Protocol
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 from master.domain.models import DomainEvent
 from master.domain.time import utcnow
@@ -91,11 +92,11 @@ class WorkflowEngine:
                     timeout=stage.timeout_s,
                 )
             return await runner.run(stage.action, progress.context)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             progress.error = f"阶段 {stage.name} 超时（>{stage.timeout_s}s）"
             logger.warning("workflow stage timeout: %s/%s", progress.aggregate_id, stage.name)
             return False
-        except Exception as exc:  # noqa: BLE001 - 动作异常统一按阶段失败处理
+        except Exception as exc:
             progress.error = f"阶段 {stage.name} 异常: {exc}"
             logger.exception("workflow stage error: %s/%s", progress.aggregate_id, stage.name)
             return False

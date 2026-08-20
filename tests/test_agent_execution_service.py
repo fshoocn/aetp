@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,14 +21,13 @@ from agent.application.services.execution_service import (
     CancellationToken,
     ExecutionCancelled,
     ExecutionService,
-    ExecutionTimedOut,
 )
 from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
 
 
 def _now() -> datetime:
-    return datetime(2099, 1, 1, tzinfo=timezone.utc).replace(tzinfo=None)
+    return datetime(2099, 1, 1, tzinfo=UTC).replace(tzinfo=None)
 
 
 _SETTINGS = AgentSettings(

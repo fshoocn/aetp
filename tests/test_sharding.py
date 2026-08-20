@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from aetp_protocol.plugin import CaseInfo
+
 from master.plugins.sharding import (
     SplitPolicyError,
     split_by_case_count,

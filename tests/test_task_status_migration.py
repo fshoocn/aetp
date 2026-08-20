@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text as sa_text
+from sqlalchemy import create_engine
+from sqlalchemy import text as sa_text
 
-import master.config as config
+from master import config
 
 
 def _alembic_config() -> Config:

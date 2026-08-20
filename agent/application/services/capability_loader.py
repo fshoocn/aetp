@@ -94,7 +94,7 @@ def _scan_system() -> SystemCapability | None:
             memory_mb=memory_mb,
             cpu_cores=cpu_cores,
         )
-    except Exception:  # noqa: BLE001 - 扫描失败不阻塞启动
+    except Exception:
         logger.exception("系统能力扫描失败")
         return None
 
@@ -125,7 +125,7 @@ def _total_memory_mb() -> int | None:
                 return int(stat.ullTotalPhys // (1024 * 1024))
             return None
         # POSIX：/proc/meminfo
-        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+        with open("/proc/meminfo", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("MemTotal:"):
                     kb = int(line.split()[1])
@@ -207,7 +207,7 @@ def _scan_serial(serial_map_file: str | Path | None) -> SerialCapability | None:
 
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("串口映射文件解析失败: %s", path)
         return None
 
@@ -282,4 +282,4 @@ def scan_vehicle():
 
         返回 ``None`` 表示不声明 CAN 能力。
     """
-    return None
+    return

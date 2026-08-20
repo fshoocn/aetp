@@ -9,9 +9,9 @@ JSONType：结构化 JSON 列（PostgreSQL 使用 JSONB，其余方言使用 JSO
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, JSON, MetaData, TypeDecorator
+from sqlalchemy import JSON, DateTime, MetaData, TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -40,18 +40,18 @@ class UTCDateTime(TypeDecorator):
         if value is None:
             return None
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).replace(tzinfo=None)
 
     def process_result_value(self, value: datetime | None, dialect):
         if value is None:
             return None
-        return value.replace(tzinfo=timezone.utc)
+        return value.replace(tzinfo=UTC)
 
 
 def utcnow() -> datetime:
     """Python 侧默认时间（UTC，带时区）。"""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # 结构化 JSON 列类型：PostgreSQL 用 JSONB 便于查询，其余用 JSON
