@@ -47,8 +47,9 @@ class TestTask(Base, TimestampMixin):
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     # sym:script_pk 引用脚本版本的代理主键（FK RESTRICT=引用保护，§18.4 删除保护）
-    script_pk: Mapped[int] = mapped_column(
-        ForeignKey("test_scripts.id", ondelete="RESTRICT"), nullable=False, index=True
+    # nullable: 已停用任务在脚本删除前置空，解除 FK 引用
+    script_pk: Mapped[int | None] = mapped_column(
+        ForeignKey("test_scripts.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     # sym:task_type 任务类型（插件类型），与引用脚本的 task_type 一致
     task_type: Mapped[str] = mapped_column(String(64), nullable=False)

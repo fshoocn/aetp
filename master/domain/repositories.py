@@ -173,6 +173,9 @@ class TestTaskRepository(ABC):
     def delete(self, task_pk: int) -> None: ...
 
     @abstractmethod
+    def cleanup_disabled_for_script(self, script_id: str) -> dict[str, int]: ...
+
+    @abstractmethod
     def add(self, task: TestTask) -> TestTask: ...
 
     @abstractmethod

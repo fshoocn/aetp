@@ -133,6 +133,50 @@ class TestTaskRepositoryImpl(TestTaskRepository):
             self._s.delete(orm)
             self._s.flush()
 
+    def cleanup_disabled_for_script(self, script_id: str) -> dict[str, int]:
+        """级联清理引用指定脚本的已停用任务。
+
+        - 无 Run 历史 → 硬删除（级联清理 schedule/bindings）
+        - 有 Run 历史 → 置空 script_pk（保留历史可追溯性）
+
+        Returns:
+            {"deleted": 硬删除数, "nullified": 置空数}
+        """
+        from sqlalchemy import update as sa_update
+        from master.adapters.sqlalchemy.orm import TaskRun as TaskRunORM
+
+        result = {"deleted": 0, "nullified": 0}
+
+        # 查找所有引用该脚本且已停用的任务
+        script_subq = (
+            select(TestScriptORM.id)
+            .where(TestScriptORM.script_id == script_id)
+            .scalar_subquery()
+        )
+        disabled_tasks = self._s.execute(
+            select(TestTaskORM)
+            .where(
+                TestTaskORM.script_pk == script_subq,
+                TestTaskORM.enabled.is_(False),
+            )
+        ).scalars().all()
+
+        for task_orm in disabled_tasks:
+            has_runs = self._s.execute(
+                select(func.count(TaskRunORM.id))
+                .where(TaskRunORM.task_pk == task_orm.id)
+            ).scalar_one()
+            if has_runs == 0:
+                self._s.delete(task_orm)
+                result["deleted"] += 1
+            else:
+                task_orm.script_pk = None
+                result["nullified"] += 1
+
+        if result["deleted"] or result["nullified"]:
+            self._s.flush()
+        return result
+
     def add(self, task: TestTask) -> TestTask:
         project_pk = self._s.execute(
             select(ProjectORM.id).where(ProjectORM.project_id == task.project_id)

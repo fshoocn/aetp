@@ -248,7 +248,10 @@ class ScriptService:
         return script
 
     def delete_script(self, script_id: str, *, project_id: str) -> None:
-        """删除项目脚本及其用例；被任务定义引用时拒绝删除。"""
+        """删除项目脚本及其用例；被启用中的任务定义引用时拒绝删除。
+
+        已停用任务在删除前自动级联清理（硬删除无 Run 的，有 Run 的置空 script_pk）。
+        """
         with self._uow_factory() as uow:
             script = uow.test_scripts.get_by_script_id(script_id)
             if script is None or script.project_id != project_id:
@@ -256,7 +259,16 @@ class ScriptService:
             references = uow.test_tasks.count_by_script(script_id)
             if references:
                 raise ScriptDeleteError(
-                    f"脚本仍被 {references} 个任务定义引用，请先删除或更换任务定义中的脚本版本"
+                    f"脚本仍被 {references} 个启用中的任务定义引用，请先停用或删除任务定义"
+                )
+            # 级联清理已停用任务：无 Run 的硬删除，有 Run 的置空 script_pk
+            cleaned = uow.test_tasks.cleanup_disabled_for_script(script_id)
+            if cleaned["deleted"] or cleaned["nullified"]:
+                logger.info(
+                    "脚本删除级联清理: script_id=%s deleted=%d nullified=%d",
+                    script_id,
+                    cleaned["deleted"],
+                    cleaned["nullified"],
                 )
             file_ref = script.file_ref
             uow.script_cases.delete_by_script(script_id)
