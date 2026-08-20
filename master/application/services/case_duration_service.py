@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import math
-import uuid
 from dataclasses import dataclass
+
+from aetp_protocol.ids import new_id
 
 from master.domain.models import DomainEvent
 
@@ -164,7 +165,7 @@ class CaseDurationStatsService:
             "reason": reason,
         }
         event = DomainEvent(
-            event_id=uuid.uuid4().hex,
+            event_id=new_id(),
             project_id=project_id,
             event_type="case.duration_anomaly",
             aggregate_id=case.case_id or case.stable_key,

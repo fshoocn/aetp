@@ -12,9 +12,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
+from aetp_protocol.ids import new_id
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
 
@@ -23,7 +24,7 @@ from master.application.errors import (
     UsernameAlreadyExistsError,
 )
 from master.domain.enums import AccountStatus, PlatformRole
-from master.domain.models import RefreshToken, User
+from master.domain.models import AuditLog, RefreshToken, User
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 
@@ -268,11 +269,12 @@ class AuthService:
         *,
         account_status: str | None = None,
         platform_role: str | None = None,
+        actor_id: int | None = None,
     ) -> User | None:
         """平台管理员审批/编辑账户属性。
 
         仅传入的字段会被更新，未传入的字段保持原值。
-        用户不存在返回 None。
+        用户不存在返回 None。敏感变更写入审计日志（§7.6 规则 5）。
         """
         with self._uow_factory() as uow:
             user = uow.users.get_by_id(user_id)
@@ -292,6 +294,27 @@ class AuthService:
                     user_id,
                     revoked,
                 )
+            # 审计：账户审批/禁用/角色变更（§7.6 规则 5）
+            action = (
+                "account.disable"
+                if updated.account_status == AccountStatus.DISABLED
+                else "account.approve"
+                if account_status is not None
+                else "role.change"
+            )
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    actor_id=actor_id,
+                    action=action,
+                    resource_type="user",
+                    resource_id=str(user_id),
+                    detail={
+                        "account_status": updated.account_status.value,
+                        "platform_role": updated.platform_role.value,
+                    },
+                )
+            )
             logger.info(
                 "用户权限已更新: user_id=%s, account_status=%s, platform_role=%s",
                 user_id,

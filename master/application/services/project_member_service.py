@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
+from aetp_protocol.ids import new_id
 from sqlalchemy.exc import IntegrityError
 
 from master.application.errors import (
@@ -16,7 +17,7 @@ from master.application.errors import (
     ProjectNotFoundError,
 )
 from master.domain.enums import AccountStatus, ProjectRole
-from master.domain.models import ProjectMember, ProjectMemberWithUser
+from master.domain.models import AuditLog, ProjectMember, ProjectMemberWithUser
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 
@@ -103,6 +104,18 @@ class ProjectMemberService:
                 uow.members.add(member)
             except IntegrityError as exc:
                 raise MemberAlreadyExistsError("用户已经是项目成员") from exc
+            # 审计：成员添加（§7.6 规则 5）
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=assigned_by,
+                    action="member.add",
+                    resource_type="member",
+                    resource_id=str(user_id),
+                    detail={"project_role": project_role.value},
+                )
+            )
             logger.info(
                 "项目成员添加成功: project_id=%s, user_id=%s, role=%s, assigned_by=%s",
                 project_id,
@@ -140,6 +153,21 @@ class ProjectMemberService:
             member.assigned_by = assigned_by
             member.updated_at = utcnow()
             uow.members.update(member)
+            # 审计：角色变更（§7.6 规则 5）
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=assigned_by,
+                    action="member.role_change",
+                    resource_type="member",
+                    resource_id=str(user_id),
+                    detail={
+                        "from_role": current_role.value,
+                        "to_role": project_role.value,
+                    },
+                )
+            )
             logger.info(
                 "项目成员角色更新成功: project_id=%s, user_id=%s, role=%s, assigned_by=%s",
                 project_id,
@@ -156,6 +184,7 @@ class ProjectMemberService:
         *,
         actor_role: ProjectRole | None,
         is_platform_admin: bool = False,
+        assigned_by: int | None = None,
     ) -> None:
         """移除项目成员并保护最后一个 owner。"""
         with self._uow_factory() as uow:
@@ -169,6 +198,18 @@ class ProjectMemberService:
             if current_role == ProjectRole.OWNER:
                 self._require_not_last_owner(uow, project_id)
             uow.members.remove(member)
+            # 审计：成员移除（§7.6 规则 5）
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=assigned_by,
+                    action="member.remove",
+                    resource_type="member",
+                    resource_id=str(user_id),
+                    detail={"from_role": current_role.value},
+                )
+            )
             logger.info(
                 "项目成员移除成功: project_id=%s, user_id=%s, role=%s",
                 project_id,

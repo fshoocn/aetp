@@ -7,11 +7,10 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import Callable
+from collections.abc import Callable
 
-from master.domain.models import DomainEvent
-from master.domain.models.notification import EventDelivery
+from aetp_protocol.ids import new_id
+
 from master.adapters.notifications.senders import SenderRegistry
 from master.domain.models import DomainEvent
 from master.domain.models.notification import EventDelivery
@@ -71,7 +70,7 @@ class NotificationDispatcher:
             with self._uow_factory() as uow:
                 uow.event_deliveries.add(
                     EventDelivery(
-                        delivery_id=f"DL-{uuid.uuid4().hex.upper()}",
+                        delivery_id=new_id(),
                         project_id=event.project_id or "",
                         event_id=event.event_id,
                         subscription_id=sub.subscription_id,

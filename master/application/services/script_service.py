@@ -17,11 +17,11 @@ import hashlib
 import io
 import logging
 import tempfile
-import uuid
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
+from aetp_protocol.ids import new_id
 from aetp_protocol.plugin import CaseInfo
 
 from master.application.errors import ScriptNotFoundError
@@ -108,7 +108,7 @@ class ScriptService:
                 raise ScriptUploadError("脚本未解析出任何用例")
 
         # 6. 持久化：同事务写脚本 + 用例（sha256 幂等 + (project,name,version) 唯一）
-        script_id = f"S-{uuid.uuid4().hex.upper()}"
+        script_id = new_id()
         with self._uow_factory() as uow:
             version = self._next_version(uow, project_id, name)
             script = uow.test_scripts.add(
@@ -137,7 +137,7 @@ class ScriptService:
                 [
                     ScriptCase(
                         script_id=script_id,
-                        case_id=f"C-{uuid.uuid4().hex.upper()}",
+                        case_id=new_id(),
                         stable_key=case.stable_key,
                         name=case.name,
                         parent_path=case.parent_path,
@@ -227,7 +227,7 @@ class ScriptService:
                     to_add.append(
                         ScriptCase(
                             script_id=script_id,
-                            case_id=f"C-{uuid.uuid4().hex.upper()}",
+                            case_id=new_id(),
                             stable_key=case.stable_key,
                             name=case.name,
                             parent_path=case.parent_path,
@@ -322,7 +322,7 @@ class ScriptService:
         """调用插件 Master 面解析用例（async 契约，直接 await）。"""
         try:
             return list(await master.parse_cases(script_dir, config))
-        except Exception as exc:  # noqa: BLE001 - 解析失败统一转为上传错误
+        except Exception as exc:
             logger.warning("脚本用例解析失败: %s", exc)
             raise ScriptUploadError(f"用例解析失败: {exc}") from exc
 

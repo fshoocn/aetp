@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from datetime import datetime, timezone
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from typing import Any
+
+from aetp_protocol.ids import new_id
 
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.notification_dispatcher import NotificationDispatcher
@@ -52,12 +54,12 @@ class EventPublisher:
             or event_type
         )
         event = DomainEvent(
-            event_id=uuid.uuid4().hex,
+            event_id=new_id(),
             project_id=resolved_project_id,
             event_type=event_type,
             aggregate_id=resolved_aggregate_id,
             payload=payload,
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
         with self._uow_factory() as uow:
             persisted = uow.domain_events.add(event)

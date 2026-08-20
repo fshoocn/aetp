@@ -11,11 +11,10 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 
-from aetp_protocol.capabilities import HardwareRequirements
+from aetp_protocol.ids import new_id
 
 from master.application.errors import (
     ProjectAccessDeniedError,
@@ -180,7 +179,7 @@ class TestTaskService:
 
             task = uow.test_tasks.add(
                 TestTask(
-                    task_id=f"T-{uuid.uuid4().hex.upper()}",
+                    task_id=new_id(),
                     project_id=project_id,
                     script_id=script_id,
                     script_version=script.version,

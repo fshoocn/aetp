@@ -13,10 +13,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import datetime, timezone
+import re
+from datetime import UTC, datetime
 
 import pytest
+
+_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _is_ulid(value: str) -> bool:
+    return bool(_ULID_RE.match(value))
 
 from aetp_protocol.capabilities import HardwareRequirements
 from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
@@ -51,7 +57,6 @@ from master.domain.models import (
     User,
 )
 from master.domain.time import utcnow
-from master.plugins import PluginRegistry
 
 
 def _uow(container):
@@ -185,7 +190,7 @@ def _seed(container, *, node_id: str = "node-a") -> tuple[int, str]:
                 status=NodeStatus.ONLINE,
                 online=True,
                 enabled=True,
-                last_seen_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                last_seen_at=datetime(2026, 1, 1, tzinfo=UTC),
             )
         )
         uow.devices.add(
@@ -441,7 +446,7 @@ def test_projection_log_batch_idempotent_by_sequence(client) -> None:
                 sequence=1,
                 level=LogLevel.INFO,
                 message="hello",
-                occurred_at=datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc),
+                occurred_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
             ),
             RunLogEntry(
                 project_id="p1",
@@ -451,7 +456,7 @@ def test_projection_log_batch_idempotent_by_sequence(client) -> None:
                 sequence=2,
                 level=LogLevel.ERROR,
                 message="boom",
-                occurred_at=datetime(2026, 8, 17, 12, 0, 1, tzinfo=timezone.utc),
+                occurred_at=datetime(2026, 8, 17, 12, 0, 1, tzinfo=UTC),
             ),
         ],
     )
@@ -485,7 +490,7 @@ def test_http_trigger_run_endpoint(client, auth_header) -> None:
     )
     assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data["run_id"].startswith("R-")
+    assert _is_ulid(data["run_id"])
     assert data["status"] == "created"
 
     # 查询详情可见 shards
@@ -532,7 +537,7 @@ def _add_tester_as_member(container) -> None:
             {
                 "ppk": project_pk,
                 "uid": tester_id,
-                "now": datetime.now(timezone.utc).replace(tzinfo=None),
+                "now": datetime.now(UTC).replace(tzinfo=None),
             },
         )
 

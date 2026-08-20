@@ -20,10 +20,10 @@
 from __future__ import annotations
 
 import logging
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
+from aetp_protocol.ids import new_id
 from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.payloads import (
     CaseResultEntry,
@@ -34,6 +34,9 @@ from aetp_protocol.payloads import (
     RunResultPayload,
 )
 
+from master.application.services.case_duration_service import (
+    CaseDurationStatsService,
+)
 from master.domain.enums import (
     CaseStatus,
     DeviceStatus,
@@ -46,9 +49,6 @@ from master.domain.models import RunCaseResult, RunLog, RunResult
 from master.domain.repositories import UnitOfWork
 from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
-from master.application.services.case_duration_service import (
-    CaseDurationStatsService,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -532,7 +532,7 @@ class RunProjectionService:
         result = uow.run_results.get_by_run_id(run.run_id)
         if result is None:
             result = RunResult(
-                result_id=uuid.uuid4().hex,
+                result_id=new_id(),
                 run_id=run.run_id,
                 project_id=run.project_id,
                 task_id=run.task_id,

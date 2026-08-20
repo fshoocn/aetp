@@ -7,16 +7,16 @@
 from __future__ import annotations
 
 import logging
-import secrets
-import uuid
-from datetime import timedelta
-from typing import Callable
+from collections.abc import Callable
+
+from aetp_protocol.ids import new_id
 
 from master.domain.models.notification import (
     EventDelivery,
     EventSubscription,
     NotificationEndpoint,
 )
+from master.domain.notifications import SecretStore
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 
@@ -41,11 +41,10 @@ class NotificationService:
         self,
         uow_factory: Callable[[], UnitOfWork],
         *,
-        secret_store: object | None = None,
+        secret_store: SecretStore | None = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._secrets: dict[str, str] = {}
-        self._external_store = secret_store
+        self._store = secret_store
 
     # -- 通知端点 CRUD --------------------------------------------------------
 
@@ -69,12 +68,12 @@ class NotificationService:
 
         secret_ref = None
         if secret_value:
-            secret_ref = f"ep-{uuid.uuid4().hex}"
-            self._secrets[secret_ref] = secret_value
+            secret_ref = new_id()
+            self._store_secret(secret_ref, secret_value)
 
         with self._uow_factory() as uow:
             endpoint = NotificationEndpoint(
-                endpoint_id=f"NE-{uuid.uuid4().hex.upper()}",
+                endpoint_id=new_id(),
                 project_id=project_id,
                 channel_type=channel_type,
                 name=name.strip(),
@@ -128,8 +127,8 @@ class NotificationService:
                 ep.enabled = enabled
             if secret_value is not None:
                 if ep.secret_ref is None:
-                    ep.secret_ref = f"ep-{uuid.uuid4().hex}"
-                self._secrets[ep.secret_ref] = secret_value
+                    ep.secret_ref = new_id()
+                self._store_secret(ep.secret_ref, secret_value)
             return uow.notification_endpoints.update(ep)
 
     def delete_endpoint(self, endpoint_id: str, project_id: str) -> None:
@@ -139,7 +138,7 @@ class NotificationService:
                 raise ValueError(f"通知端点不存在: {endpoint_id}")
             # 删除端点时级联删除关联订阅（ORM CASCADE），清理密钥
             if ep.secret_ref:
-                self._secrets.pop(ep.secret_ref, None)
+                self._delete_secret(ep.secret_ref)
             uow.notification_endpoints.delete(endpoint_id)
         logger.info("通知端点已删除: endpoint_id=%s", endpoint_id)
 
@@ -162,7 +161,7 @@ class NotificationService:
             if ep is None or ep.project_id != project_id:
                 raise ValueError(f"通知端点不存在: {endpoint_id}")
             sub = EventSubscription(
-                subscription_id=f"ES-{uuid.uuid4().hex.upper()}",
+                subscription_id=new_id(),
                 project_id=project_id,
                 endpoint_id=endpoint_id,
                 event_types=event_types,
@@ -262,4 +261,20 @@ class NotificationService:
     # -- 密钥查询（内部，不暴露给 API） ----------------------------------------
 
     def get_secret(self, secret_ref: str) -> str | None:
-        return self._secrets.get(secret_ref)
+        """从 SecretStore 解回密钥明文（不存在/解密失败返回 None）。"""
+        if self._store is None:
+            return None
+        value = self._store.get(secret_ref)
+        return value.value if value is not None else None
+
+    def _store_secret(self, secret_ref: str, value: str) -> None:
+        """加密并持久化密钥；无 SecretStore 时静默跳过（开发兜底）。"""
+        if self._store is None:
+            logger.warning("未配置 SecretStore，密钥未持久化: %s", secret_ref)
+            return
+        self._store.set(secret_ref, value)
+
+    def _delete_secret(self, secret_ref: str) -> None:
+        if self._store is None:
+            return
+        self._store.delete(secret_ref)

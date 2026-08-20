@@ -12,14 +12,19 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+import re
+from datetime import UTC, datetime
 
 import pytest
-
 from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.payloads import RunLogCompletePayload
 
-from master.domain.models import RunArtifact
+_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _is_ulid(value: str) -> bool:
+    return bool(_ULID_RE.match(value))
+
 from master.domain.time import utcnow
 
 
@@ -150,7 +155,7 @@ def test_register_artifact_writes_ref_and_file(client) -> None:
         data=b"<report>ok</report>",
     )
 
-    assert artifact.artifact_id.startswith("A-")
+    assert _is_ulid(artifact.artifact_id)
     assert artifact.kind.value == "report"
     assert artifact.size == len(b"<report>ok</report>")
     assert artifact.sha256
@@ -204,14 +209,15 @@ def test_list_and_get_artifact_project_scoped(client) -> None:
 
 
 def test_orchestrator_publishes_log_complete(tmp_path) -> None:
+    from aetp_protocol.envelope import Envelope
+    from aetp_protocol.message_types import MessageType
+    from aetp_protocol.payloads import RunAssignPayload
+
     from agent.adapters.sqlite.ledger import SQLiteLedger
     from agent.application.services.execution_service import ExecutionService
     from agent.application.services.run_orchestrator import RunOrchestrator
     from agent.config import AgentSettings
     from agent.plugins import AgentPluginRegistry
-    from aetp_protocol.message_types import MessageType
-    from aetp_protocol.payloads import RunAssignPayload
-    from aetp_protocol.envelope import Envelope
 
     class _Plugin:
         task_type = "t"
@@ -250,7 +256,7 @@ def test_orchestrator_publishes_log_complete(tmp_path) -> None:
     registry.register_installed(_Plugin())
     orchestrator = RunOrchestrator(
         settings, ledger, ExecutionService(settings, ledger), registry,
-        session_id=lambda: "s", now=lambda: datetime(2099, 1, 1, tzinfo=timezone.utc),
+        session_id=lambda: "s", now=lambda: datetime(2099, 1, 1, tzinfo=UTC),
     )
     payload = RunAssignPayload(
         project_id="p1", task_id="T-1", shard_id="SH-1", shard_index=0,
@@ -262,7 +268,7 @@ def test_orchestrator_publishes_log_complete(tmp_path) -> None:
     ledger.claim_run("R-1", 1)
     asyncio.run(orchestrator._run(payload))
 
-    pending = ledger.claim_due_outbox(100, datetime(2099, 1, 1, tzinfo=timezone.utc).replace(tzinfo=None))
+    pending = ledger.claim_due_outbox(100, datetime(2099, 1, 1, tzinfo=UTC).replace(tzinfo=None))
     envelopes = [Envelope.model_validate(e.payload) for e in pending]
     completes = [e for e in envelopes if e.message_type == MessageType.RUN_LOG_COMPLETE.value]
     assert len(completes) == 1
@@ -279,14 +285,24 @@ def test_orchestrator_publishes_log_complete(tmp_path) -> None:
 
 def _seed_run(container) -> str:
     """创建最小 Run（无分片/节点依赖），供围栏与产物测试。"""
+    from aetp_protocol.capabilities import HardwareRequirements
+
     from master.domain.enums import (
-        AccountStatus, PlatformRole, ProjectStatus, RunStatus,
-        ScriptParseLocation, ScriptParseStatus, TriggerType,
+        AccountStatus,
+        PlatformRole,
+        ProjectStatus,
+        RunStatus,
+        ScriptParseLocation,
+        ScriptParseStatus,
+        TriggerType,
     )
     from master.domain.models import (
-        Project, TaskRun, TestScript, TestTask, User,
+        Project,
+        TaskRun,
+        TestScript,
+        TestTask,
+        User,
     )
-    from aetp_protocol.capabilities import HardwareRequirements
 
     with _uow(container) as uow:
         user = uow.users.add(

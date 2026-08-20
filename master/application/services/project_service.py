@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import Callable
+from collections.abc import Callable
 
+from aetp_protocol.ids import new_id
 from sqlalchemy.exc import IntegrityError
 
 from master.application.errors import (
@@ -59,7 +59,7 @@ class ProjectService:
                 now = utcnow()
                 project = Project(
                     id=None,
-                    project_id=f"P-{uuid.uuid4().hex.upper()}",
+                    project_id=new_id(),
                     project_key=normalized_key,
                     name=normalized_name,
                     description=description,

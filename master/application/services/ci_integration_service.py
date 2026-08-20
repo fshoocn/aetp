@@ -10,21 +10,22 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import logging
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Callable
+
+from aetp_protocol.ids import new_id
 
 from master.application.errors import TaskNotFoundError
 from master.application.services.run_trigger_service import RunTriggerService
 from master.domain.enums import TriggerType
+from master.domain.models import AuditLog
 from master.domain.models.ci_integration import (
     CiTriggerBinding,
     CiWebhookDelivery,
     ProjectIntegration,
 )
+from master.domain.notifications import SecretStore
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 
@@ -52,10 +53,12 @@ class CiIntegrationService:
         *,
         trigger_service: RunTriggerService | None = None,
         signing_secret: str = "",
+        secret_store: SecretStore | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._trigger = trigger_service
         self._signing_secret = signing_secret
+        self._store = secret_store
 
     # -- 集成 CRUD -----------------------------------------------------------
 
@@ -75,22 +78,35 @@ class CiIntegrationService:
         if not name.strip():
             raise ValueError("集成名称不能为空")
 
-        secret_hash = None
+        secret_ref = None
         if secret_value:
-            secret_hash = hashlib.sha256(secret_value.encode("utf-8")).hexdigest()
+            secret_ref = new_id()
+            self._store_secret(secret_ref, secret_value)
 
         with self._uow_factory() as uow:
             integration = ProjectIntegration(
-                integration_id=f"CI-{uuid.uuid4().hex.upper()}",
+                integration_id=new_id(),
                 project_id=project_id,
                 provider=provider,
                 name=name.strip(),
-                secret_hash=secret_hash,
+                secret_ref=secret_ref,
                 config_json=config_json or {},
                 enabled=enabled,
                 created_by=created_by,
             )
             integration = uow.project_integrations.add(integration)
+            # 审计：CI 集成创建（§7.6 规则 5）
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=created_by,
+                    action="integration.create",
+                    resource_type="integration",
+                    resource_id=integration.integration_id,
+                    detail={"provider": provider},
+                )
+            )
 
         logger.info("CI 集成已创建: integration_id=%s provider=%s", integration.integration_id, provider)
         return integration
@@ -127,19 +143,50 @@ class CiIntegrationService:
             if name is not None:
                 integration.name = name.strip()
             if secret_value is not None:
-                integration.secret_hash = hashlib.sha256(secret_value.encode("utf-8")).hexdigest()
+                if integration.secret_ref is None:
+                    integration.secret_ref = new_id()
+                self._store_secret(integration.secret_ref, secret_value)
             if config_json is not None:
                 integration.config_json = config_json
             if enabled is not None:
                 integration.enabled = enabled
-            return uow.project_integrations.update(integration)
+            result = uow.project_integrations.update(integration)
+            # 审计：CI 集成更新（含密钥轮换，§7.6 规则 5）
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=integration.created_by,
+                    action=(
+                        "integration.key_rotate"
+                        if secret_value is not None
+                        else "integration.update"
+                    ),
+                    resource_type="integration",
+                    resource_id=integration.integration_id,
+                )
+            )
+            return result
 
     def delete_integration(self, integration_id: str, project_id: str) -> None:
         with self._uow_factory() as uow:
             integration = uow.project_integrations.get_by_integration_id(integration_id)
             if integration is None or integration.project_id != project_id:
                 raise ValueError(f"集成不存在: {integration_id}")
+            if integration.secret_ref:
+                self._delete_secret(integration.secret_ref)
             uow.project_integrations.delete(integration_id)
+            # 审计：CI 集成删除（§7.6 规则 5）
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=integration.created_by,
+                    action="integration.delete",
+                    resource_type="integration",
+                    resource_id=integration_id,
+                )
+            )
         logger.info("CI 集成已删除: integration_id=%s", integration_id)
 
     # -- 触发绑定 CRUD -------------------------------------------------------
@@ -161,7 +208,7 @@ class CiIntegrationService:
                 raise TaskNotFoundError(f"任务定义不存在: {task_id}")
 
             binding = CiTriggerBinding(
-                binding_id=f"TB-{uuid.uuid4().hex.upper()}",
+                binding_id=new_id(),
                 integration_id=integration_id,
                 task_id=task_id,
                 event_filter_json=event_filter_json or {},
@@ -203,7 +250,7 @@ class CiIntegrationService:
 
     # -- Webhook 处理 --------------------------------------------------------
 
-    def handle_webhook(
+    async def handle_webhook(
         self,
         integration_id: str,
         *,
@@ -250,9 +297,9 @@ class CiIntegrationService:
 
             # 2. 验证签名
             if not self._verify_signature(
-                integration.secret_hash, signature, payload_body, headers
+                integration.secret_ref, signature, payload_body, headers
             ):
-                delivery = uow.ci_webhook_deliveries.add(
+                uow.ci_webhook_deliveries.add(
                     CiWebhookDelivery(
                         integration_id=integration_id,
                         delivery_id=delivery_id,
@@ -276,7 +323,7 @@ class CiIntegrationService:
                     continue
                 # 5. 创建 Run
                 try:
-                    run_id = self._trigger_run(
+                    run_id = await self._trigger_run(
                         project_id=project_id,
                         task_id=binding.task_id,
                         integration_id=integration_id,
@@ -319,52 +366,65 @@ class CiIntegrationService:
     def list_deliveries(
         self, integration_id: str, *, limit: int = 100
     ) -> list[CiWebhookDelivery]:
-        """查询集成的投递记录。"""
+        """查询集成的投递记录（按 received_at 倒序）。"""
         with self._uow_factory() as uow:
-            return list(
-                reversed(
-                    sorted(
-                        [
-                            d
-                            for d in [
-                                uow.ci_webhook_deliveries.get_by_integration_delivery(
-                                    integration_id, str(i)
-                                )
-                                for i in range(limit * 2)
-                            ]
-                            if d is not None
-                        ],
-                        key=lambda d: d.received_at or datetime.min,
-                    )
-                )
+            return uow.ci_webhook_deliveries.list_by_integration(
+                integration_id, limit=limit
             )
 
     def _verify_signature(
         self,
-        secret_hash: str | None,
+        secret_ref: str | None,
         signature: str,
         payload_body: bytes,
         headers: dict[str, str] | None,
     ) -> bool:
-        """验证 webhook 签名。"""
-        if not secret_hash:
-            return True  # 无密钥则跳过验证
+        """验证 webhook 签名（§8.8）。
+
+        用集成保存的**原始 secret**（从 SecretStore 解回）做 HMAC-SHA256，
+        与 GitHub/GitLab 等 provider 的签名算法一致；无 secret 时跳过验证。
+        """
+        if not secret_ref:
+            return True  # 未配置密钥则跳过验证
         if not signature:
             return False
 
-        # 支持 sha256=<hex> 格式
+        secret = self._get_secret(secret_ref)
+        if not secret:
+            logger.error("CI 集成密钥缺失或解密失败: secret_ref=%s", secret_ref)
+            return False
+
+        # 支持 sha256=<hex> 格式（GitHub 风格）
         if signature.startswith("sha256="):
             expected_sig = signature[7:]
             computed = hmac.new(
-                secret_hash.encode("utf-8"), payload_body, hashlib.sha256
+                secret.encode("utf-8"), payload_body, hashlib.sha256
             ).hexdigest()
             return hmac.compare_digest(expected_sig, computed)
 
-        # 支持原始 hex 格式
+        # 支持原始 hex 格式（GitLab 的 X-Gitlab-Token 走这里由上层传 token，
+        # 此处仅兜底 raw hex HMAC）
         computed = hmac.new(
-            secret_hash.encode("utf-8"), payload_body, hashlib.sha256
+            secret.encode("utf-8"), payload_body, hashlib.sha256
         ).hexdigest()
         return hmac.compare_digest(signature, computed)
+
+    def _store_secret(self, secret_ref: str, value: str) -> None:
+        if self._store is None:
+            logger.warning("未配置 SecretStore，CI 密钥未持久化: %s", secret_ref)
+            return
+        self._store.set(secret_ref, value)
+
+    def _get_secret(self, secret_ref: str) -> str | None:
+        if self._store is None:
+            return None
+        value = self._store.get(secret_ref)
+        return value.value if value is not None else None
+
+    def _delete_secret(self, secret_ref: str) -> None:
+        if self._store is None:
+            return
+        self._store.delete(secret_ref)
 
     @staticmethod
     def _matches_filter(event_filter: dict, payload: dict) -> bool:
@@ -381,7 +441,7 @@ class CiIntegrationService:
                 return False
         return True
 
-    def _trigger_run(
+    async def _trigger_run(
         self,
         *,
         project_id: str,
@@ -392,28 +452,20 @@ class CiIntegrationService:
         parameter_mapping: dict,
         payload_json: dict,
     ) -> str:
-        """触发 Run（调用 RunTriggerService）。"""
+        """触发 Run（调用 RunTriggerService，async 契约直接 await）。"""
         if self._trigger is None:
             raise ValueError("RunTriggerService 未配置")
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(
-                self._trigger.trigger(
-                    task_id,
-                    project_id=project_id,
-                    trigger_type=TriggerType.CI_WEBHOOK,
-                    trigger_context={
-                        "integration_id": integration_id,
-                        "delivery_id": delivery_id,
-                        "event_filter": event_filter,
-                        "parameter_mapping": parameter_mapping,
-                        "provider_payload_keys": list(payload_json.keys()),
-                    },
-                )
-            )
-            return result.run_id
-        finally:
-            loop.close()
+        result = await self._trigger.trigger(
+            task_id,
+            project_id=project_id,
+            trigger_type=TriggerType.CI_WEBHOOK,
+            trigger_context={
+                "integration_id": integration_id,
+                "delivery_id": delivery_id,
+                "event_filter": event_filter,
+                "parameter_mapping": parameter_mapping,
+                "provider_payload_keys": list(payload_json.keys()),
+            },
+        )
+        return result.run_id

@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from master.adapters.sqlalchemy.orm import Device, Node
+
+_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _is_ulid(value: str) -> bool:
+    return bool(_ULID_RE.match(value))
 
 
 @pytest.fixture
@@ -117,7 +125,7 @@ def test_create_task_service_direct(client, task_context):
         command={"cmd": "ping"},
         created_by=1,
     )
-    assert task.task_id.startswith("T-")
+    assert _is_ulid(task.task_id)
     assert task.status == "pending"
     assert task.project_id == project_id
     assert task.device_id == "task-device"

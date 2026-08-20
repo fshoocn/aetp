@@ -14,10 +14,10 @@ envelope.sender.session_id 不一致时拒绝；重复注册（同 session）幂
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
+from aetp_protocol.ids import new_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     NodeHeartbeatPayload,
@@ -137,7 +137,7 @@ class NodePresenceService:
             # register-ack（事务性 outbox，QoS 1；同 session 重放相同 ACK 语义）
             ack = uow.outbox_messages.enqueue(
                 OutboxMessage(
-                    outbox_id=uuid.uuid4().hex,
+                    outbox_id=new_id(),
                     aggregate_type="node",
                     aggregate_id=node.node_id,
                     topic=command_topic(node.node_id, "register-ack"),
@@ -254,7 +254,7 @@ class NodePresenceService:
         """构造 register-ack 的 Envelope JSON（sender=master，correlation_id=原消息）。"""
         ack = Envelope(
             protocol_version=1,
-            message_id=uuid.uuid4().hex,
+            message_id=new_id(),
             message_type=MessageType.REGISTER_ACK.value,
             sent_at=utcnow(),
             sender=Sender(

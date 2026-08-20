@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
+from aetp_protocol.ids import new_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ScriptVerifyPayload, ScriptVerifyResultPayload
 from aetp_protocol.topics import command_topic
@@ -71,7 +71,7 @@ class ScriptVerificationService:
             if getattr(agent, "verify_location", "master") != "agent":
                 raise ValueError("该插件未声明 Agent 台架验证能力")
 
-            verify_id = f"V-{uuid.uuid4().hex.upper()}"
+            verify_id = new_id()
             payload = ScriptVerifyPayload(
                 verify_id=verify_id,
                 script_id=script.script_id,
@@ -90,7 +90,7 @@ class ScriptVerificationService:
                 config=dict(config or script.config or {}),
             )
             envelope = Envelope(
-                message_id=uuid.uuid4().hex,
+                message_id=new_id(),
                 message_type=MessageType.SCRIPT_VERIFY.value,
                 sent_at=utcnow(),
                 sender=Sender(
@@ -115,7 +115,7 @@ class ScriptVerificationService:
             )
             result_event = uow.domain_events.add(
                 DomainEvent(
-                    event_id=uuid.uuid4().hex,
+                    event_id=new_id(),
                     project_id=project_id,
                     event_type="script.verify_requested",
                     aggregate_id=verify_id,
@@ -174,7 +174,7 @@ class ScriptVerificationService:
                 return None
             result_event = uow.domain_events.add(
                 DomainEvent(
-                    event_id=uuid.uuid4().hex,
+                    event_id=new_id(),
                     project_id=project_id,
                     event_type="script.verify_result",
                     aggregate_id=payload.verify_id,

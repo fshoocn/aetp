@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import re
+
+_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _is_ulid(value: str) -> bool:
+    return bool(_ULID_RE.match(value))
+
 
 def _admin_headers(client) -> dict[str, str]:
     """创建隔离测试用平台管理员并返回认证请求头。"""
@@ -30,7 +38,7 @@ def test_admin_can_create_list_get_and_update_project(client):
     )
     assert response.status_code == 201
     project = response.json()
-    assert project["project_id"].startswith("P-")
+    assert _is_ulid(project["project_id"])
     assert project["project_key"] == "AETP_CORE"
     assert project["name"] == "AETP Core"
     assert project["status"] == "active"

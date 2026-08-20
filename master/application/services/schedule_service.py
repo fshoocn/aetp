@@ -7,11 +7,11 @@ cron_expression 与 interval_seconds 互斥二选一。
 from __future__ import annotations
 
 import logging
-import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Callable
 
 import croniter
+from aetp_protocol.ids import new_id
 
 from master.application.errors import TaskNotFoundError
 from master.application.services.run_trigger_service import RunTriggerService
@@ -77,7 +77,7 @@ class ScheduleService:
             )
 
             schedule = TaskSchedule(
-                schedule_id=f"SC-{uuid.uuid4().hex.upper()}",
+                schedule_id=new_id(),
                 task_id=task_id,
                 project_id=project_id,
                 cron_expression=cron_expression,
@@ -148,7 +148,7 @@ class ScheduleService:
             uow.task_schedules.delete(schedule_id)
         logger.info("调度计划已删除: schedule_id=%s", schedule_id)
 
-    def tick(self, *, now: datetime | None = None) -> int:
+    async def tick(self, *, now: datetime | None = None) -> int:
         """调度器推进：触发所有到期计划，返回触发数量。"""
         now = now or utcnow()
         triggered = 0
@@ -156,7 +156,7 @@ class ScheduleService:
             due = uow.task_schedules.list_due(now=now, limit=50)
             for schedule in due:
                 try:
-                    self._fire_schedule(uow, schedule, now)
+                    await self._fire_schedule(uow, schedule, now)
                     triggered += 1
                 except Exception:
                     logger.exception(
@@ -166,7 +166,7 @@ class ScheduleService:
             logger.info("调度器本轮触发: %d 个计划", triggered)
         return triggered
 
-    def _fire_schedule(
+    async def _fire_schedule(
         self, uow: UnitOfWork, schedule: TaskSchedule, now: datetime
     ) -> None:
         task = uow.test_tasks.get_by_task_id(schedule.task_id, schedule.project_id)
@@ -179,26 +179,18 @@ class ScheduleService:
             )
             return
 
-        # 触发 Run
+        # 触发 Run（async 契约，直接 await，不新建事件循环）
         if self._trigger is not None:
-            import asyncio
-
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(
-                    self._trigger.trigger(
-                        schedule.task_id,
-                        project_id=schedule.project_id,
-                        trigger_type=TriggerType.SCHEDULE,
-                        trigger_context={
-                            "schedule_id": schedule.schedule_id,
-                            "cron_expression": schedule.cron_expression,
-                            "interval_seconds": schedule.interval_seconds,
-                        },
-                    )
-                )
-            finally:
-                loop.close()
+            await self._trigger.trigger(
+                schedule.task_id,
+                project_id=schedule.project_id,
+                trigger_type=TriggerType.SCHEDULE,
+                trigger_context={
+                    "schedule_id": schedule.schedule_id,
+                    "cron_expression": schedule.cron_expression,
+                    "interval_seconds": schedule.interval_seconds,
+                },
+            )
 
         schedule.last_run_at = now
         schedule.next_run_at = self._compute_next_run(

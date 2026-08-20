@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import uuid
-from typing import Callable
+from collections.abc import Callable
+
+from aetp_protocol.ids import new_id
 
 from master.application.errors import RunNotFoundError
 from master.application.services.artifact_storage_service import (
@@ -59,7 +60,7 @@ class ArtifactService:
             file_ref = self._storage.store(run_id, filename, data)
             digest = hashlib.sha256(data).hexdigest()
             artifact = RunArtifact(
-                artifact_id=f"A-{uuid.uuid4().hex.upper()}",
+                artifact_id=new_id(),
                 run_id=run_id,
                 shard_id=shard_id,
                 node_id=node_id,

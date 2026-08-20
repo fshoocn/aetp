@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from typing import Callable
+from collections.abc import Callable
+
+from aetp_protocol.ids import new_id
 
 from master.application.errors import DeviceNotFoundError, TaskNotFoundError
 from master.domain.models import Task, TaskLog
@@ -40,7 +41,7 @@ class TaskService:
                 raise DeviceNotFoundError("设备不存在或不属于当前项目")
 
             task = Task.create(
-                task_id=f"T-{uuid.uuid4().hex[:12].upper()}",
+                task_id=new_id(),
                 project_id=project_id,
                 device_id=device_id,
                 command=command,

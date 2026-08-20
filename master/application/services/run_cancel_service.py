@@ -10,11 +10,11 @@
 from __future__ import annotations
 
 import logging
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
-from aetp_protocol.envelope import PROTOCOL_VERSION, Envelope, Sender, SenderKind
+from aetp_protocol.envelope import Envelope, Sender, SenderKind
+from aetp_protocol.ids import new_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import RunCancelPayload
 from aetp_protocol.topics import command_topic
@@ -114,7 +114,7 @@ class RunCancelService:
                     reason=reason,
                 )
                 envelope = Envelope(
-                    message_id=uuid.uuid4().hex,
+                    message_id=new_id(),
                     message_type=MessageType.RUN_CANCEL.value,
                     sent_at=utcnow(),
                     sender=Sender(

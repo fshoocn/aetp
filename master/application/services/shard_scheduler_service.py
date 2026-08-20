@@ -13,12 +13,12 @@
 
 from __future__ import annotations
 
-import uuid
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Callable, Iterable
 
 from aetp_protocol.capabilities import DeviceAllocation, SwitchRouteAllocation
 from aetp_protocol.envelope import PROTOCOL_VERSION, Envelope, Sender, SenderKind
+from aetp_protocol.ids import new_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import PluginPackageRef, RunAssignPayload
 from aetp_protocol.topics import command_topic
@@ -31,6 +31,7 @@ from master.application.errors import (
     TaskNotFoundError,
 )
 from master.application.services.capability_service import CapabilityService
+from master.domain.capability import list_capability_paths
 from master.domain.enums import (
     DeviceStatus,
     RunStatus,
@@ -54,7 +55,6 @@ from master.domain.resources import (
 )
 from master.domain.scheduler import ShardScheduler
 from master.domain.state_machine import assert_transition, next_attempt_no
-from master.domain.capability import list_capability_paths
 from master.domain.time import utcnow
 
 
@@ -341,7 +341,7 @@ class ShardSchedulerService:
             uow.run_shards.update(shard)
 
         attempt = ShardAttempt(
-            attempt_id=uuid.uuid4().hex,
+            attempt_id=new_id(),
             shard_id=shard.shard_id,
             attempt_no=attempt_no,
             node_id=assignment.node.node_id,
@@ -352,7 +352,7 @@ class ShardSchedulerService:
         for device in assignment.devices:
             device.status = DeviceStatus.BUSY
             uow.devices.update(device)
-        outbox_id = uuid.uuid4().hex
+        outbox_id = new_id()
         script_ref = dict(run.script_ref)
         if self._download_url_builder is not None:
             script_ref["download_url"] = self._download_url_builder(
@@ -401,7 +401,7 @@ class ShardSchedulerService:
         )
         envelope = Envelope(
             protocol_version=PROTOCOL_VERSION,
-            message_id=uuid.uuid4().hex,
+            message_id=new_id(),
             message_type=MessageType.RUN_ASSIGN.value,
             sent_at=utcnow(),
             sender=Sender(

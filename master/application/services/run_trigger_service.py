@@ -15,18 +15,18 @@ Run 创建即固化为快照；分割与派发分离，派发失败不撤销 Run
 from __future__ import annotations
 
 import logging
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
+from aetp_protocol.ids import new_id
 from aetp_protocol.plugin import CaseInfo
 
 from master.application.errors import ScriptNotFoundError, TaskNotFoundError
-from master.application.services.shard_scheduler_service import (
-    ShardSchedulerService,
-)
 from master.application.services.case_duration_service import (
     CaseDurationStatsService,
+)
+from master.application.services.shard_scheduler_service import (
+    ShardSchedulerService,
 )
 from master.domain.enums import RunStatus, ShardStatus, TriggerType
 from master.domain.models import RunShard, TaskRun
@@ -130,7 +130,7 @@ class RunTriggerService:
         )
 
         # 4. 创建 Run + Shards（同一事务）
-        run_id = f"R-{uuid.uuid4().hex.upper()}"
+        run_id = new_id()
         script_ref = {
             "script_id": script.script_id,
             "version": script.version,
@@ -153,7 +153,7 @@ class RunTriggerService:
             )
             shards = [
                 RunShard(
-                    shard_id=f"SH-{uuid.uuid4().hex.upper()}",
+                    shard_id=new_id(),
                     run_id=run_id,
                     shard_index=index,
                     case_keys=list(spec.case_keys),

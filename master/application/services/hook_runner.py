@@ -12,9 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+
+from aetp_protocol.ids import new_id
 
 from master.domain.hooks import (
     AdmissionHook,
@@ -70,7 +71,7 @@ class HookRunner:
     def registry(self) -> HookRegistry:
         return self._registry
 
-    def run_admission(
+    async def run_admission(
         self,
         stage: str,
         context: HookContext,
@@ -85,9 +86,9 @@ class HookRunner:
         if not hooks:
             return HookDecision(allowed=True)
 
-        timeout = timeout_s or self._timeout_s
+        timeout = timeout_s if timeout_s is not None else self._timeout_s
         for hook in hooks:
-            decision = self._run_single_admission(hook, context, timeout)
+            decision = await self._run_single_admission(hook, context, timeout)
             if not decision.allowed and not decision.advisory:
                 self._audit(hook.name, stage, "denied", context.project_id, error=decision.reason)
                 return decision
@@ -95,24 +96,24 @@ class HookRunner:
 
         return HookDecision(allowed=True)
 
-    def run_event_hooks(self, event: DomainEvent) -> None:
+    async def run_event_hooks(self, event: DomainEvent) -> None:
         """执行事件 Hook（fail open）。"""
         hooks = self._registry.matching_event_hooks(event.event_type)
         for hook in hooks:
-            self._run_single_event(hook, event)
+            await self._run_single_event(hook, event)
 
-    def _run_single_admission(
+    async def _run_single_admission(
         self,
         hook: AdmissionHook,
         context: HookContext,
         timeout_s: float,
     ) -> HookDecision:
         try:
-            decision = asyncio.run(
-                asyncio.wait_for(hook.evaluate(context), timeout=timeout_s)
+            decision = await asyncio.wait_for(
+                hook.evaluate(context), timeout=timeout_s
             )
             return decision
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("准入 Hook 超时: hook=%s stage=%s", hook.name, hook.stage)
             return HookDecision(allowed=False, reason=f"Hook {hook.name} 超时", code="HOOK_TIMEOUT")
         except Exception as exc:
@@ -123,11 +124,11 @@ class HookRunner:
                 code="HOOK_EXECUTION_FAILED",
             )
 
-    def _run_single_event(self, hook: EventHook, event: DomainEvent) -> None:
+    async def _run_single_event(self, hook: EventHook, event: DomainEvent) -> None:
         start = time.monotonic()
         try:
-            asyncio.run(
-                asyncio.wait_for(hook.handle(event), timeout=self._timeout_s)
+            await asyncio.wait_for(
+                hook.handle(event), timeout=self._timeout_s
             )
             duration_ms = (time.monotonic() - start) * 1000
             self._audit(
@@ -163,7 +164,7 @@ class HookRunner:
         with self._uow_factory() as uow:
             uow.hook_executions.add(
                 HookExecution(
-                    execution_id=f"HE-{uuid.uuid4().hex.upper()}",
+                    execution_id=new_id(),
                     event_id=event_id,
                     project_id=project_id,
                     hook_name=hook_name,
