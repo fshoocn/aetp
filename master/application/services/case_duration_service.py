@@ -21,6 +21,7 @@ class DurationUpdate:
     average_duration_s: float | None = None
     duration_samples: int = 0
     deviation_percent: float | None = None
+    anomaly_event: DomainEvent | None = None
 
 
 class CaseDurationStatsService:
@@ -162,15 +163,14 @@ class CaseDurationStatsService:
             "threshold_percent": self._anomaly_percent,
             "reason": reason,
         }
-        uow.domain_events.add(
-            DomainEvent(
-                event_id=uuid.uuid4().hex,
-                project_id=project_id,
-                event_type="case.duration_anomaly",
-                aggregate_id=case.case_id or case.stable_key,
-                payload=payload,
-            )
+        event = DomainEvent(
+            event_id=uuid.uuid4().hex,
+            project_id=project_id,
+            event_type="case.duration_anomaly",
+            aggregate_id=case.case_id or case.stable_key,
+            payload=payload,
         )
+        uow.domain_events.add(event)
         logger.warning(
             "case 耗时异常，样本已丢弃: run_id=%s case_key=%s duration_s=%s "
             "average_s=%s deviation_percent=%s threshold_percent=%s",
@@ -187,4 +187,5 @@ class CaseDurationStatsService:
             average_duration_s=case.avg_duration_s,
             duration_samples=case.duration_samples,
             deviation_percent=deviation_percent,
+            anomaly_event=event,
         )

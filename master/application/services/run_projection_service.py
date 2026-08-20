@@ -90,6 +90,7 @@ class ProjectionResult:
     run_id: str = ""
     project_id: str = ""
     payload: dict | None = None
+    anomaly_events: list | None = None
 
 
 class RunProjectionService:
@@ -336,7 +337,7 @@ class RunProjectionService:
             self._finalize_shard_and_release_devices(
                 uow, payload.shard_id, node_id, payload.status, attempt.device_ids
             )
-            self._persist_case_results(
+            anomaly_events = self._persist_case_results(
                 uow, run, payload.shard_id, payload.attempt_no,
                 payload.case_results,
             )
@@ -348,6 +349,7 @@ class RunProjectionService:
                 run_id=run.run_id,
                 project_id=run.project_id,
                 payload=payload.model_dump(mode="json"),
+                anomaly_events=anomaly_events or None,
             )
 
     def _finalize_attempt(
@@ -407,8 +409,13 @@ class RunProjectionService:
 
     def _persist_case_results(
         self, uow, run, shard_id: str, attempt_no: int, case_results: list
-    ) -> None:
-        """落库结构化 case 结果（D-19：按 attempt 全量保留，不覆盖）。"""
+    ) -> list:
+        """落库结构化 case 结果（D-19：按 attempt 全量保留，不覆盖）。
+
+        Returns:
+            异常耗时事件列表（已持久化，待调用方广播）
+        """
+        anomaly_events = []
         for item in case_results or []:
             case_key = item.case_key if isinstance(item, CaseResultEntry) else item.get("case_key")
             if not case_key:
@@ -450,7 +457,7 @@ class RunProjectionService:
             if status is CaseStatus.PASSED:
                 script_id = str((run.script_ref or {}).get("script_id", ""))
                 if script_id:
-                    self._duration_stats.record_success(
+                    update = self._duration_stats.record_success(
                         uow,
                         script_id=script_id,
                         project_id=run.project_id,
@@ -460,6 +467,9 @@ class RunProjectionService:
                         case_key=case_key,
                         duration_ms=duration_ms,
                     )
+                    if update.anomaly_event is not None:
+                        anomaly_events.append(update.anomaly_event)
+        return anomaly_events
 
     def _project_run_result(
         self, uow, run, node_id: str, payload: RunResultPayload

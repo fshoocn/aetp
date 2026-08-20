@@ -143,6 +143,15 @@ class MasterMessageRouter:
             # Run 事件需要 publish SSE（结果类型为 ProjectionResult）
             if isinstance(result, ProjectionResult) and result.handled:
                 await self._publish(result)
+                # P8.6：广播业务异常事件（通知失败不回滚业务状态）
+                for event in (result.anomaly_events or []):
+                    try:
+                        await self._event_publisher.broadcast(event)
+                    except Exception:
+                        logger.exception(
+                            "业务异常事件广播失败（不阻塞主流程）: event=%s",
+                            event.event_type,
+                        )
             elif isinstance(result, ScriptVerificationResult):
                 await self._event_publisher.broadcast(result.event)
             return True
