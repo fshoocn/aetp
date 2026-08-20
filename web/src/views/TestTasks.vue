@@ -463,7 +463,7 @@ async function trigger(row: TestTask) {
 // ---- 删除 ----
 const removeMutation = useMutation({
   mutationFn: (taskId: string) => aetpApi.testTasks.remove(projectId.value, taskId),
-  onSuccess: () => { ElMessage.success("任务定义已删除（停用）"); refresh(); },
+  onSuccess: () => { ElMessage.success("任务定义已删除"); refresh(); },
   onError: (e: Error) => ElMessage.error(e.message),
 });
 const toggleMutation = useMutation({

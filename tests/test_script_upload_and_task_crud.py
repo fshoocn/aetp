@@ -25,6 +25,10 @@ from master.domain.models import (
 from master.domain.time import utcnow
 
 
+def _uow(container):
+    return container.uow_factory()()
+
+
 class _UploadPlugin:
     """测试插件：verify 通过，parse 产出 3 个用例。"""
 
@@ -289,8 +293,8 @@ def test_script_delete_rejects_task_definition_reference(client):
     assert "任务定义引用" in deleted.json()["detail"]
 
 
-def test_script_deletable_after_task_hard_deleted(client):
-    """二次删除无 Run 历史的已停用任务后，脚本可以正常删除。"""
+def test_script_deletable_after_task_deleted(client):
+    """删除无 Run 历史的任务定义后，脚本可以正常删除。"""
     container = client.app.state.container
     _register_plugin(container)
     headers = _create_admin(client)
@@ -312,21 +316,65 @@ def test_script_deletable_after_task_hard_deleted(client):
     assert task.status_code == 201
     task_id = task.json()["task_id"]
 
-    # 第一次删除 → 软删除（停用）
+    # 删除无 Run 历史的任务 → 硬删除
     r1 = client.delete(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
     assert r1.status_code == 204
-
-    # 第二次删除 → 硬删除（已停用 + 无 Run 历史）
-    r2 = client.delete(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
-    assert r2.status_code == 204
 
     # 脚本现在可以删除（无引用）
     r3 = client.delete(f"/api/v1/projects/{project_id}/scripts/{script_id}", headers=headers)
     assert r3.status_code == 204
 
 
+def test_task_deletable_with_run_history(client):
+    """有 Run 历史的任务定义也可删除，历史 Run 保留（task 引用置空）。"""
+    from master.domain.models import TaskRun
+
+    container = client.app.state.container
+    _register_plugin(container)
+    headers = _create_admin(client)
+    project_id = _create_project(client, headers, key="TASK_DEL_WITH_RUNS")
+
+    resp = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=headers,
+        data={"task_type": "upload_test", "name": "with-runs", "config": "{}"},
+        files={"file": ("with_runs.py", b"def test_w():\n    pass\n", "text/x-python")},
+    )
+    assert resp.status_code == 201
+    script_id = resp.json()["script_id"]
+    task = client.post(
+        f"/api/v1/projects/{project_id}/test-tasks",
+        headers=headers,
+        json={"name": "has-runs", "script_id": script_id},
+    )
+    assert task.status_code == 201
+    task_id = task.json()["task_id"]
+
+    # 直接造一个历史 Run
+    with _uow(container) as uow:
+        run = uow.task_runs.add(
+            TaskRun(
+                run_id="R-DEL-TEST",
+                project_id=project_id,
+                task_id=task_id,
+                script_ref={"script_id": script_id, "version": 1, "sha256": "x"},
+            )
+        )
+        assert run.id is not None
+
+    # 删除任务 → 硬删除，历史 Run 保留
+    r = client.delete(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
+    assert r.status_code == 204
+
+    # Run 仍存在，但 task 引用已置空
+    with _uow(container) as uow:
+        run = uow.task_runs.get_by_run_id("R-DEL-TEST")
+        assert run is not None
+        assert run.task_id == ""
+
+
 def test_task_definition_crud_and_case_selection(client):
-    """任务定义 CRUD：创建（case 勾选校验）→ 查询 → 更新 → 软删除。"""
+    """任务定义 CRUD：创建（case 勾选校验）→ 查询 → 更新 → 删除。"""
     container = client.app.state.container
     _register_plugin(container)
     headers = _create_admin(client)
@@ -433,7 +481,7 @@ def test_task_definition_crud_and_case_selection(client):
     )
     assert resp.status_code == 403
 
-    # 软删除
+    # 删除（无 Run 历史 → 硬删除）
     resp = client.delete(
         f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers
     )
@@ -441,16 +489,13 @@ def test_task_definition_crud_and_case_selection(client):
     resp = client.get(
         f"/api/v1/projects/{project_id}/test-tasks", headers=headers
     )
-    assert all(t["task_id"] != task_id or t["enabled"] is False for t in resp.json())
+    assert all(t["task_id"] != task_id for t in resp.json())
 
-    # 软删除后可以恢复启用
-    resp = client.patch(
-        f"/api/v1/projects/{project_id}/test-tasks/{task_id}",
-        headers=headers,
-        json={"enabled": True},
+    # 再次删除 → 404（已不存在）
+    resp = client.delete(
+        f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers
     )
-    assert resp.status_code == 200
-    assert resp.json()["enabled"] is True
+    assert resp.status_code == 404
 
 
 def test_task_definition_returns_node_capability_warning(client):
