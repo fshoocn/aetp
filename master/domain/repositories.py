@@ -33,6 +33,7 @@ from master.domain.models import (
     RunResult,
     RunShard,
     ScriptCase,
+    SecretValueRecord,
     ShardAttempt,
     Task,
     TaskLog,
@@ -41,18 +42,18 @@ from master.domain.models import (
     TestTask,
     User,
 )
-from master.domain.models.notification import (
-    EventDelivery,
-    EventSubscription,
-    NotificationEndpoint,
-)
-from master.domain.models.task_schedule import TaskSchedule
 from master.domain.models.ci_integration import (
     CiTriggerBinding,
     CiWebhookDelivery,
     ProjectIntegration,
 )
 from master.domain.models.hook_execution import HookExecution
+from master.domain.models.notification import (
+    EventDelivery,
+    EventSubscription,
+    NotificationEndpoint,
+)
+from master.domain.models.task_schedule import TaskSchedule
 
 
 class UserRepository(ABC):
@@ -289,7 +290,6 @@ class RunCaseResultRepository(ABC):
 
 class RunArtifactRepository(ABC):
     """结束产物仓储（P3.4，run_artifacts 表）。"""
-
     @abstractmethod
     def add(self, artifact: RunArtifact) -> RunArtifact: ...
 
@@ -593,6 +593,7 @@ class UnitOfWork(ABC):
     refresh_tokens: RefreshTokenRepository
     test_scripts: TestScriptRepository
     script_cases: ScriptCaseRepository
+    secret_values: SecretValueRepository
     test_tasks: TestTaskRepository
     task_runs: TaskRunRepository
     run_shards: RunShardRepository
@@ -613,20 +614,33 @@ class UnitOfWork(ABC):
     bindings: ProjectNodeBindingRepository
     tasks: TaskRepository
     task_logs: TaskLogRepository
-    notification_endpoints: "NotificationEndpointRepository"
-    event_subscriptions: "EventSubscriptionRepository"
-    event_deliveries: "EventDeliveryRepository"
-    task_schedules: "TaskScheduleRepository"
-    project_integrations: "ProjectIntegrationRepository"
-    ci_trigger_bindings: "CiTriggerBindingRepository"
-    ci_webhook_deliveries: "CiWebhookDeliveryRepository"
-    hook_executions: "HookExecutionRepository"
+    notification_endpoints: NotificationEndpointRepository
+    event_subscriptions: EventSubscriptionRepository
+    event_deliveries: EventDeliveryRepository
+    task_schedules: TaskScheduleRepository
+    project_integrations: ProjectIntegrationRepository
+    ci_trigger_bindings: CiTriggerBindingRepository
+    ci_webhook_deliveries: CiWebhookDeliveryRepository
+    hook_executions: HookExecutionRepository
 
     @abstractmethod
-    def __enter__(self) -> "UnitOfWork": ...
+    def __enter__(self) -> UnitOfWork: ...
 
     @abstractmethod
     def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+
+class SecretValueRepository(ABC):
+    """加密密钥仓储（§12.2：密文落库，业务层只持有 secret_ref）。"""
+
+    @abstractmethod
+    def get(self, secret_ref: str) -> SecretValueRecord | None: ...
+
+    @abstractmethod
+    def upsert(self, secret_ref: str, cipher_text: str) -> SecretValueRecord: ...
+
+    @abstractmethod
+    def delete(self, secret_ref: str) -> None: ...
 
 
 class NotificationEndpointRepository(ABC):
@@ -774,6 +788,11 @@ class CiWebhookDeliveryRepository(ABC):
     def get_by_integration_delivery(
         self, integration_id: str, delivery_id: str
     ) -> CiWebhookDelivery | None: ...
+
+    @abstractmethod
+    def list_by_integration(
+        self, integration_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[CiWebhookDelivery]: ...
 
     @abstractmethod
     def add(self, delivery: CiWebhookDelivery) -> CiWebhookDelivery: ...

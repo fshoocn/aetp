@@ -16,6 +16,8 @@ class ProjectIntegration:
     provider: str = ""
     name: str = ""
     secret_hash: str | None = None
+    # sym:secret_ref 原始 secret 的密钥引用（加密存 secret_values，§12.2）
+    secret_ref: str | None = None
     config_json: dict = field(default_factory=dict)
     enabled: bool = True
     created_by: int | None = None

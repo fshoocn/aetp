@@ -11,7 +11,6 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, status
 
 from master.api.v1.dependencies import CiIntegrationServiceDep
-from master.domain.time import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +46,7 @@ async def handle_webhook(
         payload_json = {}
 
     try:
-        result = service.handle_webhook(
+        result = await service.handle_webhook(
             integration_id,
             delivery_id=delivery_id,
             signature=signature,

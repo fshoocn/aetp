@@ -139,3 +139,136 @@ def test_binding_crud(client):
     )
     # 任务不存在时应失败
     assert resp.status_code == 422
+
+
+def test_webhook_signature_verification(client):
+    """webhook 签名：正确 HMAC-SHA256（原始 secret）通过，错误签名 403。"""
+    import hashlib
+    import hmac
+
+    headers = _create_admin(client, "ci-admin4")
+    project_id = _create_project(client, headers, "CI-SIGN")
+
+    secret = "webhook-secret-123"
+    integration = client.post(
+        f"/api/v1/projects/{project_id}/integrations",
+        headers=headers,
+        json={"provider": "github", "name": "sign-test", "secret_value": secret},
+    ).json()
+    integration_id = integration["integration_id"]
+    assert integration["has_secret"] is True
+
+    body = b'{"event": "push"}'
+    # 正确的 GitHub 风格签名：sha256=<HMAC-SHA256(secret, body)>
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+    # 正确签名：无绑定，返回 accepted（未触发任何 Run）
+    resp = client.post(
+        f"/api/v1/integrations/{integration_id}/webhook",
+        headers={
+            "X-AETP-Delivery-Id": "delivery-1",
+            "X-AETP-Signature": f"sha256={digest}",
+            "Content-Type": "application/json",
+        },
+        content=body,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "accepted"
+
+    # 错误签名：403 拒绝
+    resp = client.post(
+        f"/api/v1/integrations/{integration_id}/webhook",
+        headers={
+            "X-AETP-Delivery-Id": "delivery-2",
+            "X-AETP-Signature": "sha256=deadbeef",
+            "Content-Type": "application/json",
+        },
+        content=body,
+    )
+    assert resp.status_code == 403
+
+    # 无签名：403 拒绝（配置了 secret 时必须签名）
+    resp = client.post(
+        f"/api/v1/integrations/{integration_id}/webhook",
+        headers={
+            "X-AETP-Delivery-Id": "delivery-3",
+            "Content-Type": "application/json",
+        },
+        content=body,
+    )
+    assert resp.status_code == 403
+
+
+def test_webhook_delivery_deduplicates(client):
+    """相同 delivery_id 重复投递不重复触发（幂等返回）。"""
+    import hashlib
+    import hmac
+
+    headers = _create_admin(client, "ci-admin5")
+    project_id = _create_project(client, headers, "CI-DUP")
+
+    secret = "webhook-secret-456"
+    integration = client.post(
+        f"/api/v1/projects/{project_id}/integrations",
+        headers=headers,
+        json={"provider": "github", "name": "dup-test", "secret_value": secret},
+    ).json()
+    integration_id = integration["integration_id"]
+
+    body = b'{"event": "push"}'
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    webhook_headers = {
+        "X-AETP-Delivery-Id": "delivery-dup",
+        "X-AETP-Signature": f"sha256={digest}",
+        "Content-Type": "application/json",
+    }
+
+    resp1 = client.post(
+        f"/api/v1/integrations/{integration_id}/webhook",
+        headers=webhook_headers,
+        content=body,
+    )
+    assert resp1.status_code == 200
+
+    # 重复投递：幂等返回 already_processed
+    resp2 = client.post(
+        f"/api/v1/integrations/{integration_id}/webhook",
+        headers=webhook_headers,
+        content=body,
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["status"] == "already_processed"
+
+
+def test_webhook_list_deliveries(client):
+    """投递记录可查询（list_by_integration，非枚举猜 ID）。"""
+    import hashlib
+    import hmac
+
+    headers = _create_admin(client, "ci-admin6")
+    project_id = _create_project(client, headers, "CI-LIST")
+
+    secret = "webhook-secret-789"
+    integration = client.post(
+        f"/api/v1/projects/{project_id}/integrations",
+        headers=headers,
+        json={"provider": "github", "name": "list-test", "secret_value": secret},
+    ).json()
+    integration_id = integration["integration_id"]
+
+    body = b'{"event": "push"}'
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    client.post(
+        f"/api/v1/integrations/{integration_id}/webhook",
+        headers={
+            "X-AETP-Delivery-Id": "delivery-list",
+            "X-AETP-Signature": f"sha256={digest}",
+            "Content-Type": "application/json",
+        },
+        content=body,
+    )
+
+    svc = client.app.state.container.ci_integration_service()
+    deliveries = svc.list_deliveries(integration_id)
+    assert len(deliveries) == 1
+    assert deliveries[0].delivery_id == "delivery-list"

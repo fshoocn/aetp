@@ -18,7 +18,6 @@ from master.adapters.sqlalchemy.repositories import (
     AuditLogRepositoryImpl,
     CiTriggerBindingRepositoryImpl,
     CiWebhookDeliveryRepositoryImpl,
-    ProjectIntegrationRepositoryImpl,
     DeviceRepositoryImpl,
     DomainEventRepositoryImpl,
     EventDeliveryRepositoryImpl,
@@ -29,6 +28,7 @@ from master.adapters.sqlalchemy.repositories import (
     NodeSessionRepositoryImpl,
     NotificationEndpointRepositoryImpl,
     OutboxMessageRepositoryImpl,
+    ProjectIntegrationRepositoryImpl,
     ProjectMemberRepositoryImpl,
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
@@ -39,6 +39,7 @@ from master.adapters.sqlalchemy.repositories import (
     RunResultRepositoryImpl,
     RunShardRepositoryImpl,
     ScriptCaseRepositoryImpl,
+    SecretValueRepositoryImpl,
     ShardAttemptRepositoryImpl,
     TaskLogRepositoryImpl,
     TaskRepositoryImpl,
@@ -63,6 +64,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.refresh_tokens = RefreshTokenRepositoryImpl(session)
         self.test_scripts = TestScriptRepositoryImpl(session)
         self.script_cases = ScriptCaseRepositoryImpl(session)
+        self.secret_values = SecretValueRepositoryImpl(session)
         self.test_tasks = TestTaskRepositoryImpl(session)
         self.task_runs = TaskRunRepositoryImpl(session)
         self.run_shards = RunShardRepositoryImpl(session)

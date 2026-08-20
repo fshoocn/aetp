@@ -23,6 +23,7 @@ class ProjectIntegration(Base, TimestampMixin):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     secret_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    secret_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
     config_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by: Mapped[int] = mapped_column(

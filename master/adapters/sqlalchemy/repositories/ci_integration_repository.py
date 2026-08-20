@@ -5,10 +5,10 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
-from master.adapters.sqlalchemy.orm import Project as ProjectORM
-from master.adapters.sqlalchemy.orm import ProjectIntegration as IntegrationORM
 from master.adapters.sqlalchemy.orm import CiTriggerBinding as BindingORM
 from master.adapters.sqlalchemy.orm import CiWebhookDelivery as DeliveryORM
+from master.adapters.sqlalchemy.orm import Project as ProjectORM
+from master.adapters.sqlalchemy.orm import ProjectIntegration as IntegrationORM
 from master.adapters.sqlalchemy.orm import TestTask as TaskORM
 from master.domain.models.ci_integration import (
     CiTriggerBinding,
@@ -30,6 +30,7 @@ def _integration_to_domain(orm: IntegrationORM) -> ProjectIntegration:
         provider=orm.provider,
         name=orm.name,
         secret_hash=orm.secret_hash,
+        secret_ref=orm.secret_ref,
         config_json=dict(orm.config_json or {}),
         enabled=orm.enabled,
         created_by=orm.created_by,
@@ -109,6 +110,7 @@ class ProjectIntegrationRepositoryImpl(ProjectIntegrationRepository):
             provider=integration.provider,
             name=integration.name,
             secret_hash=integration.secret_hash,
+            secret_ref=integration.secret_ref,
             config_json=integration.config_json,
             enabled=integration.enabled,
             created_by=integration.created_by or 0,
@@ -125,6 +127,7 @@ class ProjectIntegrationRepositoryImpl(ProjectIntegrationRepository):
         orm.provider = integration.provider
         orm.name = integration.name
         orm.secret_hash = integration.secret_hash
+        orm.secret_ref = integration.secret_ref
         orm.config_json = integration.config_json
         orm.enabled = integration.enabled
         self._s.flush()
@@ -235,6 +238,27 @@ class CiWebhookDeliveryRepositoryImpl(CiWebhookDeliveryRepository):
             )
         ).scalars().one_or_none()
         return _delivery_to_domain(orm) if orm is not None else None
+
+    def list_by_integration(
+        self, integration_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[CiWebhookDelivery]:
+        stmt = (
+            select(DeliveryORM)
+            .options(joinedload(DeliveryORM.integration))
+            .where(
+                DeliveryORM.integration_pk
+                == select(IntegrationORM.id)
+                .where(IntegrationORM.integration_id == integration_id)
+                .scalar_subquery()
+            )
+            .order_by(DeliveryORM.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return [
+            _delivery_to_domain(o)
+            for o in self._s.execute(stmt).scalars().all()
+        ]
 
     def add(self, delivery: CiWebhookDelivery) -> CiWebhookDelivery:
         integration_pk = self._s.execute(

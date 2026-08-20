@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from .audit_log import AuditLog
 from .base import (
-    JSONType,
     NAMING_CONVENTION,
-    UTCDateTime,
     Base,
+    JSONType,
     TimestampMixin,
+    UTCDateTime,
     utcnow,
 )
 from .ci_trigger_binding import CiTriggerBinding
@@ -27,9 +27,9 @@ from .node_session import NodeSession
 from .notification_endpoint import NotificationEndpoint
 from .outbox_message import OutboxMessage
 from .project import Project
+from .project_integration import ProjectIntegration
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
-from .project_integration import ProjectIntegration
 from .refresh_token import RefreshToken
 from .run_artifact import RunArtifact
 from .run_case_result import RunCaseResult
@@ -37,6 +37,7 @@ from .run_log import RunLog
 from .run_result import RunResult
 from .run_shard import RunShard
 from .script_case import ScriptCase
+from .secret_value import SecretValue
 from .shard_attempt import ShardAttempt
 from .task import Task
 from .task_log import TaskLog
@@ -47,42 +48,42 @@ from .test_task import TestTask
 from .user import User
 
 __all__ = [
-    "Base",
-    "TimestampMixin",
     "NAMING_CONVENTION",
-    "UTCDateTime",
-    "JSONType",
-    "utcnow",
-    "User",
     "AuditLog",
-    "DomainEvent",
+    "Base",
     "CiTriggerBinding",
     "CiWebhookDelivery",
+    "Device",
+    "DomainEvent",
     "EventDelivery",
     "EventSubscription",
+    "HookExecution",
     "InboxMessage",
-    "NotificationEndpoint",
-    "OutboxMessage",
-    "Device",
+    "JSONType",
     "Node",
     "NodeSession",
+    "NotificationEndpoint",
+    "OutboxMessage",
     "Project",
     "ProjectIntegration",
     "ProjectMember",
     "ProjectNodeBinding",
     "RefreshToken",
-    "ScriptCase",
-    "TestScript",
-    "TestTask",
-    "TaskRun",
-    "RunShard",
-    "ShardAttempt",
-    "RunCaseResult",
     "RunArtifact",
-    "RunResult",
+    "RunCaseResult",
     "RunLog",
+    "RunResult",
+    "RunShard",
+    "ScriptCase",
+    "ShardAttempt",
     "Task",
     "TaskLog",
+    "TaskRun",
     "TaskSchedule",
-    "HookExecution",
+    "TestScript",
+    "TestTask",
+    "TimestampMixin",
+    "UTCDateTime",
+    "User",
+    "utcnow",
 ]

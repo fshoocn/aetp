@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 from aetp_protocol.capabilities import NodeCapabilities
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from master.domain.enums import (
     AccountStatus,
@@ -141,9 +140,9 @@ class RunOut(BaseModel):
 class RunDetailOut(RunOut):
     """Run 详情（含汇总结果、分片与 case×attempt 结果矩阵，P7.5）。"""
 
-    shards: list["ShardOut"] = Field(default_factory=list)
+    shards: list[ShardOut] = Field(default_factory=list)
     result: dict | None = None
-    case_results: list["RunCaseResultOut"] = Field(default_factory=list)
+    case_results: list[RunCaseResultOut] = Field(default_factory=list)
 
 
 class RunCaseResultOut(BaseModel):
@@ -677,10 +676,10 @@ class IntegrationOut(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _compute_has_secret(cls, data: object) -> object:
-        if hasattr(data, "secret_hash"):
-            object.__setattr__(data, "has_secret", bool(data.secret_hash))  # type: ignore[attr-defined]
+        if hasattr(data, "secret_ref"):
+            object.__setattr__(data, "has_secret", bool(data.secret_ref))  # type: ignore[attr-defined]
         elif isinstance(data, dict) and "has_secret" not in data:
-            data["has_secret"] = bool(data.get("secret_hash"))
+            data["has_secret"] = bool(data.get("secret_ref"))
         return data
 
 
