@@ -54,6 +54,8 @@ from master.application.services.notification_service import NotificationService
 from master.application.services.schedule_service import ScheduleService
 from master.application.services.ci_integration_service import CiIntegrationService
 from master.application.services.hook_runner import HookRunner, HookRegistry
+from master.application.services.notification_dispatcher import NotificationDispatcher
+from master.adapters.notifications.senders import build_default_registry
 from master.adapters.mqtt.transport import MqttTransport
 from master.workers.outbox_worker import OutboxWorker
 from master.plugins.registry import create_default_registry
@@ -115,11 +117,22 @@ class Container(containers.DeclarativeContainer):
 
     # SSE 事件总线：进程级单例
     event_bus = providers.Singleton(EventBus)
-    # P7.1：领域事件先持久化，再广播到项目范围 SSE
+
+    # P8.5：通知 Sender Adapters 注册中心 + 分发器（必须在 event_publisher 之前）
+    sender_registry = providers.Singleton(build_default_registry)
+    notification_dispatcher = providers.Factory(
+        NotificationDispatcher,
+        uow_factory=uow_factory,
+        registry=sender_registry,
+        get_secret=providers.Object(lambda _: None),
+    )
+
+    # P7.1：领域事件先持久化，再广播到项目范围 SSE；P8.5：分发通知
     event_publisher = providers.Singleton(
         EventPublisher,
         uow_factory=uow_factory,
         event_bus=event_bus,
+        notification_dispatcher=notification_dispatcher,
     )
 
     # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据

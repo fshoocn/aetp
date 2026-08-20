@@ -1,14 +1,18 @@
-"""持久化领域事件并广播到进程内 SSE 总线（P7.1）。"""
+"""持久化领域事件并广播到进程内 SSE 总线（P7.1），同时分发通知（P8.5）。"""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from master.adapters.sse.event_bus import EventBus
+from master.application.services.notification_dispatcher import NotificationDispatcher
 from master.domain.models import DomainEvent
 from master.domain.repositories import UnitOfWork
+
+logger = logging.getLogger(__name__)
 
 
 class EventPublisher:
@@ -22,9 +26,12 @@ class EventPublisher:
         self,
         uow_factory: Callable[[], UnitOfWork],
         event_bus: EventBus,
+        *,
+        notification_dispatcher: NotificationDispatcher | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._event_bus = event_bus
+        self._dispatcher: NotificationDispatcher | None = notification_dispatcher
 
     async def publish(
         self,
@@ -56,6 +63,7 @@ class EventPublisher:
             persisted = uow.domain_events.add(event)
 
         await self.broadcast(persisted)
+        await self._dispatch_to_notifications(persisted)
         return persisted
 
     async def broadcast(self, event: DomainEvent) -> None:
@@ -68,6 +76,16 @@ class EventPublisher:
             project_id=event.project_id,
             occurred_at=event.occurred_at,
         )
+
+
+    async def _dispatch_to_notifications(self, event: DomainEvent) -> None:
+        """将事件分发给通知 dispatcher（失败不阻塞主流程）。"""
+        if self._dispatcher is None:
+            return
+        try:
+            await self._dispatcher.dispatch(event)
+        except Exception:
+            logger.exception("通知分发失败: event=%s", event.event_type)
 
 
 def _string_value(payload: Mapping[str, Any], key: str) -> str | None:
