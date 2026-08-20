@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from master.adapters.mqtt.transport import MqttTransport
 from common.backoff import ExponentialBackoff
 from common.transport import MqttMessage, Transport
+from master.adapters.mqtt.transport import MqttTransport
 from master.config import MasterSettings
 
 _SETTINGS = MasterSettings(
@@ -113,7 +113,7 @@ def _fake_aiomqtt(fail_first_connect: bool = False):
     """构造 fake aiomqtt 模块：Client 可选首次连接失败。"""
     class FakeClient:
         _counter = 0
-        instances: list["FakeClient"] = []
+        instances: list[FakeClient] = []
 
         def __init__(self, **kwargs):
             FakeClient._counter += 1
@@ -189,15 +189,18 @@ def test_mqtt_transport_connect_subscribe_publish():
 
 
 def test_mqtt_transport_uses_persistent_session():
-    """Master 使用持久会话：clean_start=False，离线消息由 broker 缓存补发。
+    """Master 使用持久会话：clean_session=False，离线消息由 broker 缓存补发。
 
     Master 是唯一订阅 events 主题的客户端，进程重启后首次连接不清空会话，
     broker 会在 Master 离线期间缓存 Agent 上报的 QoS 1 事件（result/log/
     register），Master 重新上线后补发，避免执行结果丢失（§9.7 规则 5）。
+
+    注意：MQTT 3.1.1 下持久会话用 ``clean_session=False``；``clean_start``
+    仅对 MQTT v5 有效，3.1.1 下会抛 "Clean start only applies to MQTT V5"。
     """
     transport = MqttTransport(_SETTINGS)
     kwargs = transport._client_kwargs()
-    assert kwargs["clean_start"] is False
+    assert kwargs["clean_session"] is False
     # 固定 client_id 是持久会话生效的前提
     assert kwargs["identifier"] == "test-master"
 

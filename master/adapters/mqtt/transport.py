@@ -101,9 +101,14 @@ class MqttTransport(Transport):
     def _client_kwargs(self) -> dict[str, Any]:
         """构造 aiomqtt.Client 参数（含 TLS）。
 
-        ``clean_start=False``：Master 使用持久会话。进程重启后首次连接不清
-        空会话，broker 会在 Master 离线期间缓存 Agent 上报的 QoS 1 事件
-        （result/log/register 等），Master 重新上线后补发，避免执行结果丢失。
+        ``clean_session=False``：Master 使用持久会话（MQTT 3.1.1）。进程重启后
+        首次连接不清空会话，broker 会在 Master 离线期间缓存 Agent 上报的
+        QoS 1 事件（result/log/register 等），Master 重新上线后补发，避免执行
+        结果丢失。
+
+        注意：``clean_start`` 参数仅对 MQTT v5 协议有效（且为 CleanStartOption
+        枚举），在默认 MQTT 3.1.1 下会抛 "Clean start only applies to MQTT V5"
+        导致连接失败；持久会话必须用 ``clean_session=False``。
         """
         s = self._settings
         kwargs: dict[str, Any] = {
@@ -114,7 +119,7 @@ class MqttTransport(Transport):
             "identifier": s.mqtt_client_id,
             "keepalive": 30,
             # 持久会话：离线消息由 broker 缓存，重连后补发（§9.7 规则 5）
-            "clean_start": False,
+            "clean_session": False,
         }
         if s.mqtt_username:
             kwargs["username"] = s.mqtt_username
