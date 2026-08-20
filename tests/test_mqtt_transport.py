@@ -73,6 +73,9 @@ class FakeTransport:
     def on_message(self, handler):
         self.handler = handler
 
+    def on_connection_change(self, handler):
+        self.connection_handler = handler
+
     async def connect(self):
         self.connected = True
 
@@ -183,6 +186,20 @@ def test_mqtt_transport_connect_subscribe_publish():
     assert client.kwargs["hostname"] == "broker.test"
     assert client.kwargs["port"] == 1883
     assert client.kwargs["identifier"] == "test-master"
+
+
+def test_mqtt_transport_uses_persistent_session():
+    """Master 使用持久会话：clean_start=False，离线消息由 broker 缓存补发。
+
+    Master 是唯一订阅 events 主题的客户端，进程重启后首次连接不清空会话，
+    broker 会在 Master 离线期间缓存 Agent 上报的 QoS 1 事件（result/log/
+    register），Master 重新上线后补发，避免执行结果丢失（§9.7 规则 5）。
+    """
+    transport = MqttTransport(_SETTINGS)
+    kwargs = transport._client_kwargs()
+    assert kwargs["clean_start"] is False
+    # 固定 client_id 是持久会话生效的前提
+    assert kwargs["identifier"] == "test-master"
 
 
 def test_mqtt_transport_publish_when_disconnected_raises():

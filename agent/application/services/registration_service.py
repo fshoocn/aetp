@@ -164,6 +164,10 @@ class RegistrationService:
 
     def enqueue_register(self) -> str:
         """构造并写入 node.register Outbox（QoS 1），返回 outbox_id。"""
+        # 重发前清理上一次的等待状态，避免残留 ACK 事件/错误
+        self._register_ack_event.clear()
+        self._registration_error = None
+        self._registered = False
         envelope = self._build_register_envelope()
         self._pending_register_message_id = envelope.message_id
         topic = event_topic(self._settings.node_id, "register")

@@ -188,22 +188,47 @@ class AgentRuntime:
             self._cancel_registration_waiter()
 
     async def _wait_for_registration(self) -> None:
-        """等待 ACK；超时/拒绝后主动断开，交给 Transport 重连。"""
-        try:
-            await self._registration.wait_for_register_ack()
-            await self._registration.start_heartbeat()
-        except asyncio.CancelledError:
-            raise
-        except (RegistrationTimeoutError, RegistrationRejectedError) as exc:
-            logger.warning("Agent 注册失败，将触发重连: %s", exc)
-            await self._transport.disconnect()
-            if not self._stop_event.is_set():
-                await self._transport.connect()
-        except Exception:  # noqa: BLE001 - 生命周期失败统一交给重连
-            logger.exception("Agent 注册等待异常")
-            await self._transport.disconnect()
-            if not self._stop_event.is_set():
-                await self._transport.connect()
+        """等待 ACK；超时后按指数退避重发注册（保持 broker 连接）。
+
+        关键：register-ack 超时通常意味着 Master 不在线或尚未订阅，
+        而 Agent 与 broker 的连接是健康的。此时不应断开 broker 连接
+        再重连，而应保持连接、按退避间隔重发注册消息并继续等待 ACK，
+        避免 Master 长时间离线时以固定频率高频重发（惊群/浪费带宽）。
+        """
+        registration_backoff = ExponentialBackoff(
+            base_delay_s=max(1.0, float(self._settings.registration_timeout_s)),
+            max_delay_s=60.0,
+        )
+        while not self._stop_event.is_set():
+            try:
+                await self._registration.wait_for_register_ack()
+                await self._registration.start_heartbeat()
+                return
+            except asyncio.CancelledError:
+                raise
+            except RegistrationTimeoutError as exc:
+                # Master 未回 ACK：保持连接，按退避重发注册，继续等待
+                delay = registration_backoff.next()
+                logger.warning(
+                    "Agent 注册超时，%.1fs 后重发注册: %s", delay, exc
+                )
+                await self._sleep(delay)
+                if self._stop_event.is_set():
+                    return
+                self._registration.enqueue_register()
+            except RegistrationRejectedError as exc:
+                # 被拒绝：通常需重新连接（如 session 冲突），断开重连
+                logger.warning("Agent 注册被拒绝，将触发重连: %s", exc)
+                await self._transport.disconnect()
+                if not self._stop_event.is_set():
+                    await self._transport.connect()
+                return
+            except Exception:  # noqa: BLE001 - 生命周期失败统一交给重连
+                logger.exception("Agent 注册等待异常")
+                await self._transport.disconnect()
+                if not self._stop_event.is_set():
+                    await self._transport.connect()
+                return
 
     def _cancel_registration_waiter(self) -> None:
         """取消旧 session 的 ACK 等待任务。"""
