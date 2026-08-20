@@ -131,6 +131,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # 1. 关闭 SSE 事件总线：唤醒所有阻塞的 SSE 连接，让它们优雅退出
+    event_bus = container.event_bus()
+    await event_bus.shutdown()
+    logger.info("SSE 事件总线已关闭")
+
     mqtt_runtime = getattr(app.state, "mqtt_runtime", None)
     if mqtt_runtime is not None:
         try:

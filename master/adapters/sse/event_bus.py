@@ -59,6 +59,13 @@ class EventBus:
         async with self._lock:
             self._subscribers.pop(queue, None)
 
+    async def shutdown(self) -> None:
+        """关闭事件总线：向所有订阅者发送哨兵值以解除阻塞。"""
+        async with self._lock:
+            for queue in list(self._subscribers):
+                queue.put_nowait(None)
+            self._subscribers.clear()
+
     @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)

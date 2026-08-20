@@ -13,6 +13,7 @@
 """
 
 import argparse
+import asyncio
 import logging
 import uvicorn
 
@@ -20,6 +21,28 @@ from common.event_loop import selector_loop_factory
 from common.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
+
+
+class _GracefulServer(uvicorn.Server):
+    """重写 shutdown：在 uvicorn 等待连接关闭前，先唤醒 SSE 连接。
+
+    uvicorn 默认流程是「等连接关闭（超时强制取消）→ lifespan shutdown」，
+    导致 SSE 长连接只能被超时强制取消。这里在等待前先调用 EventBus.shutdown
+    唤醒所有 SSE 生成器，让它们自然结束（response_complete=True）。
+    """
+
+    async def shutdown(self, sockets=None) -> None:
+        # 从 app 状态中取出 EventBus，先唤醒 SSE
+        try:
+            from master.main import app
+            container = getattr(app.state, "container", None)
+            if container is not None:
+                event_bus = container.event_bus()
+                await event_bus.shutdown()
+                logger.info("SSE 事件总线已关闭（优雅关闭前）")
+        except Exception:
+            logger.debug("优雅关闭前置唤醒失败", exc_info=True)
+        await super().shutdown(sockets=sockets)
 
 
 
@@ -67,20 +90,25 @@ def main() -> None:
     logger.info("正在启动 Master API")
 
     try:
-        uvicorn.run(
+        config = uvicorn.Config(
             "master.main:app",
             host=host,
             port=port,
             reload=args.reload,
             loop="common.event_loop:selector_loop_factory",
-            # SSE 是长连接；关闭时不要无限等待浏览器连接自行断开。
-            # 到期后 uvicorn 会取消剩余连接并继续执行 lifespan shutdown，
-            # 从而释放 MQTT/数据库资源，避免 Master 卡在 Waiting for connections。
+            # SSE 是长连接；关闭时由 _GracefulServer 先唤醒 SSE 连接，
+            # 让其自然结束，避免超时强制取消。
             timeout_graceful_shutdown=5,
             # 复用 configure_logging 配置的 root 日志（统一 AETP 格式），
             # 不使用 uvicorn 自带的日志格式
             log_config=None,
         )
+        server = _GracefulServer(config=config)
+        server.run()
+    except KeyboardInterrupt:
+        # uvicorn 优雅关闭后会把捕获的信号重新抛给主线程（capture_signals
+        # 的 finally 分支），这是预期的退出路径，不是错误。
+        logger.info("Master 已停止")
     except Exception:
         logger.exception("Master API 启动失败")
         raise

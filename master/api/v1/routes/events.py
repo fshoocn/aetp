@@ -70,6 +70,9 @@ async def stream_events(
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=_KEEPALIVE_SECONDS)
+                    if event is None:
+                        # EventBus 已关闭（Master 正在退出），正常结束流
+                        break
                     if event.event_type == "server.shutdown":
                         # 生命周期关闭前由 Master 主动通知 SSE 客户端结束流，
                         # 避免 Uvicorn 只能通过取消任务强行切断长连接。
