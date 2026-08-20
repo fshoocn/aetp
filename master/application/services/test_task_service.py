@@ -291,13 +291,24 @@ class TestTaskService:
             return uow.test_tasks.list_by_project(project_id, enabled=enabled)
 
     def delete_task(self, task_id: str, project_id: str) -> None:
-        """删除任务定义（软删除：置 enabled=False）。"""
+        """删除任务定义。
+
+        - 已停用且无 Run 历史 → 硬删除（级联清理 schedule/bindings，释放脚本引用）
+        - 否则 → 软删除（置 enabled=False，禁止新 Run，保留历史可追溯性）
+        """
         with self._uow_factory() as uow:
             task = uow.test_tasks.get_by_task_id(task_id, project_id)
             if task is None:
                 raise TaskNotFoundError(f"任务定义不存在: {task_id}")
+            if not task.enabled and task.id is not None:
+                run_count = uow.test_tasks.count_runs_by_task(task.id)
+                if run_count == 0:
+                    uow.test_tasks.delete(task.id)
+                    logger.info("任务定义硬删除: task_id=%s", task_id)
+                    return
             task.enabled = False
             uow.test_tasks.update(task)
+            logger.info("任务定义停用: task_id=%s", task_id)
 
     @staticmethod
     def _normalize_case_selection(selection, cases) -> list[str]:

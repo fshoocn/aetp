@@ -102,16 +102,36 @@ class TestTaskRepositoryImpl(TestTaskRepository):
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
     def count_by_script(self, script_id: str) -> int:
+        """统计引用该脚本的**启用中**任务定义数量（已停用不计入）。"""
         return int(
             self._s.execute(
                 select(func.count(TestTaskORM.id)).where(
                     TestTaskORM.script_pk
                     == select(TestScriptORM.id)
                     .where(TestScriptORM.script_id == script_id)
-                    .scalar_subquery()
+                    .scalar_subquery(),
+                    TestTaskORM.enabled.is_(True),
                 )
             ).scalar_one()
         )
+
+    def count_runs_by_task(self, task_pk: int) -> int:
+        """统计该任务定义关联的 Run 数量。"""
+        from master.adapters.sqlalchemy.orm import TaskRun as TaskRunORM
+        return int(
+            self._s.execute(
+                select(func.count(TaskRunORM.id)).where(
+                    TaskRunORM.task_pk == task_pk
+                )
+            ).scalar_one()
+        )
+
+    def delete(self, task_pk: int) -> None:
+        """硬删除任务定义（级联清理 schedule/bindings）。"""
+        orm = self._s.get(TestTaskORM, task_pk)
+        if orm is not None:
+            self._s.delete(orm)
+            self._s.flush()
 
     def add(self, task: TestTask) -> TestTask:
         project_pk = self._s.execute(

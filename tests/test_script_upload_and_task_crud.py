@@ -260,7 +260,7 @@ def test_script_delete_removes_script_cases_and_file(client):
 
 
 def test_script_delete_rejects_task_definition_reference(client):
-    """脚本仍被任务定义引用时，删除返回 409。"""
+    """脚本仍被启用中的任务定义引用时，删除返回 409。"""
     container = client.app.state.container
     _register_plugin(container)
     headers = _create_admin(client)
@@ -287,6 +287,42 @@ def test_script_delete_rejects_task_definition_reference(client):
     )
     assert deleted.status_code == 409
     assert "任务定义引用" in deleted.json()["detail"]
+
+
+def test_script_deletable_after_task_hard_deleted(client):
+    """二次删除无 Run 历史的已停用任务后，脚本可以正常删除。"""
+    container = client.app.state.container
+    _register_plugin(container)
+    headers = _create_admin(client)
+    project_id = _create_project(client, headers, key="SCRIPT_DEL_HARD")
+
+    resp = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=headers,
+        data={"task_type": "upload_test", "name": "to-delete", "config": "{}"},
+        files={"file": ("to_delete.py", b"def test_d():\n    pass\n", "text/x-python")},
+    )
+    assert resp.status_code == 201
+    script_id = resp.json()["script_id"]
+    task = client.post(
+        f"/api/v1/projects/{project_id}/test-tasks",
+        headers=headers,
+        json={"name": "will-hard-delete", "script_id": script_id},
+    )
+    assert task.status_code == 201
+    task_id = task.json()["task_id"]
+
+    # 第一次删除 → 软删除（停用）
+    r1 = client.delete(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
+    assert r1.status_code == 204
+
+    # 第二次删除 → 硬删除（已停用 + 无 Run 历史）
+    r2 = client.delete(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
+    assert r2.status_code == 204
+
+    # 脚本现在可以删除（无引用）
+    r3 = client.delete(f"/api/v1/projects/{project_id}/scripts/{script_id}", headers=headers)
+    assert r3.status_code == 204
 
 
 def test_task_definition_crud_and_case_selection(client):

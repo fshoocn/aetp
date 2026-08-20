@@ -12,7 +12,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from master.domain.enums import DisconnectReason
+from master.domain.enums import DisconnectReason, ShardStatus
 from master.domain.models import (
     AuditLog,
     Device,
@@ -167,6 +167,12 @@ class TestTaskRepository(ABC):
     def count_by_script(self, script_id: str) -> int: ...
 
     @abstractmethod
+    def count_runs_by_task(self, task_pk: int) -> int: ...
+
+    @abstractmethod
+    def delete(self, task_pk: int) -> None: ...
+
+    @abstractmethod
     def add(self, task: TestTask) -> TestTask: ...
 
     @abstractmethod
@@ -199,6 +205,9 @@ class TaskRunRepository(ABC):
     @abstractmethod
     def update(self, run: TaskRun) -> TaskRun: ...
 
+    @abstractmethod
+    def list_non_terminal(self, limit: int = 1000) -> list[TaskRun]: ...
+
 
 class RunShardRepository(ABC):
     """Shard 仓储（P3.4，run_shards 表）。"""
@@ -217,6 +226,9 @@ class RunShardRepository(ABC):
 
     @abstractmethod
     def update(self, shard: RunShard) -> RunShard: ...
+
+    @abstractmethod
+    def list_by_status(self, *statuses: ShardStatus) -> list[RunShard]: ...
 
 
 class ShardAttemptRepository(ABC):
@@ -241,6 +253,9 @@ class ShardAttemptRepository(ABC):
 
     @abstractmethod
     def update(self, attempt: ShardAttempt) -> ShardAttempt: ...
+
+    @abstractmethod
+    def list_active_by_node(self, node_id: str) -> list[ShardAttempt]: ...
 
 
 class RunCaseResultRepository(ABC):
