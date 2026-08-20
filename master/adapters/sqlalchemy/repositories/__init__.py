@@ -10,6 +10,7 @@ from .ci_integration_repository import (
 )
 from .device_repository import DeviceRepositoryImpl
 from .domain_event_repository import DomainEventRepositoryImpl
+from .hook_execution_repository import HookExecutionRepositoryImpl
 from .event_delivery_repository import EventDeliveryRepositoryImpl
 from .event_subscription_repository import EventSubscriptionRepositoryImpl
 from .inbox_message_repository import InboxMessageRepositoryImpl
@@ -43,6 +44,7 @@ __all__ = [
     "CiWebhookDeliveryRepositoryImpl",
     "ProjectIntegrationRepositoryImpl",
     "DomainEventRepositoryImpl",
+    "HookExecutionRepositoryImpl",
     "EventDeliveryRepositoryImpl",
     "EventSubscriptionRepositoryImpl",
     "InboxMessageRepositoryImpl",

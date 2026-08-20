@@ -23,6 +23,7 @@ from master.adapters.sqlalchemy.repositories import (
     DomainEventRepositoryImpl,
     EventDeliveryRepositoryImpl,
     EventSubscriptionRepositoryImpl,
+    HookExecutionRepositoryImpl,
     InboxMessageRepositoryImpl,
     NodeRepositoryImpl,
     NodeSessionRepositoryImpl,
@@ -89,6 +90,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.project_integrations = ProjectIntegrationRepositoryImpl(session)
         self.ci_trigger_bindings = CiTriggerBindingRepositoryImpl(session)
         self.ci_webhook_deliveries = CiWebhookDeliveryRepositoryImpl(session)
+        self.hook_executions = HookExecutionRepositoryImpl(session)
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
