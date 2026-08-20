@@ -24,6 +24,7 @@ from master.api.v1.routes.notifications import (
 from master.api.v1.routes.schedules import router as schedules_router
 from master.api.v1.routes.integrations import router as integrations_router
 from master.api.v1.routes.webhook import router as webhook_router
+from master.api.v1.routes.hooks import router as hooks_router
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth_router)
@@ -46,3 +47,4 @@ router.include_router(event_deliveries_router)
 router.include_router(schedules_router)
 router.include_router(integrations_router)
 router.include_router(webhook_router)
+router.include_router(hooks_router)

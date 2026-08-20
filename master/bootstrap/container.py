@@ -53,6 +53,7 @@ from master.application.services.mqtt_runtime import MasterMqttRuntime
 from master.application.services.notification_service import NotificationService
 from master.application.services.schedule_service import ScheduleService
 from master.application.services.ci_integration_service import CiIntegrationService
+from master.application.services.hook_runner import HookRunner, HookRegistry
 from master.adapters.mqtt.transport import MqttTransport
 from master.workers.outbox_worker import OutboxWorker
 from master.plugins.registry import create_default_registry
@@ -304,6 +305,12 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         trigger_service=run_trigger_service,
         signing_secret=providers.Callable(lambda: get_settings().internal_signing_secret or get_settings().jwt_secret),
+    )
+
+    # 生命周期 Hook 框架（P8.4：准入 fail-closed、事件 fail-open、审计）
+    hook_runner = providers.Factory(
+        HookRunner,
+        uow_factory=uow_factory,
     )
 
     # 入站 Agent 事件路由（P6.4：严格 Envelope 校验后投影/在线处理）

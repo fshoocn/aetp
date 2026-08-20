@@ -711,3 +711,25 @@ class BindingOut(BaseModel):
     enabled: bool = True
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# P8.4 Hook 执行审计
+# ---------------------------------------------------------------------------
+
+
+class HookExecutionOut(BaseModel):
+    """Hook 执行审计响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    execution_id: str
+    event_id: str | None = None
+    project_id: str | None = None
+    hook_name: str
+    stage: str
+    status: str
+    duration_ms: float | None = None
+    error_message: str | None = None
+    occurred_at: datetime | None = None
+    created_at: datetime | None = None

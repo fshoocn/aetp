@@ -32,6 +32,7 @@ from master.application.services.run_cancel_service import RunCancelService
 from master.application.services.notification_service import NotificationService
 from master.application.services.schedule_service import ScheduleService
 from master.application.services.ci_integration_service import CiIntegrationService
+from master.application.services.hook_runner import HookRunner
 from master.application.services.run_projection_service import RunProjectionService
 from master.plugins.registry import PluginRegistry
 from master.plugins.manager import PluginManager
@@ -332,4 +333,16 @@ def get_ci_integration_service(
 
 CiIntegrationServiceDep = Annotated[
     CiIntegrationService, Depends(get_ci_integration_service)
+]
+
+
+def get_hook_runner(
+    container: Annotated[Container, Depends(get_container)],
+) -> HookRunner:
+    """从容器解析 Hook 执行器（P8.4）。"""
+    return container.hook_runner()
+
+
+HookRunnerDep = Annotated[
+    HookRunner, Depends(get_hook_runner)
 ]
