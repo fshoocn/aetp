@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.repositories import (
     AuditLogRepositoryImpl,
+    CiTriggerBindingRepositoryImpl,
+    CiWebhookDeliveryRepositoryImpl,
+    ProjectIntegrationRepositoryImpl,
     DeviceRepositoryImpl,
     DomainEventRepositoryImpl,
     EventDeliveryRepositoryImpl,
@@ -83,6 +86,9 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.event_subscriptions = EventSubscriptionRepositoryImpl(session)
         self.event_deliveries = EventDeliveryRepositoryImpl(session)
         self.task_schedules = TaskScheduleRepositoryImpl(session)
+        self.project_integrations = ProjectIntegrationRepositoryImpl(session)
+        self.ci_trigger_bindings = CiTriggerBindingRepositoryImpl(session)
+        self.ci_webhook_deliveries = CiWebhookDeliveryRepositoryImpl(session)
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:

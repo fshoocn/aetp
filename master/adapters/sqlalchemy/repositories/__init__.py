@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from .audit_log_repository import AuditLogRepositoryImpl
+from .ci_integration_repository import (
+    CiTriggerBindingRepositoryImpl,
+    CiWebhookDeliveryRepositoryImpl,
+    ProjectIntegrationRepositoryImpl,
+)
 from .device_repository import DeviceRepositoryImpl
 from .domain_event_repository import DomainEventRepositoryImpl
 from .event_delivery_repository import EventDeliveryRepositoryImpl
@@ -34,6 +39,9 @@ from .user_repository import UserRepositoryImpl
 __all__ = [
     "UserRepositoryImpl",
     "AuditLogRepositoryImpl",
+    "CiTriggerBindingRepositoryImpl",
+    "CiWebhookDeliveryRepositoryImpl",
+    "ProjectIntegrationRepositoryImpl",
     "DomainEventRepositoryImpl",
     "EventDeliveryRepositoryImpl",
     "EventSubscriptionRepositoryImpl",
