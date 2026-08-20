@@ -152,9 +152,12 @@ class AgentRuntime:
         logger.info("Agent runtime 已启动: node=%s", self._settings.node_id)
 
     async def stop(self) -> None:
-        """停止 Agent 主生命周期（幂等）。"""
+        """停止 Agent 主生命周期（幂等，每步容错不阻塞后续清理）。"""
         self._stop_event.set()
-        await self._registration.stop_heartbeat()
+        try:
+            await self._registration.stop_heartbeat()
+        except Exception:
+            logger.debug("停止心跳异常（已忽略）", exc_info=True)
         self._cancel_registration_waiter()
         if self._outbox_task is not None:
             self._outbox_task.cancel()
@@ -162,8 +165,13 @@ class AgentRuntime:
                 await self._outbox_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                logger.debug("停止 outbox 异常（已忽略）", exc_info=True)
             self._outbox_task = None
-        await self._transport.disconnect()
+        try:
+            await self._transport.disconnect()
+        except Exception:
+            logger.debug("断开 MQTT 异常（已忽略）", exc_info=True)
         logger.info("Agent runtime 已停止: node=%s", self._settings.node_id)
 
     async def _handle_connection_change(
