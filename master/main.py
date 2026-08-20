@@ -14,16 +14,16 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
 from master.config import get_settings
 
-from .bootstrap.container import Container
 from .api.v1.dependencies import DbDep
 from .api.v1.errors import register_application_error_handlers
 from .api.v1.router import router as v1_router
+from .bootstrap.container import Container
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("启动恢复：无需恢复")
 
+    # 后台维护 worker：Schedule tick（定时触发）+ Stale Run 超时检测。
+    # 仅在有 MQTT broker 或需要定时调度的完整部署下才启动；纯 HTTP/单测
+    # 模式仍可关闭（由 MQTT runtime 一起控制，保持一致的生命周期边界）。
+    maintenance_worker = container.maintenance_worker()
+    await maintenance_worker.start()
+    app.state.maintenance_worker = maintenance_worker
+    logger.info("后台维护 worker 已启动")
+
     logger.info("应用启动准备完成")
 
     yield
@@ -142,10 +150,19 @@ async def lifespan(app: FastAPI):
             # Broker 断开、SSE 连接或 aiomqtt 消费任务异常时，关闭路径不能
             # 无限等待；资源清理应有界，避免 Master 进程卡在退出阶段。
             await asyncio.wait_for(mqtt_runtime.stop(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("Master MQTT 运行时关闭超时，继续释放数据库资源")
         except Exception:
             logger.exception("Master MQTT 运行时关闭失败，继续释放数据库资源")
+
+    maintenance_worker = getattr(app.state, "maintenance_worker", None)
+    if maintenance_worker is not None:
+        try:
+            await asyncio.wait_for(maintenance_worker.stop(), timeout=5.0)
+        except TimeoutError:
+            logger.error("后台维护 worker 关闭超时，继续释放数据库资源")
+        except Exception:
+            logger.exception("后台维护 worker 关闭失败，继续释放数据库资源")
 
     logger.info("应用生命周期关闭，释放数据库连接")
     container.database().close()
@@ -212,7 +229,7 @@ app.include_router(v1_router)
 
 
 @app.get("/api/v1/health", tags=["system"])
-def health(db: "DbDep") -> dict[str, str]:
+def health(db: DbDep) -> dict[str, str]:
     """健康检查：探活数据库连接。"""
     try:
         from sqlalchemy import text as sa_text

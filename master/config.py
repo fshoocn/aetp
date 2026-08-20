@@ -1,14 +1,15 @@
 
-from dataclasses import dataclass
 import logging
-from pathlib import Path
-import secrets
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 from common.config_utils import (
     load_env_file,
     parse_bool,
     parse_int,
+)
+from common.config_utils import (
     resolve_sqlite_url as _resolve_sqlite_url,
 )
 
@@ -86,6 +87,12 @@ class MasterSettings:
     refresh_token_expire_days: int = 7
     # 数据库自动迁移（Alembic upgrade head）；生产可关闭改为部署脚本手动执行
     auto_migrate: bool = True
+    # Run 超时检测阈值（秒）：非终态 Run 超过该时长标记 timed_out（§8.6 巡检）
+    run_stale_timeout_s: int = 1800
+    # 后台维护 worker 轮询间隔（秒）：Schedule tick + Stale Run 检测
+    maintenance_interval_s: float = 30.0
+    # Outbox 最大发送尝试次数（超过标记 exhausted）
+    outbox_max_attempts: int = 5
     # 开启首次启动时自动创建 platform_admin（若 users 表为空则创建，由 .env 凭据指定）
     bootstrap_admin_username: str = ""
     bootstrap_admin_password: str = ""
@@ -138,6 +145,10 @@ class MasterSettings:
         log_file = Path(raw_log_file) if raw_log_file else cls.log_file
         if not log_file.is_absolute():
             log_file = base_dir / log_file
+
+        raw_stale_timeout = values.get("AETP_MASTER_RUN_STALE_TIMEOUT_S")
+        raw_maintenance_interval = values.get("AETP_MASTER_MAINTENANCE_INTERVAL_S")
+        raw_outbox_max_attempts = values.get("AETP_MASTER_OUTBOX_MAX_ATTEMPTS")
 
         raw_data_dir = values.get("AETP_MASTER_DATA_DIR")
         data_dir = Path(raw_data_dir) if raw_data_dir else None
@@ -194,6 +205,17 @@ class MasterSettings:
             ),
             auto_migrate=parse_bool(
                 values.get("AETP_MASTER_AUTO_MIGRATE"), cls.auto_migrate
+            ),
+            run_stale_timeout_s=parse_int(
+                raw_stale_timeout, cls.run_stale_timeout_s
+            ),
+            maintenance_interval_s=(
+                float(raw_maintenance_interval)
+                if raw_maintenance_interval not in (None, "")
+                else cls.maintenance_interval_s
+            ),
+            outbox_max_attempts=parse_int(
+                raw_outbox_max_attempts, cls.outbox_max_attempts
             ),
             bootstrap_admin_username=values.get(
                 "AETP_MASTER_BOOTSTRAP_ADMIN_USERNAME", cls.bootstrap_admin_username

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
+from master.api.v1.dependencies import (
+    CurrentUser,
+    ProjectMemberServiceDep,
+    ProjectServiceDep,
+)
 from master.api.v1.permissions import PlatformAdminDep, ProjectManagerDep
 from master.api.v1.schemas import (
     ProjectCreateRequest,
@@ -14,11 +19,6 @@ from master.api.v1.schemas import (
     ProjectUpdateRequest,
 )
 from master.domain.enums import PlatformRole
-from master.api.v1.dependencies import (
-    CurrentUser,
-    ProjectMemberServiceDep,
-    ProjectServiceDep,
-)
 
 router = APIRouter(prefix="/projects", tags=["v1-projects"])
 
@@ -168,4 +168,5 @@ def remove_project_member(
         user_id,
         actor_role=access.project_role,
         is_platform_admin=access.is_platform_admin,
+        assigned_by=access.user.persisted_id,
     )

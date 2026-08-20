@@ -31,7 +31,7 @@ def approve_user(
     user_id: int,
     body: UserApprovalRequest,
     auth: AuthDep,
-    _admin: PlatformAdminDep,
+    admin: PlatformAdminDep,
 ) -> AdminUserOut:
     """审批用户或修改平台角色。"""
     user = auth.approve_user(
@@ -42,6 +42,7 @@ def approve_user(
         platform_role=(
             body.platform_role.value if body.platform_role is not None else None
         ),
+        actor_id=admin.persisted_id,
     )
     if user is None:
         raise HTTPException(

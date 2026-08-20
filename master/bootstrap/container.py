@@ -15,53 +15,64 @@
 
 from __future__ import annotations
 
-from dependency_injector import containers, providers
+from datetime import timedelta
+from pathlib import Path
 from urllib.parse import quote, urlencode
 
-from master.config import get_settings, runtime_dir
-from pathlib import Path
-from master.adapters.sqlalchemy.database_interface import DatabaseInterface
+from dependency_injector import containers, providers
+
+from master.adapters.mqtt.transport import MqttTransport
+from master.adapters.notifications.senders import build_default_registry
+from master.adapters.secrets.encrypted_store import EncryptedSecretStore
 from master.adapters.sqlalchemy.database_factory import create_database
+from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.adapters.storage.local_storage import LocalStorage
-from master.application.services.auth_service import AuthService
-from master.application.services.artifact_storage_service import ArtifactStorageService
 from master.application.services.artifact_service import ArtifactService
+from master.application.services.artifact_storage_service import ArtifactStorageService
+from master.application.services.auth_service import AuthService
 from master.application.services.capability_service import CapabilityService
-from master.application.services.device_service import DeviceService
-from master.application.services.project_service import ProjectService
-from master.application.services.project_member_service import ProjectMemberService
-from master.application.services.project_node_binding_service import ProjectNodeBindingService
-from master.application.services.node_service import NodeService
-from master.application.services.node_presence_service import NodePresenceService
-from master.application.services.task_service import TaskService
-from master.application.services.test_task_service import TestTaskService
-from master.application.services.shard_scheduler_service import SchedulerConfig, ShardSchedulerService
-from master.application.services.script_download_service import ScriptDownloadService
-from master.application.services.plugin_download_service import PluginDownloadService
 from master.application.services.case_duration_service import CaseDurationStatsService
+from master.application.services.ci_integration_service import CiIntegrationService
+from master.application.services.device_service import DeviceService
 from master.application.services.event_publisher import EventPublisher
-from master.application.services.script_service import ScriptService
-from master.application.services.script_verification_service import ScriptVerificationService
-from master.application.services.script_storage_service import ScriptStorageService
-from master.application.services.run_projection_service import RunProjectionService
-from master.application.services.run_trigger_service import RunTriggerService
-from master.application.services.run_retry_service import RunRetryService
-from master.application.services.run_cancel_service import RunCancelService
+from master.application.services.hook_runner import HookRunner
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
-from master.application.services.notification_service import NotificationService
-from master.application.services.schedule_service import ScheduleService
-from master.application.services.ci_integration_service import CiIntegrationService
-from master.application.services.hook_runner import HookRunner, HookRegistry
+from master.application.services.node_presence_service import NodePresenceService
+from master.application.services.node_service import NodeService
 from master.application.services.notification_dispatcher import NotificationDispatcher
+from master.application.services.notification_service import NotificationService
+from master.application.services.plugin_download_service import PluginDownloadService
+from master.application.services.project_member_service import ProjectMemberService
+from master.application.services.project_node_binding_service import (
+    ProjectNodeBindingService,
+)
+from master.application.services.project_service import ProjectService
 from master.application.services.recovery_service import RecoveryService
-from master.adapters.notifications.senders import build_default_registry
-from master.adapters.mqtt.transport import MqttTransport
-from master.workers.outbox_worker import OutboxWorker
-from master.plugins.registry import create_default_registry
+from master.application.services.run_cancel_service import RunCancelService
+from master.application.services.run_projection_service import RunProjectionService
+from master.application.services.run_retry_service import RunRetryService
+from master.application.services.run_trigger_service import RunTriggerService
+from master.application.services.schedule_service import ScheduleService
+from master.application.services.script_download_service import ScriptDownloadService
+from master.application.services.script_service import ScriptService
+from master.application.services.script_storage_service import ScriptStorageService
+from master.application.services.script_verification_service import (
+    ScriptVerificationService,
+)
+from master.application.services.shard_scheduler_service import (
+    SchedulerConfig,
+    ShardSchedulerService,
+)
+from master.application.services.task_service import TaskService
+from master.application.services.test_task_service import TestTaskService
+from master.config import get_settings, runtime_dir
 from master.plugins.manager import PluginManager
+from master.plugins.registry import create_default_registry
+from master.workers.maintenance_worker import MaintenanceWorker
+from master.workers.outbox_worker import OutboxWorker
 
 
 def _init_database(url: str) -> DatabaseInterface:
@@ -128,13 +139,30 @@ class Container(containers.DeclarativeContainer):
     # SSE 事件总线：进程级单例
     event_bus = providers.Singleton(EventBus)
 
+    # 加密密钥存储（SecretStore 端口实现，§12.2）：Fernet 加密落库，
+    # 通知端点与 CI 集成的密钥经它持久化，重启后仍可解回。
+    secret_store = providers.Singleton(
+        EncryptedSecretStore,
+        uow_factory=uow_factory,
+        master_secret=providers.Callable(lambda: get_settings().jwt_secret),
+    )
+
+    # P7.6/P8.5：通知端点/订阅管理服务（密钥经 SecretStore 持久化，不回显）
+    notification_service = providers.Singleton(
+        NotificationService,
+        uow_factory=uow_factory,
+        secret_store=secret_store,
+    )
+
     # P8.5：通知 Sender Adapters 注册中心 + 分发器（必须在 event_publisher 之前）
     sender_registry = providers.Singleton(build_default_registry)
     notification_dispatcher = providers.Factory(
         NotificationDispatcher,
         uow_factory=uow_factory,
         registry=sender_registry,
-        get_secret=providers.Object(lambda _: None),
+        # 密钥经 NotificationService.get_secret 解回（Singleton 保证同一实例），
+        # 否则所有需要密钥的 sender（如 generic_webhook HMAC 签名）永远拿不到密钥。
+        get_secret=notification_service.provided.get_secret,
     )
 
     # P7.1：领域事件先持久化，再广播到项目范围 SSE；P8.5：分发通知
@@ -240,6 +268,9 @@ class Container(containers.DeclarativeContainer):
     recovery_service = providers.Factory(
         RecoveryService,
         uow_factory=uow_factory,
+        stale_timeout=providers.Callable(
+            lambda: timedelta(seconds=get_settings().run_stale_timeout_s)
+        ),
     )
 
     # 节点在线投影服务（P4.4：注册/心跳/LWT/会话校验）
@@ -317,12 +348,6 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
     )
 
-    # 通知管理服务（P7.6：通知端点、事件订阅、投递状态；密钥不回显）
-    notification_service = providers.Factory(
-        NotificationService,
-        uow_factory=uow_factory,
-    )
-
     # 任务调度计划服务（P8.2：cron/interval 互斥，D-18）
     schedule_service = providers.Factory(
         ScheduleService,
@@ -335,7 +360,7 @@ class Container(containers.DeclarativeContainer):
         CiIntegrationService,
         uow_factory=uow_factory,
         trigger_service=run_trigger_service,
-        signing_secret=providers.Callable(lambda: get_settings().internal_signing_secret or get_settings().jwt_secret),
+        secret_store=secret_store,
     )
 
     # 生命周期 Hook 框架（P8.4：准入 fail-closed、事件 fail-open、审计）
@@ -359,7 +384,12 @@ class Container(containers.DeclarativeContainer):
 
     # Outbox worker（P4.3：事务性 outbox 可靠发送 run.assign/register-ack）
     outbox_worker = providers.Factory(
-        OutboxWorker, uow_factory=uow_factory, transport=mqtt_transport
+        OutboxWorker,
+        uow_factory=uow_factory,
+        transport=mqtt_transport,
+        max_attempts=providers.Callable(
+            lambda: get_settings().outbox_max_attempts
+        ),
     )
 
     # Master MQTT 运行时（P6.4：订阅事件 → 路由投影 + outbox 发送）
@@ -368,4 +398,14 @@ class Container(containers.DeclarativeContainer):
         transport=mqtt_transport,
         router=message_router,
         outbox_worker=outbox_worker,
+    )
+
+    # 后台维护 worker（P8.2/P8.5：Schedule tick + Stale Run 检测）
+    maintenance_worker = providers.Singleton(
+        MaintenanceWorker,
+        schedule_service=schedule_service,
+        recovery_service=recovery_service,
+        interval_s=providers.Callable(
+            lambda: get_settings().maintenance_interval_s
+        ),
     )

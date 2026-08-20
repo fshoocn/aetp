@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import asyncio
-from sqlalchemy import text
 
 from master.domain.hooks import HookContext, HookDecision
 from master.domain.models import DomainEvent
@@ -88,7 +87,7 @@ class _FailingEventHook:
 
 def test_admission_hooks_sorted_by_order(client):
     """准入 Hook 按 (order, name) 稳定排序。"""
-    from master.application.services.hook_runner import HookRunner, HookRegistry
+    from master.application.services.hook_runner import HookRegistry, HookRunner
 
     registry = HookRegistry(admission_hooks=[_AllowHook(), _DenyHook()])
     runner = HookRunner(lambda: client.app.state.container.uow_factory()(), registry=registry)
@@ -99,22 +98,22 @@ def test_admission_hooks_sorted_by_order(client):
 
 def test_admission_deny_rejects(client):
     """准入 Hook deny 拒绝操作。"""
-    from master.application.services.hook_runner import HookRunner, HookRegistry
+    from master.application.services.hook_runner import HookRegistry, HookRunner
 
     registry = HookRegistry(admission_hooks=[_DenyHook()])
     runner = HookRunner(lambda: client.app.state.container.uow_factory()(), registry=registry)
 
-    decision = runner.run_admission(
+    decision = asyncio.run(runner.run_admission(
         "run.before_create",
         HookContext(stage="run.before_create"),
-    )
+    ))
     assert decision.allowed is False
     assert decision.code == "TEST_HOOK_DENIED"
 
 
 def test_admission_timeout_rejects(client):
     """准入 Hook 超时映射为 HOOK_TIMEOUT。"""
-    from master.application.services.hook_runner import HookRunner, HookRegistry
+    from master.application.services.hook_runner import HookRegistry, HookRunner
 
     registry = HookRegistry(admission_hooks=[_TimeoutHook()])
     runner = HookRunner(
@@ -123,17 +122,17 @@ def test_admission_timeout_rejects(client):
         timeout_s=0.1,
     )
 
-    decision = runner.run_admission(
+    decision = asyncio.run(runner.run_admission(
         "run.before_create",
         HookContext(stage="run.before_create"),
-    )
+    ))
     assert decision.allowed is False
     assert decision.code == "HOOK_TIMEOUT"
 
 
 def test_event_hook_fail_open(client):
     """事件 Hook 异常不抛出，fail open。"""
-    from master.application.services.hook_runner import HookRunner, HookRegistry
+    from master.application.services.hook_runner import HookRegistry, HookRunner
 
     registry = HookRegistry(event_hooks=[_FailingEventHook()])
     runner = HookRunner(lambda: client.app.state.container.uow_factory()(), registry=registry)
@@ -145,4 +144,4 @@ def test_event_hook_fail_open(client):
         aggregate_id="R-1",
     )
     # fail open：不抛异常
-    runner.run_event_hooks(event)
+    asyncio.run(runner.run_event_hooks(event))
