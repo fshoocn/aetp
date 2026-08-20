@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -240,6 +241,8 @@ def download_script(
         media_type="application/octet-stream",
         headers={
             "X-Checksum-Sha256": script.sha256,
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+            ),
         },
     )

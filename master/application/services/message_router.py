@@ -44,6 +44,7 @@ from master.application.services.run_projection_service import (
     ProjectionResult,
     RunProjectionService,
 )
+from master.application.services.shard_scheduler_service import ShardSchedulerService
 from master.application.services.event_publisher import EventPublisher
 from master.application.services.script_verification_service import (
     ScriptVerificationResult,
@@ -63,11 +64,13 @@ class MasterMessageRouter:
         projection: RunProjectionService,
         event_publisher: EventPublisher,
         verification: ScriptVerificationService,
+        scheduler: ShardSchedulerService | None = None,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
         self._event_publisher = event_publisher
         self._verification = verification
+        self._scheduler = scheduler
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -151,6 +154,15 @@ class MasterMessageRouter:
                         logger.exception(
                             "业务异常事件广播失败（不阻塞主流程）: event=%s",
                             event.event_type,
+                        )
+                # ACK 被拒绝：触发 failover 重派
+                if result.retry_dispatch and self._scheduler is not None:
+                    try:
+                        self._scheduler.schedule_run(result.run_id)
+                    except Exception:
+                        logger.exception(
+                            "ACK 拒绝后重派失败（不阻塞主流程）: run_id=%s",
+                            result.run_id,
                         )
             elif isinstance(result, ScriptVerificationResult):
                 await self._event_publisher.broadcast(result.event)

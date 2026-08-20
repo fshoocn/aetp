@@ -91,6 +91,8 @@ class ProjectionResult:
     project_id: str = ""
     payload: dict | None = None
     anomaly_events: list | None = None
+    # sym:retry_dispatch ACK 被拒绝，需要触发重新派发（failover）
+    retry_dispatch: bool = False
 
 
 class RunProjectionService:
@@ -131,11 +133,25 @@ class RunProjectionService:
                     attempt.error_message = payload.reason or "Agent 拒绝执行"
                     attempt.finished_at = utcnow()
                     uow.shard_attempts.update(attempt)
+
+                    # 拒绝 ACK：释放设备。Shard 保持 dispatching，
+                    # 调度器 _is_dispatchable 检测到最新 attempt FAILED 后 failover 重派。
+                    for device_id in attempt.device_ids:
+                        device = uow.devices.get_by_id(device_id)
+                        if device is not None:
+                            device.status = (
+                                DeviceStatus.ONLINE
+                                if device.online
+                                else DeviceStatus.OFFLINE
+                            )
+                            uow.devices.update(device)
+
                 return ProjectionResult(
                     True,
                     event_type="run.ack",
                     run_id=run.run_id,
                     project_id=run.project_id,
+                    retry_dispatch=True,
                 )
 
             if attempt.status is ShardAttemptStatus.DISPATCHED:

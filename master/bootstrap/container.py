@@ -342,6 +342,7 @@ class Container(containers.DeclarativeContainer):
         projection=run_projection_service,
         event_publisher=event_publisher,
         verification=script_verification_service,
+        scheduler=shard_scheduler_service,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）

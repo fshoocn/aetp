@@ -13,6 +13,8 @@ P5.5 插件签名下载：Agent 检查本地插件版本缺失/不兼容时，�
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
@@ -56,12 +58,14 @@ def download_script(
             detail="脚本文件缺失",
         )
     filename = f"{script.name}-v{script.version}"
+    # RFC 5987 编码：文件名可能含中文，用 UTF-8 编码避免 latin-1 header 报错
+    encoded = quote(filename, safe="")
     return StreamingResponse(
         storage_service.open_script(script.file_ref),
         media_type="application/octet-stream",
         headers={
             "X-Checksum-Sha256": script.sha256,
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded}",
         },
     )
 
@@ -105,7 +109,9 @@ def download_plugin(
         media_type="application/zip",
         headers={
             "X-Checksum-Sha256": record.sha256,
-            "Content-Disposition": f'attachment; filename="{record.filename}"',
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{quote(record.filename, safe='')}"
+            ),
         },
     )
 
