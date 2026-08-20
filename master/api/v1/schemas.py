@@ -630,3 +630,84 @@ class ScheduleOut(BaseModel):
     last_run_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# P8.3 CI/CD 集成
+# ---------------------------------------------------------------------------
+
+
+class IntegrationCreateRequest(BaseModel):
+    """创建 CI/CD 集成请求。"""
+
+    provider: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+    secret_value: str | None = Field(default=None, max_length=2048)
+    config_json: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class IntegrationUpdateRequest(BaseModel):
+    """更新 CI/CD 集成请求。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    secret_value: str | None = Field(default=None, max_length=2048)
+    config_json: dict | None = None
+    enabled: bool | None = None
+
+
+class IntegrationOut(BaseModel):
+    """CI/CD 集成响应（不含密钥）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    integration_id: str
+    project_id: str
+    provider: str
+    name: str
+    has_secret: bool = False
+    config_json: dict = Field(default_factory=dict)
+    enabled: bool = True
+    created_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compute_has_secret(cls, data: object) -> object:
+        if hasattr(data, "secret_hash"):
+            object.__setattr__(data, "has_secret", bool(data.secret_hash))  # type: ignore[attr-defined]
+        elif isinstance(data, dict) and "has_secret" not in data:
+            data["has_secret"] = bool(data.get("secret_hash"))
+        return data
+
+
+class BindingCreateRequest(BaseModel):
+    """创建 CI 触发绑定请求。"""
+
+    task_id: str = Field(min_length=1, max_length=64)
+    event_filter_json: dict = Field(default_factory=dict)
+    parameter_mapping_json: dict = Field(default_factory=dict)
+
+
+class BindingUpdateRequest(BaseModel):
+    """更新 CI 触发绑定请求。"""
+
+    event_filter_json: dict | None = None
+    parameter_mapping_json: dict | None = None
+    enabled: bool | None = None
+
+
+class BindingOut(BaseModel):
+    """CI 触发绑定响应。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    binding_id: str
+    integration_id: str
+    task_id: str
+    event_filter_json: dict = Field(default_factory=dict)
+    parameter_mapping_json: dict = Field(default_factory=dict)
+    enabled: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

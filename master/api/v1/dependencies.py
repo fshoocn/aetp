@@ -31,6 +31,7 @@ from master.application.services.run_retry_service import RunRetryService
 from master.application.services.run_cancel_service import RunCancelService
 from master.application.services.notification_service import NotificationService
 from master.application.services.schedule_service import ScheduleService
+from master.application.services.ci_integration_service import CiIntegrationService
 from master.application.services.run_projection_service import RunProjectionService
 from master.plugins.registry import PluginRegistry
 from master.plugins.manager import PluginManager
@@ -319,4 +320,16 @@ def get_schedule_service(
 
 ScheduleServiceDep = Annotated[
     ScheduleService, Depends(get_schedule_service)
+]
+
+
+def get_ci_integration_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> CiIntegrationService:
+    """从容器解析 CI/CD 集成服务（P8.3）。"""
+    return container.ci_integration_service()
+
+
+CiIntegrationServiceDep = Annotated[
+    CiIntegrationService, Depends(get_ci_integration_service)
 ]
