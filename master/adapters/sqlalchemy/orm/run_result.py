@@ -52,9 +52,9 @@ class RunResult(Base, TimestampMixin):
     project_pk: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    # sym:task_pk 任务定义代理主键
-    task_pk: Mapped[int] = mapped_column(
-        ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=False, index=True
+    # sym:task_pk 任务定义代理主键（任务删除后置空，Run 级汇总仍可展示）
+    task_pk: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     # sym:node_id 最终执行节点业务 ID（多 Shard 场景可为空）
     node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

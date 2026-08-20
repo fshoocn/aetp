@@ -291,24 +291,29 @@ class TestTaskService:
             return uow.test_tasks.list_by_project(project_id, enabled=enabled)
 
     def delete_task(self, task_id: str, project_id: str) -> None:
-        """删除任务定义。
+        """删除任务定义（硬删除）。
 
-        - 已停用且无 Run 历史 → 硬删除（级联清理 schedule/bindings，释放脚本引用）
-        - 否则 → 软删除（置 enabled=False，禁止新 Run，保留历史可追溯性）
+        历史 Run 的 task_pk 置空（Run 依赖自身快照 script_ref/case_selection/
+        split_policy 仍可展示），随后删除任务定义并级联清理 schedule/bindings。
         """
         with self._uow_factory() as uow:
             task = uow.test_tasks.get_by_task_id(task_id, project_id)
             if task is None:
                 raise TaskNotFoundError(f"任务定义不存在: {task_id}")
-            if not task.enabled and task.id is not None:
-                run_count = uow.test_tasks.count_runs_by_task(task.id)
-                if run_count == 0:
-                    uow.test_tasks.delete(task.id)
-                    logger.info("任务定义硬删除: task_id=%s", task_id)
-                    return
-            task.enabled = False
-            uow.test_tasks.update(task)
-            logger.info("任务定义停用: task_id=%s", task_id)
+            if task.id is None:
+                raise TaskNotFoundError(f"任务定义不存在: {task_id}")
+            # 解除历史 Run 及 Run 汇总投影的任务引用（保留执行历史）
+            detached_runs = uow.task_runs.nullify_task_for_runs(task_id)
+            detached_results = uow.run_results.nullify_task_for_results(task_id)
+            if detached_runs or detached_results:
+                logger.info(
+                    "任务删除：解除引用 task_id=%s runs=%d results=%d",
+                    task_id,
+                    detached_runs,
+                    detached_results,
+                )
+            uow.test_tasks.delete(task.id)
+            logger.info("任务定义硬删除: task_id=%s", task_id)
 
     @staticmethod
     def _normalize_case_selection(selection, cases) -> list[str]:

@@ -130,5 +130,5 @@ def delete_test_task(
     _access: ProjectManagerDep,
     service: TestTaskServiceDep,
 ) -> None:
-    """删除任务定义（软删除：置 enabled=False）。"""
+    """删除任务定义（硬删除；历史 Run 引用置空，执行记录保留）。"""
     service.delete_task(task_id, project_id)

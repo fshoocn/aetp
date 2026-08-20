@@ -211,6 +211,9 @@ class TaskRunRepository(ABC):
     @abstractmethod
     def list_non_terminal(self, limit: int = 1000) -> list[TaskRun]: ...
 
+    @abstractmethod
+    def nullify_task_for_runs(self, task_id: str) -> int: ...
+
 
 class RunShardRepository(ABC):
     """Shard 仓储（P3.4，run_shards 表）。"""
@@ -332,6 +335,9 @@ class RunResultRepository(ABC):
 
     @abstractmethod
     def update(self, result: RunResult) -> RunResult: ...
+
+    @abstractmethod
+    def nullify_task_for_results(self, task_id: str) -> int: ...
 
 
 class InboxMessageRepository(ABC):
@@ -470,6 +476,10 @@ class NodeRepository(ABC):
     def save(self, node: Node) -> Node:
         """创建或更新节点（按 node_id upsert；返回持久化后的节点）。"""
 
+    @abstractmethod
+    def mark_all_offline(self) -> int:
+        """把所有节点投影重置为 offline（启动恢复用）。"""
+
 
 class NodeSessionRepository(ABC):
     """节点会话仓储（P4.4，node_sessions 表）。
@@ -493,6 +503,12 @@ class NodeSessionRepository(ABC):
         self, session: NodeSession, *, reason: DisconnectReason, at: datetime | None = None
     ) -> NodeSession:
         """关闭会话（置 disconnected_at + disconnect_reason）。"""
+
+    @abstractmethod
+    def close_all_open(
+        self, *, reason: DisconnectReason, at: datetime | None = None
+    ) -> int:
+        """关闭所有未关闭会话（启动恢复用）。"""
 
 
 class DeviceRepository(ABC):

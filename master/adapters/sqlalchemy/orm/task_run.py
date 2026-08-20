@@ -55,8 +55,9 @@ class TaskRun(Base, TimestampMixin):
         ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     # sym:task_pk 引用的任务定义代理主键（只引用不复制，FK RESTRICT）
-    task_pk: Mapped[int] = mapped_column(
-        ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=False, index=True
+    # nullable: 任务定义删除后置空，Run 依赖自身快照仍可展示历史
+    task_pk: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     # sym:script_ref 脚本引用快照 {script_id, version, sha256}（§7.5）
     script_ref: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)

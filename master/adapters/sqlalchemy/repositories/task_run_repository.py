@@ -177,3 +177,28 @@ class TaskRunRepositoryImpl(TaskRunRepository):
             .limit(limit)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+
+    def nullify_task_for_runs(self, task_id: str) -> int:
+        """把引用指定任务定义的所有 Run 的 task_pk 置空（保留历史）。
+
+        Returns:
+            受影响的 Run 数量
+        """
+        from typing import Any
+
+        from sqlalchemy import update as sa_update
+        from sqlalchemy.engine import Result
+        result: Result[Any] = self._s.execute(
+            sa_update(TaskRunORM)
+            .where(
+                TaskRunORM.task_pk
+                == select(TestTaskORM.id)
+                .where(TestTaskORM.task_id == task_id)
+                .scalar_subquery()
+            )
+            .values(task_pk=None)
+        )
+        count = int(getattr(result, "rowcount", 0) or 0)
+        if count:
+            self._s.flush()
+        return count
