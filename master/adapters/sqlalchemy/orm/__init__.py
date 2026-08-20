@@ -14,6 +14,8 @@ from .base import (
     TimestampMixin,
     utcnow,
 )
+from .ci_trigger_binding import CiTriggerBinding
+from .ci_webhook_delivery import CiWebhookDelivery
 from .device import Device
 from .domain_event import DomainEvent
 from .event_delivery import EventDelivery
@@ -26,6 +28,7 @@ from .outbox_message import OutboxMessage
 from .project import Project
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
+from .project_integration import ProjectIntegration
 from .refresh_token import RefreshToken
 from .run_artifact import RunArtifact
 from .run_case_result import RunCaseResult
@@ -52,6 +55,8 @@ __all__ = [
     "User",
     "AuditLog",
     "DomainEvent",
+    "CiTriggerBinding",
+    "CiWebhookDelivery",
     "EventDelivery",
     "EventSubscription",
     "InboxMessage",
@@ -61,6 +66,7 @@ __all__ = [
     "Node",
     "NodeSession",
     "Project",
+    "ProjectIntegration",
     "ProjectMember",
     "ProjectNodeBinding",
     "RefreshToken",

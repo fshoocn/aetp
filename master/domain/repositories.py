@@ -47,6 +47,11 @@ from master.domain.models.notification import (
     NotificationEndpoint,
 )
 from master.domain.models.task_schedule import TaskSchedule
+from master.domain.models.ci_integration import (
+    CiTriggerBinding,
+    CiWebhookDelivery,
+    ProjectIntegration,
+)
 
 
 class UserRepository(ABC):
@@ -577,6 +582,9 @@ class UnitOfWork(ABC):
     event_subscriptions: "EventSubscriptionRepository"
     event_deliveries: "EventDeliveryRepository"
     task_schedules: "TaskScheduleRepository"
+    project_integrations: "ProjectIntegrationRepository"
+    ci_trigger_bindings: "CiTriggerBindingRepository"
+    ci_webhook_deliveries: "CiWebhookDeliveryRepository"
 
     @abstractmethod
     def __enter__(self) -> "UnitOfWork": ...
@@ -674,3 +682,60 @@ class TaskScheduleRepository(ABC):
 
     @abstractmethod
     def delete(self, schedule_id: str) -> None: ...
+
+
+class ProjectIntegrationRepository(ABC):
+    """项目 CI/CD 集成仓储（P8.3）。"""
+
+    @abstractmethod
+    def get_by_integration_id(self, integration_id: str) -> ProjectIntegration | None: ...
+
+    @abstractmethod
+    def list_by_project(
+        self, project_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[ProjectIntegration]: ...
+
+    @abstractmethod
+    def add(self, integration: ProjectIntegration) -> ProjectIntegration: ...
+
+    @abstractmethod
+    def update(self, integration: ProjectIntegration) -> ProjectIntegration: ...
+
+    @abstractmethod
+    def delete(self, integration_id: str) -> None: ...
+
+
+class CiTriggerBindingRepository(ABC):
+    """CI 触发绑定仓储（P8.3）。"""
+
+    @abstractmethod
+    def get_by_binding_id(self, binding_id: str) -> CiTriggerBinding | None: ...
+
+    @abstractmethod
+    def list_by_integration(
+        self, integration_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[CiTriggerBinding]: ...
+
+    @abstractmethod
+    def add(self, binding: CiTriggerBinding) -> CiTriggerBinding: ...
+
+    @abstractmethod
+    def update(self, binding: CiTriggerBinding) -> CiTriggerBinding: ...
+
+    @abstractmethod
+    def delete(self, binding_id: str) -> None: ...
+
+
+class CiWebhookDeliveryRepository(ABC):
+    """CI Webhook 投递记录仓储（P8.3）。"""
+
+    @abstractmethod
+    def get_by_integration_delivery(
+        self, integration_id: str, delivery_id: str
+    ) -> CiWebhookDelivery | None: ...
+
+    @abstractmethod
+    def add(self, delivery: CiWebhookDelivery) -> CiWebhookDelivery: ...
+
+    @abstractmethod
+    def update(self, delivery: CiWebhookDelivery) -> CiWebhookDelivery: ...
