@@ -29,7 +29,10 @@ from master.api.v1.schemas import (
     ScriptVerifyResultOut,
 )
 from master.application.errors import ScriptNotFoundError
-from master.application.services.script_service import ScriptDeleteError, ScriptUploadError
+from master.application.services.script_service import (
+    ScriptDeleteError,
+    ScriptUploadError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +98,7 @@ async def upload_script(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    except Exception as exc:  # noqa: BLE001 - 插件/仓储错误统一 422
+    except Exception as exc:
         logger.exception("脚本上传失败: project=%s name=%s", project_id, name)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -167,7 +170,7 @@ async def reparse_script(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("脚本重解析失败: script_id=%s", script_id)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
