@@ -142,9 +142,16 @@ class RunProjectionService:
 
                 return ProjectionResult(
                     True,
-                    event_type="run.ack",
+                    event_type="run.ack_rejected",
                     run_id=run.run_id,
                     project_id=run.project_id,
+                    payload={
+                        "run_id": run.run_id,
+                        "shard_id": attempt.shard_id,
+                        "attempt_no": attempt.attempt_no,
+                        "node_id": node_id,
+                        "reason": payload.reason or "Agent 拒绝执行",
+                    },
                     retry_dispatch=True,
                 )
 

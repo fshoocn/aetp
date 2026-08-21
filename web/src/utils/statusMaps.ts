@@ -76,6 +76,24 @@ export const TRIGGER_TEXT: Record<string, string> = {
   recovery: "恢复",
 };
 
+/** Run 流程事件类型 → 中文文本（下发/执行全链路时间线） */
+export const RUN_EVENT_TEXT: Record<string, string> = {
+  "run.created": "Run 已创建",
+  "run.split": "任务分割完成",
+  "run.dispatched": "Shard 已派发",
+  "run.ack": "Agent 已确认",
+  "run.ack_rejected": "Agent 拒绝执行",
+  "run.progress": "执行进度",
+  "run.case-status": "用例状态更新",
+  "run.log": "运行日志",
+  "run.result": "结果上报",
+  "run.log_complete": "日志围栏达成",
+  "run.succeeded": "执行成功",
+  "run.failed": "执行失败",
+  "run.cancelled": "已取消",
+  "run.timed_out": "超时",
+};
+
 export function runStatusText(status: string): string {
   return RUN_STATUS_TEXT[status] || status;
 }
@@ -102,4 +120,17 @@ export function caseStatusTag(status: string): "success" | "danger" | "warning" 
 
 export function triggerText(value: string): string {
   return TRIGGER_TEXT[value] || value;
+}
+
+/** Run 流程事件类型 → 中文文本 */
+export function runEventText(eventType: string): string {
+  return RUN_EVENT_TEXT[eventType] || eventType;
+}
+
+/** Run 流程事件类型 → 时间线节点类型 */
+export function runEventTag(eventType: string): "success" | "danger" | "warning" | "primary" | "info" {
+  if (eventType.includes("rejected") || eventType.includes("failed") || eventType === "run.timed_out") return "danger";
+  if (eventType.includes("succeeded")) return "success";
+  if (eventType === "run.progress" || eventType === "run.case-status") return "warning";
+  return "primary";
 }

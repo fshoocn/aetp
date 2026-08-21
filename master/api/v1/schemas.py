@@ -181,6 +181,17 @@ class RunLogOut(BaseModel):
     occurred_at: datetime | None = None
 
 
+class RunEventOut(BaseModel):
+    """Run 流程领域事件（下发/执行全链路时间线）。"""
+
+    event_id: str
+    sequence: int | None = None
+    event_type: str
+    aggregate_id: str
+    payload: dict = Field(default_factory=dict)
+    occurred_at: datetime | None = None
+
+
 class RunArtifactOut(BaseModel):
     """Run 结束产物响应。"""
 

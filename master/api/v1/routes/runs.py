@@ -18,6 +18,7 @@ from master.api.v1.schemas import (
     RunArtifactOut,
     RunCaseResultOut,
     RunDetailOut,
+    RunEventOut,
     RunLogOut,
     RunOut,
     RunTriggerRequest,
@@ -185,6 +186,32 @@ def get_run_logs(
             occurred_at=log.occurred_at,
         )
         for log in logs
+    ]
+
+
+@router.get("/{run_id}/events", response_model=list[RunEventOut])
+def get_run_events(
+    project_id: str,
+    run_id: str,
+    _access: ProjectAccessDep,
+    uow_factory: UowFactoryDep,
+) -> list[RunEventOut]:
+    """查询 Run 的流程领域事件时间线（下发→执行→终态全链路，§10.4）。"""
+    with uow_factory() as uow:
+        run = uow.task_runs.get_by_run_id(run_id, project_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run 不存在")
+        events = uow.domain_events.list_by_aggregate(run_id, project_id=project_id)
+    return [
+        RunEventOut(
+            event_id=e.event_id,
+            sequence=e.sequence,
+            event_type=e.event_type,
+            aggregate_id=e.aggregate_id,
+            payload=e.payload,
+            occurred_at=e.occurred_at,
+        )
+        for e in events
     ]
 
 

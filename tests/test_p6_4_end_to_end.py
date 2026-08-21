@@ -494,6 +494,17 @@ def test_http_trigger_run_endpoint(client, auth_header) -> None:
     assert detail.status_code == 200
     assert len(detail.json()["shards"]) == 2
 
+    # 流程时间线：触发 → 分割 → 派发事件已落库并可查询（§10.4）
+    events = client.get(
+        f"/api/v1/projects/p1/runs/{data['run_id']}/events",
+        headers=auth_header,
+    )
+    assert events.status_code == 200, events.text
+    event_types = [ev["event_type"] for ev in events.json()]
+    assert "run.created" in event_types
+    assert "run.split" in event_types
+    assert "run.dispatched" in event_types
+
 
 def test_http_list_runs(client, auth_header) -> None:
     container = client.app.state.container

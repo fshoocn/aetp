@@ -369,6 +369,15 @@ class DomainEventRepository(ABC):
         limit: int = 100,
     ) -> list[DomainEvent]: ...
 
+    @abstractmethod
+    def list_by_aggregate(
+        self,
+        aggregate_id: str,
+        *,
+        project_id: str | None = None,
+        limit: int = 500,
+    ) -> list[DomainEvent]: ...
+
 
 class AuditLogRepository(ABC):
     """审计日志仓储（P3.5，audit_logs 表，append-only）。"""

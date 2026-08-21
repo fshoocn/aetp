@@ -64,12 +64,14 @@ class MasterMessageRouter:
         event_publisher: EventPublisher,
         verification: ScriptVerificationService,
         scheduler: ShardSchedulerService | None = None,
+        uow_factory=None,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
         self._event_publisher = event_publisher
         self._verification = verification
         self._scheduler = scheduler
+        self._uow_factory = uow_factory
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -159,6 +161,9 @@ class MasterMessageRouter:
                             "ACK 拒绝后重派失败（不阻塞主流程）: run_id=%s",
                             result.run_id,
                         )
+                    else:
+                        # 重派后若 Run 已收敛为 FAILED（派发耗尽），发布失败事件
+                        await self._publish_run_failed_if_terminal(result.run_id)
             elif isinstance(result, ScriptVerificationResult):
                 await self._event_publisher.broadcast(result.event)
             return True
@@ -187,3 +192,28 @@ class MasterMessageRouter:
             project_id=result.project_id,
             aggregate_id=result.run_id,
         )
+
+    async def _publish_run_failed_if_terminal(self, run_id: str) -> None:
+        """重派后若 Run 已收敛为 FAILED（派发耗尽），发布 run.failed 事件。
+
+        failover 重派时调度器可能把 Run 收敛到 FAILED（§8.4），但该路径
+        没有 result 上报，需在此补发失败事件供前端时间线展示。
+        """
+        if self._uow_factory is None:
+            return
+        from master.domain.enums import RunStatus
+
+        try:
+            with self._uow_factory() as uow:
+                run = uow.task_runs.get_by_run_id(run_id)
+                if run is None or run.status is not RunStatus.FAILED:
+                    return
+                project_id = run.project_id
+            await self._event_publisher.publish(
+                "run.failed",
+                {"run_id": run_id, "reason": "派发耗尽（无可用节点或 failover 不允许）"},
+                project_id=project_id,
+                aggregate_id=run_id,
+            )
+        except Exception:
+            logger.exception("run.failed 事件发布失败（不阻断主流程）: run=%s", run_id)

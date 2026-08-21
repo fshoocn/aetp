@@ -184,6 +184,15 @@ export interface RunLog {
   occurred_at: string | null;
 }
 
+export interface RunEvent {
+  event_id: string;
+  sequence: number | null;
+  event_type: string;
+  aggregate_id: string;
+  payload: Record<string, unknown>;
+  occurred_at: string | null;
+}
+
 export interface RunArtifact {
   artifact_id: string;
   run_id: string;
@@ -525,6 +534,9 @@ export const aetpApi = {
     },
     logs(projectId: string, runId: string, afterSequence = 0) {
       return api.get<RunLog[]>(`${API_V1}/projects/${projectId}/runs/${runId}/logs?after_sequence=${afterSequence}`);
+    },
+    events(projectId: string, runId: string) {
+      return api.get<RunEvent[]>(`${API_V1}/projects/${projectId}/runs/${runId}/events`);
     },
     artifacts(projectId: string, runId: string) {
       return api.get<RunArtifact[]>(`${API_V1}/projects/${projectId}/runs/${runId}/artifacts`);

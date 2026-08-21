@@ -66,3 +66,17 @@ class DomainEventRepositoryImpl(DomainEventRepository):
             stmt = stmt.where(DomainEventORM.sequence > after_sequence)
         stmt = stmt.order_by(DomainEventORM.sequence).limit(limit)
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+
+    def list_by_aggregate(
+        self,
+        aggregate_id: str,
+        *,
+        project_id: str | None = None,
+        limit: int = 500,
+    ) -> list[DomainEvent]:
+        """按聚合标识（run_id/task_id 等）查询事件时间线，按 sequence 升序。"""
+        stmt = select(DomainEventORM).where(DomainEventORM.aggregate_id == aggregate_id)
+        if project_id is not None:
+            stmt = stmt.where(DomainEventORM.project_id == project_id)
+        stmt = stmt.order_by(DomainEventORM.sequence).limit(limit)
+        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]

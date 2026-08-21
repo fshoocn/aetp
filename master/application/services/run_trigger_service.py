@@ -57,11 +57,13 @@ class RunTriggerService:
         plugin_registry: PluginRegistry,
         scheduler: ShardSchedulerService,
         duration_stats: CaseDurationStatsService | None = None,
+        event_publisher=None,
     ) -> None:
         self._uow_factory = uow_factory
         self._plugin_registry = plugin_registry
         self._scheduler = scheduler
         self._duration_stats = duration_stats or CaseDurationStatsService()
+        self._event_publisher = event_publisher
 
     async def trigger(
         self,
@@ -155,8 +157,34 @@ class RunTriggerService:
             if shards:
                 uow.run_shards.add_many(shards)
 
+        # 发布分割事件：记录分割策略与产出 Shard 数（§10.4 流程时间线）
+        await self._publish_run_event(
+            "run.split",
+            run_id,
+            project_id,
+            {
+                "shard_count": len(shard_specs),
+                "case_count": len(case_infos),
+                "split_policy": split_policy,
+            },
+        )
+
         # 5. 派发（设备分配 + run.assign outbox）
         schedule = self._scheduler.schedule_run(run_id)
+
+        # 发布派发事件：逐条记录派发到哪个节点（§10.4 流程时间线）
+        for dispatched in schedule.scheduled:
+            await self._publish_run_event(
+                "run.dispatched",
+                run_id,
+                project_id,
+                {
+                    "shard_id": dispatched.shard_id,
+                    "attempt_no": dispatched.attempt_no,
+                    "node_id": dispatched.node_id,
+                    "device_ids": list(dispatched.device_ids),
+                },
+            )
 
         logger.info(
             "Run 触发成功: run_id=%s task=%s shards=%d scheduled=%d pending=%d",
@@ -174,3 +202,23 @@ class RunTriggerService:
             scheduled=len(schedule.scheduled),
             pending_shard_ids=schedule.pending_shard_ids,
         )
+
+    async def _publish_run_event(
+        self, event_type: str, run_id: str, project_id: str, payload: dict
+    ) -> None:
+        """发布 Run 流程领域事件（有 publisher 时）；失败不阻断触发流程。"""
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish(
+                event_type,
+                payload,
+                project_id=project_id,
+                aggregate_id=run_id,
+            )
+        except Exception:
+            logger.exception(
+                "Run 流程事件发布失败（不阻断触发）: event=%s run=%s",
+                event_type,
+                run_id,
+            )

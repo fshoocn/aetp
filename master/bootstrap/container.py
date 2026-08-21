@@ -308,6 +308,7 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
         scheduler=shard_scheduler_service,
         duration_stats=case_duration_stats,
+        event_publisher=event_publisher,
     )
 
     # Run 重试服务（P6.7：retry=新 Run；retry-failed=失败 case 新 Run，D-20）
@@ -352,6 +353,7 @@ class Container(containers.DeclarativeContainer):
         event_publisher=event_publisher,
         verification=script_verification_service,
         scheduler=shard_scheduler_service,
+        uow_factory=uow_factory,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）
