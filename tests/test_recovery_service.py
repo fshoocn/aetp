@@ -127,10 +127,9 @@ class TestStartupRecovery:
         assert active_shard.status == ShardStatus.WAITING_RECOVERY
 
     def test_no_non_terminal_runs_is_noop(self):
-        """启动恢复：无非终态 Run → 仍重置节点投影并关闭遗留会话。"""
+        """启动恢复：无非终态 Run → 仍重置节点投影（不关闭会话）。"""
         uow = _mock_uow()
         uow.nodes.mark_all_offline.return_value = 2
-        uow.node_sessions.close_all_open.return_value = 3
         uow.task_runs.list_non_terminal.return_value = []
 
         service = RecoveryService(uow_factory=lambda: uow)
@@ -139,11 +138,10 @@ class TestStartupRecovery:
             "stale_runs": 0,
             "orphan_shards": 0,
             "offline_nodes": 2,
-            "closed_sessions": 3,
         }
-        # 节点重置 + 会话关闭被调用
+        # 节点投影重置被调用；会话不关闭（Agent 可能仍在线，§8.6）
         uow.nodes.mark_all_offline.assert_called_once()
-        uow.node_sessions.close_all_open.assert_called_once()
+        uow.node_sessions.close_all_open.assert_not_called()
 
 
 class TestDetectStaleRuns:

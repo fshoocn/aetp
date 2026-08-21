@@ -14,7 +14,6 @@ from datetime import timedelta
 
 from master.domain.enums import (
     DeviceStatus,
-    DisconnectReason,
     RunStatus,
     ShardAttemptStatus,
     ShardStatus,
@@ -92,21 +91,18 @@ class RecoveryService:
             各类处理的数量统计
         """
         now = utcnow()
-        stats = {"stale_runs": 0, "orphan_shards": 0, "offline_nodes": 0, "closed_sessions": 0}
+        stats = {"stale_runs": 0, "orphan_shards": 0, "offline_nodes": 0}
 
         with self._uow_factory() as uow:
-            # 0. 重置节点投影 + 关闭遗留会话（掉线期间状态不可信）
+            # 0. 重置节点投影为 offline（Master 重启后无法确认节点状态）。
+            # 注意：不在这里 close_all_open —— Master 离线 ≠ Agent 离线，
+            # Agent 是独立的 MQTT 客户端，可能全程在线且 session 仍有效；
+            # 若强行关闭 session，仍在线的 Agent 心跳会因 get_current 返回
+            # None 被永久拒绝（Agent 不重连就不会重注册，形成死锁）。
+            # session 有效性由后续 LWT（Agent 真掉线）/ 心跳 / 注册动态决定。
             stats["offline_nodes"] = uow.nodes.mark_all_offline()
-            stats["closed_sessions"] = uow.node_sessions.close_all_open(
-                reason=DisconnectReason.EXPIRED,
-                at=now,
-            )
-            if stats["offline_nodes"] or stats["closed_sessions"]:
-                logger.warning(
-                    "启动恢复：重置节点投影 nodes=%d sessions=%d",
-                    stats["offline_nodes"],
-                    stats["closed_sessions"],
-                )
+            if stats["offline_nodes"]:
+                logger.warning("启动恢复：重置节点投影 nodes=%d", stats["offline_nodes"])
 
             # 扫描所有非终态 Run
             non_terminal_runs = uow.task_runs.list_non_terminal(limit=5000)
