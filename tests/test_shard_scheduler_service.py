@@ -456,3 +456,45 @@ def test_schedule_run_failover_uses_new_node_and_preserves_history(client) -> No
             (1, "node-b", ShardAttemptStatus.FAILED),
             (2, "node-a", ShardAttemptStatus.DISPATCHED),
         ]
+
+
+def test_schedule_run_converges_run_to_failed_when_dispatch_exhausted(client) -> None:
+    """派发耗尽（failover 不允许）时，Shard 与 Run 收敛到 FAILED 终态。
+
+    回归：Agent 因脚本下载失败回 ACK(rejected) 后，若 failover_nodes=false，
+    此前 Shard 会永久卡在 dispatching、Run 永久卡在"已派发"（§8.4）。
+    """
+    container = client.app.state.container
+    run_id = _seed(
+        container,
+        node_ids=("node-a",),
+        shard_count=1,
+        # failover_nodes 未开：默认 false → 拒绝后无可用重派 → 应失败
+        retry_policy={"max_attempts": 1, "failover_nodes": False},
+    )
+    service = container.shard_scheduler_service()
+
+    first = service.schedule_run(run_id)
+    assert len(first.scheduled) == 1
+    shard_id = first.scheduled[0].shard_id
+
+    # 模拟 Agent 拒绝：attempt 置 FAILED（脚本下载失败场景）
+    with _uow(container) as uow:
+        attempt = uow.shard_attempts.list_by_shard(shard_id)[0]
+        attempt.status = ShardAttemptStatus.FAILED
+        attempt.error_code = "RUN_REJECTED"
+        attempt.error_message = "脚本下载失败"
+        uow.shard_attempts.update(attempt)
+
+    # 再次调度：应触发派发耗尽收敛，Shard → FAILED、Run → FAILED
+    second = service.schedule_run(run_id)
+
+    assert second.scheduled == ()
+    with _uow(container) as uow:
+        shard = uow.run_shards.get_by_shard_id(shard_id)
+        assert shard is not None
+        assert shard.status is ShardStatus.FAILED
+        run = uow.task_runs.get_by_run_id(run_id)
+        assert run is not None
+        assert run.status is RunStatus.FAILED
+        assert run.finished_at is not None

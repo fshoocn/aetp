@@ -137,6 +137,18 @@ class ShardSchedulerService:
                 if not self._is_dispatchable(shard, attempts):
                     continue
 
+                # 派发耗尽收敛：最新 attempt 已失败且 failover 不允许时，
+                # Shard 进入 FAILED 终态，不再无限停留在 dispatching
+                # （否则 Agent 拒绝后 Run 会永久卡在"已派发"，§8.4）。
+                if self._is_dispatch_exhausted(shard, attempts, task):
+                    assert_transition(shard.status, ShardStatus.FAILED)
+                    shard.status = ShardStatus.FAILED
+                    shard.final_node = (
+                        max(attempts, key=lambda a: a.attempt_no).node_id
+                    )
+                    uow.run_shards.update(shard)
+                    continue
+
                 assignment = self._select_assignment(
                     script=script,
                     task=task,
@@ -164,6 +176,10 @@ class ShardSchedulerService:
                 assert_transition(run.status, RunStatus.DISPATCHED)
                 run.status = RunStatus.DISPATCHED
                 uow.task_runs.update(run)
+
+            # Run 失败投影：所有 Shard 均终态失败（派发耗尽）时，Run 收敛到
+            # FAILED 终态，避免 Agent 拒绝后永久卡在"已派发"。
+            self._project_run_failure_if_all_shards_failed(uow, run)
 
             return ScheduleResult(
                 run_id=run.run_id,
@@ -286,6 +302,67 @@ class ShardSchedulerService:
         return bool(policy.get("failover_nodes", False)) and latest_attempt_no < _positive_int(
             policy.get("max_attempts"), 1
         )
+
+    @staticmethod
+    def _is_dispatch_exhausted(
+        shard: RunShard,
+        attempts: list[ShardAttempt],
+        task: TestTask,
+    ) -> bool:
+        """判断 Shard 是否已派发耗尽（应进入 FAILED 终态而非继续等待）。
+
+        仅当 Shard 处于 DISPATCHING 且最新 attempt 已终态失败/超时、且
+        failover 不允许时视为耗尽。其余情况（首次派发、无 attempt、设备
+        暂时忙/离线、failover 仍可继续）返回 False，保持 pending/重派。
+        """
+        if shard.status is not ShardStatus.DISPATCHING:
+            return False
+        if not attempts:
+            return False
+        latest = max(attempts, key=lambda attempt: attempt.attempt_no)
+        if latest.status not in {
+            ShardAttemptStatus.FAILED,
+            ShardAttemptStatus.TIMED_OUT,
+        }:
+            return False
+        return not ShardSchedulerService._failover_allowed(task, latest.attempt_no)
+
+    @staticmethod
+    def _project_run_failure_if_all_shards_failed(
+        uow: UnitOfWork, run: TaskRun
+    ) -> None:
+        """所有 Shard 均终态失败（派发耗尽）时，把 Run 收敛到 FAILED 终态。
+
+        Agent 在下载/准备阶段 reject 后不会上报 run.result，因此 Run 无法
+        通过结果投影进入失败终态；此处兜底：所有 Shard 均为 FAILED/TIMED_OUT/
+        CANCELLED 等终态且至少一个失败时，Run 投影为 FAILED（§5.4 状态机）。
+        """
+        if run.status in {
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.TIMED_OUT,
+            RunStatus.LOST,
+        }:
+            return
+        shards = uow.run_shards.list_by_run(run.run_id)
+        if not shards:
+            return
+        terminal = {
+            ShardStatus.SUCCEEDED,
+            ShardStatus.FAILED,
+            ShardStatus.CANCELLED,
+            ShardStatus.TIMED_OUT,
+        }
+        if not all(shard.status in terminal for shard in shards):
+            return
+        # 全部终态且无任一成功 → Run 失败（避免全 cancelled 误判为 failed）
+        if any(shard.status is ShardStatus.SUCCEEDED for shard in shards):
+            return
+        assert_transition(run.status, RunStatus.FAILED)
+        run.status = RunStatus.FAILED
+        run.finished_at = utcnow()
+        uow.task_runs.update(run)
 
     def _persist_dispatch(
         self,
