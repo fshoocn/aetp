@@ -128,12 +128,10 @@ class AgentPluginRegistry:
         except (PluginNotFoundError, PluginVersionMismatchError):
             if package_ref is None or installer is None:
                 raise
-            if (
-                package_ref.task_type != task_type
-            ):
+            if package_ref.task_type != task_type:
                 raise PluginVersionMismatchError(
                     "run.assign.plugin_ref 与 task_type 不一致"
-                )
+                ) from None
             plugin = installer.install(package_ref)
             self.register_installed(plugin, replace=True)
             return self.require_compatible(task_type, plugin_version)

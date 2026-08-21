@@ -93,9 +93,23 @@ class NotificationSender(ABC):
 
 
 class SecretStore(ABC):
-    """密钥存储端口：业务层只持有 secret_ref。"""
+    """密钥存储端口：业务层只持有 secret_ref。
+
+    密钥值加密后落库；`get` 解回明文供 HMAC 签名类 sender / webhook 验证使用，
+    `set` 加密持久化（幂等覆盖），`delete` 删除（端点/集成删除时调用）。
+    """
 
     @abstractmethod
-    def get(self, secret_ref: str) -> SecretValue:
-        """按引用取回密钥值。"""
+    def get(self, secret_ref: str) -> SecretValue | None:
+        """按引用取回密钥值；不存在或解密失败返回 None。"""
+        ...
+
+    @abstractmethod
+    def set(self, secret_ref: str, value: str) -> None:
+        """加密并持久化一个密钥值（幂等覆盖）。"""
+        ...
+
+    @abstractmethod
+    def delete(self, secret_ref: str) -> None:
+        """删除密钥（端点/集成删除时调用）。"""
         ...

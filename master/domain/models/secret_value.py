@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import ClassVar
 
 from master.domain.time import utcnow
 
@@ -15,6 +16,9 @@ from master.domain.time import utcnow
 @dataclass
 class SecretValueRecord:
     """加密密钥记录（secret_values 表）。"""
+
+    # 防止 pytest 误收集（测试文件中会导入本模块）。
+    __test__: ClassVar[bool] = False
 
     # sym:id 持久化后回填的代理主键
     id: int | None = None
@@ -26,6 +30,3 @@ class SecretValueRecord:
     created_at: datetime = field(default_factory=utcnow)
     # sym:updated_at 最后更新时间（UTC）
     updated_at: datetime = field(default_factory=utcnow)
-
-
-SecretValueRecord.__test__ = False

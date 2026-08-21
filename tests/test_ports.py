@@ -86,23 +86,36 @@ class RunEventHook:
         self.handled.append(event.event_type)
 
 
-class ConsoleSender:
+class ConsoleSender(NotificationSender):
     channel_type = "console_test"
 
     def __init__(self) -> None:
         self.sent: list[tuple[NotificationMessage, NotificationEndpoint]] = []
 
-    async def send(self, message: NotificationMessage, endpoint: NotificationEndpoint) -> DeliveryReceipt:
+    async def send(
+        self,
+        message: NotificationMessage,
+        endpoint: NotificationEndpoint,
+        *,
+        secret_value: str | None = None,
+    ) -> DeliveryReceipt:
         self.sent.append((message, endpoint))
         return DeliveryReceipt(status="succeeded", detail="console")
 
 
-class InMemorySecretStore:
+class InMemorySecretStore(SecretStore):
     def __init__(self, secret: str = "s3cret") -> None:
         self._secret = secret
+        self._values: dict[str, str] = {}
 
-    def get(self, secret_ref: str) -> SecretValue:
-        return SecretValue(value=self._secret)
+    def get(self, secret_ref: str) -> SecretValue | None:
+        return SecretValue(value=self._values.get(secret_ref, self._secret))
+
+    def set(self, secret_ref: str, value: str) -> None:
+        self._values[secret_ref] = value
+
+    def delete(self, secret_ref: str) -> None:
+        self._values.pop(secret_ref, None)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +203,9 @@ def test_notification_sender_and_secret_store_port_contract():
         )
     )
     assert receipt.status == "succeeded"
-    assert secrets.get("ref/1").value == "s3cret"
+    secret = secrets.get("ref/1")
+    assert secret is not None
+    assert secret.value == "s3cret"
 
 
 # ---------------------------------------------------------------------------

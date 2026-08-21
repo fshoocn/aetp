@@ -16,7 +16,7 @@ import re
 from datetime import UTC, datetime
 
 import pytest
-from aetp_protocol.logs import RunLogBatch
+from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
 from aetp_protocol.payloads import RunLogCompletePayload
 
 from master.domain.time import utcnow
@@ -32,17 +32,17 @@ def _uow(container):
     return container.uow_factory()()
 
 
-def _log_entry(run_id: str, sequence: int, message: str) -> dict:
-    return {
-        "project_id": "p1",
-        "task_id": "T-e2e",
-        "run_id": run_id,
-        "node_id": "node-a",
-        "sequence": sequence,
-        "level": "info",
-        "message": message,
-        "occurred_at": "2026-08-18T12:00:00Z",
-    }
+def _log_entry(run_id: str, sequence: int, message: str) -> RunLogEntry:
+    return RunLogEntry(
+        project_id="p1",
+        task_id="T-e2e",
+        run_id=run_id,
+        node_id="node-a",
+        sequence=sequence,
+        level=LogLevel.INFO,
+        message=message,
+        occurred_at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+    )
 
 
 # ---------------------------------------------------------------------------
