@@ -26,6 +26,8 @@ dependencies = [
 [project.optional-dependencies]
 mysql = ["pymysql>=1.1"]
 postgres = ["psycopg2-binary>=2.9"]
+# USB 插拔事件监听（能力缓存失效，跨平台：Windows WMI / Linux pyudev / macOS IORegistry）
+usb = ["usb-monitor>=1.23"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

@@ -69,12 +69,14 @@ class AgentRuntime:
         artifact_uploader: ArtifactUploadService | None = None,
         script_preflight: ScriptPreflightService | None = None,
         execution_service: ExecutionService | None = None,
+        capability_cache=None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
         self._transport = transport
         self._ledger = ledger
         self._registration = registration
+        self._capability_cache = capability_cache
         self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
@@ -148,6 +150,12 @@ class AgentRuntime:
         )
         self._outbox_task = asyncio.create_task(self._outbox_loop())
         await self._transport.connect()
+        # 启动 USB 插拔监听（可选，usb-monitor 未安装/失败时静默降级为指纹兜底）
+        if self._capability_cache is not None:
+            try:
+                self._capability_cache.start_usb_monitoring()
+            except Exception:
+                logger.debug("启动 USB 插拔监听失败（已忽略）", exc_info=True)
         logger.info("Agent runtime 已启动: node=%s", self._settings.node_id)
 
     async def stop(self) -> None:
@@ -157,6 +165,11 @@ class AgentRuntime:
             await self._registration.stop_heartbeat()
         except Exception:
             logger.debug("停止心跳异常（已忽略）", exc_info=True)
+        if self._capability_cache is not None:
+            try:
+                self._capability_cache.stop_usb_monitoring()
+            except Exception:
+                logger.debug("停止 USB 插拔监听异常（已忽略）", exc_info=True)
         self._cancel_registration_waiter()
         if self._outbox_task is not None:
             self._outbox_task.cancel()

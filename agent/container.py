@@ -15,7 +15,7 @@ from agent.adapters.mqtt.transport import AgentMqttTransport
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
 from agent.application.services.artifact_upload_service import ArtifactUploadService
-from agent.application.services.capability_loader import scan_capabilities
+from agent.application.services.capability_loader import CapabilityCache
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
 from agent.application.services.script_cache_service import ScriptCacheService
@@ -72,13 +72,21 @@ class Container(containers.DeclarativeContainer):
         ledger=ledger,
     )
 
+    # 能力扫描缓存单例（P5：仅可插拔外设变动时重扫，避免重复全量扫描）
+    capability_cache = providers.Singleton(
+        CapabilityCache,
+        serial_map_file=providers.Callable(lambda: get_settings().serial_map_file),
+    )
+
     # 注册与心跳服务（P5.3 + P5.5：register outbox → register-ack 校验 → heartbeat）
     registration_service = providers.Factory(
         RegistrationService,
         transport=transport,
         ledger=ledger,
         settings=settings,
-        capabilities=providers.Callable(lambda: scan_capabilities(get_settings().serial_map_file)),
+        capabilities=providers.Callable(
+            lambda cache=capability_cache: cache().scan()
+        ),
         plugin_registry=plugin_registry,
     )
 
@@ -96,4 +104,5 @@ class Container(containers.DeclarativeContainer):
         script_cache=script_cache,
         artifact_uploader=artifact_uploader,
         execution_service=execution_service,
+        capability_cache=capability_cache,
     )

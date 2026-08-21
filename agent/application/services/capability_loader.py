@@ -34,6 +34,7 @@ import subprocess
 from pathlib import Path
 
 from aetp_protocol.capabilities import (
+    HardwareChannel,
     LanguageCapability,
     LanguageRuntime,
     NodeCapabilities,
@@ -41,6 +42,10 @@ from aetp_protocol.capabilities import (
     SerialCapability,
     SerialPortCapability,
     SystemCapability,
+    VehicleBus,
+    VehicleCapability,
+    VehicleVendor,
+    Version,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,7 +91,9 @@ def _scan_system() -> SystemCapability | None:
     """自动检测操作系统、内存与 CPU 核数（标准库实现）。"""
     try:
         os_name = platform.system().lower() or "unknown"
-        os_version = platform.version() or platform.release() or "unknown"
+        os_version = _to_version(
+            platform.version() or platform.release() or "0"
+        )
         cpu_cores = os.cpu_count() or 0
         memory_mb = _total_memory_mb()
         return SystemCapability(
@@ -97,6 +104,20 @@ def _scan_system() -> SystemCapability | None:
     except Exception:
         logger.exception("系统能力扫描失败")
         return None
+
+
+def _to_version(raw: str) -> Version:
+    """把任意版本字符串规范化为 ``Version``（点分数字，§5.1）。
+
+    从字符串中提取第一个形如 ``x.y[.z]`` 的 token（如 ``10.0.19045``、
+    ``Darwin Kernel Version 24.0.0`` -> ``24.0.0``）；无法提取时降级为
+    ``"0"``，避免 ``Version`` 的 pattern 校验抛错。
+    """
+    for token in raw.split():
+        candidate = token.strip().rstrip(",").lstrip("v")
+        if _is_version_like(candidate):
+            return Version(candidate)
+    return Version("0")
 
 
 def _total_memory_mb() -> int | None:
@@ -152,7 +173,7 @@ def _scan_language() -> LanguageCapability | None:
     return LanguageCapability(runtimes=tuple(runtimes))
 
 
-def _probe_version(name: str, candidates: tuple[str, ...]) -> str | None:
+def _probe_version(name: str, candidates: tuple[str, ...]) -> Version | None:
     """探测可执行文件版本；找不到或执行失败返回 None。
 
     只接受匹配点分数字版本（如 ``3.11.4``、``17.0.10``）的输出；
@@ -173,8 +194,9 @@ def _probe_version(name: str, candidates: tuple[str, ...]) -> str | None:
         # 提取版本号（如 "Python 3.11.4" -> "3.11.4"）；
         # 要求至少"数字.数字"，防止把错误消息当版本
         for token in output.split():
-            if _is_version_like(token):
-                return token
+            candidate = token.strip().rstrip(",").lstrip("v")
+            if _is_version_like(candidate):
+                return Version(candidate)
         return None
     except Exception:  # noqa: BLE001
         return None
@@ -259,25 +281,232 @@ def _port_exists(port: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def scan_vehicle():
-    """扫描 CAN 通道能力（占位实现）。
+def scan_vehicle() -> VehicleCapability | None:
+    """扫描车载硬件能力（Vector CAN/LIN/FlexRay/Ethernet 通道）。
 
-    .. note::
-        当前返回 ``None``（不声明任何 CAN 能力）。台架侧需要实现时，在此
-        返回 ``VehicleCapability``，例如::
+    通过 ``py-canoe`` 的 ``VxlDriver`` 读取 Vector XL 驱动发现的硬件设备与
+    通道，映射为强类型能力树 ``VehicleCapability -> VehicleVendor -> VehicleBus
+    -> HardwareChannel``（§18.5）。
 
-            from aetp_protocol.capabilities import (
-                HardwareChannel, VehicleBus, VehicleCapability, VehicleVendor,
-            )
-            return VehicleCapability(vendors=(
-                VehicleVendor(name="vector", buses=(
-                    VehicleBus(bus_type="can", channels=(
-                        HardwareChannel(name="can0", enabled=True),
-                        HardwareChannel(name="can1", enabled=True),
-                    )),
-                )),
-            ))
+    - 厂商名固定为 ``vector``（py-canoe 仅支持 Vector 硬件）；
+    - 总线类型由通道的 ``can``/``lin``/``flexray``/``ethernet`` 能力位判定；
+    - 通道名由「设备名 + 通道名」组成（如 ``Virtual Channel 1``），
+      ``hardware_model`` 填设备型号（如 ``VN1640``）。
 
-        返回 ``None`` 表示不声明 CAN 能力。
+    扫描失败（py-canoe 未安装 / XL 驱动未就绪 / 无硬件）返回 ``None``，
+    不阻塞 Agent 启动（与 system/language/serial 扫描一致）。
     """
-    return
+    try:
+        from py_canoe.helpers.vxlapi import VxlDriver
+    except Exception:  # noqa: BLE001 - py-canoe 未安装则无车载能力
+        logger.warning("py-canoe 未安装，跳过车载能力扫描")
+        return None
+
+    try:
+        devices = VxlDriver().get_devices()
+    except Exception:  # noqa: BLE001 - XL 驱动未就绪/无硬件
+        logger.warning("Vector XL 驱动扫描失败，跳过车载能力")
+        return None
+
+    buses = _group_buses_by_type(devices)
+    if not buses:
+        return None
+    return VehicleCapability(
+        vendors=(
+            VehicleVendor(name="vector", buses=tuple(buses)),
+        )
+    )
+
+
+# 通道能力位 -> 总线类型（与 py-canoe XlBusType 对应，§18.5）
+_BUS_TYPE_ATTRS: tuple[tuple[str, str], ...] = (
+    ("can", "can"),
+    ("lin", "lin"),
+    ("flexray", "flexray"),
+    ("ethernet", "ethernet"),
+)
+
+
+def _group_buses_by_type(devices: list) -> list[VehicleBus]:
+    """把 Vector 硬件通道按总线类型分组，返回 ``VehicleBus`` 列表。
+
+    一个设备可能提供多个总线类型的通道；按总线类型聚合。通道名由「设备名 +
+    通道名」组成（如 ``Virtual Channel 1``），可直接看出通道归属设备；
+    ``hardware_model`` 记录设备型号（如 ``VN1640``）。
+    """
+    by_type: dict[str, list[HardwareChannel]] = {}
+    for device in devices:
+        model = getattr(device, "name", None) or None
+        for channel in getattr(device, "channels", []):
+            for bus_type, attr in _BUS_TYPE_ATTRS:
+                if getattr(channel, attr, False):
+                    by_type.setdefault(bus_type, []).append(
+                        HardwareChannel(
+                            name=_channel_name(device, channel),
+                            hardware_model=model,
+                            enabled=True,
+                        )
+                    )
+    buses: list[VehicleBus] = []
+    for bus_type in ("can", "lin", "flexray", "ethernet"):
+        channels = by_type.get(bus_type)
+        if not channels:
+            continue
+        buses.append(VehicleBus(bus_type=bus_type, channels=tuple(channels)))
+    return buses
+
+
+def _channel_name(device, channel) -> str:
+    """用「设备名 + 通道名」组成通道名（如 ``Virtual Channel 1``）。
+
+    py-canoe 的 ``ChannelInfo.name`` 已包含设备名前缀（XL 驱动返回的完整
+    通道名），直接使用即可保证唯一；通道名缺失时回退到硬件通道号拼接。
+    """
+    device_name = getattr(device, "name", "") or ""
+    channel_name = getattr(channel, "name", "") or ""
+    if channel_name:
+        return channel_name
+    if device_name:
+        return f"{device_name} {getattr(channel, 'hw_channel', 0)}"
+    return f"ch{getattr(channel, 'hw_channel', 0)}"
+
+
+# ---------------------------------------------------------------------------
+# 能力缓存：仅在可插拔外设变动时重扫，避免每次心跳全量扫描
+# ---------------------------------------------------------------------------
+
+
+def _device_fingerprint(serial_map_file: str | Path | None) -> tuple:
+    """计算可插拔外设的轻量指纹（串口端口 + Vector 硬件通道）。
+
+    只探测「运行中可能热插拔」的外设：串口端口存在性与 Vector 设备通道。
+    system / language 是安装状态，运行中不变，不参与指纹。指纹未变时
+    复用缓存能力，避免每次全量扫描（尤其 language 的多次 subprocess）。
+    """
+    serial_ports: list[tuple[str, str, bool]] = []
+    path = _resolve_serial_map(serial_map_file)
+    if path is not None and path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                for function, port in raw.items():
+                    if isinstance(port, str) and port:
+                        serial_ports.append(
+                            (function, port, _port_exists(port))
+                        )
+        except Exception:  # noqa: BLE001 - 指纹失败视为无串口
+            serial_ports = []
+
+    vehicle_channels: list[tuple[str, str, str]] = []
+    try:
+        from py_canoe.helpers.vxlapi import VxlDriver
+
+        devices = VxlDriver().get_devices()
+    except Exception:  # noqa: BLE001 - py-canoe 未安装/无硬件
+        devices = []
+    for device in devices:
+        for channel in getattr(device, "channels", []):
+            for bus_type, attr in _BUS_TYPE_ATTRS:
+                if getattr(channel, attr, False):
+                    vehicle_channels.append(
+                        (
+                            bus_type,
+                            _channel_name(device, channel),
+                            getattr(device, "name", "") or "",
+                        )
+                    )
+
+    return (tuple(serial_ports), tuple(vehicle_channels))
+
+
+class CapabilityCache:
+    """能力扫描缓存：指纹（可插拔外设）未变时复用缓存，变了才重扫。
+
+    用法（Agent 容器装配为单例）::
+
+        cache = CapabilityCache(serial_map_file)
+        cache.start_usb_monitoring()  # 可选：USB 插拔事件驱动失效
+        caps = cache.scan()   # 首次全量扫描
+        caps = cache.scan()   # 指纹未变 -> 命中缓存
+
+    能力更新由两条路径触发（互补）：
+    1. **事件驱动**：``start_usb_monitoring`` 用 ``usb-monitor`` 跨平台库
+       （Windows WMI / Linux pyudev / macOS IORegistry）后台监听 USB 插拔，
+       Vector CAN 卡与 USB 串口都经 USB 连接，插拔时回调使缓存失效；
+    2. **指纹兜底**：每次 ``scan()`` 对比轻量设备指纹，漏掉的事件也能兜住。
+    system / language 是安装状态，运行中不变。
+    """
+
+    def __init__(self, serial_map_file: str | Path | None = None) -> None:
+        self._serial_map_file = serial_map_file
+        self._cached: NodeCapabilities | None = None
+        self._fingerprint: tuple | None = None
+        self._usb_monitor = None
+
+    def scan(self) -> NodeCapabilities:
+        """返回能力快照；指纹未变复用缓存，变了全量重扫。"""
+        fingerprint = _device_fingerprint(self._serial_map_file)
+        if self._cached is not None and fingerprint == self._fingerprint:
+            logger.debug("能力缓存命中（外设未变动）")
+            return self._cached
+
+        logger.info("可插拔外设变动或首次扫描，重新扫描本机能力")
+        capabilities = scan_capabilities(serial_map_file=self._serial_map_file)
+        self._cached = capabilities
+        self._fingerprint = fingerprint
+        return capabilities
+
+    def invalidate(self) -> None:
+        """主动使缓存失效（下次 scan 强制重扫）。"""
+        self._cached = None
+        self._fingerprint = None
+
+    # -- USB 插拔事件监听（可选，跨平台） -----------------------------------
+
+    def start_usb_monitoring(self, check_every_seconds: float = 1.0) -> bool:
+        """启动 USB 插拔监听（后台线程）；插拔时使缓存失效。
+
+        ``usb-monitor`` 未安装或初始化失败时返回 ``False``（优雅降级，
+        仅靠指纹兜底）；成功返回 ``True``。幂等：重复调用不重复启动。
+
+        :param check_every_seconds: 后台轮询间隔（秒），默认 1.0。
+        """
+        if self._usb_monitor is not None:
+            return True
+        try:
+            from usbmonitor import USBMonitor
+        except Exception:  # noqa: BLE001 - usb-monitor 未安装则降级为纯指纹
+            logger.warning("usb-monitor 未安装，USB 插拔事件监听不可用（仅指纹兜底）")
+            return False
+
+        try:
+            monitor = USBMonitor()
+            monitor.start_monitoring(
+                on_connect=self._on_usb_change,
+                on_disconnect=self._on_usb_change,
+                check_every_seconds=check_every_seconds,
+            )
+        except Exception:  # noqa: BLE001 - 监听启动失败不阻塞 Agent
+            logger.exception("USB 插拔监听启动失败，仅靠指纹兜底")
+            return False
+
+        self._usb_monitor = monitor
+        logger.info("USB 插拔监听已启动（interval=%.1fs）", check_every_seconds)
+        return True
+
+    def stop_usb_monitoring(self) -> None:
+        """停止 USB 插拔监听（Agent 关闭时调用）。"""
+        if self._usb_monitor is None:
+            return
+        try:
+            self._usb_monitor.stop_monitoring()
+        except Exception:  # noqa: BLE001 - 停止失败不阻塞关闭
+            logger.debug("停止 USB 监听异常（已忽略）", exc_info=True)
+        self._usb_monitor = None
+        logger.info("USB 插拔监听已停止")
+
+    def _on_usb_change(self, device_id: str, device_info: dict) -> None:
+        """USB 插拔回调：使缓存失效，下次 scan 重扫能力。"""
+        model = (device_info or {}).get("ID_MODEL", "") if isinstance(device_info, dict) else ""
+        logger.info("检测到 USB 设备变动，能力缓存失效: device=%s model=%s", device_id, model)
+        self.invalidate()
