@@ -140,9 +140,7 @@ class RunOrchestrator:
         # 异步解包脚本（避免阻塞事件循环）
         if self._script_cache is not None:
             script_ref = dict(payload.script_ref or {})
-            script_ref = await asyncio.to_thread(
-                self._enrich_script_ref, script_ref
-            )
+            script_ref = await asyncio.to_thread(self._enrich_script_ref, script_ref)
             context = self._build_context_with_ref(payload, script_ref)
 
         try:
@@ -176,9 +174,7 @@ class RunOrchestrator:
         """构造执行上下文（脚本路径未经解包，异步阶段会替换）。"""
         return self._build_context_with_ref(payload, dict(payload.script_ref or {}))
 
-    def _build_context_with_ref(
-        self, payload: RunAssignPayload, script_ref: dict
-    ) -> TaskContext:
+    def _build_context_with_ref(self, payload: RunAssignPayload, script_ref: dict) -> TaskContext:
         """构造执行上下文；params 取 Shard 专属执行参数（§8.4）。"""
         run_id = payload.run_id
         return TaskContext(
@@ -211,22 +207,16 @@ class RunOrchestrator:
             entry = self._script_cache.ensure_cached(script_ref)
             source = Path(entry.path)
             if not source.is_file():
-                logger.warning(
-                    "缓存脚本文件缺失: %s", source
-                )
+                logger.warning("缓存脚本文件缺失: %s", source)
                 return script_ref
             workspace = Path(self._settings.script_cache_dir).resolve().parent / "runs"
             workspace.mkdir(parents=True, exist_ok=True)
-            tmp_dir = Path(
-                tempfile.mkdtemp(prefix="aetp-run-script-", dir=str(workspace))
-            )
+            tmp_dir = Path(tempfile.mkdtemp(prefix="aetp-run-script-", dir=str(workspace)))
             self._extract_script_sync(source, tmp_dir)
             self._script_dirs.add(tmp_dir)
             script_ref["path"] = str(tmp_dir)
         except Exception as exc:  # noqa: BLE001 - 解包失败不阻塞执行
-            logger.warning(
-                "脚本解包失败，回退缓存文件路径: %s", exc
-            )
+            logger.warning("脚本解包失败，回退缓存文件路径: %s", exc)
             try:
                 cached = self._ledger.get_cached_script(
                     script_ref.get("script_id", ""),
@@ -243,7 +233,7 @@ class RunOrchestrator:
     def _extract_script_sync(source: Path, tmp_dir: Path) -> None:
         """同步解包脚本（zip 解压或单文件复制）。"""
         if zipfile.is_zipfile(source):
-                extract_zip_safely(source, tmp_dir)
+            extract_zip_safely(source, tmp_dir)
         else:
             shutil.copy2(source, tmp_dir / "test_script.py")
 
@@ -276,9 +266,7 @@ class RunOrchestrator:
                             (
                                 path,
                                 str(item.get("kind") or "data"),
-                                item.get("filename")
-                                if isinstance(item.get("filename"), str)
-                                else None,
+                                item.get("filename") if isinstance(item.get("filename"), str) else None,
                             )
                         )
 
@@ -333,9 +321,7 @@ class RunOrchestrator:
         try:
             await collect(context)
         except Exception:
-            logger.warning(
-                "插件 collect_logs 失败: run_id=%s", context.run_id, exc_info=True
-            )
+            logger.warning("插件 collect_logs 失败: run_id=%s", context.run_id, exc_info=True)
 
     async def _flush_logs(self, context: TaskContext) -> None:
         """把 spool 剩余日志按 RunLogBatch 分批上报并标记已发布。"""
@@ -354,12 +340,8 @@ class RunOrchestrator:
             )
             topic = event_topic(self._settings.node_id, "log")
             outbox_id = f"log:{context.run_id}:{batch.first_sequence}"
-            self._ledger.replace_outbox(
-                outbox_id, topic, envelope.model_dump(mode="json")
-            )
-            context.mark_logs_published(
-                [e.id for e in entries if e.id is not None]
-            )
+            self._ledger.replace_outbox(outbox_id, topic, envelope.model_dump(mode="json"))
+            context.mark_logs_published([e.id for e in entries if e.id is not None])
             if len(entries) < batch_size:
                 return
 
@@ -393,16 +375,11 @@ class RunOrchestrator:
         else:
             status = (
                 "failed"
-                if result.status is AgentRunStatus.SUCCEEDED
-                and analysis.passed is False
+                if result.status is AgentRunStatus.SUCCEEDED and analysis.passed is False
                 else _status_value(result.status)
             )
             case_results = analysis.case_results
-            passed = bool(
-                analysis.passed
-                if analysis.passed is not None
-                else result.status is AgentRunStatus.SUCCEEDED
-            )
+            passed = bool(analysis.passed if analysis.passed is not None else result.status is AgentRunStatus.SUCCEEDED)
             metrics = analysis.metrics
             data = analysis.data
             if result.error and not data.get("error"):
@@ -426,9 +403,7 @@ class RunOrchestrator:
         )
         topic = event_topic(self._settings.node_id, "result")
         outbox_id = f"result:{payload.run_id}:{payload.attempt_no}"
-        self._ledger.replace_outbox(
-            outbox_id, topic, envelope.model_dump(mode="json")
-        )
+        self._ledger.replace_outbox(outbox_id, topic, envelope.model_dump(mode="json"))
         logger.info(
             "run.result 已入 outbox: run_id=%s attempt=%s status=%s",
             payload.run_id,
@@ -449,21 +424,15 @@ class RunOrchestrator:
         try:
             analysis = await analyze(result.summary, context)
         except Exception as exc:
-            logger.warning(
-                "插件 analyze_results 失败: run_id=%s", context.run_id, exc_info=True
-            )
+            logger.warning("插件 analyze_results 失败: run_id=%s", context.run_id, exc_info=True)
             return _Analysis(failed=True, error=f"{type(exc).__name__}: {exc}")
 
         if not isinstance(analysis, Mapping):
-            return _Analysis(
-                failed=True, error="analyze_results 必须返回 Mapping"
-            )
+            return _Analysis(failed=True, error="analyze_results 必须返回 Mapping")
         try:
             return _Analysis.from_mapping(analysis)
         except Exception as exc:
-            logger.warning(
-                "analyze_results 返回结构非法: run_id=%s", context.run_id, exc_info=True
-            )
+            logger.warning("analyze_results 返回结构非法: run_id=%s", context.run_id, exc_info=True)
             return _Analysis(failed=True, error=f"非法结果结构: {exc}")
 
     async def _report_abort(self, payload: RunAssignPayload) -> None:
@@ -483,9 +452,7 @@ class RunOrchestrator:
         )
         topic = event_topic(self._settings.node_id, "result")
         outbox_id = f"result:{payload.run_id}:{payload.attempt_no}"
-        self._ledger.replace_outbox(
-            outbox_id, topic, envelope.model_dump(mode="json")
-        )
+        self._ledger.replace_outbox(outbox_id, topic, envelope.model_dump(mode="json"))
 
     async def _report_log_complete(
         self,
@@ -512,9 +479,7 @@ class RunOrchestrator:
         )
         topic = event_topic(self._settings.node_id, "log-complete")
         outbox_id = f"log-complete:{context.run_id}"
-        self._ledger.replace_outbox(
-            outbox_id, topic, envelope.model_dump(mode="json")
-        )
+        self._ledger.replace_outbox(outbox_id, topic, envelope.model_dump(mode="json"))
         logger.info(
             "run.log-complete 已入 outbox: run_id=%s last_sequence=%s count=%s",
             context.run_id,
@@ -524,9 +489,7 @@ class RunOrchestrator:
 
     # -- 信封构造 -----------------------------------------------------------
 
-    def _envelope(
-        self, message_type: MessageType, trace_id: str, payload: dict
-    ) -> Envelope:
+    def _envelope(self, message_type: MessageType, trace_id: str, payload: dict) -> Envelope:
         return Envelope(
             message_id=uuid.uuid4().hex,
             message_type=message_type.value,

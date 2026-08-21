@@ -34,17 +34,13 @@ class RunArtifactRepositoryImpl(RunArtifactRepository):
         self._s = session
 
     def add(self, artifact: RunArtifact) -> RunArtifact:
-        run_pk = self._s.execute(
-            select(TaskRunORM.id).where(TaskRunORM.run_id == artifact.run_id)
-        ).scalar_one_or_none()
+        run_pk = self._s.execute(select(TaskRunORM.id).where(TaskRunORM.run_id == artifact.run_id)).scalar_one_or_none()
         if run_pk is None:
             raise ValueError(f"Run 不存在: {artifact.run_id}")
         shard_pk = None
         if artifact.shard_id is not None:
             shard_pk = self._s.execute(
-                select(RunShardORM.id).where(
-                    RunShardORM.shard_id == artifact.shard_id
-                )
+                select(RunShardORM.id).where(RunShardORM.shard_id == artifact.shard_id)
             ).scalar_one_or_none()
             if shard_pk is None:
                 raise ValueError(f"Shard 不存在: {artifact.shard_id}")
@@ -65,14 +61,18 @@ class RunArtifactRepositoryImpl(RunArtifactRepository):
         return _to_domain(orm)
 
     def get_by_artifact_id(self, artifact_id: str) -> RunArtifact | None:
-        orm = self._s.execute(
-            select(RunArtifactORM)
-            .options(
-                joinedload(RunArtifactORM.run),
-                joinedload(RunArtifactORM.shard),
+        orm = (
+            self._s.execute(
+                select(RunArtifactORM)
+                .options(
+                    joinedload(RunArtifactORM.run),
+                    joinedload(RunArtifactORM.shard),
+                )
+                .where(RunArtifactORM.artifact_id == artifact_id)
             )
-            .where(RunArtifactORM.artifact_id == artifact_id)
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def list_by_run(self, run_id: str) -> list[RunArtifact]:
@@ -82,12 +82,7 @@ class RunArtifactRepositoryImpl(RunArtifactRepository):
                 joinedload(RunArtifactORM.run),
                 joinedload(RunArtifactORM.shard),
             )
-            .where(
-                RunArtifactORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery()
-            )
+            .where(RunArtifactORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery())
             .order_by(RunArtifactORM.uploaded_at, RunArtifactORM.id)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]

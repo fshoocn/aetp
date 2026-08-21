@@ -78,19 +78,10 @@ class RunTriggerService:
         with self._uow_factory() as uow:
             task = uow.test_tasks.get_by_task_id(task_id, project_id)
             if task is None:
-                raise TaskNotFoundError(
-                    f"任务定义不存在或不属于当前项目: {task_id}"
-                )
+                raise TaskNotFoundError(f"任务定义不存在或不属于当前项目: {task_id}")
             script = uow.test_scripts.get_by_script_id(task.script_id)
-            if (
-                script is None
-                or script.project_id != project_id
-                or script.version != task.script_version
-            ):
-                raise ScriptNotFoundError(
-                    f"脚本版本不存在或不属于当前项目: "
-                    f"{task.script_id} v{task.script_version}"
-                )
+            if script is None or script.project_id != project_id or script.version != task.script_version:
+                raise ScriptNotFoundError(f"脚本版本不存在或不属于当前项目: {task.script_id} v{task.script_version}")
             cases = uow.script_cases.list_by_script(script.script_id)
             task_id = task.task_id
             project_id = task.project_id
@@ -120,9 +111,7 @@ class RunTriggerService:
         package = self._plugin_registry.require(task.task_type)
         split_policy = dict(task.split_policy or {})
         if split_policy.get("type") == "by_time":
-            split_policy.setdefault(
-                "default_duration_s", self._duration_stats.default_duration_s
-            )
+            split_policy.setdefault("default_duration_s", self._duration_stats.default_duration_s)
         shard_specs = await package.master.split_shards(
             case_infos,
             split_policy,

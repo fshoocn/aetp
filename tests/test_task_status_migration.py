@@ -16,9 +16,7 @@ from master import config
 
 def _alembic_config() -> Config:
     cfg = Config(str(config.PROJECT_ROOT / "alembic.ini"))
-    cfg.set_main_option(
-        "script_location", str(config.PROJECT_ROOT / "migrations")
-    )
+    cfg.set_main_option("script_location", str(config.PROJECT_ROOT / "migrations"))
     return cfg
 
 
@@ -77,9 +75,7 @@ def _read_statuses(db_path: str) -> dict[str, str]:
     engine = create_engine(f"sqlite:///{db_path}")
     try:
         with engine.connect() as conn:
-            rows = conn.execute(
-                sa_text("SELECT task_id, status FROM tasks")
-            ).all()
+            rows = conn.execute(sa_text("SELECT task_id, status FROM tasks")).all()
             # 用下标显式构建，避免 dict(Row) 触发 Pylance 的 __init__ 重载误报
             return {row[0]: row[1] for row in rows}
     finally:

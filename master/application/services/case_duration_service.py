@@ -94,10 +94,7 @@ class CaseDurationStatsService:
         samples = max(0, int(case.duration_samples or 0))
         average = case.avg_duration_s
         deviation_percent = self._deviation_percent(duration_s, average, samples)
-        if (
-            deviation_percent is not None
-            and deviation_percent > self._anomaly_percent
-        ):
+        if deviation_percent is not None and deviation_percent > self._anomaly_percent:
             return self._discard_anomaly(
                 uow,
                 project_id=project_id,

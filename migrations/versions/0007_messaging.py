@@ -36,9 +36,7 @@ def upgrade() -> None:
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "origin_id", "message_id", name="uq_inbox_messages_origin_message"
-        ),
+        sa.UniqueConstraint("origin_id", "message_id", name="uq_inbox_messages_origin_message"),
     )
 
     op.create_table(
@@ -64,9 +62,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("outbox_id"),
     )
-    op.create_index(
-        "ix_outbox_messages_outbox_id", "outbox_messages", ["outbox_id"], unique=True
-    )
+    op.create_index("ix_outbox_messages_outbox_id", "outbox_messages", ["outbox_id"], unique=True)
     op.create_index(
         "ix_outbox_messages_status_attempt",
         "outbox_messages",
@@ -89,9 +85,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("event_id"),
         sa.UniqueConstraint("sequence", name="uq_domain_events_sequence"),
     )
-    op.create_index(
-        "ix_domain_events_event_id", "domain_events", ["event_id"], unique=True
-    )
+    op.create_index("ix_domain_events_event_id", "domain_events", ["event_id"], unique=True)
     op.create_index(
         "ix_domain_events_project_sequence",
         "domain_events",
@@ -116,12 +110,8 @@ def upgrade() -> None:
         sa.UniqueConstraint("audit_id"),
     )
     op.create_index("ix_audit_logs_audit_id", "audit_logs", ["audit_id"], unique=True)
-    op.create_index(
-        "ix_audit_logs_project_occurred", "audit_logs", ["project_id", "occurred_at"]
-    )
-    op.create_index(
-        "ix_audit_logs_actor_occurred", "audit_logs", ["actor_id", "occurred_at"]
-    )
+    op.create_index("ix_audit_logs_project_occurred", "audit_logs", ["project_id", "occurred_at"])
+    op.create_index("ix_audit_logs_actor_occurred", "audit_logs", ["actor_id", "occurred_at"])
 
 
 def downgrade() -> None:

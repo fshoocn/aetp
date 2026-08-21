@@ -13,25 +13,25 @@ class MessageType(StrEnum):
     """AETP 协议消息类型（§8.3/§8.4 + verify 扩展）。"""
 
     # 节点
-    NODE_REGISTER = "node.register"          # events/register
-    REGISTER_ACK = "register-ack"            # commands/register-ack
-    NODE_HEARTBEAT = "node.heartbeat"        # events/heartbeat
-    PRESENCE = "presence"                    # events/presence（LWT 非正常离线）
+    NODE_REGISTER = "node.register"  # events/register
+    REGISTER_ACK = "register-ack"  # commands/register-ack
+    NODE_HEARTBEAT = "node.heartbeat"  # events/heartbeat
+    PRESENCE = "presence"  # events/presence（LWT 非正常离线）
     # 脚本
-    SCRIPT_PARSE = "script.parse"            # commands/parse
+    SCRIPT_PARSE = "script.parse"  # commands/parse
     SCRIPT_PARSE_RESULT = "script.parse-result"  # events/parse-result
-    SCRIPT_VERIFY = "script.verify"          # commands/verify（验证扩展）
+    SCRIPT_VERIFY = "script.verify"  # commands/verify（验证扩展）
     SCRIPT_VERIFY_RESULT = "script.verify-result"  # events/verify-result
     # Run 派发
-    RUN_ASSIGN = "run.assign"                # commands/assign
-    RUN_CANCEL = "run.cancel"                # commands/cancel
-    RUN_ACK = "run.ack"                      # events/ack
+    RUN_ASSIGN = "run.assign"  # commands/assign
+    RUN_CANCEL = "run.cancel"  # commands/cancel
+    RUN_ACK = "run.ack"  # events/ack
     # 运行期
-    RUN_PROGRESS = "run.progress"            # events/progress
-    RUN_LOG = "run.log"                      # events/log
-    RUN_CASE_STATUS = "run.case-status"      # events/case-status
-    RUN_RESULT = "run.result"                # events/result
-    RUN_LOG_COMPLETE = "run.log-complete"    # events/log-complete
+    RUN_PROGRESS = "run.progress"  # events/progress
+    RUN_LOG = "run.log"  # events/log
+    RUN_CASE_STATUS = "run.case-status"  # events/case-status
+    RUN_RESULT = "run.result"  # events/result
+    RUN_LOG_COMPLETE = "run.log-complete"  # events/log-complete
 
 
 # message_type -> (方向, 段名)；方向：commands（Master→Agent）/ events（Agent→Master）

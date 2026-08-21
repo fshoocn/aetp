@@ -114,17 +114,13 @@ class Task:
         elif self.status == TaskStatus.CANCELLING:
             self._transition(TaskStatus.CANCELLED)
         else:
-            raise InvalidStateTransitionError(
-                f"任务状态 {self.status.value} 不允许取消"
-            )
+            raise InvalidStateTransitionError(f"任务状态 {self.status.value} 不允许取消")
         self.finished_at = utcnow()
 
     def mark_cancelled(self) -> None:
         """Agent 确认取消完成（仅 cancelling 可进入）。"""
         if self.status != TaskStatus.CANCELLING:
-            raise InvalidStateTransitionError(
-                f"任务状态 {self.status.value} 未处于取消中，无法标记取消完成"
-            )
+            raise InvalidStateTransitionError(f"任务状态 {self.status.value} 未处于取消中，无法标记取消完成")
         self._transition(TaskStatus.CANCELLED)
         self.finished_at = utcnow()
 

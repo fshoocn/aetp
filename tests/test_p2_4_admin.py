@@ -1,4 +1,4 @@
-﻿"""平台管理员审批 API 集成测试。"""
+"""平台管理员审批 API 集成测试。"""
 
 from __future__ import annotations
 

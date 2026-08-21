@@ -12,7 +12,8 @@ class CiTriggerBinding(Base, TimestampMixin):
     __tablename__ = "ci_trigger_bindings"
     __table_args__ = (
         UniqueConstraint(
-            "integration_pk", "task_pk",
+            "integration_pk",
+            "task_pk",
             name="uq_ci_trigger_bindings_integration_task",
         ),
         Index("ix_ci_trigger_bindings_integration_enabled", "integration_pk", "enabled"),

@@ -220,9 +220,7 @@ def _scan_serial(serial_map_file: str | Path | None) -> SerialCapability | None:
         if not isinstance(port, str) or not port:
             continue
         exists = _port_exists(port)
-        ports.append(
-            SerialPortCapability(function=function, port=port, enabled=exists)
-        )
+        ports.append(SerialPortCapability(function=function, port=port, enabled=exists))
         if not exists:
             logger.warning("串口 %s (%s) 当前不存在，已标记为禁用", port, function)
 

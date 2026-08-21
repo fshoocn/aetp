@@ -55,18 +55,12 @@ class DatabaseConfig:
         if t == "sqlite":
             return f"sqlite:///{self.database or 'data/aetp.db'}"
         if t in ("mysql", "mariadb"):
-            return (
-                f"mysql+pymysql://{self.username}:{self.password}"
-                f"@{self.host}:{self.port or 3306}/{self.database}"
-            )
+            return f"mysql+pymysql://{self.username}:{self.password}@{self.host}:{self.port or 3306}/{self.database}"
         if t in ("postgresql", "postgres"):
             return (
-                f"postgresql+psycopg2://{self.username}:{self.password}"
-                f"@{self.host}:{self.port or 5432}/{self.database}"
+                f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port or 5432}/{self.database}"
             )
-        raise ValueError(
-            f"不支持的数据库类型: {self.db_type!r}（支持: sqlite / mysql / mariadb / postgresql）"
-        )
+        raise ValueError(f"不支持的数据库类型: {self.db_type!r}（支持: sqlite / mysql / mariadb / postgresql）")
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> DatabaseConfig:
@@ -109,4 +103,3 @@ class DatabaseInterface(ABC):
     @abstractmethod
     def close(self) -> None:
         """释放连接池等资源。"""
-

@@ -52,8 +52,6 @@ def get_config_context(
         "verification": {
             "supported": verify_location == "agent",
             "location": verify_location,
-            "endpoint_template": (
-                f"/api/v1/projects/{project_id}/scripts/{{script_id}}/verify"
-            ),
+            "endpoint_template": (f"/api/v1/projects/{project_id}/scripts/{{script_id}}/verify"),
         },
     }

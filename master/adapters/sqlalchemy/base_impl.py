@@ -41,9 +41,7 @@ class BaseDatabase(DatabaseInterface):
         self.config = config
         url = self._ensure_driver(config.build_url())
         self.engine = self._make_engine(url, config)
-        self._session_factory = sessionmaker(
-            bind=self.engine, expire_on_commit=False
-        )
+        self._session_factory = sessionmaker(bind=self.engine, expire_on_commit=False)
 
     @property
     def db_type(self) -> str:

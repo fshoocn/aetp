@@ -121,13 +121,9 @@ class MasterMessageRouter:
     async def handle(self, message: MqttMessage) -> bool:
         """处理一条入站消息；成功返回 True。"""
         try:
-            envelope = Envelope.model_validate(
-                json.loads(message.payload.decode("utf-8"))
-            )
+            envelope = Envelope.model_validate(json.loads(message.payload.decode("utf-8")))
             validate_sender_for_topic(message.topic, envelope.sender)
-            validate_message_type_for_topic(
-                message.topic, MessageType(envelope.message_type)
-            )
+            validate_message_type_for_topic(message.topic, MessageType(envelope.message_type))
         except Exception:  # noqa: BLE001 - 协议错误静默忽略
             logger.warning("入站消息校验失败: topic=%s", message.topic)
             return False
@@ -146,7 +142,7 @@ class MasterMessageRouter:
             if isinstance(result, ProjectionResult) and result.handled:
                 await self._publish(result)
                 # P8.6：广播业务异常事件（通知失败不回滚业务状态）
-                for event in (result.anomaly_events or []):
+                for event in result.anomaly_events or []:
                     try:
                         await self._event_publisher.broadcast(event)
                     except Exception:

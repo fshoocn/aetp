@@ -47,10 +47,7 @@ class HookRegistry:
         )
 
     def matching_event_hooks(self, event_type: str) -> list[EventHook]:
-        return [
-            h for h in self.event_hooks
-            if not h.event_types or event_type in h.event_types
-        ]
+        return [h for h in self.event_hooks if not h.event_types or event_type in h.event_types]
 
 
 class HookRunner:
@@ -109,9 +106,7 @@ class HookRunner:
         timeout_s: float,
     ) -> HookDecision:
         try:
-            decision = await asyncio.wait_for(
-                hook.evaluate(context), timeout=timeout_s
-            )
+            decision = await asyncio.wait_for(hook.evaluate(context), timeout=timeout_s)
             return decision
         except TimeoutError:
             logger.warning("准入 Hook 超时: hook=%s stage=%s", hook.name, hook.stage)
@@ -127,9 +122,7 @@ class HookRunner:
     async def _run_single_event(self, hook: EventHook, event: DomainEvent) -> None:
         start = time.monotonic()
         try:
-            await asyncio.wait_for(
-                hook.handle(event), timeout=self._timeout_s
-            )
+            await asyncio.wait_for(hook.handle(event), timeout=self._timeout_s)
             duration_ms = (time.monotonic() - start) * 1000
             self._audit(
                 hook.name,
@@ -184,6 +177,4 @@ class HookRunner:
         offset: int = 0,
     ) -> list[HookExecution]:
         with self._uow_factory() as uow:
-            return uow.hook_executions.list_by_project(
-                project_id, limit=limit, offset=offset
-            )
+            return uow.hook_executions.list_by_project(project_id, limit=limit, offset=offset)

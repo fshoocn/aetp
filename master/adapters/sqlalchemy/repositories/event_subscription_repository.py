@@ -33,24 +33,23 @@ class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
         self._s = session
 
     def get_by_subscription_id(self, subscription_id: str) -> EventSubscription | None:
-        orm = self._s.execute(
-            select(SubORM)
-            .options(joinedload(SubORM.project), joinedload(SubORM.endpoint))
-            .where(SubORM.subscription_id == subscription_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(SubORM)
+                .options(joinedload(SubORM.project), joinedload(SubORM.endpoint))
+                .where(SubORM.subscription_id == subscription_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
-    def list_by_project(
-        self, project_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[EventSubscription]:
+    def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[EventSubscription]:
         stmt = (
             select(SubORM)
             .options(joinedload(SubORM.project), joinedload(SubORM.endpoint))
             .where(
-                SubORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                SubORM.project_pk == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
             .order_by(SubORM.id.desc())
             .limit(limit)
@@ -97,9 +96,7 @@ class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
         return _to_domain(orm)
 
     def delete(self, subscription_id: str) -> None:
-        orm = self._s.execute(
-            select(SubORM).where(SubORM.subscription_id == subscription_id)
-        ).scalars().one_or_none()
+        orm = self._s.execute(select(SubORM).where(SubORM.subscription_id == subscription_id)).scalars().one_or_none()
         if orm is None:
             raise ValueError(f"事件订阅不存在: {subscription_id}")
         self._s.delete(orm)

@@ -75,18 +75,12 @@ class RecoveryService:
                 for device_id in attempt.device_ids:
                     device = uow.devices.get_by_id(device_id)
                     if device is not None:
-                        device.status = (
-                            DeviceStatus.ONLINE
-                            if device.online
-                            else DeviceStatus.OFFLINE
-                        )
+                        device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
                         uow.devices.update(device)
 
                 handled += 1
 
-        logger.info(
-            "节点离线恢复完成: node=%s attempts_failed=%d", node_id, handled
-        )
+        logger.info("节点离线恢复完成: node=%s attempts_failed=%d", node_id, handled)
         return handled
 
     # ── 2. Master 启动恢复 ────────────────────────────────────────────
@@ -120,9 +114,7 @@ class RecoveryService:
                 logger.info("启动恢复：无遗留非终态 Run")
                 return stats
 
-            logger.warning(
-                "启动恢复：发现 %d 个遗留非终态 Run", len(non_terminal_runs)
-            )
+            logger.warning("启动恢复：发现 %d 个遗留非终态 Run", len(non_terminal_runs))
 
             for run in non_terminal_runs:
                 if run.created_at and now - run.created_at > self._stale_timeout:

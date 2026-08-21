@@ -36,6 +36,4 @@ class ScriptDownloadService:
 
     def verify(self, script_id: str, expires: int, signature: str) -> bool:
         """校验签名 URL 是否有效。"""
-        return verify_signed_path(
-            script_id, expires, signature, self._secret
-        )
+        return verify_signed_path(script_id, expires, signature, self._secret)

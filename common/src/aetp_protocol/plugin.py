@@ -49,9 +49,7 @@ class TaskDefinitionSpec:
     split_policy: Mapping[str, Any] = field(default_factory=dict)
     retry_policy: Mapping[str, Any] = field(default_factory=dict)
     timeout_s: int = 0
-    hardware_requirements: HardwareRequirements = field(
-        default_factory=HardwareRequirements
-    )
+    hardware_requirements: HardwareRequirements = field(default_factory=HardwareRequirements)
 
 
 class AgentTaskContext(Protocol):
@@ -64,17 +62,11 @@ class AgentTaskContext(Protocol):
     params: Mapping[str, Any]
     script_ref: Mapping[str, Any]
 
-    async def progress(
-        self, percent: int, stage: str, message: str = ""
-    ) -> None: ...
+    async def progress(self, percent: int, stage: str, message: str = "") -> None: ...
 
-    async def log(
-        self, level: str, message: str, detail: Mapping[str, Any] | None = None
-    ) -> None: ...
+    async def log(self, level: str, message: str, detail: Mapping[str, Any] | None = None) -> None: ...
 
-    async def capture_log(
-        self, stream: str, message: str, detail: Mapping[str, Any] | None = None
-    ) -> None: ...
+    async def capture_log(self, stream: str, message: str, detail: Mapping[str, Any] | None = None) -> None: ...
 
     def is_cancelled(self) -> bool: ...
 
@@ -117,15 +109,11 @@ class AgentExecutionPlugin(Protocol):
 
     async def collect_logs(self, context: AgentTaskContext) -> None: ...
 
-    def verify_script(
-        self, script_dir: str, config: Mapping[str, Any]
-    ) -> list[str]:
+    def verify_script(self, script_dir: str, config: Mapping[str, Any]) -> list[str]:
         """（可选）台架侧脚本预检：返回错误列表，空 = 通过。"""
         ...
 
-    def parse_cases(
-        self, script_dir: str, config: Mapping[str, Any]
-    ) -> list[CaseInfo]:
+    def parse_cases(self, script_dir: str, config: Mapping[str, Any]) -> list[CaseInfo]:
         """（可选）台架侧用例解析：返回 CaseInfo 事实列表（同步）。"""
         ...
 
@@ -178,8 +166,7 @@ class PluginPackage:
         agent_package = self.metadata.agent_package
         if agent_package is not None and agent_package.version != self.metadata.plugin_version:
             raise ValueError(
-                "Agent 插件包版本必须与共享插件版本一致: "
-                f"{agent_package.version} != {self.metadata.plugin_version}"
+                f"Agent 插件包版本必须与共享插件版本一致: {agent_package.version} != {self.metadata.plugin_version}"
             )
 
     def agent_package_ref(self) -> PluginPackageRef | None:

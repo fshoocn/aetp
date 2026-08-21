@@ -17,17 +17,13 @@ class ProjectIntegration(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     integration_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    project_pk: Mapped[int] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     secret_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     secret_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
     config_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_by: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
     project = relationship("Project", lazy="joined")

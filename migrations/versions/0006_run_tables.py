@@ -48,24 +48,16 @@ def upgrade() -> None:
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
         sa.CheckConstraint(
-            "trigger_type IN ('manual_web','api','schedule','ci_webhook',"
-            "'retry','recovery')",
+            "trigger_type IN ('manual_web','api','schedule','ci_webhook','retry','recovery')",
             name="ck_task_runs_trigger_type",
         ),
         sa.CheckConstraint(
-            "status IN ('created','dispatched','acked','running','succeeded',"
-            "'failed','cancelled','timed_out','lost')",
+            "status IN ('created','dispatched','acked','running','succeeded','failed','cancelled','timed_out','lost')",
             name="ck_task_runs_status",
         ),
-        sa.ForeignKeyConstraint(
-            ["project_pk"], ["projects.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["task_pk"], ["test_tasks.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["triggered_by_user_pk"], ["users.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["project_pk"], ["projects.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["task_pk"], ["test_tasks.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["triggered_by_user_pk"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("run_id"),
     )
@@ -82,9 +74,7 @@ def upgrade() -> None:
         "task_runs",
         ["project_pk", "trigger_type", "created_at"],
     )
-    op.create_index(
-        "ix_task_runs_task_created", "task_runs", ["task_pk", "created_at"]
-    )
+    op.create_index("ix_task_runs_task_created", "task_runs", ["task_pk", "created_at"])
 
     op.create_table(
         "run_shards",
@@ -104,14 +94,10 @@ def upgrade() -> None:
             "'succeeded','failed','cancelled','timed_out')",
             name="ck_run_shards_status",
         ),
-        sa.ForeignKeyConstraint(
-            ["run_pk"], ["task_runs.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["run_pk"], ["task_runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("shard_id"),
-        sa.UniqueConstraint(
-            "run_pk", "shard_index", name="uq_run_shards_run_index"
-        ),
+        sa.UniqueConstraint("run_pk", "shard_index", name="uq_run_shards_run_index"),
     )
     op.create_index("ix_run_shards_shard_id", "run_shards", ["shard_id"], unique=True)
     op.create_index("ix_run_shards_run_pk", "run_shards", ["run_pk"])
@@ -132,22 +118,15 @@ def upgrade() -> None:
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
         sa.CheckConstraint(
-            "status IN ('created','dispatched','acked','running','succeeded',"
-            "'failed','cancelled','timed_out')",
+            "status IN ('created','dispatched','acked','running','succeeded','failed','cancelled','timed_out')",
             name="ck_shard_attempts_status",
         ),
-        sa.ForeignKeyConstraint(
-            ["shard_pk"], ["run_shards.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["shard_pk"], ["run_shards.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("attempt_id"),
-        sa.UniqueConstraint(
-            "shard_pk", "attempt_no", name="uq_shard_attempts_shard_attempt"
-        ),
+        sa.UniqueConstraint("shard_pk", "attempt_no", name="uq_shard_attempts_shard_attempt"),
     )
-    op.create_index(
-        "ix_shard_attempts_attempt_id", "shard_attempts", ["attempt_id"], unique=True
-    )
+    op.create_index("ix_shard_attempts_attempt_id", "shard_attempts", ["attempt_id"], unique=True)
     op.create_index("ix_shard_attempts_shard_pk", "shard_attempts", ["shard_pk"])
 
     op.create_table(
@@ -167,12 +146,8 @@ def upgrade() -> None:
             "status IN ('pending','running','passed','failed','skipped','error')",
             name="ck_run_case_results_status",
         ),
-        sa.ForeignKeyConstraint(
-            ["run_pk"], ["task_runs.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["shard_pk"], ["run_shards.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["run_pk"], ["task_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["shard_pk"], ["run_shards.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "run_pk",
@@ -203,18 +178,12 @@ def upgrade() -> None:
             "kind IN ('report','log_archive','data')",
             name="ck_run_artifacts_kind",
         ),
-        sa.ForeignKeyConstraint(
-            ["run_pk"], ["task_runs.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["shard_pk"], ["run_shards.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["run_pk"], ["task_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["shard_pk"], ["run_shards.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("artifact_id"),
     )
-    op.create_index(
-        "ix_run_artifacts_artifact_id", "run_artifacts", ["artifact_id"], unique=True
-    )
+    op.create_index("ix_run_artifacts_artifact_id", "run_artifacts", ["artifact_id"], unique=True)
     op.create_index("ix_run_artifacts_run_pk", "run_artifacts", ["run_pk"])
     op.create_index("ix_run_artifacts_run_kind", "run_artifacts", ["run_pk", "kind"])
 
@@ -235,19 +204,12 @@ def upgrade() -> None:
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
         sa.CheckConstraint(
-            "status IN ('created','dispatched','acked','running','succeeded',"
-            "'failed','cancelled','timed_out','lost')",
+            "status IN ('created','dispatched','acked','running','succeeded','failed','cancelled','timed_out','lost')",
             name="ck_results_status",
         ),
-        sa.ForeignKeyConstraint(
-            ["run_pk"], ["task_runs.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["project_pk"], ["projects.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["task_pk"], ["test_tasks.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["run_pk"], ["task_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["project_pk"], ["projects.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["task_pk"], ["test_tasks.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("result_id"),
         sa.UniqueConstraint("run_pk", name="uq_results_run"),

@@ -136,9 +136,7 @@ def test_endpoint_requires_owner_permission(client):
     """viewer 不能创建端点。"""
     admin_headers = _create_admin(client)
     project_id = _create_project(client, admin_headers, "NOTIF_PERM")
-    viewer_headers = _add_member(
-        client, admin_headers, project_id, "viewer-user", "pass123", "viewer"
-    )
+    viewer_headers = _add_member(client, admin_headers, project_id, "viewer-user", "pass123", "viewer")
 
     resp = client.post(
         f"/api/v1/projects/{project_id}/notification-endpoints",
@@ -263,6 +261,7 @@ def _seed_delivery(client, headers, project_id):
     container = client.app.state.container
     with container.uow_factory()() as uow:
         from master.domain.models.notification import EventDelivery
+
         delivery = uow.event_deliveries.add(
             EventDelivery(
                 delivery_id="DL-TEST-001",
@@ -315,9 +314,7 @@ def test_delivery_requires_owner_for_retry(client):
     admin_headers = _create_admin(client)
     project_id = _create_project(client, admin_headers, "NOTIF_DL_PERM")
     delivery_id = _seed_delivery(client, admin_headers, project_id)
-    viewer_headers = _add_member(
-        client, admin_headers, project_id, "dl-viewer", "pass123", "viewer"
-    )
+    viewer_headers = _add_member(client, admin_headers, project_id, "dl-viewer", "pass123", "viewer")
 
     resp = client.post(
         f"/api/v1/projects/{project_id}/event-deliveries/{delivery_id}/retry",
@@ -334,6 +331,7 @@ def test_delivery_retry_rejects_non_retryable_status(client):
     container = client.app.state.container
     with container.uow_factory()() as uow:
         from master.domain.models.notification import EventDelivery
+
         uow.event_deliveries.add(
             EventDelivery(
                 delivery_id="DL-SUCCESS",

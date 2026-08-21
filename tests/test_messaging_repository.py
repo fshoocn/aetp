@@ -196,9 +196,7 @@ def test_domain_event_list_order_and_filters(client):
     container = client.app.state.container
     with _uow(container) as uow:
         uow.domain_events.add(_make_event("E-1", event_type="run.created"))
-        uow.domain_events.add(
-            _make_event("E-2", project_id="p2", event_type="run.attempt_failed")
-        )
+        uow.domain_events.add(_make_event("E-2", project_id="p2", event_type="run.attempt_failed"))
         uow.domain_events.add(_make_event("E-3", event_type="run.succeeded"))
     with _uow(container) as uow:
         all_events = uow.domain_events.list()
@@ -236,12 +234,8 @@ def test_audit_list_filters(client):
     container = client.app.state.container
     with _uow(container) as uow:
         uow.audit_logs.add(_make_audit("AUD-1"))
-        uow.audit_logs.add(
-            _make_audit("AUD-2", actor_id=2, action="member.remove")
-        )
-        uow.audit_logs.add(
-            _make_audit("AUD-3", project_id="p2", action="integration.key_rotate")
-        )
+        uow.audit_logs.add(_make_audit("AUD-2", actor_id=2, action="member.remove"))
+        uow.audit_logs.add(_make_audit("AUD-3", project_id="p2", action="integration.key_rotate"))
     with _uow(container) as uow:
         assert len(uow.audit_logs.list(project_id="p1")) == 2
         assert len(uow.audit_logs.list(actor_id=2)) == 1

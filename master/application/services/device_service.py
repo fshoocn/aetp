@@ -22,9 +22,7 @@ class DeviceService:
         """列出设备；可选 ?online=true 过滤。"""
         with self._uow_factory() as uow:
             devices = uow.devices.list_all(online=online)
-            logger.debug(
-                "查询全局设备列表: online=%s, count=%s", online, len(devices)
-            )
+            logger.debug("查询全局设备列表: online=%s, count=%s", online, len(devices))
             return devices
 
     def get_by_id(self, device_id: str) -> Device | None:

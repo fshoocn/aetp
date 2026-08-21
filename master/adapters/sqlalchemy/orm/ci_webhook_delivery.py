@@ -14,7 +14,8 @@ class CiWebhookDelivery(Base, TimestampMixin):
     __tablename__ = "ci_webhook_deliveries"
     __table_args__ = (
         UniqueConstraint(
-            "integration_pk", "delivery_id",
+            "integration_pk",
+            "delivery_id",
             name="uq_ci_webhook_deliveries_integration_delivery",
         ),
         Index("ix_ci_webhook_deliveries_integration_received", "integration_pk", "received_at"),

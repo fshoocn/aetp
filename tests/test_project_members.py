@@ -22,10 +22,7 @@ def _create_active_user(client, username: str, password: str = "user-pass-123") 
     user = service.create_user(username, password, username)
     with client.app.state.container.database().session_scope() as session:
         session.execute(
-            text(
-                "UPDATE users SET account_status='active' "
-                "WHERE username=:username"
-            ),
+            text("UPDATE users SET account_status='active' WHERE username=:username"),
             {"username": username},
         )
     return user.id
@@ -185,9 +182,7 @@ def test_inactive_user_cannot_be_added(client):
     """pending 用户不能加入项目。"""
     _, admin_headers = _create_admin(client)
     project_id = _create_project(client, admin_headers, "ACTIVE_ONLY")
-    pending_id = client.app.state.container.auth_service().create_user(
-        "pending-member", "user-pass-123", "Pending"
-    ).id
+    pending_id = client.app.state.container.auth_service().create_user("pending-member", "user-pass-123", "Pending").id
 
     response = client.post(
         f"/api/v1/projects/{project_id}/members",

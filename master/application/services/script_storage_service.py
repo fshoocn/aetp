@@ -26,9 +26,7 @@ class ScriptStorageService:
         """生成脚本文件的存储键（上传时写入 file_ref）。"""
         return f"scripts/{script_id}/{version}/{filename}"
 
-    def store_script(
-        self, script_id: str, version: int, filename: str, data: bytes
-    ) -> str:
+    def store_script(self, script_id: str, version: int, filename: str, data: bytes) -> str:
         """写入脚本文件并返回存储键（file_ref）。"""
         key = self.script_key(script_id, version, filename)
         self._storage.put(key, data)

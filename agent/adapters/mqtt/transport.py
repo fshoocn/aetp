@@ -165,9 +165,7 @@ class AgentMqttTransport(Transport):
             return None
         ctx = ssl.create_default_context()
         if self._settings.mqtt_ca_cert_path:
-            ctx.load_verify_locations(
-                cafile=str(self._settings.mqtt_ca_cert_path)
-            )
+            ctx.load_verify_locations(cafile=str(self._settings.mqtt_ca_cert_path))
         return ctx
 
     async def _run_loop(self) -> None:
@@ -209,9 +207,7 @@ class AgentMqttTransport(Transport):
                 if self._connected:
                     await self._set_disconnected()
 
-    async def _notify_connection_change(
-        self, connected: bool, session_id: str | None
-    ) -> None:
+    async def _notify_connection_change(self, connected: bool, session_id: str | None) -> None:
         """通知上层连接变化；回调失败不打断 MQTT 循环。"""
         handler = self._connection_handler
         if handler is None:
@@ -234,12 +230,8 @@ class AgentMqttTransport(Transport):
         handler = self._handler
         if handler is None:
             return
-        topic = (
-            str(raw.topic.value) if hasattr(raw.topic, "value") else str(raw.topic)
-        )
-        payload = (
-            raw.payload if isinstance(raw.payload, bytes) else bytes(raw.payload or b"")
-        )
+        topic = str(raw.topic.value) if hasattr(raw.topic, "value") else str(raw.topic)
+        payload = raw.payload if isinstance(raw.payload, bytes) else bytes(raw.payload or b"")
         qos = getattr(raw, "qos", 1)
         try:
             await handler(MqttMessage(topic=topic, payload=payload, qos=qos))

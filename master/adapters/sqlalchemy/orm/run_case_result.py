@@ -49,21 +49,15 @@ class RunCaseResult(Base, TimestampMixin):
     # sym:id 代理主键（自增 int）
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # sym:run_pk 所属 Run 代理主键（Run 删除时级联清理）
-    run_pk: Mapped[int] = mapped_column(
-        ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    run_pk: Mapped[int] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     # sym:shard_pk 所属 Shard 代理主键
-    shard_pk: Mapped[int] = mapped_column(
-        ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    shard_pk: Mapped[int] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=False, index=True)
     # sym:case_key 用例稳定标识（stable_key）
     case_key: Mapped[str] = mapped_column(String(256), nullable=False)
     # sym:attempt_no 关联的派发尝试序号
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
     # sym:status case 结果状态（passed/failed/skipped/error/...）
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=CaseStatus.PENDING.value
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=CaseStatus.PENDING.value)
     # sym:duration_ms 执行耗时（毫秒；仅成功统计 avg_duration_s 数据源，D-21）
     duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # sym:error_summary 失败/错误摘要

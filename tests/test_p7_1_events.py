@@ -87,9 +87,7 @@ def test_sse_replays_events_after_last_event_id(client, auth_header) -> None:
     _seed_project_member(client.app.state.container)
     publisher = client.app.state.container.event_publisher()
     asyncio.run(publisher.publish("run.created", {"project_id": "p-events", "run_id": "R-1"}))
-    second = asyncio.run(
-        publisher.publish("run.updated", {"project_id": "p-events", "run_id": "R-1"})
-    )
+    second = asyncio.run(publisher.publish("run.updated", {"project_id": "p-events", "run_id": "R-1"}))
     assert second.sequence is not None
 
     from master.api.v1.routes.events import stream_events

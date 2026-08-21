@@ -63,9 +63,7 @@ class WorkflowSpec:
         for name, stage in self.stages.items():
             for target in (stage.on_success, stage.on_failure):
                 if target and target not in self.stages:
-                    raise ValueError(
-                        f"阶段 {name} 的去向不存在: {target}"
-                    )
+                    raise ValueError(f"阶段 {name} 的去向不存在: {target}")
 
     def next_stage(self, current: str, ok: bool) -> str:
         """纯函数：当前阶段执行结果 → 下一阶段（终态由 on_success/on_failure 或默认终态决定）。"""

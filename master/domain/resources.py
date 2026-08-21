@@ -68,9 +68,7 @@ def _has_labels(actual: dict[str, str], required: dict[str, str]) -> bool:
     return all(actual.get(key) == value for key, value in required.items())
 
 
-def _preferred_label_score(
-    actual: dict[str, str], preferred: dict[str, str]
-) -> int:
+def _preferred_label_score(actual: dict[str, str], preferred: dict[str, str]) -> int:
     """软约束得分：preferred 命中越多越优先。"""
     return sum(1 for key, value in preferred.items() if actual.get(key) == value)
 
@@ -102,16 +100,9 @@ class ResourceAllocator:
     def __init__(self, matcher: PhysicalDeviceMatcher | None = None) -> None:
         self._matcher = matcher or PhysicalDeviceMatcher()
 
-    def supports(
-        self, node: Node, requirements: tuple[DeviceRequirement, ...]
-    ) -> bool:
+    def supports(self, node: Node, requirements: tuple[DeviceRequirement, ...]) -> bool:
         """节点是否具备资源能力（忽略占用状态）。"""
-        return (
-            self.allocate(
-                node, requirements, frozenset(), include_occupied=True
-            )
-            is not None
-        )
+        return self.allocate(node, requirements, frozenset(), include_occupied=True) is not None
 
     def allocate(
         self,
@@ -128,14 +119,9 @@ class ResourceAllocator:
             device
             for device in node.devices
             if device.device_id not in reserved_device_ids
-            and (
-                include_occupied
-                or (device.online and device.status is not DeviceStatus.BUSY)
-            )
+            and (include_occupied or (device.online and device.status is not DeviceStatus.BUSY))
         )
-        ordered = tuple(
-            sorted(requirements, key=_requirement_specificity, reverse=True)
-        )
+        ordered = tuple(sorted(requirements, key=_requirement_specificity, reverse=True))
         return self._allocate_groups(
             available,
             ordered,
@@ -144,18 +130,12 @@ class ResourceAllocator:
             used_ports=frozenset(),
         )
 
-    def reserve(
-        self, state: NodeSchedulingState, device_ids: Iterable[str]
-    ) -> NodeSchedulingState:
+    def reserve(self, state: NodeSchedulingState, device_ids: Iterable[str]) -> NodeSchedulingState:
         """预留本轮已分配的资源。"""
-        available = set(
-            _available_device_ids(state.node, state.reserved_device_ids)
-        )
+        available = set(_available_device_ids(state.node, state.reserved_device_ids))
         requested = frozenset(device_ids)
         if not requested.issubset(available):
-            raise ValueError(
-                f"设备不可预留: node={state.node.node_id} devices={sorted(requested)}"
-            )
+            raise ValueError(f"设备不可预留: node={state.node.node_id} devices={sorted(requested)}")
         return NodeSchedulingState(
             node=state.node,
             reserved_device_ids=state.reserved_device_ids | requested,
@@ -183,28 +163,17 @@ class ResourceAllocator:
         matches = tuple(
             sorted(
                 matched,
-                key=lambda match: _preferred_label_score(
-                    match[0].capability.labels, requirement.preferred_labels
-                ),
+                key=lambda match: _preferred_label_score(match[0].capability.labels, requirement.preferred_labels),
                 reverse=True,
             )
         )
         for selected in combinations(matches, requirement.quantity):
             selected_devices = tuple(match[0] for match in selected)
-            selected_routes = tuple(
-                match[1] for match in selected if match[1] is not None
-            )
-            selected_device_ids = frozenset(
-                device.device_id for device in selected_devices
-            )
-            if requirement.device_ids and not set(requirement.device_ids).issubset(
-                selected_device_ids
-            ):
+            selected_routes = tuple(match[1] for match in selected if match[1] is not None)
+            selected_device_ids = frozenset(device.device_id for device in selected_devices)
+            if requirement.device_ids and not set(requirement.device_ids).issubset(selected_device_ids):
                 continue
-            selected_ports = frozenset(
-                f"{route.switch_device_id}:{route.port}"
-                for route in selected_routes
-            )
+            selected_ports = frozenset(f"{route.switch_device_id}:{route.port}" for route in selected_routes)
             if selected_ports.intersection(used_ports):
                 continue
             remainder = self._allocate_groups(
@@ -215,11 +184,7 @@ class ResourceAllocator:
                 used_ports=used_ports | selected_ports,
             )
             if remainder is not None:
-                routes = {
-                    device.device_id: route
-                    for device, route in selected
-                    if route is not None
-                }
+                routes = {device.device_id: route for device, route in selected if route is not None}
                 return Allocation(
                     devices=selected_devices + remainder.devices,
                     routes_by_device={**routes, **remainder.routes_by_device},
@@ -237,10 +202,7 @@ class ResourceAllocator:
             return None
         if _has_labels(device.capability.labels, requirement.required_labels):
             return (device, None)
-        if (
-            requirement.allow_switching
-            and device.capability.connection is not None
-        ):
+        if requirement.allow_switching and device.capability.connection is not None:
             connection = device.capability.connection
             for port in connection.ports:
                 if _has_labels(port.labels, requirement.required_labels):
@@ -256,16 +218,12 @@ class ResourceAllocator:
         return None
 
 
-def _available_device_ids(
-    node: Node, reserved_device_ids: frozenset[str]
-) -> tuple[str, ...]:
+def _available_device_ids(node: Node, reserved_device_ids: frozenset[str]) -> tuple[str, ...]:
     """返回在线、非 BUSY 且未被本轮调度预留的设备。"""
     return tuple(
         device.device_id
         for device in node.devices
-        if device.online
-        and device.status is not DeviceStatus.BUSY
-        and device.device_id not in reserved_device_ids
+        if device.online and device.status is not DeviceStatus.BUSY and device.device_id not in reserved_device_ids
     )
 
 

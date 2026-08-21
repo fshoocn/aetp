@@ -41,6 +41,4 @@ class DomainEvent(Base, TimestampMixin):
     # sym:payload 事件载荷 JSON（不可变快照）
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # sym:occurred_at 业务发生时间（UTC）
-    occurred_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=datetime.utcnow
-    )
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=datetime.utcnow)

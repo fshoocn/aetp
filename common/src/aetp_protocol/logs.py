@@ -76,13 +76,9 @@ class RunLogBatch(BaseModel):
         if self.entries:
             if self.entries[0].sequence != self.first_sequence:
                 raise ValueError(
-                    "first_sequence 必须等于首条 entry.sequence: "
-                    f"{self.first_sequence} != {self.entries[0].sequence}"
+                    f"first_sequence 必须等于首条 entry.sequence: {self.first_sequence} != {self.entries[0].sequence}"
                 )
             for prev, cur in zip(self.entries, self.entries[1:], strict=False):
                 if cur.sequence <= prev.sequence:
-                    raise ValueError(
-                        "entries 必须按 sequence 严格递增: "
-                        f"{prev.sequence} -> {cur.sequence}"
-                    )
+                    raise ValueError(f"entries 必须按 sequence 严格递增: {prev.sequence} -> {cur.sequence}")
         return self

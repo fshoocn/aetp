@@ -48,9 +48,7 @@ class _UploadPlugin:
 
     def hardware_requirements(self, config, cases):
         required_tag = config.get("required_tag")
-        return HardwareRequirements(
-            required_tags=(required_tag,) if required_tag else ()
-        )
+        return HardwareRequirements(required_tags=(required_tag,) if required_tag else ())
 
 
 def _register_plugin(container) -> None:
@@ -147,9 +145,7 @@ def test_script_upload_parse_and_case_list(client):
     assert cases[0]["avg_duration_s"] == 5
 
     # 脚本列表/详情
-    resp = client.get(
-        f"/api/v1/projects/{project_id}/scripts", headers=headers
-    )
+    resp = client.get(f"/api/v1/projects/{project_id}/scripts", headers=headers)
     assert resp.status_code == 200
     assert any(s["script_id"] == script["script_id"] for s in resp.json())
     resp = client.get(
@@ -205,13 +201,9 @@ def test_script_upload_same_hash_idempotent(client):
     data = {"task_type": "upload_test", "name": "dup", "config": "{}"}
     files = {"file": ("dup.py", content, "text/x-python")}
 
-    resp1 = client.post(
-        f"/api/v1/projects/{project_id}/scripts", headers=headers, data=data, files=files
-    )
+    resp1 = client.post(f"/api/v1/projects/{project_id}/scripts", headers=headers, data=data, files=files)
     assert resp1.status_code == 201
-    resp2 = client.post(
-        f"/api/v1/projects/{project_id}/scripts", headers=headers, data=data, files=files
-    )
+    resp2 = client.post(f"/api/v1/projects/{project_id}/scripts", headers=headers, data=data, files=files)
     assert resp2.status_code == 201
     assert resp1.json()["script_id"] == resp2.json()["script_id"]
     assert resp1.json()["version"] == resp2.json()["version"] == 1
@@ -241,14 +233,20 @@ def test_script_delete_removes_script_cases_and_file(client):
     )
     assert deleted.status_code == 204, deleted.text
     assert not container.storage().exists(file_ref)
-    assert client.get(
-        f"/api/v1/projects/{project_id}/scripts/{script['script_id']}",
-        headers=headers,
-    ).status_code == 404
-    assert client.get(
-        f"/api/v1/projects/{project_id}/scripts/{script['script_id']}/cases",
-        headers=headers,
-    ).status_code == 404
+    assert (
+        client.get(
+            f"/api/v1/projects/{project_id}/scripts/{script['script_id']}",
+            headers=headers,
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/v1/projects/{project_id}/scripts/{script['script_id']}/cases",
+            headers=headers,
+        ).status_code
+        == 404
+    )
 
 
 def test_script_delete_rejects_task_definition_reference(client):
@@ -404,14 +402,10 @@ def test_task_definition_crud_and_case_selection(client):
     task_id = task["task_id"]
 
     # 查询列表/详情
-    resp = client.get(
-        f"/api/v1/projects/{project_id}/test-tasks", headers=headers
-    )
+    resp = client.get(f"/api/v1/projects/{project_id}/test-tasks", headers=headers)
     assert resp.status_code == 200
     assert any(t["task_id"] == task_id for t in resp.json())
-    resp = client.get(
-        f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers
-    )
+    resp = client.get(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
     assert resp.status_code == 200
     assert resp.json()["name"] == "reg-task"
 
@@ -470,19 +464,13 @@ def test_task_definition_crud_and_case_selection(client):
     assert resp.status_code == 403
 
     # 删除（无 Run 历史 → 硬删除）
-    resp = client.delete(
-        f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers
-    )
+    resp = client.delete(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
     assert resp.status_code == 204
-    resp = client.get(
-        f"/api/v1/projects/{project_id}/test-tasks", headers=headers
-    )
+    resp = client.get(f"/api/v1/projects/{project_id}/test-tasks", headers=headers)
     assert all(t["task_id"] != task_id for t in resp.json())
 
     # 再次删除 → 404（已不存在）
-    resp = client.delete(
-        f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers
-    )
+    resp = client.delete(f"/api/v1/projects/{project_id}/test-tasks/{task_id}", headers=headers)
     assert resp.status_code == 404
 
 

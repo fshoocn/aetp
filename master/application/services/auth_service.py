@@ -69,9 +69,7 @@ class AuthService:
             if not _verify_password(password, user.password_hash):
                 logger.warning("认证失败：密码错误: username=%s", username)
                 return None
-            logger.info(
-                "用户认证成功: user_id=%s, username=%s", user.id, username
-            )
+            logger.info("用户认证成功: user_id=%s, username=%s", user.id, username)
             return user
 
     def authenticate_or_raise(self, username: str, password: str) -> User:
@@ -83,9 +81,7 @@ class AuthService:
 
     # ---- 刷新令牌会话（P2.10） ----
 
-    def issue_refresh_token(
-        self, user_id: int, token_hash: str, expires_at: datetime
-    ) -> None:
+    def issue_refresh_token(self, user_id: int, token_hash: str, expires_at: datetime) -> None:
         """登录/刷新成功后登记新刷新令牌（只存 SHA-256 哈希）。"""
         with self._uow_factory() as uow:
             uow.refresh_tokens.add(
@@ -102,9 +98,7 @@ class AuthService:
             )
             logger.info("刷新令牌已签发: user_id=%s", user_id)
 
-    def rotate_refresh_token(
-        self, old_hash: str, new_hash: str, expires_at: datetime
-    ) -> User | None:
+    def rotate_refresh_token(self, old_hash: str, new_hash: str, expires_at: datetime) -> User | None:
         """轮换刷新令牌：校验旧令牌有效后，同一事务内撤销旧令牌并签发新令牌。
 
         返回激活用户（调用方据此签发新访问令牌）；
@@ -119,14 +113,8 @@ class AuthService:
                 logger.warning("刷新失败：令牌已过期")
                 return None
             user = uow.users.get_by_id(old.user_id)
-            if (
-                user is None
-                or user.id is None
-                or user.account_status != AccountStatus.ACTIVE
-            ):
-                logger.warning(
-                    "刷新失败：用户不存在或非 active: user_id=%s", old.user_id
-                )
+            if user is None or user.id is None or user.account_status != AccountStatus.ACTIVE:
+                logger.warning("刷新失败：用户不存在或非 active: user_id=%s", old.user_id)
                 return None
             old.revoked_at = utcnow()
             old.replaced_by_hash = new_hash
@@ -253,9 +241,7 @@ class AuthService:
     ) -> list[User]:
         """分页查询用户列表；管理员按 account_status 筛选 pending 待审批账户。"""
         with self._uow_factory() as uow:
-            users = uow.users.list(
-                account_status=account_status, limit=limit, offset=offset
-            )
+            users = uow.users.list(account_status=account_status, limit=limit, offset=offset)
             logger.debug(
                 "查询用户列表: account_status=%s, count=%s",
                 account_status,

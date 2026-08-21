@@ -98,14 +98,10 @@ class ScriptCacheService:
         except ScriptCacheError:
             raise
         except Exception as exc:
-            raise ScriptDownloadError(
-                f"脚本下载失败: {download_url}: {exc}"
-            ) from exc
+            raise ScriptDownloadError(f"脚本下载失败: {download_url}: {exc}") from exc
         digest = hashlib.sha256(data).hexdigest()
         if digest.lower() != sha256.lower():
-            raise ScriptChecksumError(
-                f"脚本 SHA-256 校验失败: script_id={script_id} version={version}"
-            )
+            raise ScriptChecksumError(f"脚本 SHA-256 校验失败: script_id={script_id} version={version}")
 
         path = self._path_for(script_id, version, sha256)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,10 +121,7 @@ class ScriptCacheService:
         inserted = self._ledger.cache_script(entry)
         if not inserted:
             # 并发下同 hash 已由其他 worker 写入：复用已存在引用。
-            return (
-                self._ledger.get_cached_script(script_id, version, sha256)
-                or entry
-            )
+            return self._ledger.get_cached_script(script_id, version, sha256) or entry
         return entry
 
     def _path_for(self, script_id: str, version: int, sha256: str) -> Path:
@@ -144,27 +137,17 @@ class ScriptCacheService:
         download_url = script_ref.get("download_url")
 
         if not isinstance(script_id, str) or not script_id.strip():
-            raise ScriptCacheError(
-                "script_ref 缺少合法 script_id", code=SCRIPT_REF_INVALID
-            )
+            raise ScriptCacheError("script_ref 缺少合法 script_id", code=SCRIPT_REF_INVALID)
         if not isinstance(version, int) or version < 1:
-            raise ScriptCacheError(
-                "script_ref 缺少合法 version", code=SCRIPT_REF_INVALID
-            )
+            raise ScriptCacheError("script_ref 缺少合法 version", code=SCRIPT_REF_INVALID)
         if not isinstance(sha256, str) or len(sha256) != 64:
-            raise ScriptCacheError(
-                "script_ref 缺少合法 sha256", code=SCRIPT_REF_INVALID
-            )
+            raise ScriptCacheError("script_ref 缺少合法 sha256", code=SCRIPT_REF_INVALID)
         try:
             int(sha256, 16)
         except ValueError as exc:
-            raise ScriptCacheError(
-                "script_ref.sha256 不是合法十六进制", code=SCRIPT_REF_INVALID
-            ) from exc
+            raise ScriptCacheError("script_ref.sha256 不是合法十六进制", code=SCRIPT_REF_INVALID) from exc
         if not isinstance(download_url, str) or not download_url.strip():
-            raise ScriptCacheError(
-                "script_ref 缺少合法 download_url", code=SCRIPT_REF_INVALID
-            )
+            raise ScriptCacheError("script_ref 缺少合法 download_url", code=SCRIPT_REF_INVALID)
         return (
             script_id.strip(),
             version,

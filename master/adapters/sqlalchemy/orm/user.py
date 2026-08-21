@@ -17,12 +17,8 @@ class User(Base, TimestampMixin):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    account_status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=AccountStatus.PENDING.value
-    )
-    platform_role: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=PlatformRole.USER.value
-    )
+    account_status: Mapped[str] = mapped_column(String(16), nullable=False, default=AccountStatus.PENDING.value)
+    platform_role: Mapped[str] = mapped_column(String(16), nullable=False, default=PlatformRole.USER.value)
 
     __table_args__ = (
         CheckConstraint(

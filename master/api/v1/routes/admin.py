@@ -20,9 +20,7 @@ def list_users(
     offset: int = 0,
 ) -> list[AdminUserOut]:
     """分页查询用户列表；管理员按 account_status 筛选 pending 待审批账户。"""
-    users = auth.list_users(
-        account_status=account_status, limit=limit, offset=offset
-    )
+    users = auth.list_users(account_status=account_status, limit=limit, offset=offset)
     return [AdminUserOut.model_validate(user) for user in users]
 
 
@@ -36,12 +34,8 @@ def approve_user(
     """审批用户或修改平台角色。"""
     user = auth.approve_user(
         user_id,
-        account_status=(
-            body.account_status.value if body.account_status is not None else None
-        ),
-        platform_role=(
-            body.platform_role.value if body.platform_role is not None else None
-        ),
+        account_status=(body.account_status.value if body.account_status is not None else None),
+        platform_role=(body.platform_role.value if body.platform_role is not None else None),
         actor_id=admin.persisted_id,
     )
     if user is None:

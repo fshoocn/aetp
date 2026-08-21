@@ -23,12 +23,7 @@ from master.domain.time import utcnow
 
 
 def _query(path: str) -> dict[str, str]:
-    return {
-        key: value[0]
-        for key, value in urllib.parse.parse_qs(
-            urllib.parse.urlsplit(path).query
-        ).items()
-    }
+    return {key: value[0] for key, value in urllib.parse.parse_qs(urllib.parse.urlsplit(path).query).items()}
 
 
 def test_signed_path_roundtrip() -> None:
@@ -44,27 +39,21 @@ def test_signed_path_rejects_expired() -> None:
     path = build_signed_path("S-1", secret, 300, now=now)
     qs = _query(path)
     later = now + timedelta(seconds=301)
-    assert not verify_signed_path(
-        "S-1", int(qs["expires"]), qs["signature"], secret, now=later
-    )
+    assert not verify_signed_path("S-1", int(qs["expires"]), qs["signature"], secret, now=later)
 
 
 def test_signed_path_rejects_wrong_script_id() -> None:
     secret = "unit-test-secret"
     path = build_signed_path("S-1", secret, 300)
     qs = _query(path)
-    assert not verify_signed_path(
-        "S-2", int(qs["expires"]), qs["signature"], secret
-    )
+    assert not verify_signed_path("S-2", int(qs["expires"]), qs["signature"], secret)
 
 
 def test_signed_path_rejects_tampered_signature() -> None:
     secret = "unit-test-secret"
     path = build_signed_path("S-1", secret, 300)
     qs = _query(path)
-    assert not verify_signed_path(
-        "S-1", int(qs["expires"]), "0" * 64, secret
-    )
+    assert not verify_signed_path("S-1", int(qs["expires"]), "0" * 64, secret)
 
 
 def _seed_script(client, tmp_path) -> tuple[str, str]:

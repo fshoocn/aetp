@@ -34,6 +34,7 @@ class _GracefulServer(uvicorn.Server):
         # 从 app 状态中取出 EventBus，先唤醒 SSE
         try:
             from master.main import app
+
             container = getattr(app.state, "container", None)
             if container is not None:
                 event_bus = container.event_bus()
@@ -42,10 +43,6 @@ class _GracefulServer(uvicorn.Server):
         except Exception:
             logger.debug("优雅关闭前置唤醒失败", exc_info=True)
         await super().shutdown(sockets=sockets)
-
-
-
-
 
 
 def main() -> None:
@@ -111,7 +108,6 @@ def main() -> None:
     except Exception:
         logger.exception("Master API 启动失败")
         raise
-
 
 
 if __name__ == "__main__":

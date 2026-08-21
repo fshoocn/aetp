@@ -92,12 +92,9 @@ class VehicleSpec:
             if not self._match_bus(capabilities, bus_requirement):
                 failures.append(self._failure(bus_requirement))
         if requirement.any_of and not any(
-            self._match_bus(capabilities, bus_requirement)
-            for bus_requirement in requirement.any_of
+            self._match_bus(capabilities, bus_requirement) for bus_requirement in requirement.any_of
         ):
-            alternatives = "；".join(
-                self._failure(bus_requirement) for bus_requirement in requirement.any_of
-            )
+            alternatives = "；".join(self._failure(bus_requirement) for bus_requirement in requirement.any_of)
             failures.append(f"vehicle 任一总线需求均不满足: {alternatives}")
         return tuple(failures)
 
@@ -115,16 +112,10 @@ class VehicleSpec:
                     channel
                     for channel in bus.channels
                     if channel.enabled
-                    and (
-                        requirement.hardware_model is None
-                        or channel.hardware_model == requirement.hardware_model
-                    )
+                    and (requirement.hardware_model is None or channel.hardware_model == requirement.hardware_model)
                 )
                 names = {channel.name for channel in enabled_channels}
-                if (
-                    requirement.minimum_channels is not None
-                    and len(enabled_channels) < requirement.minimum_channels
-                ):
+                if requirement.minimum_channels is not None and len(enabled_channels) < requirement.minimum_channels:
                     continue
                 if not set(requirement.required_channels).issubset(names):
                     continue
@@ -160,14 +151,9 @@ class LanguageSpec:
 
         failures: list[str] = []
         for requirement in requirements.languages:
-            runtimes = tuple(
-                runtime
-                for runtime in capabilities.language.runtimes
-                if runtime.name == requirement.name
-            )
+            runtimes = tuple(runtime for runtime in capabilities.language.runtimes if runtime.name == requirement.name)
             if not any(
-                requirement.version is None
-                or _matches_version(runtime.version, requirement.version)
+                requirement.version is None or _matches_version(runtime.version, requirement.version)
                 for runtime in runtimes
             ):
                 failures.append(f"language 不满足: {requirement.name}")
@@ -196,17 +182,10 @@ class SystemSpec:
             if operating_system is None:
                 failures.append("system 未上报 operating_system")
             else:
-                if (
-                    os_requirement.name is not None
-                    and operating_system.name != os_requirement.name
-                ):
-                    failures.append(
-                        f"操作系统名称不匹配: 期望 {os_requirement.name}，"
-                        f"实际 {operating_system.name}"
-                    )
-                if (
-                    os_requirement.version is not None
-                    and not _matches_version(operating_system.version, os_requirement.version)
+                if os_requirement.name is not None and operating_system.name != os_requirement.name:
+                    failures.append(f"操作系统名称不匹配: 期望 {os_requirement.name}，实际 {operating_system.name}")
+                if os_requirement.version is not None and not _matches_version(
+                    operating_system.version, os_requirement.version
                 ):
                     failures.append("操作系统版本不满足")
 
@@ -251,12 +230,8 @@ class SerialSpec:
                 and port.enabled == requirement.enabled
             )
             if not candidates:
-                suffix = (
-                    f" port={requirement.port}" if requirement.port is not None else ""
-                )
-                failures.append(
-                    f"serial 功能不满足: function={requirement.function}{suffix}"
-                )
+                suffix = f" port={requirement.port}" if requirement.port is not None else ""
+                failures.append(f"serial 功能不满足: function={requirement.function}{suffix}")
         return tuple(failures)
 
 
@@ -270,11 +245,7 @@ class TagSpec:
         tags: Sequence[str] = (),
     ) -> tuple[str, ...]:
         actual = set(tags)
-        return tuple(
-            f"缺少标签: {tag}"
-            for tag in requirements.required_tags
-            if tag not in actual
-        )
+        return tuple(f"缺少标签: {tag}" for tag in requirements.required_tags if tag not in actual)
 
 
 def default_capability_spec() -> CapabilitySpec:
@@ -325,9 +296,7 @@ def list_capability_paths(capabilities: NodeCapabilities) -> list[str]:
         for vendor in capabilities.vehicle.vendors:
             for bus in vendor.buses:
                 for channel in bus.channels:
-                    paths.append(
-                        f"vehicle.vendor.{vendor.name}.bus.{bus.bus_type}.channel.{channel.name}"
-                    )
+                    paths.append(f"vehicle.vendor.{vendor.name}.bus.{bus.bus_type}.channel.{channel.name}")
     if capabilities.language is not None:
         for runtime in capabilities.language.runtimes:
             paths.append(f"language.{runtime.name}.version")

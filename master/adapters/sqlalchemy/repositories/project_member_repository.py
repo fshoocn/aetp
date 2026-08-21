@@ -15,11 +15,7 @@ from master.domain.repositories import ProjectMemberRepository
 
 def _project_pk_subq(session: Session, project_id: str):
     """将业务 project_id 解析为代理主键子查询（保持查询形状简单）。"""
-    return (
-        select(ProjectORM.id)
-        .where(ProjectORM.project_id == project_id)
-        .scalar_subquery()
-    )
+    return select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
 
 
 def _to_domain(orm: ProjectMemberORM, project_id: str) -> ProjectMember:
@@ -40,8 +36,7 @@ class ProjectMemberRepositoryImpl(ProjectMemberRepository):
 
     def get_role(self, project_id: str, user_id: int) -> str | None:
         return self._s.execute(
-            select(ProjectMemberORM.project_role)
-            .where(
+            select(ProjectMemberORM.project_role).where(
                 ProjectMemberORM.project_pk == _project_pk_subq(self._s, project_id),
                 ProjectMemberORM.user_id == user_id,
             )
@@ -69,9 +64,7 @@ class ProjectMemberRepositoryImpl(ProjectMemberRepository):
             for member, user in rows
         ]
 
-    def get_by_project_and_user(
-        self, project_id: str, user_id: int
-    ) -> ProjectMember | None:
+    def get_by_project_and_user(self, project_id: str, user_id: int) -> ProjectMember | None:
         orm = self._s.execute(
             select(ProjectMemberORM).where(
                 ProjectMemberORM.project_pk == _project_pk_subq(self._s, project_id),
@@ -92,9 +85,7 @@ class ProjectMemberRepositoryImpl(ProjectMemberRepository):
 
     def add(self, member: ProjectMember) -> ProjectMember:
         project_pk = self._s.execute(
-            select(ProjectORM.id).where(
-                ProjectORM.project_id == member.project_id
-            )
+            select(ProjectORM.id).where(ProjectORM.project_id == member.project_id)
         ).scalar_one_or_none()
         if project_pk is None:
             raise ValueError(f"项目不存在: {member.project_id}")

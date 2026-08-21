@@ -19,11 +19,7 @@ from .base import Base, TimestampMixin, UTCDateTime
 
 class InboxMessage(Base, TimestampMixin):
     __tablename__ = "inbox_messages"
-    __table_args__ = (
-        UniqueConstraint(
-            "origin_id", "message_id", name="uq_inbox_messages_origin_message"
-        ),
-    )
+    __table_args__ = (UniqueConstraint("origin_id", "message_id", name="uq_inbox_messages_origin_message"),)
 
     # sym:id 代理主键（自增 int）
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -36,10 +32,6 @@ class InboxMessage(Base, TimestampMixin):
     # sym:payload_hash 载荷哈希（内容校验与重复检测）
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     # sym:received_at 接收时间（UTC）
-    received_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=datetime.utcnow
-    )
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=datetime.utcnow)
     # sym:processed_at 处理完成时间（非空=已处理）
-    processed_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime, nullable=True
-    )
+    processed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

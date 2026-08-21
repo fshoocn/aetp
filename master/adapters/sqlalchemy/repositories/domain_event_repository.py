@@ -32,9 +32,7 @@ class DomainEventRepositoryImpl(DomainEventRepository):
         self._s = session
 
     def add(self, event: DomainEvent) -> DomainEvent:
-        max_seq = self._s.execute(
-            select(func.max(DomainEventORM.sequence))
-        ).scalar_one_or_none()
+        max_seq = self._s.execute(select(func.max(DomainEventORM.sequence))).scalar_one_or_none()
         sequence = (max_seq or 0) + 1
         orm = DomainEventORM(
             event_id=event.event_id,
@@ -51,9 +49,7 @@ class DomainEventRepositoryImpl(DomainEventRepository):
         return _to_domain(orm)
 
     def get_by_event_id(self, event_id: str) -> DomainEvent | None:
-        orm = self._s.execute(
-            select(DomainEventORM).where(DomainEventORM.event_id == event_id)
-        ).scalars().one_or_none()
+        orm = self._s.execute(select(DomainEventORM).where(DomainEventORM.event_id == event_id)).scalars().one_or_none()
         return _to_domain(orm) if orm is not None else None
 
     def list(

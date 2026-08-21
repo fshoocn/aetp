@@ -148,8 +148,8 @@ class ScriptPreflightService:
         script_id = str(envelope.payload.get("script_id", ""))
         script_dir: Path | None = None
         try:
-            script_id, _version, task_type, plugin_version, script_ref, config = (
-                self._parse_command_payload(envelope, expected_type)
+            script_id, _version, task_type, plugin_version, script_ref, config = self._parse_command_payload(
+                envelope, expected_type
             )
             plugin = self._require_agent_plugin(task_type, plugin_version)
             script_dir = self._materialize_script_dir(script_ref)
@@ -219,19 +219,11 @@ class ScriptPreflightService:
     def _require_agent_plugin(self, task_type: str, plugin_version: str):
         """取兼容插件实例；缺失/版本不符抛错（回传 Master）。"""
         if self._plugin_registry is None:
-            raise ScriptPreflightError(
-                "Agent 未装配插件注册表", code="PLUGIN_NOT_FOUND"
-            )
+            raise ScriptPreflightError("Agent 未装配插件注册表", code="PLUGIN_NOT_FOUND")
         try:
-            return self._plugin_registry.require_compatible(
-                task_type, plugin_version
-            )
+            return self._plugin_registry.require_compatible(task_type, plugin_version)
         except (PluginNotFoundError, PluginVersionMismatchError) as exc:
-            code = (
-                "PLUGIN_NOT_FOUND"
-                if isinstance(exc, PluginNotFoundError)
-                else "PLUGIN_VERSION_MISMATCH"
-            )
+            code = "PLUGIN_NOT_FOUND" if isinstance(exc, PluginNotFoundError) else "PLUGIN_VERSION_MISMATCH"
             raise ScriptPreflightError(str(exc), code=code) from exc
 
     # -- 脚本物化 -----------------------------------------------------------
@@ -241,9 +233,7 @@ class ScriptPreflightService:
         entry = self._script_cache.ensure_cached(script_ref)
         source = Path(entry.path)
         if not source.is_file():
-            raise ScriptPreflightError(
-                f"缓存脚本文件缺失: {source}", code="SCRIPT_REF_INVALID"
-            )
+            raise ScriptPreflightError(f"缓存脚本文件缺失: {source}", code="SCRIPT_REF_INVALID")
         tmp_dir = Path(tempfile.mkdtemp(prefix="aetp-script-"))
         try:
             if zipfile.is_zipfile(source):
@@ -252,16 +242,12 @@ class ScriptPreflightService:
                 shutil.copy2(source, tmp_dir / "test_script.py")
         except Exception as exc:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise ScriptPreflightError(
-                f"脚本解包失败: {exc}", code="SCRIPT_DIR_INVALID"
-            ) from exc
+            raise ScriptPreflightError(f"脚本解包失败: {exc}", code="SCRIPT_DIR_INVALID") from exc
         return tmp_dir
 
     # -- 插件执行 -----------------------------------------------------------
 
-    def _run_verify(
-        self, script_dir: Path, plugin, config: dict
-    ) -> list[str]:
+    def _run_verify(self, script_dir: Path, plugin, config: dict) -> list[str]:
         verify = getattr(plugin, "verify_script", None)
         if verify is None or getattr(plugin, "verify_location", "master") != "agent":
             raise ScriptPreflightError(
@@ -270,9 +256,7 @@ class ScriptPreflightService:
             )
         return list(verify(str(script_dir), config))
 
-    def _run_parse(
-        self, script_dir: Path, plugin, config: dict
-    ) -> list[dict]:
+    def _run_parse(self, script_dir: Path, plugin, config: dict) -> list[dict]:
         parse = getattr(plugin, "parse_cases", None)
         if parse is None or getattr(plugin, "parse_location", "master") != "agent":
             raise ScriptPreflightError(
@@ -295,9 +279,7 @@ class ScriptPreflightService:
 
     # -- 结果回传 -----------------------------------------------------------
 
-    def _enqueue_verify_result(
-        self, envelope: Envelope, script_id: str, *, errors: list[str]
-    ) -> None:
+    def _enqueue_verify_result(self, envelope: Envelope, script_id: str, *, errors: list[str]) -> None:
         payload = ScriptVerifyResultPayload(
             verify_id=envelope.payload.get("verify_id", ""),
             script_id=script_id,
@@ -312,9 +294,7 @@ class ScriptPreflightService:
             payload.model_dump(mode="json"),
         )
 
-    def _enqueue_parse_result(
-        self, envelope: Envelope, script_id: str, *, cases: list[dict]
-    ) -> None:
+    def _enqueue_parse_result(self, envelope: Envelope, script_id: str, *, cases: list[dict]) -> None:
         payload = ScriptParseResultPayload(
             parse_id=envelope.payload.get("parse_id", ""),
             script_id=script_id,
@@ -328,9 +308,7 @@ class ScriptPreflightService:
             payload.model_dump(mode="json"),
         )
 
-    def _enqueue_error_result(
-        self, envelope: Envelope, script_id: str, *, errors: list[str]
-    ) -> None:
+    def _enqueue_error_result(self, envelope: Envelope, script_id: str, *, errors: list[str]) -> None:
         """把预检失败以对应结果类型回传（verify/parse 二选一）。"""
         if envelope.message_type == MessageType.SCRIPT_VERIFY.value:
             self._enqueue_verify_result(envelope, script_id, errors=errors)

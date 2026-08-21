@@ -48,9 +48,7 @@ def test_set_encrypts_and_get_decrypts():
     assert "plain-secret-value" not in written_cipher
 
     # get 从仓储读到密文后解回明文
-    uow.secret_values.get.return_value = SecretValueRecord(
-        id=1, secret_ref="ref-1", cipher_text=written_cipher
-    )
+    uow.secret_values.get.return_value = SecretValueRecord(id=1, secret_ref="ref-1", cipher_text=written_cipher)
     result = store.get("ref-1")
     assert result is not None
     assert result.value == "plain-secret-value"
@@ -90,8 +88,6 @@ def test_cross_store_decryption_fails_with_different_master_secret():
     cipher = uow_a.secret_values.upsert.call_args[0][1]
 
     uow_b = _mock_uow()
-    uow_b.secret_values.get.return_value = SecretValueRecord(
-        id=1, secret_ref="ref-1", cipher_text=cipher
-    )
+    uow_b.secret_values.get.return_value = SecretValueRecord(id=1, secret_ref="ref-1", cipher_text=cipher)
     store_b = _make_store(uow_b, master_secret="master-secret-B")
     assert store_b.get("ref-1") is None

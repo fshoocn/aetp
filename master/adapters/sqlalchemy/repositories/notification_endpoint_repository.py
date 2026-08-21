@@ -32,24 +32,24 @@ class NotificationEndpointRepositoryImpl(NotificationEndpointRepository):
         self._s = session
 
     def get_by_endpoint_id(self, endpoint_id: str) -> NotificationEndpoint | None:
-        orm = self._s.execute(
-            select(EndpointORM)
-            .options(joinedload(EndpointORM.project))
-            .where(EndpointORM.endpoint_id == endpoint_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(EndpointORM)
+                .options(joinedload(EndpointORM.project))
+                .where(EndpointORM.endpoint_id == endpoint_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
-    def list_by_project(
-        self, project_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[NotificationEndpoint]:
+    def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[NotificationEndpoint]:
         stmt = (
             select(EndpointORM)
             .options(joinedload(EndpointORM.project))
             .where(
                 EndpointORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
             .order_by(EndpointORM.id.desc())
             .limit(limit)
@@ -92,9 +92,7 @@ class NotificationEndpointRepositoryImpl(NotificationEndpointRepository):
         return _to_domain(orm)
 
     def delete(self, endpoint_id: str) -> None:
-        orm = self._s.execute(
-            select(EndpointORM).where(EndpointORM.endpoint_id == endpoint_id)
-        ).scalars().one_or_none()
+        orm = self._s.execute(select(EndpointORM).where(EndpointORM.endpoint_id == endpoint_id)).scalars().one_or_none()
         if orm is None:
             raise ValueError(f"通知端点不存在: {endpoint_id}")
         self._s.delete(orm)

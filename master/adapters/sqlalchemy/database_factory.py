@@ -49,18 +49,12 @@ def create_database(
     elif isinstance(connection, dict):
         config = DatabaseConfig.from_mapping(connection)
     else:
-        raise TypeError(
-            f"connection 必须是 str / DatabaseConfig / dict，"
-            f"实际为 {type(connection).__name__}"
-        )
+        raise TypeError(f"connection 必须是 str / DatabaseConfig / dict，实际为 {type(connection).__name__}")
 
     url = config.build_url()
     scheme = _detect_scheme(url)
 
     impl_cls = REGISTRY.get(scheme)
     if impl_cls is None:
-        raise ValueError(
-            f"不支持的数据库类型: {scheme!r}"
-            f"（支持: {', '.join(sorted(set(REGISTRY)))}）"
-        )
+        raise ValueError(f"不支持的数据库类型: {scheme!r}（支持: {', '.join(sorted(set(REGISTRY)))}）")
     return impl_cls(config)

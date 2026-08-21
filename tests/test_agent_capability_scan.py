@@ -52,9 +52,7 @@ def test_scan_serial_marks_missing_ports_disabled(tmp_path):
     """串口映射：不存在的端口标记为禁用，存在的端口启用。"""
     mapping = tmp_path / "serial_ports.json"
     mapping.write_text(
-        json.dumps(
-            {"relay_board": "COM999999_NOT_EXIST", "psu": "COM30"}
-        ),
+        json.dumps({"relay_board": "COM999999_NOT_EXIST", "psu": "COM30"}),
         encoding="utf-8",
     )
     caps = _scan_serial(mapping)

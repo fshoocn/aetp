@@ -103,10 +103,12 @@ def test_admission_deny_rejects(client):
     registry = HookRegistry(admission_hooks=[_DenyHook()])
     runner = HookRunner(lambda: client.app.state.container.uow_factory()(), registry=registry)
 
-    decision = asyncio.run(runner.run_admission(
-        "run.before_create",
-        HookContext(stage="run.before_create"),
-    ))
+    decision = asyncio.run(
+        runner.run_admission(
+            "run.before_create",
+            HookContext(stage="run.before_create"),
+        )
+    )
     assert decision.allowed is False
     assert decision.code == "TEST_HOOK_DENIED"
 
@@ -122,10 +124,12 @@ def test_admission_timeout_rejects(client):
         timeout_s=0.1,
     )
 
-    decision = asyncio.run(runner.run_admission(
-        "run.before_create",
-        HookContext(stage="run.before_create"),
-    ))
+    decision = asyncio.run(
+        runner.run_admission(
+            "run.before_create",
+            HookContext(stage="run.before_create"),
+        )
+    )
     assert decision.allowed is False
     assert decision.code == "HOOK_TIMEOUT"
 

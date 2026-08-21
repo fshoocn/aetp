@@ -27,9 +27,7 @@ def _device_to_domain(orm: DeviceORM) -> Device:
         name=orm.name,
         status=DeviceStatus(orm.status),
         online=orm.online,
-        capability=PhysicalDeviceCapability.model_validate(
-            orm.capabilities or {"resource_type": "generic"}
-        ),
+        capability=PhysicalDeviceCapability.model_validate(orm.capabilities or {"resource_type": "generic"}),
         last_seen_at=orm.last_seen_at,
         created_at=orm.created_at,
         updated_at=orm.updated_at,
@@ -37,11 +35,7 @@ def _device_to_domain(orm: DeviceORM) -> Device:
 
 
 def _project_pk_subq(session: Session, project_id: str):
-    return (
-        select(ProjectORM.id)
-        .where(ProjectORM.project_id == project_id)
-        .scalar_subquery()
-    )
+    return select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
 
 
 class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
@@ -62,8 +56,7 @@ class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
         orm = self._s.execute(
             select(BindingORM).where(
                 BindingORM.project_pk == _project_pk_subq(self._s, project_id),
-                BindingORM.node_pk
-                == select(NodeORM.id).where(NodeORM.node_id == node_id).scalar_subquery(),
+                BindingORM.node_pk == select(NodeORM.id).where(NodeORM.node_id == node_id).scalar_subquery(),
             )
         ).scalar_one_or_none()
         if orm is None:
@@ -82,9 +75,7 @@ class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
         project_pk = self._s.execute(
             select(ProjectORM.id).where(ProjectORM.project_id == binding.project_id)
         ).scalar_one_or_none()
-        node_pk = self._s.execute(
-            select(NodeORM.id).where(NodeORM.node_id == binding.node_id)
-        ).scalar_one_or_none()
+        node_pk = self._s.execute(select(NodeORM.id).where(NodeORM.node_id == binding.node_id)).scalar_one_or_none()
         if project_pk is None or node_pk is None:
             raise ValueError("项目或节点不存在")
         orm = BindingORM(
@@ -129,9 +120,7 @@ class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
             self._s.delete(orm)
 
     @staticmethod
-    def _to_view(
-        binding: BindingORM, node: NodeORM, project_id: str
-    ) -> ProjectNodeBindingView:
+    def _to_view(binding: BindingORM, node: NodeORM, project_id: str) -> ProjectNodeBindingView:
         from aetp_protocol.capabilities import NodeCapabilities
 
         return ProjectNodeBindingView(
@@ -147,9 +136,7 @@ class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
             assigned_by=binding.assigned_by,
             created_at=binding.created_at,
             updated_at=binding.updated_at,
-            capabilities=NodeCapabilities.model_validate(
-                node.capabilities or {}
-            ),
+            capabilities=NodeCapabilities.model_validate(node.capabilities or {}),
             plugin_versions=dict(node.plugin_versions or {}),
             devices=[_device_to_domain(d) for d in (node.devices or [])],
         )

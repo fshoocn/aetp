@@ -85,9 +85,7 @@ def test_checksum_mismatch_raises_and_does_not_cache(tmp_path) -> None:
 
     # 校验失败不落缓存：账本与磁盘都没有痕迹
     assert _ledger(tmp_path).get_cached_script("S-1", 1, "0" * 64) is None
-    assert not (tmp_path / "scripts").exists() or not any(
-        (tmp_path / "scripts").rglob("*.bin")
-    )
+    assert not (tmp_path / "scripts").exists() or not any((tmp_path / "scripts").rglob("*.bin"))
 
 
 def test_download_failure_raises(tmp_path) -> None:
@@ -117,9 +115,7 @@ def test_cache_hit_reuses_existing_entry_without_download(tmp_path) -> None:
     ledger.cache_script(ScriptCacheEntry("S-1", 1, _SHA, str(path)))
 
     calls = []
-    service = ScriptCacheService(
-        tmp_path / "scripts", ledger, fetcher=lambda url: calls.append(url) or _DATA
-    )
+    service = ScriptCacheService(tmp_path / "scripts", ledger, fetcher=lambda url: calls.append(url) or _DATA)
     entry = service.ensure_cached(_script_ref())
 
     assert entry.path == str(path)
@@ -129,6 +125,7 @@ def test_cache_hit_reuses_existing_entry_without_download(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # CommandDispatcher 集成：脚本准备失败回 ACK(rejected)，可重试
 # -----------------------------------------------------------------------
+
 
 def _dispatcher(tmp_path, fetcher) -> tuple[CommandDispatcher, SQLiteLedger]:
     settings = AgentSettings(
@@ -143,9 +140,7 @@ def _dispatcher(tmp_path, fetcher) -> tuple[CommandDispatcher, SQLiteLedger]:
         settings,
         ledger,
         is_registered=lambda: True,
-        script_cache=ScriptCacheService(
-            tmp_path / "scripts", ledger, fetcher=fetcher
-        ),
+        script_cache=ScriptCacheService(tmp_path / "scripts", ledger, fetcher=fetcher),
     )
     return dispatcher, ledger
 
@@ -168,9 +163,7 @@ def _assign_envelope(sha256: str = _SHA) -> Envelope:
         message_id="assign-script-1",
         message_type=MessageType.RUN_ASSIGN.value,
         sent_at="2026-08-17T12:00:00Z",
-        sender=Sender(
-            kind=SenderKind.MASTER, id="aetp-master", session_id="master-sess"
-        ),
+        sender=Sender(kind=SenderKind.MASTER, id="aetp-master", session_id="master-sess"),
         trace_id="R-script",
         payload=payload.model_dump(mode="json"),
     )

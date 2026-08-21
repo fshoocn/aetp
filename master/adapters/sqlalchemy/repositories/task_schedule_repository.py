@@ -36,30 +36,25 @@ class TaskScheduleRepositoryImpl(TaskScheduleRepository):
         self._s = session
 
     def get_by_schedule_id(self, schedule_id: str) -> TaskSchedule | None:
-        orm = self._s.execute(
-            select(ScheduleORM)
-            .options(joinedload(ScheduleORM.task))
-            .where(ScheduleORM.schedule_id == schedule_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(ScheduleORM).options(joinedload(ScheduleORM.task)).where(ScheduleORM.schedule_id == schedule_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def list_by_task(self, task_id: str) -> list[TaskSchedule]:
         stmt = (
             select(ScheduleORM)
             .options(joinedload(ScheduleORM.task))
-            .where(
-                ScheduleORM.task_pk
-                == select(TaskORM.id)
-                .where(TaskORM.task_id == task_id)
-                .scalar_subquery()
-            )
+            .where(ScheduleORM.task_pk == select(TaskORM.id).where(TaskORM.task_id == task_id).scalar_subquery())
             .order_by(ScheduleORM.id)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
-    def list_due(
-        self, *, now: datetime, limit: int = 100
-    ) -> list[TaskSchedule]:
+    def list_due(self, *, now: datetime, limit: int = 100) -> list[TaskSchedule]:
         stmt = (
             select(ScheduleORM)
             .options(joinedload(ScheduleORM.task))
@@ -72,9 +67,7 @@ class TaskScheduleRepositoryImpl(TaskScheduleRepository):
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
     def add(self, schedule: TaskSchedule) -> TaskSchedule:
-        task_pk = self._s.execute(
-            select(TaskORM.id).where(TaskORM.task_id == schedule.task_id)
-        ).scalar_one_or_none()
+        task_pk = self._s.execute(select(TaskORM.id).where(TaskORM.task_id == schedule.task_id)).scalar_one_or_none()
         if task_pk is None:
             raise ValueError(f"任务定义不存在: {schedule.task_id}")
         orm = ScheduleORM(
@@ -107,9 +100,7 @@ class TaskScheduleRepositoryImpl(TaskScheduleRepository):
         return _to_domain(orm)
 
     def delete(self, schedule_id: str) -> None:
-        orm = self._s.execute(
-            select(ScheduleORM).where(ScheduleORM.schedule_id == schedule_id)
-        ).scalars().one_or_none()
+        orm = self._s.execute(select(ScheduleORM).where(ScheduleORM.schedule_id == schedule_id)).scalars().one_or_none()
         if orm is None:
             raise ValueError(f"调度计划不存在: {schedule_id}")
         self._s.delete(orm)

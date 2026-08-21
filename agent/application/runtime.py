@@ -94,9 +94,7 @@ class AgentRuntime:
     def _ensure_components(self) -> None:
         """延迟构建子组件（首次使用时调用）。"""
         if self._execution_service is None:
-            self._execution_service = ExecutionService(
-                settings=self._settings, ledger=self._ledger
-            )
+            self._execution_service = ExecutionService(settings=self._settings, ledger=self._ledger)
         if self._orchestrator is None:
             self._orchestrator = RunOrchestrator(
                 settings=self._settings,
@@ -175,16 +173,12 @@ class AgentRuntime:
             logger.debug("断开 MQTT 异常（已忽略）", exc_info=True)
         logger.info("Agent runtime 已停止: node=%s", self._settings.node_id)
 
-    async def _handle_connection_change(
-        self, connected: bool, session_id: str | None = None
-    ) -> None:
+    async def _handle_connection_change(self, connected: bool, session_id: str | None = None) -> None:
         """连接成功触发重新注册，断开撤销注册状态。"""
         await self._registration.handle_connection_change(connected, session_id)
         if connected:
             self._cancel_registration_waiter()
-            self._registration_task = asyncio.create_task(
-                self._wait_for_registration()
-            )
+            self._registration_task = asyncio.create_task(self._wait_for_registration())
         else:
             self._cancel_registration_waiter()
 
@@ -210,9 +204,7 @@ class AgentRuntime:
             except RegistrationTimeoutError as exc:
                 # Master 未回 ACK：保持连接，按退避重发注册，继续等待
                 delay = registration_backoff.next()
-                logger.warning(
-                    "Agent 注册超时，%.1fs 后重发注册: %s", delay, exc
-                )
+                logger.warning("Agent 注册超时，%.1fs 后重发注册: %s", delay, exc)
                 await self._sleep(delay)
                 if self._stop_event.is_set():
                     return
@@ -253,9 +245,7 @@ class AgentRuntime:
         if self._script_preflight_obj is None:
             return False
         try:
-            envelope = Envelope.model_validate(
-                json.loads(message.payload.decode("utf-8"))
-            )
+            envelope = Envelope.model_validate(json.loads(message.payload.decode("utf-8")))
         except Exception:  # noqa: BLE001 - 非预检命令交由 dispatcher 处理
             return False
         msg_type = envelope.message_type
@@ -280,9 +270,7 @@ class AgentRuntime:
                         qos=1,
                     )
                 except Exception as exc:  # noqa: BLE001 - 单条失败不阻塞批次
-                    retry_at = now + timedelta(
-                        seconds=min(60, 2 ** min(entry.attempts + 1, 6))
-                    )
+                    retry_at = now + timedelta(seconds=min(60, 2 ** min(entry.attempts + 1, 6)))
                     self._ledger.mark_outbox(
                         entry.outbox_id,
                         status=AgentOutboxStatus.PENDING,

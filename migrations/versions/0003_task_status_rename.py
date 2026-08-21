@@ -33,14 +33,8 @@ depends_on: str | Sequence[str] | None = None
 # ck_<表>_<token> -> ck_tasks_ck_tasks_status（与 0001/ORM 生成的库内名一致）
 _DB_CHECK_NAME = "ck_tasks_status"
 
-_NEW_CHECK = (
-    "status IN ('pending','dispatching','running','cancelling',"
-    "'succeeded','failed','cancelled','timed_out')"
-)
-_OLD_CHECK = (
-    "status IN ('pending','dispatched','accepted','running',"
-    "'completed','failed','cancelled','timeout')"
-)
+_NEW_CHECK = "status IN ('pending','dispatching','running','cancelling','succeeded','failed','cancelled','timed_out')"
+_OLD_CHECK = "status IN ('pending','dispatched','accepted','running','completed','failed','cancelled','timeout')"
 _UNION_CHECK = (
     "status IN ('pending','dispatching','running','cancelling',"
     "'succeeded','failed','cancelled','timed_out',"
@@ -59,10 +53,7 @@ def upgrade() -> None:
     # 1. CHECK 放宽为并集（旧数据在重建拷贝时可通过新约束）
     _swap_check(_UNION_CHECK)
     # 2. 数据回填为新值（并集 CHECK 下合法）
-    op.execute(
-        "UPDATE tasks SET status='dispatching' "
-        "WHERE status IN ('dispatched','accepted')"
-    )
+    op.execute("UPDATE tasks SET status='dispatching' WHERE status IN ('dispatched','accepted')")
     op.execute("UPDATE tasks SET status='succeeded' WHERE status='completed'")
     op.execute("UPDATE tasks SET status='timed_out' WHERE status='timeout'")
     # 3. CHECK 收紧为新值集合

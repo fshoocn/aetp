@@ -48,9 +48,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         return _to_domain(orm)
 
     def get_by_audit_id(self, audit_id: str) -> AuditLog | None:
-        orm = self._s.execute(
-            select(AuditLogORM).where(AuditLogORM.audit_id == audit_id)
-        ).scalars().one_or_none()
+        orm = self._s.execute(select(AuditLogORM).where(AuditLogORM.audit_id == audit_id)).scalars().one_or_none()
         return _to_domain(orm) if orm is not None else None
 
     def list(
@@ -69,7 +67,5 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             stmt = stmt.where(AuditLogORM.actor_id == actor_id)
         if action is not None:
             stmt = stmt.where(AuditLogORM.action == action)
-        stmt = stmt.order_by(
-            AuditLogORM.occurred_at.desc(), AuditLogORM.id.desc()
-        ).limit(limit).offset(offset)
+        stmt = stmt.order_by(AuditLogORM.occurred_at.desc(), AuditLogORM.id.desc()).limit(limit).offset(offset)
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]

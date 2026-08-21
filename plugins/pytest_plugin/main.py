@@ -96,7 +96,7 @@ class PytestMasterPlugin:
             raise ValueError("cases_per_shard 必须大于 0")
         return [
             ShardSpec(
-                case_keys=tuple(case.stable_key for case in cases[index:index + size]),
+                case_keys=tuple(case.stable_key for case in cases[index : index + size]),
                 execution_params=dict(config),
             )
             for index in range(0, len(cases), size)
@@ -224,8 +224,7 @@ class PytestAgentPlugin:
                 await context.log("error", "pytest 报告解析失败", {"report_path": str(report_path)})
         failed_count = sum(item["status"] in {"failed", "error"} for item in case_results)
         return {
-            "passed": execution_result.get("return_code") == 0
-            and failed_count == 0,
+            "passed": execution_result.get("return_code") == 0 and failed_count == 0,
             "case_results": case_results,
             "metrics": {
                 "total": len(case_results),

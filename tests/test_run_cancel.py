@@ -53,9 +53,7 @@ def test_cancel_requires_operator_permission(client):
     svc = client.app.state.container.auth_service()
     user = svc.create_user("cancel-viewer", "pass123", "cancel-viewer")
     with client.app.state.container.database().session_scope() as session:
-        session.execute(
-            text("UPDATE users SET account_status='active' WHERE username='cancel-viewer'")
-        )
+        session.execute(text("UPDATE users SET account_status='active' WHERE username='cancel-viewer'"))
     client.post(
         f"/api/v1/projects/{project_id}/members",
         headers=admin_headers,

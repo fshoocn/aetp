@@ -34,7 +34,9 @@ def upgrade() -> None:
         "node_sessions",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column(
-            "node_pk", sa.Integer(), sa.ForeignKey("nodes.id", ondelete="CASCADE"),
+            "node_pk",
+            sa.Integer(),
+            sa.ForeignKey("nodes.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("node_id", sa.String(length=64), nullable=False),
@@ -46,9 +48,7 @@ def upgrade() -> None:
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "node_pk", "session_id", name="uq_node_sessions_node_session"
-        ),
+        sa.UniqueConstraint("node_pk", "session_id", name="uq_node_sessions_node_session"),
     )
     op.create_index(
         "ix_node_sessions_node_current",

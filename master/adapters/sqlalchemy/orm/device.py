@@ -34,16 +34,10 @@ class Device(Base, TimestampMixin):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     # sym:capabilities 物理资源能力 JSON（业务层使用 PhysicalDeviceCapability）
-    capabilities: Mapped[dict] = mapped_column(
-        JSONType, nullable=False, default=dict
-    )
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="offline"
-    )
+    capabilities: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="offline")
     online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    last_seen_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime, nullable=True
-    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
     node: Mapped[Node | None] = relationship(
         back_populates="devices",

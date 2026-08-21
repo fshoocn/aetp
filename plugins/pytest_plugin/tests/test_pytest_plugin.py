@@ -21,9 +21,7 @@ class _PluginContext:
         case_keys: list[str] | None = None,
     ) -> None:
         self.params: Mapping[str, Any] = {}
-        self.script_ref: Mapping[str, Any] = (
-            {"path": str(script_path)} if script_path is not None else {}
-        )
+        self.script_ref: Mapping[str, Any] = {"path": str(script_path)} if script_path is not None else {}
         self.case_keys = list(case_keys or [])
         self.lines: list[str] = []
 
@@ -89,9 +87,7 @@ def test_split_shards_by_case_count() -> None:
 def test_split_shards_forwards_execution_config() -> None:
     plugin = PytestMasterPlugin()
     cases = [CaseInfo(stable_key="test_0", name="test_0")]
-    shards = __import__("asyncio").run(
-        plugin.split_shards(cases, {"cases_per_shard": 1}, {"pytest_args": ["-q"]})
-    )
+    shards = __import__("asyncio").run(plugin.split_shards(cases, {"cases_per_shard": 1}, {"pytest_args": ["-q"]}))
     assert shards[0].execution_params == {"pytest_args": ["-q"]}
 
 
@@ -133,14 +129,10 @@ def test_analyze_results_allows_skipped_and_keeps_case_output(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    context = _PluginContext(
-        case_keys=["test_script.py::test_ok", "test_script.py::test_skip"]
-    )
+    context = _PluginContext(case_keys=["test_script.py::test_ok", "test_script.py::test_skip"])
 
     result = __import__("asyncio").run(
-        PytestAgentPlugin().analyze_results(
-            {"return_code": 0, "report_path": str(report)}, context
-        )
+        PytestAgentPlugin().analyze_results({"return_code": 0, "report_path": str(report)}, context)
     )
     assert result["passed"] is True
     assert result["case_results"][0]["case_key"] == "test_script.py::test_ok"

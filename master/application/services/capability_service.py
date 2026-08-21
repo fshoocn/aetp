@@ -66,8 +66,4 @@ class CapabilityService:
         requirements: HardwareRequirements,
     ) -> list[Node]:
         """返回满足硬件需求的节点子集（§18.5 候选节点 ∩ 谓词满足）。"""
-        return [
-            node
-            for node in nodes
-            if self.evaluate(node, requirements).matched
-        ]
+        return [node for node in nodes if self.evaluate(node, requirements).matched]

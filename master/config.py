@@ -1,4 +1,3 @@
-
 import logging
 import sys
 from dataclasses import dataclass
@@ -112,11 +111,7 @@ class MasterSettings:
         通常不需要直接调用——入口应使用模块级 configure()，
         其余模块使用 get_settings()。
         """
-        path = (
-            Path(env_file).resolve()
-            if env_file is not None
-            else cls.default_env_file()
-        )
+        path = Path(env_file).resolve() if env_file is not None else cls.default_env_file()
 
         values = load_env_file(path)
         base_dir = path.parent
@@ -135,12 +130,8 @@ class MasterSettings:
         raw_jwt_expire = values.get("AETP_MASTER_JWT_EXPIRE_MINUTES")
         raw_refresh_days = values.get("AETP_MASTER_REFRESH_TOKEN_EXPIRE_DAYS")
         raw_download_ttl = values.get("AETP_MASTER_INTERNAL_DOWNLOAD_TTL_S")
-        raw_case_duration_default = values.get(
-            "AETP_MASTER_CASE_DURATION_DEFAULT_S"
-        )
-        raw_case_duration_anomaly = values.get(
-            "AETP_MASTER_CASE_DURATION_ANOMALY_PERCENT"
-        )
+        raw_case_duration_default = values.get("AETP_MASTER_CASE_DURATION_DEFAULT_S")
+        raw_case_duration_anomaly = values.get("AETP_MASTER_CASE_DURATION_ANOMALY_PERCENT")
         raw_log_file = values.get("AETP_MASTER_LOG_FILE")
         log_file = Path(raw_log_file) if raw_log_file else cls.log_file
         if not log_file.is_absolute():
@@ -160,36 +151,24 @@ class MasterSettings:
             mqtt_port=parse_int(raw_port, cls.mqtt_port),
             mqtt_username=values.get("AETP_MASTER_MQTT_USERNAME"),
             mqtt_password=values.get("AETP_MASTER_MQTT_PASSWORD"),
-            mqtt_client_id=values.get(
-                "AETP_MASTER_MQTT_CLIENT_ID", cls.mqtt_client_id
-            ),
+            mqtt_client_id=values.get("AETP_MASTER_MQTT_CLIENT_ID", cls.mqtt_client_id),
             mqtt_ca_cert_path=ca_cert_path,
-            mqtt_use_tls=parse_bool(
-                values.get("AETP_MASTER_MQTT_USE_TLS"), cls.mqtt_use_tls
-            ),
+            mqtt_use_tls=parse_bool(values.get("AETP_MASTER_MQTT_USE_TLS"), cls.mqtt_use_tls),
             http_host=values.get("AETP_MASTER_HTTP_HOST", cls.http_host),
             http_port=parse_int(raw_http_port, cls.http_port),
             log_level=values.get("AETP_MASTER_LOG_LEVEL", cls.log_level),
             log_file=log_file,
-            log_console=parse_bool(
-                values.get("AETP_MASTER_LOG_CONSOLE"), cls.log_console
-            ),
+            log_console=parse_bool(values.get("AETP_MASTER_LOG_CONSOLE"), cls.log_console),
             jwt_secret=values.get("AETP_MASTER_JWT_SECRET", cls.jwt_secret),
-            jwt_expire_minutes=parse_int(
-                raw_jwt_expire, cls.jwt_expire_minutes
-            ),
+            jwt_expire_minutes=parse_int(raw_jwt_expire, cls.jwt_expire_minutes),
             jwt_issuer=values.get("AETP_MASTER_JWT_ISSUER", cls.jwt_issuer),
             jwt_audience=values.get("AETP_MASTER_JWT_AUDIENCE", cls.jwt_audience),
-            public_base_url=values.get(
-                "AETP_MASTER_PUBLIC_BASE_URL", cls.public_base_url
-            ),
+            public_base_url=values.get("AETP_MASTER_PUBLIC_BASE_URL", cls.public_base_url),
             internal_signing_secret=values.get(
                 "AETP_MASTER_INTERNAL_SIGNING_SECRET",
                 cls.internal_signing_secret,
             ),
-            internal_download_ttl_s=parse_int(
-                raw_download_ttl, cls.internal_download_ttl_s
-            ),
+            internal_download_ttl_s=parse_int(raw_download_ttl, cls.internal_download_ttl_s),
             case_duration_default_s=(
                 float(raw_case_duration_default)
                 if raw_case_duration_default not in (None, "")
@@ -200,29 +179,17 @@ class MasterSettings:
                 if raw_case_duration_anomaly not in (None, "")
                 else cls.case_duration_anomaly_percent
             ),
-            refresh_token_expire_days=parse_int(
-                raw_refresh_days, cls.refresh_token_expire_days
-            ),
-            auto_migrate=parse_bool(
-                values.get("AETP_MASTER_AUTO_MIGRATE"), cls.auto_migrate
-            ),
-            run_stale_timeout_s=parse_int(
-                raw_stale_timeout, cls.run_stale_timeout_s
-            ),
+            refresh_token_expire_days=parse_int(raw_refresh_days, cls.refresh_token_expire_days),
+            auto_migrate=parse_bool(values.get("AETP_MASTER_AUTO_MIGRATE"), cls.auto_migrate),
+            run_stale_timeout_s=parse_int(raw_stale_timeout, cls.run_stale_timeout_s),
             maintenance_interval_s=(
                 float(raw_maintenance_interval)
                 if raw_maintenance_interval not in (None, "")
                 else cls.maintenance_interval_s
             ),
-            outbox_max_attempts=parse_int(
-                raw_outbox_max_attempts, cls.outbox_max_attempts
-            ),
-            bootstrap_admin_username=values.get(
-                "AETP_MASTER_BOOTSTRAP_ADMIN_USERNAME", cls.bootstrap_admin_username
-            ),
-            bootstrap_admin_password=values.get(
-                "AETP_MASTER_BOOTSTRAP_ADMIN_PASSWORD", cls.bootstrap_admin_password
-            ),
+            outbox_max_attempts=parse_int(raw_outbox_max_attempts, cls.outbox_max_attempts),
+            bootstrap_admin_username=values.get("AETP_MASTER_BOOTSTRAP_ADMIN_USERNAME", cls.bootstrap_admin_username),
+            bootstrap_admin_password=values.get("AETP_MASTER_BOOTSTRAP_ADMIN_PASSWORD", cls.bootstrap_admin_password),
             bootstrap_admin_display_name=values.get(
                 "AETP_MASTER_BOOTSTRAP_ADMIN_DISPLAY_NAME",
                 cls.bootstrap_admin_display_name,
@@ -244,14 +211,9 @@ def configure(env_file: str | Path | None = None) -> MasterSettings:
     """
     global _settings
     if _settings is not None:
-        requested = (
-            Path(env_file).resolve() if env_file is not None else None
-        )
+        requested = Path(env_file).resolve() if env_file is not None else None
         if requested is not None and requested != _settings.env_file:
-            raise RuntimeError(
-                f"配置已初始化（{_settings.env_file}），"
-                f"不能再用 {requested} 重新初始化"
-            )
+            raise RuntimeError(f"配置已初始化（{_settings.env_file}），不能再用 {requested} 重新初始化")
         return _settings
 
     _settings = MasterSettings.from_env_file(env_file)
@@ -267,9 +229,7 @@ def configure(env_file: str | Path | None = None) -> MasterSettings:
 def get_settings() -> MasterSettings:
     """只读获取进程级配置；未初始化时明确报错而不是猜路径。"""
     if _settings is None:
-        raise RuntimeError(
-            "配置未初始化：请在入口（run.py）先调用 master.config.configure()"
-        )
+        raise RuntimeError("配置未初始化：请在入口（run.py）先调用 master.config.configure()")
     return _settings
 
 

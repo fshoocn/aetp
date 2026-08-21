@@ -33,23 +33,17 @@ class UserRepositoryImpl(UserRepository):
         return _to_domain(orm) if orm is not None else None
 
     def get_by_username(self, username: str) -> User | None:
-        orm = self._s.execute(
-            select(UserORM).where(UserORM.username == username)
-        ).scalar_one_or_none()
+        orm = self._s.execute(select(UserORM).where(UserORM.username == username)).scalar_one_or_none()
         return _to_domain(orm) if orm is not None else None
 
-    def list(
-        self, *, account_status: str | None = None, limit: int = 50, offset: int = 0
-    ) -> list[User]:
+    def list(self, *, account_status: str | None = None, limit: int = 50, offset: int = 0) -> list[User]:
         stmt = select(UserORM).order_by(UserORM.id).limit(limit).offset(offset)
         if account_status:
             stmt = stmt.where(UserORM.account_status == account_status)
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
     def count(self) -> int:
-        return self._s.execute(
-            select(func.count()).select_from(UserORM)
-        ).scalar_one()
+        return self._s.execute(select(func.count()).select_from(UserORM)).scalar_one()
 
     def add(self, user: User) -> User:
         orm = UserORM(

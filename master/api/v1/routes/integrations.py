@@ -60,9 +60,7 @@ def create_integration(
             created_by=access.user.persisted_id,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return IntegrationOut.model_validate(integration)
 
 
@@ -97,9 +95,7 @@ def update_integration(
             enabled=body.enabled,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return IntegrationOut.model_validate(integration)
 
 
@@ -150,9 +146,7 @@ def create_binding(
             parameter_mapping_json=body.parameter_mapping_json,
         )
     except (ValueError, Exception) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return BindingOut.model_validate(binding)
 
 
@@ -176,9 +170,7 @@ def update_binding(
             enabled=body.enabled,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return BindingOut.model_validate(binding)
 
 

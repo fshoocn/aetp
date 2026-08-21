@@ -29,6 +29,7 @@ from master.domain.time import utcnow
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
+
 def _protocol_endpoint(channel_type: str, **overrides) -> NotificationEndpoint:
     """创建协议端点（senders 使用的 frozen dataclass）。"""
     defaults = {
@@ -94,6 +95,7 @@ def _mock_httpx_client(response: MagicMock | None = None) -> MagicMock:
 
 
 # ── Sender 合约测试 ──────────────────────────────────────────────────────
+
 
 class TestConsoleSender:
     def test_console_sender_returns_succeeded(self):
@@ -207,14 +209,17 @@ class TestEmailSender:
     def test_email_sender_placeholder(self):
         """EmailSender 返回 succeeded（占位实现，记录日志）。"""
         sender = EmailSender()
-        result = asyncio.run(sender.send(
-            _message(),
-            _protocol_endpoint("email", config={"to": "test@example.com"}),
-        ))
+        result = asyncio.run(
+            sender.send(
+                _message(),
+                _protocol_endpoint("email", config={"to": "test@example.com"}),
+            )
+        )
         assert result.status == "succeeded"
 
 
 # ── SenderRegistry 测试 ─────────────────────────────────────────────────
+
 
 class TestSenderRegistry:
     def test_build_default_registry_returns_all(self):
@@ -245,6 +250,7 @@ class TestSenderRegistry:
 
 
 # ── Dispatcher 集成测试 ─────────────────────────────────────────────────
+
 
 class TestNotificationDispatcher:
     def test_dispatcher_matches_event_type(self):

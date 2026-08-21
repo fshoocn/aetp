@@ -59,8 +59,12 @@ class OutboxWorker:
             return
         self._running = True
         self._task = asyncio.create_task(self._loop())
-        logger.info("Outbox worker 启动（poll=%.1fs, batch=%d, max_attempts=%d）",
-                    self._poll_interval_s, self._batch_size, self._max_attempts)
+        logger.info(
+            "Outbox worker 启动（poll=%.1fs, batch=%d, max_attempts=%d）",
+            self._poll_interval_s,
+            self._batch_size,
+            self._max_attempts,
+        )
 
     async def stop(self) -> None:
         """停止轮询循环（幂等）。"""
@@ -114,22 +118,25 @@ class OutboxWorker:
         message.sent_at = utcnow()
         with self._uow_factory() as uow:
             uow.outbox_messages.update(message)
-        logger.info("Outbox 发送成功: outbox_id=%s topic=%s qos=%d",
-                    message.outbox_id, message.topic, message.qos)
+        logger.info("Outbox 发送成功: outbox_id=%s topic=%s qos=%d", message.outbox_id, message.topic, message.qos)
 
     def _mark_failed(self, message: OutboxMessage, exc: Exception) -> None:
         now = utcnow()
         if message.attempts >= self._max_attempts:
             message.status = OutboxStatus.EXHAUSTED
             message.next_attempt_at = None
-            logger.error("Outbox 重试耗尽: outbox_id=%s topic=%s（%s）",
-                         message.outbox_id, message.topic, exc)
+            logger.error("Outbox 重试耗尽: outbox_id=%s topic=%s（%s）", message.outbox_id, message.topic, exc)
         else:
             message.status = OutboxStatus.RETRYING
             self._backoff.reset()
             delay = self._backoff.next()
             message.next_attempt_at = now + timedelta(seconds=delay)
-            logger.warning("Outbox 发送失败，%.1fs 后重试: outbox_id=%s topic=%s（%s）",
-                           delay, message.outbox_id, message.topic, exc)
+            logger.warning(
+                "Outbox 发送失败，%.1fs 后重试: outbox_id=%s topic=%s（%s）",
+                delay,
+                message.outbox_id,
+                message.topic,
+                exc,
+            )
         with self._uow_factory() as uow:
             uow.outbox_messages.update(message)

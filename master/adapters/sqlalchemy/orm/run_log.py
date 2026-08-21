@@ -42,13 +42,9 @@ class RunLog(Base, TimestampMixin):
     # sym:id 代理主键（自增 int）
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # sym:run_pk 所属 Run 代理主键（Run 删除时级联清理）
-    run_pk: Mapped[int] = mapped_column(
-        ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    run_pk: Mapped[int] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     # sym:shard_pk 所属 Shard 代理主键（Run 级日志可空）
-    shard_pk: Mapped[int | None] = mapped_column(
-        ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True
-    )
+    shard_pk: Mapped[int | None] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True)
     # sym:node_id 产生日志的 Agent 节点业务 ID（无 FK 保留业务键）
     node_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     # sym:sequence Run 内单调递增序号；(run_pk, sequence) 唯一
@@ -60,9 +56,7 @@ class RunLog(Base, TimestampMixin):
     # sym:detail 结构化详情 JSON
     detail: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # sym:occurred_at 产生时间（UTC）
-    occurred_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=datetime.utcnow
-    )
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=datetime.utcnow)
 
     # sym:run 所属 Run ORM 关系
     run: Mapped[TaskRun] = relationship()

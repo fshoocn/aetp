@@ -87,9 +87,7 @@ class ScriptService:
         with self._uow_factory() as uow:
             existing = uow.test_scripts.get_by_hash(sha256)
             if existing is not None:
-                logger.info(
-                    "脚本同 hash 复用: sha256=%s… existing=%s", sha256[:12], existing.script_id
-                )
+                logger.info("脚本同 hash 复用: sha256=%s… existing=%s", sha256[:12], existing.script_id)
                 return existing
 
         # 3. 解包到临时目录（zip 解压；.py 直接放置），供 verify/parse 使用
@@ -122,9 +120,7 @@ class ScriptService:
                     size=len(file_data),
                     sha256=sha256,
                     config=config,
-                    hardware_requirements=package.master.hardware_requirements(
-                        config, cases
-                    ),
+                    hardware_requirements=package.master.hardware_requirements(config, cases),
                     parse_status=ScriptParseStatus.PARSED,
                     parse_location=ScriptParseLocation.MASTER,
                     result_parse_location=ScriptParseLocation.MASTER,
@@ -150,9 +146,7 @@ class ScriptService:
                 ]
             )
             # 文件写入存储（DB 只存引用，§6.2）；写入失败回滚事务
-            script.file_ref = self._storage.store_script(
-                script_id, version, filename, file_data
-            )
+            script.file_ref = self._storage.store_script(script_id, version, filename, file_data)
             uow.test_scripts.update(script)
 
         logger.info(
@@ -164,9 +158,7 @@ class ScriptService:
         )
         return script
 
-    async def reparse_script(
-        self, script_id: str, *, project_id: str
-    ) -> TestScript:
+    async def reparse_script(self, script_id: str, *, project_id: str) -> TestScript:
         """对已有脚本重新执行验证 + 解析（§18.3 步骤 6，插件升级后显式触发）。"""
         with self._uow_factory() as uow:
             script = uow.test_scripts.get_by_script_id(script_id)
@@ -196,9 +188,7 @@ class ScriptService:
             script = uow.test_scripts.get_by_script_id(script_id)
             if script is None:
                 raise ScriptNotFoundError(f"脚本不存在: {script_id}")
-            old_cases = uow.script_cases.list_by_script(
-                script_id, include_deleted=True
-            )
+            old_cases = uow.script_cases.list_by_script(script_id, include_deleted=True)
             old_by_key = {c.stable_key: c for c in old_cases}
             new_keys = {c.stable_key for c in cases}
             for case in old_cases:
@@ -258,9 +248,7 @@ class ScriptService:
                 raise ScriptNotFoundError(f"脚本不存在或不属于当前项目: {script_id}")
             references = uow.test_tasks.count_by_script(script_id)
             if references:
-                raise ScriptDeleteError(
-                    f"脚本仍被 {references} 个启用中的任务定义引用，请先停用或删除任务定义"
-                )
+                raise ScriptDeleteError(f"脚本仍被 {references} 个启用中的任务定义引用，请先停用或删除任务定义")
             # 级联清理已停用任务：无 Run 的硬删除，有 Run 的置空 script_pk
             cleaned = uow.test_tasks.cleanup_disabled_for_script(script_id)
             if cleaned["deleted"] or cleaned["nullified"]:
@@ -286,14 +274,11 @@ class ScriptService:
         extensions = [str(e).lower() for e in spec.get("extensions", [])]
         if extensions and suffix not in extensions:
             raise ScriptUploadError(
-                f"不支持的文件类型 {suffix or '(无扩展名)'}；"
-                f"该任务类型仅接受: {', '.join(extensions)}"
+                f"不支持的文件类型 {suffix or '(无扩展名)'}；该任务类型仅接受: {', '.join(extensions)}"
             )
         max_mb = int(spec.get("max_size_mb", 100))
         if len(data) > max_mb * 1024 * 1024:
-            raise ScriptUploadError(
-                f"文件超过大小上限 {max_mb}MB"
-            )
+            raise ScriptUploadError(f"文件超过大小上限 {max_mb}MB")
 
     @staticmethod
     def _unpack(data: bytes, filename: str, target: Path) -> None:
@@ -331,9 +316,6 @@ class ScriptService:
         """计算同名脚本的下一个版本号（(project, name, version) 唯一）。"""
         version = 1
         while True:
-            if (
-                uow.test_scripts.find_by_name_version(project_id, name, version)
-                is None
-            ):
+            if uow.test_scripts.find_by_name_version(project_id, name, version) is None:
                 return version
             version += 1

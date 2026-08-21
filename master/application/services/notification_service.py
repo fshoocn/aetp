@@ -26,15 +26,17 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     """通知端点、事件订阅、投递记录管理。"""
 
-    VALID_CHANNEL_TYPES = frozenset({
-        "email",
-        "generic_webhook",
-        "feishu",
-        "dingtalk",
-        "slack",
-        "teams",
-        "console_test",
-    })
+    VALID_CHANNEL_TYPES = frozenset(
+        {
+            "email",
+            "generic_webhook",
+            "feishu",
+            "dingtalk",
+            "slack",
+            "teams",
+            "console_test",
+        }
+    )
     MAX_RETRY_ATTEMPTS = 10
 
     def __init__(
@@ -59,10 +61,7 @@ class NotificationService:
         created_by: int,
     ) -> NotificationEndpoint:
         if channel_type not in self.VALID_CHANNEL_TYPES:
-            raise ValueError(
-                f"不支持的通道类型: {channel_type}; "
-                f"可选: {', '.join(sorted(self.VALID_CHANNEL_TYPES))}"
-            )
+            raise ValueError(f"不支持的通道类型: {channel_type}; 可选: {', '.join(sorted(self.VALID_CHANNEL_TYPES))}")
         if not name.strip():
             raise ValueError("端点名称不能为空")
 
@@ -83,22 +82,14 @@ class NotificationService:
                 created_by=created_by,
             )
             endpoint = uow.notification_endpoints.add(endpoint)
-        logger.info(
-            "通知端点已创建: endpoint_id=%s channel=%s", endpoint.endpoint_id, channel_type
-        )
+        logger.info("通知端点已创建: endpoint_id=%s channel=%s", endpoint.endpoint_id, channel_type)
         return endpoint
 
-    def list_endpoints(
-        self, project_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[NotificationEndpoint]:
+    def list_endpoints(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[NotificationEndpoint]:
         with self._uow_factory() as uow:
-            return uow.notification_endpoints.list_by_project(
-                project_id, limit=limit, offset=offset
-            )
+            return uow.notification_endpoints.list_by_project(project_id, limit=limit, offset=offset)
 
-    def get_endpoint(
-        self, endpoint_id: str, project_id: str
-    ) -> NotificationEndpoint | None:
+    def get_endpoint(self, endpoint_id: str, project_id: str) -> NotificationEndpoint | None:
         with self._uow_factory() as uow:
             ep = uow.notification_endpoints.get_by_endpoint_id(endpoint_id)
             if ep is None or ep.project_id != project_id:
@@ -173,17 +164,15 @@ class NotificationService:
             sub = uow.event_subscriptions.add(sub)
         logger.info(
             "事件订阅已创建: subscription_id=%s endpoint=%s events=%s",
-            sub.subscription_id, endpoint_id, event_types,
+            sub.subscription_id,
+            endpoint_id,
+            event_types,
         )
         return sub
 
-    def list_subscriptions(
-        self, project_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[EventSubscription]:
+    def list_subscriptions(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[EventSubscription]:
         with self._uow_factory() as uow:
-            return uow.event_subscriptions.list_by_project(
-                project_id, limit=limit, offset=offset
-            )
+            return uow.event_subscriptions.list_by_project(project_id, limit=limit, offset=offset)
 
     def update_subscription(
         self,
@@ -209,9 +198,7 @@ class NotificationService:
                 sub.enabled = enabled
             return uow.event_subscriptions.update(sub)
 
-    def delete_subscription(
-        self, subscription_id: str, project_id: str
-    ) -> None:
+    def delete_subscription(self, subscription_id: str, project_id: str) -> None:
         with self._uow_factory() as uow:
             sub = uow.event_subscriptions.get_by_subscription_id(subscription_id)
             if sub is None or sub.project_id != project_id:
@@ -230,22 +217,16 @@ class NotificationService:
         offset: int = 0,
     ) -> list[EventDelivery]:
         with self._uow_factory() as uow:
-            return uow.event_deliveries.list_by_project(
-                project_id, status=status, limit=limit, offset=offset
-            )
+            return uow.event_deliveries.list_by_project(project_id, status=status, limit=limit, offset=offset)
 
-    def get_delivery(
-        self, delivery_id: str, project_id: str
-    ) -> EventDelivery | None:
+    def get_delivery(self, delivery_id: str, project_id: str) -> EventDelivery | None:
         with self._uow_factory() as uow:
             d = uow.event_deliveries.get_by_delivery_id(delivery_id)
             if d is None or d.project_id != project_id:
                 return None
             return d
 
-    def retry_delivery(
-        self, delivery_id: str, project_id: str
-    ) -> EventDelivery:
+    def retry_delivery(self, delivery_id: str, project_id: str) -> EventDelivery:
         with self._uow_factory() as uow:
             d = uow.event_deliveries.get_by_delivery_id(delivery_id)
             if d is None or d.project_id != project_id:

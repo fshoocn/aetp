@@ -36,9 +36,7 @@ class MessageHandler(Protocol):
 class ConnectionHandler(Protocol):
     """连接状态变化处理器（connected, session_id）。"""
 
-    async def __call__(
-        self, connected: bool, session_id: str | None = None
-    ) -> None: ...
+    async def __call__(self, connected: bool, session_id: str | None = None) -> None: ...
 
 
 class Transport(Protocol):

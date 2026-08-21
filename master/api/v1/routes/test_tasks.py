@@ -35,9 +35,7 @@ router = APIRouter(
 def _task_out(task, service: TestTaskService) -> TestTaskOut:
     """把保存时的节点能力软校验结果带回 Web。"""
     output = TestTaskOut.model_validate(task)
-    validation = service.validate_node_selection(
-        task.project_id, task.node_ids, task.script_id
-    )
+    validation = service.validate_node_selection(task.project_id, task.node_ids, task.script_id)
     return output.model_copy(update={"validation_warning": validation.warning})
 
 

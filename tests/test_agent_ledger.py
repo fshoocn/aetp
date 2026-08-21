@@ -17,9 +17,7 @@ def _ledger(tmp_path, *, max_spool_bytes: int = 104857600) -> SQLiteLedger:
 
 
 def _future_utc(seconds: int = 60) -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None) + timedelta(
-        seconds=seconds
-    )
+    return datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=seconds)
 
 
 def test_claim_run_is_atomic(tmp_path) -> None:
@@ -91,9 +89,7 @@ def test_outbox_roundtrip(tmp_path) -> None:
 
 def test_task_log_spool_is_idempotent(tmp_path) -> None:
     ledger = _ledger(tmp_path)
-    entry = TaskLogSpoolEntry(
-        run_id="r1", sequence=1, level="info", message="hello"
-    )
+    entry = TaskLogSpoolEntry(run_id="r1", sequence=1, level="info", message="hello")
     ledger.append_task_log(entry)
     # 同 (run_id, sequence) 重复追加：幂等忽略
     ledger.append_task_log(entry)
@@ -110,9 +106,7 @@ def test_task_log_spool_is_idempotent(tmp_path) -> None:
 
 def test_script_cache_by_hash(tmp_path) -> None:
     ledger = _ledger(tmp_path)
-    entry = ScriptCacheEntry(
-        script_id="S-1", version=1, sha256="a" * 64, path="/cache/S-1.zip"
-    )
+    entry = ScriptCacheEntry(script_id="S-1", version=1, sha256="a" * 64, path="/cache/S-1.zip")
     assert ledger.cache_script(entry) is True
     # 同 (script_id, version, sha256) 重复缓存：幂等返回 False
     assert ledger.cache_script(entry) is False
@@ -126,25 +120,13 @@ def test_script_cache_by_hash(tmp_path) -> None:
 
 def test_task_log_spool_evicts_low_level_but_keeps_error(tmp_path) -> None:
     ledger = _ledger(tmp_path, max_spool_bytes=20)
-    ledger.append_task_log(
-        TaskLogSpoolEntry(
-            run_id="r1", sequence=1, level="info", message="old-info"
-        )
-    )
-    ledger.append_task_log(
-        TaskLogSpoolEntry(
-            run_id="r1", sequence=2, level="error", message="important-error"
-        )
-    )
+    ledger.append_task_log(TaskLogSpoolEntry(run_id="r1", sequence=1, level="info", message="old-info"))
+    ledger.append_task_log(TaskLogSpoolEntry(run_id="r1", sequence=2, level="error", message="important-error"))
     pending = ledger.list_pending_task_logs(10)
     assert [(entry.sequence, entry.level) for entry in pending] == [(2, "error")]
 
     # 即使超过上限，error 也必须保留。
-    ledger.append_task_log(
-        TaskLogSpoolEntry(
-            run_id="r1", sequence=3, level="error", message="second-error"
-        )
-    )
+    ledger.append_task_log(TaskLogSpoolEntry(run_id="r1", sequence=3, level="error", message="second-error"))
     assert [entry.sequence for entry in ledger.list_pending_task_logs(10)] == [
         2,
         3,

@@ -34,8 +34,7 @@ class RunResult(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("run_pk", name="uq_results_run"),
         CheckConstraint(
-            "status IN ('created','dispatched','acked','running','succeeded',"
-            "'failed','cancelled','timed_out','lost')",
+            "status IN ('created','dispatched','acked','running','succeeded','failed','cancelled','timed_out','lost')",
             name="ck_results_status",
         ),
     )
@@ -45,13 +44,9 @@ class RunResult(Base, TimestampMixin):
     # sym:result_id 汇总投影业务标识（ULID），全局唯一
     result_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     # sym:run_pk 对应 Run 代理主键（唯一，一 Run 一行投影）
-    run_pk: Mapped[int] = mapped_column(
-        ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    run_pk: Mapped[int] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     # sym:project_pk 所属项目代理主键
-    project_pk: Mapped[int] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
+    project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
     # sym:task_pk 任务定义代理主键（任务删除后置空，Run 级汇总仍可展示）
     task_pk: Mapped[int | None] = mapped_column(
         ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=True, index=True
@@ -61,9 +56,7 @@ class RunResult(Base, TimestampMixin):
     # sym:passed 是否全部通过（供列表快速展示）
     passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # sym:status Run 总体状态
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=RunStatus.CREATED.value
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=RunStatus.CREATED.value)
     # sym:metrics 汇总指标 JSON（总耗时、通过/失败数等）
     metrics: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # sym:data 汇总数据 JSON

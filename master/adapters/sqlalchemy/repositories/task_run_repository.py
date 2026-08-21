@@ -47,9 +47,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         ).scalar_one_or_none()
         if project_pk is None:
             raise ValueError(f"项目不存在: {run.project_id}")
-        task_pk = self._s.execute(
-            select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)
-        ).scalar_one_or_none()
+        task_pk = self._s.execute(select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)).scalar_one_or_none()
         if task_pk is None:
             raise ValueError(f"任务定义不存在: {run.task_id}")
         triggered_by_user_pk = None
@@ -81,9 +79,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         self._s.refresh(orm)
         return _to_domain(orm)
 
-    def get_by_run_id(
-        self, run_id: str, project_id: str | None = None
-    ) -> TaskRun | None:
+    def get_by_run_id(self, run_id: str, project_id: str | None = None) -> TaskRun | None:
         stmt = (
             select(TaskRunORM)
             .options(
@@ -95,9 +91,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         if project_id is not None:
             stmt = stmt.where(
                 TaskRunORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         orm = self._s.execute(stmt).scalars().one_or_none()
         return _to_domain(orm) if orm is not None else None
@@ -125,16 +119,11 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         if project_id is not None:
             stmt = stmt.where(
                 TaskRunORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         if task_id is not None:
             stmt = stmt.where(
-                TaskRunORM.task_pk
-                == select(TestTaskORM.id)
-                .where(TestTaskORM.task_id == task_id)
-                .scalar_subquery()
+                TaskRunORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery()
             )
         if status is not None:
             stmt = stmt.where(TaskRunORM.status == status)
@@ -166,12 +155,14 @@ class TaskRunRepositoryImpl(TaskRunRepository):
                 joinedload(TaskRunORM.task),
             )
             .where(
-                TaskRunORM.status.in_([
-                    RunStatus.CREATED.value,
-                    RunStatus.DISPATCHED.value,
-                    RunStatus.ACKED.value,
-                    RunStatus.RUNNING.value,
-                ])
+                TaskRunORM.status.in_(
+                    [
+                        RunStatus.CREATED.value,
+                        RunStatus.DISPATCHED.value,
+                        RunStatus.ACKED.value,
+                        RunStatus.RUNNING.value,
+                    ]
+                )
             )
             .order_by(TaskRunORM.id)
             .limit(limit)
@@ -188,14 +179,10 @@ class TaskRunRepositoryImpl(TaskRunRepository):
 
         from sqlalchemy import update as sa_update
         from sqlalchemy.engine import Result
+
         result: Result[Any] = self._s.execute(
             sa_update(TaskRunORM)
-            .where(
-                TaskRunORM.task_pk
-                == select(TestTaskORM.id)
-                .where(TestTaskORM.task_id == task_id)
-                .scalar_subquery()
-            )
+            .where(TaskRunORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery())
             .values(task_pk=None)
         )
         count = int(getattr(result, "rowcount", 0) or 0)

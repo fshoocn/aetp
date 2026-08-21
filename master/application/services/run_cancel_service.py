@@ -27,9 +27,7 @@ from master.domain.time import utcnow
 
 logger = logging.getLogger(__name__)
 
-_CANCELABLE_RUN_STATUSES = frozenset(
-    {RunStatus.DISPATCHED, RunStatus.ACKED, RunStatus.RUNNING}
-)
+_CANCELABLE_RUN_STATUSES = frozenset({RunStatus.DISPATCHED, RunStatus.ACKED, RunStatus.RUNNING})
 _ACTIVE_SHARD_STATUSES = frozenset(
     {
         ShardStatus.PENDING,

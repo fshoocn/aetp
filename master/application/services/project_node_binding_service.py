@@ -132,9 +132,7 @@ class ProjectNodeBindingService:
             raise ProjectNotFoundError("项目不存在")
 
     @staticmethod
-    def _view_for(
-        uow: UnitOfWork, project_id: str, node_id: str
-    ) -> ProjectNodeBindingView:
+    def _view_for(uow: UnitOfWork, project_id: str, node_id: str) -> ProjectNodeBindingView:
         for view in uow.bindings.list_with_nodes(project_id):
             if view.node_id == node_id:
                 return view

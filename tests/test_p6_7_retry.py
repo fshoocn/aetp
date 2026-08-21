@@ -46,7 +46,7 @@ def test_failed_case_keys_latest_attempt_wins() -> None:
         _case("c0", 1, CaseStatus.FAILED),
         _case("c0", 2, CaseStatus.PASSED),  # 最新成功 → 不重跑
         _case("c1", 1, CaseStatus.FAILED),  # 最新失败 → 重跑
-        _case("c2", 1, CaseStatus.ERROR),   # 最新 error → 重跑
+        _case("c2", 1, CaseStatus.ERROR),  # 最新 error → 重跑
         _case("c3", 1, CaseStatus.SKIPPED),  # skipped → 不重跑
     ]
     assert RunRetryService._failed_case_keys(results) == {"c1", "c2"}
@@ -81,9 +81,7 @@ def _seed_run_with_result(container) -> str:
     _register_plugin(container)
     user_id, task_id = _seed(container)
     run_id = asyncio.run(
-        container.run_trigger_service().trigger(
-            task_id, project_id="p1", triggered_by_user_id=user_id
-        )
+        container.run_trigger_service().trigger(task_id, project_id="p1", triggered_by_user_id=user_id)
     ).run_id
 
     with _uow(container) as uow:
@@ -91,12 +89,18 @@ def _seed_run_with_result(container) -> str:
         uow.run_case_results.add_many(
             [
                 RunCaseResult(
-                    run_id=run_id, shard_id=shard.shard_id,
-                    case_key="c0", attempt_no=1, status=CaseStatus.FAILED,
+                    run_id=run_id,
+                    shard_id=shard.shard_id,
+                    case_key="c0",
+                    attempt_no=1,
+                    status=CaseStatus.FAILED,
                 ),
                 RunCaseResult(
-                    run_id=run_id, shard_id=shard.shard_id,
-                    case_key="c1", attempt_no=1, status=CaseStatus.PASSED,
+                    run_id=run_id,
+                    shard_id=shard.shard_id,
+                    case_key="c1",
+                    attempt_no=1,
+                    status=CaseStatus.PASSED,
                 ),
             ]
         )
@@ -107,11 +111,7 @@ def test_retry_creates_new_run_with_retry_context(client) -> None:
     container = client.app.state.container
     run_id = _seed_run_with_result(container)
 
-    result = asyncio.run(
-        container.run_retry_service().retry(
-            run_id, project_id="p1", triggered_by_user_id=None
-        )
-    )
+    result = asyncio.run(container.run_retry_service().retry(run_id, project_id="p1", triggered_by_user_id=None))
 
     assert result.new_run_id != run_id
     assert result.original_run_id == run_id
@@ -131,11 +131,7 @@ def test_retry_failed_only_failed_cases(client) -> None:
     container = client.app.state.container
     run_id = _seed_run_with_result(container)
 
-    result = asyncio.run(
-        container.run_retry_service().retry_failed(
-            run_id, project_id="p1", triggered_by_user_id=None
-        )
-    )
+    result = asyncio.run(container.run_retry_service().retry_failed(run_id, project_id="p1", triggered_by_user_id=None))
 
     # c1 成功不重跑，c0 失败重跑
     assert result.retried_case_keys == ("c0",)
@@ -149,11 +145,7 @@ def test_retry_failed_only_failed_cases(client) -> None:
 def test_retry_unknown_run_raises(client) -> None:
     container = client.app.state.container
     with pytest.raises(RunNotFoundError):
-        asyncio.run(
-            container.run_retry_service().retry(
-                "missing", project_id="p1", triggered_by_user_id=None
-            )
-        )
+        asyncio.run(container.run_retry_service().retry("missing", project_id="p1", triggered_by_user_id=None))
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +158,7 @@ def test_http_retry_endpoint(client, auth_header) -> None:
     run_id = _seed_run_with_result(container)
     _add_tester_member(container)
 
-    resp = client.post(
-        f"/api/v1/projects/p1/runs/{run_id}/retry", headers=auth_header
-    )
+    resp = client.post(f"/api/v1/projects/p1/runs/{run_id}/retry", headers=auth_header)
     assert resp.status_code == 201, resp.text
     data = resp.json()
     assert data["trigger_type"] == "retry"
@@ -180,9 +170,7 @@ def test_http_retry_failed_endpoint(client, auth_header) -> None:
     run_id = _seed_run_with_result(container)
     _add_tester_member(container)
 
-    resp = client.post(
-        f"/api/v1/projects/p1/runs/{run_id}/retry-failed", headers=auth_header
-    )
+    resp = client.post(f"/api/v1/projects/p1/runs/{run_id}/retry-failed", headers=auth_header)
     assert resp.status_code == 201, resp.text
     data = resp.json()
     assert data["trigger_type"] == "retry"
@@ -196,12 +184,8 @@ def _add_tester_member(container) -> None:
     from sqlalchemy import text as sa_text
 
     with container.database().session_scope() as s:
-        tester_id = s.execute(
-            sa_text("SELECT id FROM users WHERE username='tester'")
-        ).scalar_one()
-        project_pk = s.execute(
-            sa_text("SELECT id FROM projects WHERE project_id='p1'")
-        ).scalar_one()
+        tester_id = s.execute(sa_text("SELECT id FROM users WHERE username='tester'")).scalar_one()
+        project_pk = s.execute(sa_text("SELECT id FROM projects WHERE project_id='p1'")).scalar_one()
         s.execute(
             sa_text(
                 "INSERT OR IGNORE INTO project_members "

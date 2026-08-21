@@ -98,9 +98,7 @@ class Ledger(Protocol):
         """返回未终结的 Run（claimed/running，用于心跳负载与恢复现场）。"""
         ...
 
-    def record_inbox(
-        self, origin_id: str, message_id: str, message_type: str
-    ) -> bool:
+    def record_inbox(self, origin_id: str, message_id: str, message_type: str) -> bool:
         """入站去重：已存在返回 False，首次记录返回 True。"""
         ...
 
@@ -151,8 +149,6 @@ class Ledger(Protocol):
         """写入脚本缓存引用；重复返回 False。"""
         ...
 
-    def get_cached_script(
-        self, script_id: str, version: int, sha256: str
-    ) -> ScriptCacheEntry | None:
+    def get_cached_script(self, script_id: str, version: int, sha256: str) -> ScriptCacheEntry | None:
         """按 (script_id, version, sha256) 查缓存。"""
         ...

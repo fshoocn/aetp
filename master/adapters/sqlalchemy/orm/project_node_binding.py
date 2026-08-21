@@ -10,11 +10,7 @@ from .base import Base, TimestampMixin
 
 class ProjectNodeBinding(Base, TimestampMixin):
     __tablename__ = "project_node_bindings"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_pk", "node_pk", name="uq_project_node_bindings_project_node"
-        ),
-    )
+    __table_args__ = (UniqueConstraint("project_pk", "node_pk", name="uq_project_node_bindings_project_node"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_pk: Mapped[int] = mapped_column(
@@ -28,6 +24,4 @@ class ProjectNodeBinding(Base, TimestampMixin):
         index=True,
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    assigned_by: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
+    assigned_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)

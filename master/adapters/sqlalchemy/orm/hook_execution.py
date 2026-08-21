@@ -12,9 +12,7 @@ from .base import Base, TimestampMixin, UTCDateTime
 
 class HookExecution(Base, TimestampMixin):
     __tablename__ = "hook_executions"
-    __table_args__ = (
-        Index("ix_hook_executions_event_hook", "event_id", "hook_name"),
-    )
+    __table_args__ = (Index("ix_hook_executions_event_hook", "event_id", "hook_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     execution_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)

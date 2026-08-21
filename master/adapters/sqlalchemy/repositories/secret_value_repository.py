@@ -25,15 +25,19 @@ class SecretValueRepositoryImpl(SecretValueRepository):
         self._s = session
 
     def get(self, secret_ref: str) -> SecretValueRecord | None:
-        orm = self._s.execute(
-            select(SecretValueORM).where(SecretValueORM.secret_ref == secret_ref)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(select(SecretValueORM).where(SecretValueORM.secret_ref == secret_ref))
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def upsert(self, secret_ref: str, cipher_text: str) -> SecretValueRecord:
-        orm = self._s.execute(
-            select(SecretValueORM).where(SecretValueORM.secret_ref == secret_ref)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(select(SecretValueORM).where(SecretValueORM.secret_ref == secret_ref))
+            .scalars()
+            .one_or_none()
+        )
         if orm is None:
             orm = SecretValueORM(secret_ref=secret_ref, cipher_text=cipher_text)
             self._s.add(orm)
@@ -44,9 +48,11 @@ class SecretValueRepositoryImpl(SecretValueRepository):
         return _to_domain(orm)
 
     def delete(self, secret_ref: str) -> None:
-        orm = self._s.execute(
-            select(SecretValueORM).where(SecretValueORM.secret_ref == secret_ref)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(select(SecretValueORM).where(SecretValueORM.secret_ref == secret_ref))
+            .scalars()
+            .one_or_none()
+        )
         if orm is not None:
             self._s.delete(orm)
             self._s.flush()

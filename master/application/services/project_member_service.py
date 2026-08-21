@@ -74,20 +74,12 @@ class ProjectMemberService:
         """添加项目成员并校验角色授予权限。"""
         with self._uow_factory() as uow:
             self._require_project(uow, project_id)
-            self._require_role_grant(
-                actor_role, project_role, is_platform_admin=is_platform_admin
-            )
+            self._require_role_grant(actor_role, project_role, is_platform_admin=is_platform_admin)
             target_user = uow.users.get_by_id(user_id)
-            if (
-                target_user is None
-                or target_user.account_status != AccountStatus.ACTIVE
-            ):
+            if target_user is None or target_user.account_status != AccountStatus.ACTIVE:
                 raise InactiveUserError("目标用户不存在或账户未激活")
 
-            if (
-                uow.members.get_by_project_and_user(project_id, user_id)
-                is not None
-            ):
+            if uow.members.get_by_project_and_user(project_id, user_id) is not None:
                 raise MemberAlreadyExistsError("用户已经是项目成员")
 
             now = utcnow()
@@ -192,9 +184,7 @@ class ProjectMemberService:
             if member is None:
                 raise MemberNotFoundError("项目成员不存在")
             current_role = member.project_role
-            self._require_member_management(
-                actor_role, current_role, is_platform_admin=is_platform_admin
-            )
+            self._require_member_management(actor_role, current_role, is_platform_admin=is_platform_admin)
             if current_role == ProjectRole.OWNER:
                 self._require_not_last_owner(uow, project_id)
             uow.members.remove(member)
@@ -245,20 +235,12 @@ class ProjectMemberService:
         actor_rank = _ROLE_RANK[actor_role]
         # 不能授予更高角色
         if _ROLE_RANK[target_role] > actor_rank:
-            raise InvalidRoleGrantError(
-                f"无权授予 {target_role.value} 角色（最高可授予 {actor_role.value}）"
-            )
+            raise InvalidRoleGrantError(f"无权授予 {target_role.value} 角色（最高可授予 {actor_role.value}）")
         # 不能授予同级角色（owner 除外，owner 可以授予另一个 owner）
         if _ROLE_RANK[target_role] == actor_rank and actor_role != ProjectRole.OWNER:
-            raise InvalidRoleGrantError(
-                f"无权授予 {target_role.value} 角色（不能授予同级角色）"
-            )
+            raise InvalidRoleGrantError(f"无权授予 {target_role.value} 角色（不能授予同级角色）")
         # 不能操作同级或更高级别的成员（owner 除外）
-        if (
-            current_role is not None
-            and _ROLE_RANK[current_role] >= actor_rank
-            and actor_role != ProjectRole.OWNER
-        ):
+        if current_role is not None and _ROLE_RANK[current_role] >= actor_rank and actor_role != ProjectRole.OWNER:
             raise InvalidRoleGrantError("不能操作同级或更高级别的成员")
 
     @staticmethod
@@ -276,9 +258,7 @@ class ProjectMemberService:
             raise InvalidRoleGrantError("不能移除同级或更高级别的成员")
 
     @staticmethod
-    def _member_with_user(
-        uow: UnitOfWork, project_id: str, user_id: int
-    ) -> ProjectMemberWithUser:
+    def _member_with_user(uow: UnitOfWork, project_id: str, user_id: int) -> ProjectMemberWithUser:
         """添加/更新后返回带用户信息的成员视图。"""
         for member in uow.members.list_with_users(project_id):
             if member.user_id == user_id:

@@ -83,17 +83,13 @@ class TestTaskService:
             # 引用脚本必须存在且属于当前项目（IDOR 防护）
             script = uow.test_scripts.get_by_script_id(script_id)
             if script is None or script.project_id != project_id:
-                raise ScriptNotFoundError(
-                    f"脚本不存在或不属于当前项目: {script_id}"
-                )
+                raise ScriptNotFoundError(f"脚本不存在或不属于当前项目: {script_id}")
 
             # 第一层硬校验：node_ids ⊆ 项目绑定节点（D-23）
             bound = {b.node_id for b in uow.bindings.list_with_nodes(project_id)}
             invalid = [n for n in node_ids if n not in bound]
             if invalid:
-                raise ProjectAccessDeniedError(
-                    f"节点不在项目绑定范围（D-23）: {', '.join(sorted(invalid))}"
-                )
+                raise ProjectAccessDeniedError(f"节点不在项目绑定范围（D-23）: {', '.join(sorted(invalid))}")
 
             # 硬件需求软校验
             requirements = script.hardware_requirements
@@ -101,11 +97,7 @@ class TestTaskService:
             for node_id in node_ids:
                 node = uow.nodes.get_by_id(node_id)
                 if node is None:
-                    matches.append(
-                        NodeCandidateMatch(
-                            node_id=node_id, matched=False, failures=("节点不存在",)
-                        )
-                    )
+                    matches.append(NodeCandidateMatch(node_id=node_id, matched=False, failures=("节点不存在",)))
                     continue
                 result = self._capability.evaluate(node, requirements)
                 matches.append(
@@ -119,10 +111,7 @@ class TestTaskService:
         matched_count = sum(1 for m in matches if m.matched)
         warning: str | None = None
         if node_ids and matched_count == 0:
-            warning = (
-                "所选节点均不满足脚本硬件要求（可保存；触发 Run 时将硬校验 "
-                "NODE_CAPABILITY_MISMATCH）"
-            )
+            warning = "所选节点均不满足脚本硬件要求（可保存；触发 Run 时将硬校验 NODE_CAPABILITY_MISMATCH）"
         logger.info(
             "任务定义节点筛选: project=%s nodes=%d matched=%d warning=%s",
             project_id,
@@ -160,21 +149,15 @@ class TestTaskService:
         with self._uow_factory() as uow:
             script = uow.test_scripts.get_by_script_id(script_id)
             if script is None or script.project_id != project_id:
-                raise ScriptNotFoundError(
-                    f"脚本不存在或不属于当前项目: {script_id}"
-                )
+                raise ScriptNotFoundError(f"脚本不存在或不属于当前项目: {script_id}")
             if script.parse_status != ScriptParseStatus.PARSED:
                 raise ValueError("脚本尚未解析完成，无法创建任务定义")
             if uow.test_tasks.find_by_name(project_id, name) is not None:
                 raise ValueError(f"任务定义已存在: {name}")
 
             cases = uow.script_cases.list_by_script(script_id)
-            selected = self._normalize_case_selection(
-                default_case_selection, cases
-            )
-            normalized_split = self._normalize_split_policy(
-                split_policy, cases, selected
-            )
+            selected = self._normalize_case_selection(default_case_selection, cases)
+            normalized_split = self._normalize_split_policy(split_policy, cases, selected)
             normalized_retry = self._normalize_retry_policy(retry_policy)
 
             task = uow.test_tasks.add(
@@ -222,20 +205,14 @@ class TestTaskService:
             target_script_id = script_id or task.script_id
             script = uow.test_scripts.get_by_script_id(target_script_id)
             if script is None or script.project_id != project_id:
-                raise ScriptNotFoundError(
-                    f"脚本不存在或不属于当前项目: {target_script_id}"
-                )
+                raise ScriptNotFoundError(f"脚本不存在或不属于当前项目: {target_script_id}")
             if script.parse_status != ScriptParseStatus.PARSED:
                 raise ValueError("脚本尚未解析完成，无法切换")
             cases = uow.script_cases.list_by_script(target_script_id)
             target_selection = (
-                default_case_selection
-                if default_case_selection is not None
-                else task.default_case_selection
+                default_case_selection if default_case_selection is not None else task.default_case_selection
             )
-            normalized_selection = self._normalize_case_selection(
-                target_selection, cases
-            )
+            normalized_selection = self._normalize_case_selection(target_selection, cases)
             normalized_split = self._normalize_split_policy(
                 split_policy if split_policy is not None else task.split_policy,
                 cases,
@@ -282,9 +259,7 @@ class TestTaskService:
         with self._uow_factory() as uow:
             return uow.test_tasks.get_by_task_id(task_id, project_id)
 
-    def list_tasks(
-        self, project_id: str, *, enabled: bool | None = None
-    ) -> list[TestTask]:
+    def list_tasks(self, project_id: str, *, enabled: bool | None = None) -> list[TestTask]:
         """列出项目任务定义。"""
         with self._uow_factory() as uow:
             return uow.test_tasks.list_by_project(project_id, enabled=enabled)
@@ -321,9 +296,7 @@ class TestTaskService:
         available = {case.stable_key for case in cases}
         invalid = [key for key in requested if key not in available]
         if invalid:
-            raise ValueError(
-                f"勾选的用例不存在于脚本索引: {', '.join(invalid[:5])}"
-            )
+            raise ValueError(f"勾选的用例不存在于脚本索引: {', '.join(invalid[:5])}")
         return requested
 
     @staticmethod
@@ -344,11 +317,7 @@ class TestTaskService:
             if isinstance(target, bool) or not isinstance(target, (int, float)) or target <= 0:
                 raise ValueError("by_time 的 target_duration_s 必须大于 0")
             selected_set = set(selected)
-            considered = (
-                [case for case in cases if case.stable_key in selected_set]
-                if selected_set
-                else list(cases)
-            )
+            considered = [case for case in cases if case.stable_key in selected_set] if selected_set else list(cases)
             if not any(case.avg_duration_s is not None for case in considered):
                 raise ValueError("全部用例无耗时数据，无法使用按时间分割（D-21）")
             return {"type": split_type, "target_duration_s": target}
@@ -360,11 +329,7 @@ class TestTaskService:
         max_attempts = value.get("max_attempts", 1)
         case_retry = value.get("case_retry", 0)
         failover_nodes = value.get("failover_nodes", False)
-        if (
-            isinstance(max_attempts, bool)
-            or not isinstance(max_attempts, int)
-            or not 1 <= max_attempts <= 10
-        ):
+        if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or not 1 <= max_attempts <= 10:
             raise ValueError("retry_policy.max_attempts 必须是 1 到 10 的整数")
         if isinstance(case_retry, bool) or not isinstance(case_retry, int) or not 0 <= case_retry <= 10:
             raise ValueError("retry_policy.case_retry 必须是 0 到 10 的整数")

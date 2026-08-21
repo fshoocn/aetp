@@ -46,6 +46,7 @@ deliveries_router = APIRouter(
 
 # -- 通知端点 ---------------------------------------------------------------
 
+
 @endpoints_router.get("", response_model=list[EndpointOut])
 def list_endpoints(
     project_id: str,
@@ -56,9 +57,7 @@ def list_endpoints(
     return [EndpointOut.model_validate(ep) for ep in eps]
 
 
-@endpoints_router.post(
-    "", response_model=EndpointOut, status_code=status.HTTP_201_CREATED
-)
+@endpoints_router.post("", response_model=EndpointOut, status_code=status.HTTP_201_CREATED)
 def create_endpoint(
     project_id: str,
     body: EndpointCreate,
@@ -75,9 +74,7 @@ def create_endpoint(
             created_by=access.user.persisted_id,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return EndpointOut.model_validate(ep)
 
 
@@ -99,15 +96,11 @@ def update_endpoint(
             enabled=body.enabled,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return EndpointOut.model_validate(ep)
 
 
-@endpoints_router.delete(
-    "/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@endpoints_router.delete("/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_endpoint(
     project_id: str,
     endpoint_id: str,
@@ -122,6 +115,7 @@ def delete_endpoint(
 
 # -- 事件订阅 ---------------------------------------------------------------
 
+
 @subscriptions_router.get("", response_model=list[SubscriptionOut])
 def list_subscriptions(
     project_id: str,
@@ -132,9 +126,7 @@ def list_subscriptions(
     return [SubscriptionOut.model_validate(s) for s in subs]
 
 
-@subscriptions_router.post(
-    "", response_model=SubscriptionOut, status_code=status.HTTP_201_CREATED
-)
+@subscriptions_router.post("", response_model=SubscriptionOut, status_code=status.HTTP_201_CREATED)
 def create_subscription(
     project_id: str,
     body: SubscriptionCreate,
@@ -151,9 +143,7 @@ def create_subscription(
             created_by=access.user.persisted_id,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return SubscriptionOut.model_validate(sub)
 
 
@@ -175,15 +165,11 @@ def update_subscription(
             enabled=body.enabled,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return SubscriptionOut.model_validate(sub)
 
 
-@subscriptions_router.delete(
-    "/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@subscriptions_router.delete("/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_subscription(
     project_id: str,
     subscription_id: str,
@@ -198,6 +184,7 @@ def delete_subscription(
 
 # -- 投递状态 ---------------------------------------------------------------
 
+
 @deliveries_router.get("", response_model=list[DeliveryOut])
 def list_deliveries(
     project_id: str,
@@ -207,9 +194,7 @@ def list_deliveries(
     limit: int = 100,
     offset: int = 0,
 ) -> list[DeliveryOut]:
-    deliveries = service.list_deliveries(
-        project_id, status=status_filter, limit=limit, offset=offset
-    )
+    deliveries = service.list_deliveries(project_id, status=status_filter, limit=limit, offset=offset)
     return [DeliveryOut.model_validate(d) for d in deliveries]
 
 
@@ -236,7 +221,5 @@ def retry_delivery(
     try:
         d = service.retry_delivery(delivery_id, project_id)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return DeliveryOut.model_validate(d)

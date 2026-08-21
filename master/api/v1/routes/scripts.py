@@ -46,9 +46,7 @@ def _to_script_out(script, storage_service) -> ScriptOut:
     """把脚本实体转为响应，并标记文件是否在存储中缺失。"""
     output = ScriptOut.model_validate(script)
     if script.file_ref:
-        output = output.model_copy(
-            update={"file_missing": not storage_service.script_exists(script.file_ref)}
-        )
+        output = output.model_copy(update={"file_missing": not storage_service.script_exists(script.file_ref)})
     return output
 
 
@@ -106,6 +104,7 @@ async def upload_script(
         ) from exc
     return ScriptOut.model_validate(script)
 
+
 @router.get("", response_model=list[ScriptOut])
 def list_scripts(
     project_id: str,
@@ -117,9 +116,7 @@ def list_scripts(
 ) -> list[ScriptOut]:
     """列出项目脚本版本（最新在前）。"""
     with uow_factory() as uow:
-        scripts = uow.test_scripts.list_by_project(
-            project_id, limit=limit, offset=offset
-        )
+        scripts = uow.test_scripts.list_by_project(project_id, limit=limit, offset=offset)
     return [_to_script_out(s, storage_service) for s in scripts]
 
 
@@ -255,8 +252,6 @@ def download_script(
         media_type="application/octet-stream",
         headers={
             "X-Checksum-Sha256": script.sha256,
-            "Content-Disposition": (
-                f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
-            ),
+            "Content-Disposition": (f"attachment; filename*=UTF-8''{quote(filename, safe='')}"),
         },
     )

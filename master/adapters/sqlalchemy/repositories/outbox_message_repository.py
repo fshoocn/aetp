@@ -55,35 +55,35 @@ class OutboxMessageRepositoryImpl(OutboxMessageRepository):
         return _to_domain(orm)
 
     def get_by_outbox_id(self, outbox_id: str) -> OutboxMessage | None:
-        orm = self._s.execute(
-            select(OutboxMessageORM).where(
-                OutboxMessageORM.outbox_id == outbox_id
-            )
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(select(OutboxMessageORM).where(OutboxMessageORM.outbox_id == outbox_id))
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
-    def claim_due(
-        self, *, limit: int = 100, now: datetime | None = None
-    ) -> list[OutboxMessage]:
+    def claim_due(self, *, limit: int = 100, now: datetime | None = None) -> list[OutboxMessage]:
         """取到期消息并标记 sending（事务性 claim，防止并发重复发送）。
 
         条件：status IN (pending, retrying) 且 (next_attempt_at 为空或已到期)。
         """
         now = now or utcnow()
-        orms = self._s.execute(
-            select(OutboxMessageORM)
-            .where(
-                OutboxMessageORM.status.in_(
-                    [OutboxStatus.PENDING.value, OutboxStatus.RETRYING.value]
-                ),
-                or_(
-                    OutboxMessageORM.next_attempt_at.is_(None),
-                    OutboxMessageORM.next_attempt_at <= now,
-                ),
+        orms = (
+            self._s.execute(
+                select(OutboxMessageORM)
+                .where(
+                    OutboxMessageORM.status.in_([OutboxStatus.PENDING.value, OutboxStatus.RETRYING.value]),
+                    or_(
+                        OutboxMessageORM.next_attempt_at.is_(None),
+                        OutboxMessageORM.next_attempt_at <= now,
+                    ),
+                )
+                .order_by(OutboxMessageORM.id)
+                .limit(limit)
             )
-            .order_by(OutboxMessageORM.id)
-            .limit(limit)
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for orm in orms:
             orm.status = OutboxStatus.SENDING.value
             orm.attempts = orm.attempts + 1

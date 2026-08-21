@@ -34,9 +34,7 @@ def list_projects(
     if current_user.platform_role == PlatformRole.ADMIN:
         projects = service.list_all(limit=limit, offset=offset)
     else:
-        projects = service.list_visible_to_user(
-            current_user.persisted_id, limit=limit, offset=offset
-        )
+        projects = service.list_visible_to_user(current_user.persisted_id, limit=limit, offset=offset)
     return [ProjectOut.model_validate(project) for project in projects]
 
 

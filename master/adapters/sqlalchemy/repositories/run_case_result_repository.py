@@ -45,9 +45,7 @@ class RunCaseResultRepositoryImpl(RunCaseResultRepository):
             if run_pk is None:
                 raise ValueError(f"Run 不存在: {result.run_id}")
             shard_pk = self._s.execute(
-                select(RunShardORM.id).where(
-                    RunShardORM.shard_id == result.shard_id
-                )
+                select(RunShardORM.id).where(RunShardORM.shard_id == result.shard_id)
             ).scalar_one_or_none()
             if shard_pk is None:
                 raise ValueError(f"Shard 不存在: {result.shard_id}")
@@ -63,10 +61,7 @@ class RunCaseResultRepositoryImpl(RunCaseResultRepository):
             )
             self._s.add(orm)
         self._s.flush()
-        return [
-            self.get_by_key(r.run_id, r.shard_id, r.case_key, r.attempt_no) or r
-            for r in results
-        ]
+        return [self.get_by_key(r.run_id, r.shard_id, r.case_key, r.attempt_no) or r for r in results]
 
     def list_by_run(self, run_id: str) -> list[RunCaseResult]:
         stmt = (
@@ -76,20 +71,13 @@ class RunCaseResultRepositoryImpl(RunCaseResultRepository):
                 joinedload(RunCaseResultORM.shard),
             )
             .where(
-                RunCaseResultORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery()
+                RunCaseResultORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery()
             )
-            .order_by(
-                RunCaseResultORM.case_key, RunCaseResultORM.attempt_no
-            )
+            .order_by(RunCaseResultORM.case_key, RunCaseResultORM.attempt_no)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
-    def list_by_shard(
-        self, run_id: str, shard_id: str
-    ) -> list[RunCaseResult]:
+    def list_by_shard(self, run_id: str, shard_id: str) -> list[RunCaseResult]:
         stmt = (
             select(RunCaseResultORM)
             .options(
@@ -97,41 +85,34 @@ class RunCaseResultRepositoryImpl(RunCaseResultRepository):
                 joinedload(RunCaseResultORM.shard),
             )
             .where(
-                RunCaseResultORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery(),
+                RunCaseResultORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery(),
                 RunCaseResultORM.shard_pk
-                == select(RunShardORM.id)
-                .where(RunShardORM.shard_id == shard_id)
-                .scalar_subquery(),
+                == select(RunShardORM.id).where(RunShardORM.shard_id == shard_id).scalar_subquery(),
             )
             .order_by(RunCaseResultORM.case_key, RunCaseResultORM.attempt_no)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
-    def get_by_key(
-        self, run_id: str, shard_id: str, case_key: str, attempt_no: int
-    ) -> RunCaseResult | None:
-        orm = self._s.execute(
-            select(RunCaseResultORM)
-            .options(
-                joinedload(RunCaseResultORM.run),
-                joinedload(RunCaseResultORM.shard),
+    def get_by_key(self, run_id: str, shard_id: str, case_key: str, attempt_no: int) -> RunCaseResult | None:
+        orm = (
+            self._s.execute(
+                select(RunCaseResultORM)
+                .options(
+                    joinedload(RunCaseResultORM.run),
+                    joinedload(RunCaseResultORM.shard),
+                )
+                .where(
+                    RunCaseResultORM.run_pk
+                    == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery(),
+                    RunCaseResultORM.shard_pk
+                    == select(RunShardORM.id).where(RunShardORM.shard_id == shard_id).scalar_subquery(),
+                    RunCaseResultORM.case_key == case_key,
+                    RunCaseResultORM.attempt_no == attempt_no,
+                )
             )
-            .where(
-                RunCaseResultORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery(),
-                RunCaseResultORM.shard_pk
-                == select(RunShardORM.id)
-                .where(RunShardORM.shard_id == shard_id)
-                .scalar_subquery(),
-                RunCaseResultORM.case_key == case_key,
-                RunCaseResultORM.attempt_no == attempt_no,
-            )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def update(self, result: RunCaseResult) -> RunCaseResult:

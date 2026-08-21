@@ -70,9 +70,7 @@ def _ack_envelope(
         message_id=uuid.uuid4().hex,
         message_type=MessageType.REGISTER_ACK.value,
         sent_at=_now(),
-        sender=Sender(
-            kind=SenderKind.MASTER, id="aetp-master", session_id="master-session"
-        ),
+        sender=Sender(kind=SenderKind.MASTER, id="aetp-master", session_id="master-session"),
         correlation_id=correlation_id,
         trace_id="bench-001",
         payload={
@@ -86,9 +84,7 @@ def _ack_envelope(
 def _make_service(tmp_path) -> tuple[RegistrationService, FakeTransport, SQLiteLedger]:
     transport = FakeTransport()
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
-    service = RegistrationService(
-        transport, ledger, _SETTINGS, session_id="sess-1", now=_now
-    )
+    service = RegistrationService(transport, ledger, _SETTINGS, session_id="sess-1", now=_now)
     return service, transport, ledger
 
 
@@ -96,9 +92,7 @@ def test_register_enqueue_writes_outbox(tmp_path) -> None:
     service, _transport, ledger = _make_service(tmp_path)
     outbox_id = service.enqueue_register()
 
-    due = ledger.claim_due_outbox(
-        10, datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1)
-    )
+    due = ledger.claim_due_outbox(10, datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1))
     assert len(due) == 1
     assert due[0].outbox_id == outbox_id
     assert due[0].topic == event_topic("bench-001", "register")
@@ -132,9 +126,7 @@ def test_register_ack_validates_and_marks_registered(tmp_path) -> None:
     assert service.registered is False
 
     service.enqueue_register()
-    ack = _ack_envelope(
-        "sess-1", correlation_id=service.pending_register_message_id
-    )
+    ack = _ack_envelope("sess-1", correlation_id=service.pending_register_message_id)
     topic = command_topic("bench-001", "register-ack")
     ok = service.handle_register_ack(
         MqttMessage(
@@ -169,9 +161,7 @@ def test_register_ack_rejects_wrong_node(tmp_path) -> None:
 def test_register_ack_rejects_wrong_message_type(tmp_path) -> None:
     service, _transport, _ledger = _make_service(tmp_path)
     service.enqueue_register()
-    envelope = _ack_envelope(
-        "sess-1", correlation_id=service.pending_register_message_id
-    )
+    envelope = _ack_envelope("sess-1", correlation_id=service.pending_register_message_id)
     envelope.message_type = MessageType.RUN_ASSIGN.value
     topic = command_topic("bench-001", "assign")
     ok = service.handle_register_ack(
@@ -188,9 +178,7 @@ def test_register_ack_rejects_wrong_message_type(tmp_path) -> None:
 async def test_publish_heartbeat_sends_qos0(tmp_path) -> None:
     service, transport, _ledger = _make_service(tmp_path)
     service.enqueue_register()
-    ack = _ack_envelope(
-        "sess-1", correlation_id=service.pending_register_message_id
-    )
+    ack = _ack_envelope("sess-1", correlation_id=service.pending_register_message_id)
     assert service.handle_register_ack(
         MqttMessage(
             topic=command_topic("bench-001", "register-ack"),

@@ -57,39 +57,25 @@ def _capabilities(
                     buses=(
                         VehicleBus(
                             bus_type="can",
-                            channels=tuple(
-                                HardwareChannel(name=name)
-                                for name in can_channels
-                            ),
+                            channels=tuple(HardwareChannel(name=name) for name in can_channels),
                         ),
                         VehicleBus(
                             bus_type="lin",
-                            channels=tuple(
-                                HardwareChannel(name=name)
-                                for name in lin_channels
-                            ),
+                            channels=tuple(HardwareChannel(name=name) for name in lin_channels),
                         ),
                     ),
                 ),
             )
         ),
-        language=LanguageCapability(
-            runtimes=(
-                LanguageRuntime(name="python", version=Version(python_version)),
-            )
-        ),
+        language=LanguageCapability(runtimes=(LanguageRuntime(name="python", version=Version(python_version)),)),
         system=SystemCapability(
-            operating_system=OperatingSystem(
-                name="windows", version=Version(os_version)
-            ),
+            operating_system=OperatingSystem(name="windows", version=Version(os_version)),
             memory_mb=memory_mb,
             cpu_cores=cpu_cores,
         ),
         serial=SerialCapability(
             ports=(
-                SerialPortCapability(
-                    function="relay_board", port="20", enabled=serial_enabled
-                ),
+                SerialPortCapability(function="relay_board", port="20", enabled=serial_enabled),
                 SerialPortCapability(function="psu", port="30", enabled=True),
             )
         ),
@@ -177,22 +163,16 @@ def test_vehicle_model_rejects_duplicate_vendor_bus_and_channel_names():
 
 def test_vehicle_spec_checks_vendor_bus_count_and_channel_name():
     assert VehicleSpec().evaluate(_capabilities(), _requirements()) == ()
-    assert VehicleSpec().evaluate(
-        _capabilities(can_channels=("can0",)), _requirements()
-    )
+    assert VehicleSpec().evaluate(_capabilities(can_channels=("can0",)), _requirements())
 
 
 def test_vehicle_matcher_handles_lin_and_eth_as_data_not_logic():
     requirements = HardwareRequirements(
-        vehicle=VehicleRequirement(
-            all_of=(BusRequirement(bus_type="lin", required_channels=("lin0",)),)
-        )
+        vehicle=VehicleRequirement(all_of=(BusRequirement(bus_type="lin", required_channels=("lin0",)),))
     )
     assert evaluate_capability(requirements, _capabilities()).matched is True
     eth_requirement = HardwareRequirements(
-        vehicle=VehicleRequirement(
-            all_of=(BusRequirement(bus_type="eth", minimum_channels=1),)
-        )
+        vehicle=VehicleRequirement(all_of=(BusRequirement(bus_type="eth", minimum_channels=1),))
     )
     assert evaluate_capability(eth_requirement, _capabilities()).matched is False
 
@@ -218,12 +198,8 @@ def test_language_matcher_uses_semantic_versions():
             ),
         )
     )
-    assert LanguageSpec().evaluate(
-        _capabilities(python_version="3.11"), requirement
-    ) == ()
-    assert LanguageSpec().evaluate(
-        _capabilities(python_version="3.9"), requirement
-    )
+    assert LanguageSpec().evaluate(_capabilities(python_version="3.11"), requirement) == ()
+    assert LanguageSpec().evaluate(_capabilities(python_version="3.9"), requirement)
 
 
 def test_version_17_10_is_greater_than_17_2():
@@ -235,12 +211,8 @@ def test_version_17_10_is_greater_than_17_2():
             ),
         )
     )
-    assert evaluate_capability(
-        requirement, _capabilities(python_version="17.2")
-    ).matched is False
-    assert evaluate_capability(
-        requirement, _capabilities(python_version="17.10")
-    ).matched is True
+    assert evaluate_capability(requirement, _capabilities(python_version="17.2")).matched is False
+    assert evaluate_capability(requirement, _capabilities(python_version="17.10")).matched is True
 
 
 def test_system_matcher_checks_os_memory_and_cpu_separately():
@@ -261,42 +233,26 @@ def test_system_matcher_checks_os_memory_and_cpu_separately():
 
 
 def test_serial_matcher_uses_function_as_identity_and_port_as_constraint():
-    requirement = HardwareRequirements(
-        serial_ports=(SerialPortRequirement(function="psu", port="30"),)
-    )
+    requirement = HardwareRequirements(serial_ports=(SerialPortRequirement(function="psu", port="30"),))
     assert SerialSpec().evaluate(_capabilities(), requirement) == ()
-    wrong_port = HardwareRequirements(
-        serial_ports=(SerialPortRequirement(function="psu", port="20"),)
-    )
+    wrong_port = HardwareRequirements(serial_ports=(SerialPortRequirement(function="psu", port="20"),))
     assert SerialSpec().evaluate(_capabilities(), wrong_port)
 
 
 def test_serial_matcher_checks_enabled_state():
-    requirement = HardwareRequirements(
-        serial_ports=(SerialPortRequirement(function="relay_board"),)
-    )
-    assert SerialSpec().evaluate(
-        _capabilities(serial_enabled=True), requirement
-    ) == ()
-    assert SerialSpec().evaluate(
-        _capabilities(serial_enabled=False), requirement
-    )
+    requirement = HardwareRequirements(serial_ports=(SerialPortRequirement(function="relay_board"),))
+    assert SerialSpec().evaluate(_capabilities(serial_enabled=True), requirement) == ()
+    assert SerialSpec().evaluate(_capabilities(serial_enabled=False), requirement)
 
 
 def test_aggregate_evaluator_combines_categories_and_tags():
     evaluator = CapabilityEvaluator()
-    assert evaluator.evaluate(
-        _capabilities(), _requirements(), tags=("can",)
-    ).matched is True
-    assert evaluator.evaluate(
-        _capabilities(), _requirements(), tags=()
-    ).matched is False
+    assert evaluator.evaluate(_capabilities(), _requirements(), tags=("can",)).matched is True
+    assert evaluator.evaluate(_capabilities(), _requirements(), tags=()).matched is False
 
 
 def test_evaluator_can_inject_custom_spec():
-    evaluator = CapabilityEvaluator(
-        spec=AllOf((VehicleSpec(), LanguageSpec(), SystemSpec(), SerialSpec()))
-    )
+    evaluator = CapabilityEvaluator(spec=AllOf((VehicleSpec(), LanguageSpec(), SystemSpec(), SerialSpec())))
     assert evaluator.evaluate(_capabilities(), HardwareRequirements()).matched is True
 
 

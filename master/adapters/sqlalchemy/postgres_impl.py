@@ -17,8 +17,5 @@ class PostgresDatabase(BaseDatabase):
         try:
             import psycopg2  # noqa: F401
         except ImportError as exc:
-            raise RuntimeError(
-                "使用 PostgreSQL 需要安装驱动 psycopg2: "
-                "pip install psycopg2-binary"
-            ) from exc
+            raise RuntimeError("使用 PostgreSQL 需要安装驱动 psycopg2: pip install psycopg2-binary") from exc
         return create_engine(url, **config.engine_kwargs)

@@ -40,9 +40,7 @@ def upgrade() -> None:
             "account_status IN ('pending','active','disabled')",
             name="ck_users_account_status",
         ),
-        sa.CheckConstraint(
-            "platform_role IN ('user','admin')", name="ck_users_platform_role"
-        ),
+        sa.CheckConstraint("platform_role IN ('user','admin')", name="ck_users_platform_role"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("username"),
     )
@@ -61,9 +59,7 @@ def upgrade() -> None:
         sa.Column("last_seen_at", UTCDateTime(), nullable=True),
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
-        sa.CheckConstraint(
-            "status IN ('offline','online')", name="ck_nodes_status"
-        ),
+        sa.CheckConstraint("status IN ('offline','online')", name="ck_nodes_status"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("node_id"),
     )
@@ -80,12 +76,8 @@ def upgrade() -> None:
         sa.Column("last_seen_at", UTCDateTime(), nullable=True),
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
-        sa.CheckConstraint(
-            "status IN ('offline','online','busy')", name="ck_devices_status"
-        ),
-        sa.ForeignKeyConstraint(
-            ["node_pk"], ["nodes.id"], ondelete="RESTRICT"
-        ),
+        sa.CheckConstraint("status IN ('offline','online','busy')", name="ck_devices_status"),
+        sa.ForeignKeyConstraint(["node_pk"], ["nodes.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("device_id"),
     )
@@ -102,9 +94,7 @@ def upgrade() -> None:
         sa.Column("created_by", sa.Integer(), nullable=False),
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
-        sa.CheckConstraint(
-            "status IN ('active','archived')", name="ck_projects_status"
-        ),
+        sa.CheckConstraint("status IN ('active','archived')", name="ck_projects_status"),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("project_id"),
@@ -128,9 +118,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["assigned_by"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "project_pk", "user_id", name="uq_project_members_project_user"
-        ),
+        sa.UniqueConstraint("project_pk", "user_id", name="uq_project_members_project_user"),
     )
     op.create_index("ix_project_members_project_pk", "project_members", ["project_pk"])
     op.create_index("ix_project_members_user_id", "project_members", ["user_id"])
@@ -147,18 +135,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["node_pk"], ["nodes.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["assigned_by"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "project_pk", "node_pk", name="uq_project_node_bindings_project_node"
-        ),
+        sa.UniqueConstraint("project_pk", "node_pk", name="uq_project_node_bindings_project_node"),
     )
     op.create_index(
         "ix_project_node_bindings_project_pk",
         "project_node_bindings",
         ["project_pk"],
     )
-    op.create_index(
-        "ix_project_node_bindings_node_pk", "project_node_bindings", ["node_pk"]
-    )
+    op.create_index("ix_project_node_bindings_node_pk", "project_node_bindings", ["node_pk"])
     op.create_table(
         "tasks",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -175,8 +159,7 @@ def upgrade() -> None:
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
         sa.CheckConstraint(
-            "status IN ('pending','dispatched','accepted','running',"
-            "'completed','failed','cancelled','timeout')",
+            "status IN ('pending','dispatched','accepted','running','completed','failed','cancelled','timeout')",
             name="ck_tasks_status",
         ),
         sa.ForeignKeyConstraint(["project_pk"], ["projects.id"], ondelete="RESTRICT"),

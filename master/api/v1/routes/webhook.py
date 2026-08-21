@@ -57,12 +57,8 @@ async def handle_webhook(
     except ValueError as exc:
         detail = str(exc)
         if "签名" in detail:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail=detail
-            ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail
-        ) from exc
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from exc
 
     return {
         "status": result.status,

@@ -70,31 +70,21 @@ class AgentRunORM(_Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     cancelled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     result_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    claimed_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=_utcnow
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
-    )
+    claimed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 
 
 class AgentInboxORM(_Base):
     """入站命令去重表。"""
 
     __tablename__ = "agent_inbox_messages"
-    __table_args__ = (
-        UniqueConstraint(
-            "origin_id", "message_id", name="uq_agent_inbox_origin_message"
-        ),
-    )
+    __table_args__ = (UniqueConstraint("origin_id", "message_id", name="uq_agent_inbox_origin_message"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     origin_id: Mapped[str] = mapped_column(String(128), nullable=False)
     message_id: Mapped[str] = mapped_column(String(128), nullable=False)
     message_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    received_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=_utcnow
-    )
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
 class AgentOutboxORM(_Base):
@@ -105,30 +95,20 @@ class AgentOutboxORM(_Base):
     outbox_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     topic: Mapped[str] = mapped_column(String(255), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=AgentOutboxStatus.PENDING.value
-    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default=AgentOutboxStatus.PENDING.value)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # 已发送（sent）的消息无需下次重试时间，故可空
-    next_attempt_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True, default=_utcnow
-    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=_utcnow)
     # sending 状态的租约到期后可被另一个 worker 回收
-    claimed_until: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=_utcnow
-    )
+    claimed_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
 class TaskLogSpoolORM(_Base):
     """任务日志本地缓冲表。"""
 
     __tablename__ = "agent_task_log_spool"
-    __table_args__ = (
-        UniqueConstraint("run_id", "sequence", name="uq_agent_log_run_sequence"),
-    )
+    __table_args__ = (UniqueConstraint("run_id", "sequence", name="uq_agent_log_run_sequence"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -136,12 +116,8 @@ class TaskLogSpoolORM(_Base):
     level: Mapped[str] = mapped_column(String(16), nullable=False)
     message: Mapped[str] = mapped_column(String(8192), nullable=False)
     detail: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    published: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=_utcnow
-    )
+    published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
 class ScriptCacheORM(_Base):
@@ -150,7 +126,9 @@ class ScriptCacheORM(_Base):
     __tablename__ = "agent_script_cache"
     __table_args__ = (
         UniqueConstraint(
-            "script_id", "version", "sha256",
+            "script_id",
+            "version",
+            "sha256",
             name="uq_agent_cache_script_version_sha",
         ),
     )
@@ -160,9 +138,7 @@ class ScriptCacheORM(_Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     path: Mapped[str] = mapped_column(String(512), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=_utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
 class SQLiteLedger:
@@ -175,9 +151,7 @@ class SQLiteLedger:
         _Base.metadata.create_all(self._engine)
         # expire_on_commit=False：提交后属性仍可用，便于在会话外把 ORM 行
         # 转换为领域对象而不触发 DetachedInstanceError
-        self._session_factory = sessionmaker(
-            bind=self._engine, expire_on_commit=False
-        )
+        self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         self._max_spool_bytes = max_spool_bytes
 
     # ---- agent_runs：原子 claim ----
@@ -209,9 +183,7 @@ class SQLiteLedger:
             )
             if inserted.rowcount == 1:
                 return True
-            existing = session.execute(
-                select(AgentRunORM).where(AgentRunORM.run_id == run_id)
-            ).scalar_one()
+            existing = session.execute(select(AgentRunORM).where(AgentRunORM.run_id == run_id)).scalar_one()
             if attempt_no <= existing.attempt_no:
                 return False  # 迟到旧 attempt 或同 attempt 重复派发
             if existing.status in {
@@ -240,9 +212,7 @@ class SQLiteLedger:
     def get_run(self, run_id: str) -> AgentRun | None:
         """读取本地 Run 状态；不存在返回 None。"""
         with self._session_factory.begin() as session:
-            row = session.execute(
-                select(AgentRunORM).where(AgentRunORM.run_id == run_id)
-            ).scalar_one_or_none()
+            row = session.execute(select(AgentRunORM).where(AgentRunORM.run_id == run_id)).scalar_one_or_none()
         return _to_run(row) if row is not None else None
 
     def update_run(self, run: AgentRun) -> None:
@@ -267,18 +237,16 @@ class SQLiteLedger:
             AgentRunStatus.RUNNING.value,
         }
         with self._session_factory.begin() as session:
-            rows = session.execute(
-                select(AgentRunORM)
-                .where(AgentRunORM.status.in_(active))
-                .order_by(AgentRunORM.run_id)
-            ).scalars().all()
+            rows = (
+                session.execute(select(AgentRunORM).where(AgentRunORM.status.in_(active)).order_by(AgentRunORM.run_id))
+                .scalars()
+                .all()
+            )
         return [_to_run(row) for row in rows]
 
     # ---- inbox 去重 ----
 
-    def record_inbox(
-        self, origin_id: str, message_id: str, message_type: str
-    ) -> bool:
+    def record_inbox(self, origin_id: str, message_id: str, message_type: str) -> bool:
         """入站去重：首次记录返回 True，已存在返回 False。"""
         with self._session_factory.begin() as session:
             result = cast(
@@ -291,9 +259,7 @@ class SQLiteLedger:
                         message_type=message_type,
                         received_at=_utcnow(),
                     )
-                    .on_conflict_do_nothing(
-                        index_elements=["origin_id", "message_id"]
-                    )
+                    .on_conflict_do_nothing(index_elements=["origin_id", "message_id"])
                 ),
             )
             return result.rowcount == 1
@@ -343,9 +309,7 @@ class SQLiteLedger:
                 )
             )
 
-    def claim_due_outbox(
-        self, limit: int, now: datetime
-    ) -> list[AgentOutboxEntry]:
+    def claim_due_outbox(self, limit: int, now: datetime) -> list[AgentOutboxEntry]:
         """事务性领取到期待发送消息，并设置短租约。
 
         先回收租约过期的 ``sending`` 消息，再用带子查询的 UPDATE 把
@@ -366,29 +330,34 @@ class SQLiteLedger:
                     claimed_until=None,
                 )
             )
-            candidate_ids = select(AgentOutboxORM.outbox_id).where(
-                AgentOutboxORM.status == AgentOutboxStatus.PENDING.value,
-                AgentOutboxORM.next_attempt_at <= now,
-            ).order_by(AgentOutboxORM.created_at).limit(limit)
-            claimed = session.execute(
-                update(AgentOutboxORM)
+            candidate_ids = (
+                select(AgentOutboxORM.outbox_id)
                 .where(
-                    AgentOutboxORM.outbox_id.in_(candidate_ids),
                     AgentOutboxORM.status == AgentOutboxStatus.PENDING.value,
+                    AgentOutboxORM.next_attempt_at <= now,
                 )
-                .values(
-                    status=AgentOutboxStatus.SENDING.value,
-                    claimed_until=lease_until,
+                .order_by(AgentOutboxORM.created_at)
+                .limit(limit)
+            )
+            claimed = (
+                session.execute(
+                    update(AgentOutboxORM)
+                    .where(
+                        AgentOutboxORM.outbox_id.in_(candidate_ids),
+                        AgentOutboxORM.status == AgentOutboxStatus.PENDING.value,
+                    )
+                    .values(
+                        status=AgentOutboxStatus.SENDING.value,
+                        claimed_until=lease_until,
+                    )
+                    .returning(AgentOutboxORM.outbox_id)
                 )
-                .returning(AgentOutboxORM.outbox_id)
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not claimed:
                 return []
-            rows = session.execute(
-                select(AgentOutboxORM).where(
-                    AgentOutboxORM.outbox_id.in_(claimed)
-                )
-            ).scalars().all()
+            rows = session.execute(select(AgentOutboxORM).where(AgentOutboxORM.outbox_id.in_(claimed))).scalars().all()
         return [_to_outbox(row) for row in rows]
 
     def mark_outbox(
@@ -430,18 +399,19 @@ class SQLiteLedger:
             ).scalar_one_or_none()
             if duplicate is not None:
                 return
-            detail_size = len(
-                json.dumps(entry.detail, ensure_ascii=False).encode("utf-8")
-            )
+            detail_size = len(json.dumps(entry.detail, ensure_ascii=False).encode("utf-8"))
             entry_size = len(entry.message.encode("utf-8")) + detail_size
-            pending = session.execute(
-                select(TaskLogSpoolORM)
-                .where(TaskLogSpoolORM.published.is_(False))
-                .order_by(TaskLogSpoolORM.created_at, TaskLogSpoolORM.id)
-            ).scalars().all()
+            pending = (
+                session.execute(
+                    select(TaskLogSpoolORM)
+                    .where(TaskLogSpoolORM.published.is_(False))
+                    .order_by(TaskLogSpoolORM.created_at, TaskLogSpoolORM.id)
+                )
+                .scalars()
+                .all()
+            )
             current_size = sum(
-                len(row.message.encode("utf-8"))
-                + len(json.dumps(row.detail or {}, ensure_ascii=False).encode("utf-8"))
+                len(row.message.encode("utf-8")) + len(json.dumps(row.detail or {}, ensure_ascii=False).encode("utf-8"))
                 for row in pending
             )
             for row in pending:
@@ -449,13 +419,10 @@ class SQLiteLedger:
                     break
                 if row.level.lower() == "error":
                     continue
-                current_size -= (
-                    len(row.message.encode("utf-8"))
-                    + len(json.dumps(row.detail or {}, ensure_ascii=False).encode("utf-8"))
+                current_size -= len(row.message.encode("utf-8")) + len(
+                    json.dumps(row.detail or {}, ensure_ascii=False).encode("utf-8")
                 )
-                session.execute(
-                    delete(TaskLogSpoolORM).where(TaskLogSpoolORM.id == row.id)
-                )
+                session.execute(delete(TaskLogSpoolORM).where(TaskLogSpoolORM.id == row.id))
             if current_size + entry_size > self._max_spool_bytes:
                 if entry.level.lower() != "error":
                     logger.warning(
@@ -486,12 +453,16 @@ class SQLiteLedger:
     def list_pending_task_logs(self, limit: int) -> list[TaskLogSpoolEntry]:
         """取未上报的任务日志（按 run_id、sequence 排序）。"""
         with self._session_factory.begin() as session:
-            rows = session.execute(
-                select(TaskLogSpoolORM)
-                .where(TaskLogSpoolORM.published.is_(False))
-                .order_by(TaskLogSpoolORM.run_id, TaskLogSpoolORM.sequence)
-                .limit(limit)
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(TaskLogSpoolORM)
+                    .where(TaskLogSpoolORM.published.is_(False))
+                    .order_by(TaskLogSpoolORM.run_id, TaskLogSpoolORM.sequence)
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
         return [_to_log(row) for row in rows]
 
     def mark_task_logs_published(self, ids: list[int]) -> None:
@@ -499,22 +470,21 @@ class SQLiteLedger:
         if not ids:
             return
         with self._session_factory.begin() as session:
-            session.execute(
-                update(TaskLogSpoolORM)
-                .where(TaskLogSpoolORM.id.in_(ids))
-                .values(published=True)
-            )
+            session.execute(update(TaskLogSpoolORM).where(TaskLogSpoolORM.id.in_(ids)).values(published=True))
 
     def get_published_log_stats(self, run_id: str) -> dict:
         """返回 run 已发布日志统计：{last_sequence, entry_count}。"""
         with self._session_factory.begin() as session:
-            published = session.execute(
-                select(TaskLogSpoolORM)
-                .where(
-                    TaskLogSpoolORM.run_id == run_id,
-                    TaskLogSpoolORM.published.is_(True),
+            published = (
+                session.execute(
+                    select(TaskLogSpoolORM).where(
+                        TaskLogSpoolORM.run_id == run_id,
+                        TaskLogSpoolORM.published.is_(True),
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         sequences = [row.sequence for row in published]
         return {
             "last_sequence": max(sequences) if sequences else 0,
@@ -536,16 +506,12 @@ class SQLiteLedger:
                         sha256=entry.sha256,
                         path=entry.path,
                     )
-                    .on_conflict_do_nothing(
-                        index_elements=["script_id", "version", "sha256"]
-                    )
+                    .on_conflict_do_nothing(index_elements=["script_id", "version", "sha256"])
                 ),
             )
             return result.rowcount == 1
 
-    def get_cached_script(
-        self, script_id: str, version: int, sha256: str
-    ) -> ScriptCacheEntry | None:
+    def get_cached_script(self, script_id: str, version: int, sha256: str) -> ScriptCacheEntry | None:
         """按 (script_id, version, sha256) 查缓存。"""
         with self._session_factory.begin() as session:
             row = session.execute(

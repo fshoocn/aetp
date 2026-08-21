@@ -38,9 +38,7 @@ class TestScript:
     # sym:config 插件配置 JSON（执行与解析输入）
     config: dict = field(default_factory=dict)
     # sym:hardware_requirements 硬件能力谓词（§18.5 节点匹配）
-    hardware_requirements: HardwareRequirements = field(
-        default_factory=HardwareRequirements
-    )
+    hardware_requirements: HardwareRequirements = field(default_factory=HardwareRequirements)
     # sym:parse_status 用例解析状态（pending/parsing/parsed/failed）
     parse_status: ScriptParseStatus = ScriptParseStatus.PENDING
     # sym:parse_location 用例解析执行位置（master/agent，D-17）

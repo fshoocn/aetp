@@ -23,9 +23,7 @@ _PLUGIN_URL_PATH = "/api/v1/internal/plugins/{plugin_id}/download"
 
 def _signature(resource_id: str, expires: int, secret: str) -> str:
     message = f"{resource_id}:{expires}".encode()
-    return hmac.new(
-        secret.encode("utf-8"), message, hashlib.sha256
-    ).hexdigest()
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
 def build_signed_path(

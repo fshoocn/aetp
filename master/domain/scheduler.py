@@ -99,13 +99,9 @@ class ShardScheduler:
                 continue
             if node.status in (NodeStatus.OFFLINE, NodeStatus.DISABLED):
                 continue
-            if not self._evaluator.evaluate(
-                node.capabilities, requirements, node.tags
-            ).matched:
+            if not self._evaluator.evaluate(node.capabilities, requirements, node.tags).matched:
                 continue
-            if self._allocator.allocate(
-                node, requirements.devices, state.reserved_device_ids
-            ) is None:
+            if self._allocator.allocate(node, requirements.devices, state.reserved_device_ids) is None:
                 continue
             eligible.append(state)
 
@@ -141,20 +137,14 @@ class ShardScheduler:
     ) -> ResourceAssignment | None:
         """选择 failover 节点及完整空闲资源集合，排除历史尝试节点。"""
 
-        attempted_nodes = {
-            attempt.node_id
-            for attempt in attempts
-            if attempt.node_id
-        }
+        attempted_nodes = {attempt.node_id for attempt in attempts if attempt.node_id}
         return self._select_assignment_excluding_nodes(
             requirements=requirements,
             candidates=candidates,
             excluded_node_ids=attempted_nodes,
         )
 
-    def supports_resources(
-        self, node: Node, requirements: tuple[DeviceRequirement, ...]
-    ) -> bool:
+    def supports_resources(self, node: Node, requirements: tuple[DeviceRequirement, ...]) -> bool:
         """判断节点是否具备资源能力，忽略当前 online/BUSY 占用状态。"""
 
         return self._allocator.supports(node, requirements)
@@ -185,9 +175,7 @@ class ShardScheduler:
                 )
         return None
 
-    def reserve_devices(
-        self, state: NodeSchedulingState, device_ids: Iterable[str]
-    ) -> NodeSchedulingState:
+    def reserve_devices(self, state: NodeSchedulingState, device_ids: Iterable[str]) -> NodeSchedulingState:
         """为本轮已选节点预留一个 Shard 的完整设备集合。"""
 
         return self._allocator.reserve(state, device_ids)

@@ -69,9 +69,7 @@ class MasterFakePlugin:
 
     def hardware_requirements(self, config, cases):
         return HardwareRequirements(
-            vehicle=VehicleRequirement(
-                all_of=(BusRequirement(bus_type="can", minimum_channels=1),)
-            )
+            vehicle=VehicleRequirement(all_of=(BusRequirement(bus_type="can", minimum_channels=1),))
         )
 
 
@@ -171,9 +169,7 @@ def test_registry_delegates_master_task_generation_and_result_schema() -> None:
             agent=object(),
         )
     )
-    cases = asyncio.run(
-        registry.require("master_fake").master.parse_cases("/script", {})
-    )
+    cases = asyncio.run(registry.require("master_fake").master.parse_cases("/script", {}))
 
     definition = registry.build_task_definition("master_fake", {}, cases)
 
@@ -226,9 +222,7 @@ def test_plugin_manager_load_packages_injects_agent_package(tmp_path):
 
     manager = PluginManager(
         tmp_path,
-        agent_download_builder=lambda plugin_id: (
-            f"https://master.example/internal/plugins/{plugin_id}/download"
-        ),
+        agent_download_builder=lambda plugin_id: f"https://master.example/internal/plugins/{plugin_id}/download",
     )
     record = manager.upload("test_plugin.zip", zip_bytes)
     assert record.task_type == "zip_test"
@@ -248,7 +242,6 @@ def test_plugin_download_endpoint_signed(client, tmp_path):
     """内部插件下载端点：签名 URL 可下载已安装插件 ZIP（Agent 侧用）。"""
     import io
     import zipfile
-
 
     container = client.app.state.container
     manager = container.plugin_manager()
@@ -274,7 +267,7 @@ def test_plugin_download_endpoint_signed(client, tmp_path):
         download_service = container.plugin_download_service()
         url = download_service.build_download_url(record.plugin_id)
         # url 形如 /api/v1/internal/plugins/{id}/download?expires=...&signature=...
-        path = url[url.index("/api/v1"):]
+        path = url[url.index("/api/v1") :]
 
         resp = client.get(path)
         assert resp.status_code == 200
@@ -286,8 +279,7 @@ def test_plugin_download_endpoint_signed(client, tmp_path):
 
         # 错误签名被拒
         bad = client.get(
-            f"/api/v1/internal/plugins/{record.plugin_id}/download"
-            f"?expires=9999999999&signature={'0' * 64}"
+            f"/api/v1/internal/plugins/{record.plugin_id}/download?expires=9999999999&signature={'0' * 64}"
         )
         assert bad.status_code == 403
     finally:
@@ -319,10 +311,7 @@ def _build_test_plugin_zip() -> bytes:
     import io
     import zipfile
 
-    plugin_json = (
-        '{"task_type": "zip_test", "plugin_version": "1.0.0", '
-        '"display_name": "Zip Test"}'
-    )
+    plugin_json = '{"task_type": "zip_test", "plugin_version": "1.0.0", "display_name": "Zip Test"}'
     main_py = (
         "from aetp_protocol.plugin import PluginMetadata, PluginPackage\n"
         "from aetp_protocol.capabilities import HardwareRequirements\n"

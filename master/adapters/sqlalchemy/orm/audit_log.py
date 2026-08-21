@@ -44,6 +44,4 @@ class AuditLog(Base, TimestampMixin):
     # sym:detail 审计详情 JSON（变更前后值等）
     detail: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # sym:occurred_at 操作发生时间（UTC）
-    occurred_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=datetime.utcnow
-    )
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=datetime.utcnow)

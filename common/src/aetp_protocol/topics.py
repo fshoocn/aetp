@@ -85,18 +85,12 @@ def validate_sender_for_topic(topic: str, sender: Sender) -> None:
     info = parse_topic(topic)
     if info.direction == _COMMANDS_SEG:
         if sender.kind != SenderKind.MASTER:
-            raise InvalidSenderError(
-                f"commands 主题发送方必须是 master: {topic}（sender.kind={sender.kind}）"
-            )
+            raise InvalidSenderError(f"commands 主题发送方必须是 master: {topic}（sender.kind={sender.kind}）")
     else:
         if sender.kind != SenderKind.AGENT:
-            raise InvalidSenderError(
-                f"events 主题发送方必须是 agent: {topic}（sender.kind={sender.kind}）"
-            )
+            raise InvalidSenderError(f"events 主题发送方必须是 agent: {topic}（sender.kind={sender.kind}）")
         if sender.id != info.node_id:
-            raise InvalidSenderError(
-                f"sender.id 与主题 node_id 不匹配: {sender.id} != {info.node_id}（topic={topic}）"
-            )
+            raise InvalidSenderError(f"sender.id 与主题 node_id 不匹配: {sender.id} != {info.node_id}（topic={topic}）")
 
 
 def validate_message_type_for_topic(topic: str, message_type: MessageType) -> None:
@@ -105,6 +99,5 @@ def validate_message_type_for_topic(topic: str, message_type: MessageType) -> No
     expected_direction, expected_segment = topic_segment_for(message_type)
     if info.direction != expected_direction or info.segment != expected_segment:
         raise TopicMismatchError(
-            f"message_type {message_type.value} 与主题不匹配: {topic}"
-            f"（期望 {expected_direction}/{expected_segment}）"
+            f"message_type {message_type.value} 与主题不匹配: {topic}（期望 {expected_direction}/{expected_segment}）"
         )

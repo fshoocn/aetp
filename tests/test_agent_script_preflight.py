@@ -120,9 +120,7 @@ class MasterOnlyPlugin:
 
 def _service(tmp_path, *, registry, registered=True, fetcher=None) -> tuple[ScriptPreflightService, SQLiteLedger]:
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
-    script_cache = ScriptCacheService(
-        tmp_path / "scripts", ledger, fetcher=fetcher or (lambda url: _DATA)
-    )
+    script_cache = ScriptCacheService(tmp_path / "scripts", ledger, fetcher=fetcher or (lambda url: _DATA))
     return ScriptPreflightService(
         _SETTINGS,
         ledger,
@@ -141,9 +139,7 @@ def _command_message(envelope: Envelope, segment: str) -> MqttMessage:
     )
 
 
-def _verify_envelope(
-    *, verify_id="V-1", config=None, script_id="S-1", task_type="canoe"
-) -> Envelope:
+def _verify_envelope(*, verify_id="V-1", config=None, script_id="S-1", task_type="canoe") -> Envelope:
     payload = ScriptVerifyPayload(
         verify_id=verify_id,
         script_id=script_id,
@@ -163,9 +159,7 @@ def _verify_envelope(
     )
 
 
-def _parse_envelope(
-    *, parse_id="P-1", config=None, script_id="S-1", task_type="canoe"
-) -> Envelope:
+def _parse_envelope(*, parse_id="P-1", config=None, script_id="S-1", task_type="canoe") -> Envelope:
     payload = ScriptParsePayload(
         parse_id=parse_id,
         script_id=script_id,
@@ -197,6 +191,7 @@ def _claim_result(ledger, segment: str) -> Envelope:
 # -----------------------------------------------------------------------
 # verify 命令
 # -----------------------------------------------------------------------
+
 
 def test_verify_ok_returns_empty_errors(tmp_path) -> None:
     registry = AgentPluginRegistry()
@@ -262,6 +257,7 @@ def test_verify_plugin_without_agent_capability_returns_error(tmp_path) -> None:
 # parse 命令
 # -----------------------------------------------------------------------
 
+
 def test_parse_ok_returns_cases(tmp_path) -> None:
     registry = AgentPluginRegistry()
     registry.register_installed(AgentSidePlugin())
@@ -323,6 +319,7 @@ def test_script_zip_rejects_directory_traversal(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # 下载/校验失败
 # -----------------------------------------------------------------------
+
 
 def test_parse_download_failure_returns_error(tmp_path) -> None:
     registry = AgentPluginRegistry()

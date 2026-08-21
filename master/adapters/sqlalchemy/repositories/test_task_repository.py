@@ -38,40 +38,34 @@ class TestTaskRepositoryImpl(TestTaskRepository):
     def __init__(self, session: Session) -> None:
         self._s = session
 
-    def get_by_task_id(
-        self, task_id: str, project_id: str | None = None
-    ) -> TestTask | None:
+    def get_by_task_id(self, task_id: str, project_id: str | None = None) -> TestTask | None:
         stmt = (
             select(TestTaskORM)
-            .options(
-                joinedload(TestTaskORM.project), joinedload(TestTaskORM.script)
-            )
+            .options(joinedload(TestTaskORM.project), joinedload(TestTaskORM.script))
             .where(TestTaskORM.task_id == task_id)
         )
         if project_id is not None:
             stmt = stmt.where(
                 TestTaskORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         orm = self._s.execute(stmt).scalars().one_or_none()
         return _to_domain(orm) if orm is not None else None
 
     def find_by_name(self, project_id: str, name: str) -> TestTask | None:
-        orm = self._s.execute(
-            select(TestTaskORM)
-            .options(
-                joinedload(TestTaskORM.project), joinedload(TestTaskORM.script)
+        orm = (
+            self._s.execute(
+                select(TestTaskORM)
+                .options(joinedload(TestTaskORM.project), joinedload(TestTaskORM.script))
+                .where(
+                    TestTaskORM.project_pk
+                    == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery(),
+                    TestTaskORM.name == name,
+                )
             )
-            .where(
-                TestTaskORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery(),
-                TestTaskORM.name == name,
-            )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def list_by_project(
@@ -84,14 +78,10 @@ class TestTaskRepositoryImpl(TestTaskRepository):
     ) -> list[TestTask]:
         stmt = (
             select(TestTaskORM)
-            .options(
-                joinedload(TestTaskORM.project), joinedload(TestTaskORM.script)
-            )
+            .options(joinedload(TestTaskORM.project), joinedload(TestTaskORM.script))
             .where(
                 TestTaskORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
             .order_by(TestTaskORM.created_at.desc(), TestTaskORM.id.desc())
             .limit(limit)
@@ -107,9 +97,7 @@ class TestTaskRepositoryImpl(TestTaskRepository):
             self._s.execute(
                 select(func.count(TestTaskORM.id)).where(
                     TestTaskORM.script_pk
-                    == select(TestScriptORM.id)
-                    .where(TestScriptORM.script_id == script_id)
-                    .scalar_subquery(),
+                    == select(TestScriptORM.id).where(TestScriptORM.script_id == script_id).scalar_subquery(),
                     TestTaskORM.enabled.is_(True),
                 )
             ).scalar_one()
@@ -118,13 +106,8 @@ class TestTaskRepositoryImpl(TestTaskRepository):
     def count_runs_by_task(self, task_pk: int) -> int:
         """统计该任务定义关联的 Run 数量。"""
         from master.adapters.sqlalchemy.orm import TaskRun as TaskRunORM
-        return int(
-            self._s.execute(
-                select(func.count(TaskRunORM.id)).where(
-                    TaskRunORM.task_pk == task_pk
-                )
-            ).scalar_one()
-        )
+
+        return int(self._s.execute(select(func.count(TaskRunORM.id)).where(TaskRunORM.task_pk == task_pk)).scalar_one())
 
     def delete(self, task_pk: int) -> None:
         """硬删除任务定义（级联清理 schedule/bindings）。"""
@@ -147,23 +130,21 @@ class TestTaskRepositoryImpl(TestTaskRepository):
         result = {"deleted": 0, "nullified": 0}
 
         # 查找所有引用该脚本且已停用的任务
-        script_subq = (
-            select(TestScriptORM.id)
-            .where(TestScriptORM.script_id == script_id)
-            .scalar_subquery()
-        )
-        disabled_tasks = self._s.execute(
-            select(TestTaskORM)
-            .where(
-                TestTaskORM.script_pk == script_subq,
-                TestTaskORM.enabled.is_(False),
+        script_subq = select(TestScriptORM.id).where(TestScriptORM.script_id == script_id).scalar_subquery()
+        disabled_tasks = (
+            self._s.execute(
+                select(TestTaskORM).where(
+                    TestTaskORM.script_pk == script_subq,
+                    TestTaskORM.enabled.is_(False),
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for task_orm in disabled_tasks:
             has_runs = self._s.execute(
-                select(func.count(TaskRunORM.id))
-                .where(TaskRunORM.task_pk == task_orm.id)
+                select(func.count(TaskRunORM.id)).where(TaskRunORM.task_pk == task_orm.id)
             ).scalar_one()
             if has_runs == 0:
                 self._s.delete(task_orm)
@@ -189,9 +170,7 @@ class TestTaskRepositoryImpl(TestTaskRepository):
             )
         ).scalar_one_or_none()
         if script_pk is None:
-            raise ValueError(
-                f"引用的脚本版本不存在: {task.script_id} v{task.script_version}"
-            )
+            raise ValueError(f"引用的脚本版本不存在: {task.script_id} v{task.script_version}")
         if task.created_by is None:
             raise ValueError("缺少创建者 created_by")
         orm = TestTaskORM(
@@ -240,9 +219,7 @@ class TestTaskRepositoryImpl(TestTaskRepository):
                 )
             ).scalar_one_or_none()
             if script_pk is None:
-                raise ValueError(
-                    f"引用的脚本版本不存在: {task.script_id} v{task.script_version}"
-                )
+                raise ValueError(f"引用的脚本版本不存在: {task.script_id} v{task.script_version}")
             orm.script_pk = script_pk
         self._s.flush()
         self._s.refresh(orm)

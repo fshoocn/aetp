@@ -57,28 +57,23 @@ class RunShardRepositoryImpl(RunShardRepository):
             )
             self._s.add(orm)
         self._s.flush()
-        return [
-            self.get_by_shard_id(s.shard_id) or s for s in shards
-        ]
+        return [self.get_by_shard_id(s.shard_id) or s for s in shards]
 
     def get_by_shard_id(self, shard_id: str) -> RunShard | None:
-        orm = self._s.execute(
-            select(RunShardORM)
-            .options(joinedload(RunShardORM.run))
-            .where(RunShardORM.shard_id == shard_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(RunShardORM).options(joinedload(RunShardORM.run)).where(RunShardORM.shard_id == shard_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def list_by_run(self, run_id: str) -> list[RunShard]:
         stmt = (
             select(RunShardORM)
             .options(joinedload(RunShardORM.run))
-            .where(
-                RunShardORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery()
-            )
+            .where(RunShardORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery())
             .order_by(RunShardORM.shard_index, RunShardORM.id)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]

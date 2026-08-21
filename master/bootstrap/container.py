@@ -96,16 +96,12 @@ def _data_dir() -> Path:
     return runtime_dir() / "data"
 
 
-def _plugin_ref_from_registry(
-    task_type: str, version: str
-):
+def _plugin_ref_from_registry(task_type: str, version: str):
     """运行时从 Master 插件注册表获取 Agent 包引用。"""
     return Container.plugin_registry().agent_package_ref(task_type)
 
 
-def _artifact_upload_url(
-    run_id: str, project_id: str, node_id: str, shard_id: str
-) -> str:
+def _artifact_upload_url(run_id: str, project_id: str, node_id: str, shard_id: str) -> str:
     """构造 Agent 上传 Run 产物的内部地址。"""
     base_url = get_settings().public_base_url.rstrip("/")
     if not base_url:
@@ -117,10 +113,7 @@ def _artifact_upload_url(
             "shard_id": shard_id,
         }
     )
-    return (
-        f"{base_url}/api/v1/internal/runs/{quote(run_id, safe='')}/artifacts"
-        f"?{query}"
-    )
+    return f"{base_url}/api/v1/internal/runs/{quote(run_id, safe='')}/artifacts?{query}"
 
 
 class Container(containers.DeclarativeContainer):
@@ -189,23 +182,15 @@ class Container(containers.DeclarativeContainer):
     )
     plugin_registry = providers.Singleton(
         create_default_registry,
-        disabled_task_types=providers.Callable(
-            lambda manager: manager.disabled_task_types(), plugin_manager
-        ),
-        zip_packages=providers.Callable(
-            lambda manager: manager.load_packages(), plugin_manager
-        ),
+        disabled_task_types=providers.Callable(lambda manager: manager.disabled_task_types(), plugin_manager),
+        zip_packages=providers.Callable(lambda manager: manager.load_packages(), plugin_manager),
     )
 
     # P6.8：成功 case 耗时滚动统计与 by-time 缺省耗时策略
     case_duration_stats = providers.Singleton(
         CaseDurationStatsService,
-        default_duration_s=providers.Callable(
-            lambda: get_settings().case_duration_default_s
-        ),
-        anomaly_percent=providers.Callable(
-            lambda: get_settings().case_duration_anomaly_percent
-        ),
+        default_duration_s=providers.Callable(lambda: get_settings().case_duration_default_s),
+        anomaly_percent=providers.Callable(lambda: get_settings().case_duration_anomaly_percent),
     )
 
     # 文件存储：进程级单例（默认本地 data/ 目录；切云存储只换 adapter）
@@ -215,9 +200,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     # 脚本文件存储服务（P4.7：上传/下载统一走 Storage 端口）
-    script_storage_service = providers.Factory(
-        ScriptStorageService, storage=storage
-    )
+    script_storage_service = providers.Factory(ScriptStorageService, storage=storage)
 
     # 脚本上传/解析服务（P7.3：upload_spec 校验 → verify → parse → 写库）
     script_service = providers.Factory(
@@ -228,9 +211,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     # 产物文件存储服务（P6.6：run_artifacts 文件读写统一走 Storage 端口）
-    artifact_storage_service = providers.Factory(
-        ArtifactStorageService, storage=storage
-    )
+    artifact_storage_service = providers.Factory(ArtifactStorageService, storage=storage)
 
     # 产物登记/查询服务（P6.6：写引用 + 项目范围查询）
     artifact_service = providers.Factory(
@@ -252,14 +233,10 @@ class Container(containers.DeclarativeContainer):
     project_service = providers.Factory(ProjectService, uow_factory=uow_factory)
 
     # 项目成员授权服务
-    project_member_service = providers.Factory(
-        ProjectMemberService, uow_factory=uow_factory
-    )
+    project_member_service = providers.Factory(ProjectMemberService, uow_factory=uow_factory)
 
     # 项目节点绑定服务
-    project_node_binding_service = providers.Factory(
-        ProjectNodeBindingService, uow_factory=uow_factory
-    )
+    project_node_binding_service = providers.Factory(ProjectNodeBindingService, uow_factory=uow_factory)
 
     # Node/Device 平台资产只读查询服务
     node_service = providers.Factory(NodeService, uow_factory=uow_factory)
@@ -268,9 +245,7 @@ class Container(containers.DeclarativeContainer):
     recovery_service = providers.Factory(
         RecoveryService,
         uow_factory=uow_factory,
-        stale_timeout=providers.Callable(
-            lambda: timedelta(seconds=get_settings().run_stale_timeout_s)
-        ),
+        stale_timeout=providers.Callable(lambda: timedelta(seconds=get_settings().run_stale_timeout_s)),
     )
 
     # 节点在线投影服务（P4.4：注册/心跳/LWT/会话校验）
@@ -387,9 +362,7 @@ class Container(containers.DeclarativeContainer):
         OutboxWorker,
         uow_factory=uow_factory,
         transport=mqtt_transport,
-        max_attempts=providers.Callable(
-            lambda: get_settings().outbox_max_attempts
-        ),
+        max_attempts=providers.Callable(lambda: get_settings().outbox_max_attempts),
     )
 
     # Master MQTT 运行时（P6.4：订阅事件 → 路由投影 + outbox 发送）
@@ -405,7 +378,5 @@ class Container(containers.DeclarativeContainer):
         MaintenanceWorker,
         schedule_service=schedule_service,
         recovery_service=recovery_service,
-        interval_s=providers.Callable(
-            lambda: get_settings().maintenance_interval_s
-        ),
+        interval_s=providers.Callable(lambda: get_settings().maintenance_interval_s),
     )

@@ -65,9 +65,5 @@ class Base(DeclarativeBase):
 class TimestampMixin:
     """统一 created_at / updated_at 字段（UTC）。"""
 
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, default=utcnow, nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, default=utcnow, onupdate=utcnow, nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow, nullable=False)

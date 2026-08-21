@@ -48,13 +48,9 @@ class ProjectService:
                 owner_user_id = owner_id if owner_id is not None else created_by
                 owner = uow.users.get_by_id(owner_user_id)
                 if owner is None or not owner.is_active:
-                    raise InvalidProjectOwnerError(
-                        "项目 owner 不存在或账户未激活"
-                    )
+                    raise InvalidProjectOwnerError("项目 owner 不存在或账户未激活")
                 if uow.projects.get_by_key(normalized_key) is not None:
-                    raise ProjectKeyAlreadyExistsError(
-                        f"项目标识已存在: {normalized_key}"
-                    )
+                    raise ProjectKeyAlreadyExistsError(f"项目标识已存在: {normalized_key}")
 
                 now = utcnow()
                 project = Project(
@@ -89,9 +85,7 @@ class ProjectService:
                 )
                 return created
         except IntegrityError as exc:
-            raise ProjectKeyAlreadyExistsError(
-                f"项目标识已存在: {normalized_key}"
-            ) from exc
+            raise ProjectKeyAlreadyExistsError(f"项目标识已存在: {normalized_key}") from exc
 
     def list_all(
         self,
@@ -105,17 +99,11 @@ class ProjectService:
             logger.debug("查询全部项目: count=%s", len(projects))
             return projects
 
-    def list_visible_to_user(
-        self, user_id: int, limit: int = 100, offset: int = 0
-    ) -> list[Project]:
+    def list_visible_to_user(self, user_id: int, limit: int = 100, offset: int = 0) -> list[Project]:
         """按项目成员关系查询用户有权限查看的项目。"""
         with self._uow_factory() as uow:
-            projects = uow.projects.list_visible_to_user(
-                user_id, limit=limit, offset=offset
-            )
-            logger.debug(
-                "查询用户可见项目: user_id=%s, count=%s", user_id, len(projects)
-            )
+            projects = uow.projects.list_visible_to_user(user_id, limit=limit, offset=offset)
+            logger.debug("查询用户可见项目: user_id=%s, count=%s", user_id, len(projects))
             return projects
 
     def get_by_project_id(self, project_id: str) -> Project | None:

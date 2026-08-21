@@ -34,17 +34,13 @@ class ScriptCaseRepositoryImpl(ScriptCaseRepository):
     def __init__(self, session: Session) -> None:
         self._s = session
 
-    def list_by_script(
-        self, script_id: str, *, include_deleted: bool = False
-    ) -> list[ScriptCase]:
+    def list_by_script(self, script_id: str, *, include_deleted: bool = False) -> list[ScriptCase]:
         stmt = (
             select(ScriptCaseORM)
             .options(joinedload(ScriptCaseORM.script))
             .where(
                 ScriptCaseORM.script_pk
-                == select(TestScriptORM.id)
-                .where(TestScriptORM.script_id == script_id)
-                .scalar_subquery()
+                == select(TestScriptORM.id).where(TestScriptORM.script_id == script_id).scalar_subquery()
             )
             .order_by(ScriptCaseORM.order_index, ScriptCaseORM.id)
         )
@@ -52,20 +48,20 @@ class ScriptCaseRepositoryImpl(ScriptCaseRepository):
             stmt = stmt.where(ScriptCaseORM.deleted.is_(False))
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
-    def get_by_stable_key(
-        self, script_id: str, stable_key: str
-    ) -> ScriptCase | None:
-        orm = self._s.execute(
-            select(ScriptCaseORM)
-            .options(joinedload(ScriptCaseORM.script))
-            .where(
-                ScriptCaseORM.script_pk
-                == select(TestScriptORM.id)
-                .where(TestScriptORM.script_id == script_id)
-                .scalar_subquery(),
-                ScriptCaseORM.stable_key == stable_key,
+    def get_by_stable_key(self, script_id: str, stable_key: str) -> ScriptCase | None:
+        orm = (
+            self._s.execute(
+                select(ScriptCaseORM)
+                .options(joinedload(ScriptCaseORM.script))
+                .where(
+                    ScriptCaseORM.script_pk
+                    == select(TestScriptORM.id).where(TestScriptORM.script_id == script_id).scalar_subquery(),
+                    ScriptCaseORM.stable_key == stable_key,
+                )
             )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def add(self, case: ScriptCase) -> ScriptCase:
@@ -77,9 +73,7 @@ class ScriptCaseRepositoryImpl(ScriptCaseRepository):
         for case in cases:
             if script_pk is None or case.script_id != first_script_id:
                 script_pk = self._s.execute(
-                    select(TestScriptORM.id).where(
-                        TestScriptORM.script_id == case.script_id
-                    )
+                    select(TestScriptORM.id).where(TestScriptORM.script_id == case.script_id)
                 ).scalar_one_or_none()
             if script_pk is None:
                 raise ValueError(f"测试脚本不存在: {case.script_id}")
@@ -99,10 +93,7 @@ class ScriptCaseRepositoryImpl(ScriptCaseRepository):
             self._s.add(orm)
         self._s.flush()
         # flush 后按 stable_key 回读已落库用例（保持与入参顺序一致）
-        return [
-            self.get_by_stable_key(case.script_id, case.stable_key) or case
-            for case in cases
-        ]
+        return [self.get_by_stable_key(case.script_id, case.stable_key) or case for case in cases]
 
     def update(self, case: ScriptCase) -> ScriptCase:
         orm = self._s.get(ScriptCaseORM, case.id)
@@ -122,10 +113,6 @@ class ScriptCaseRepositoryImpl(ScriptCaseRepository):
         return _to_domain(orm)
 
     def delete_by_script(self, script_id: str) -> None:
-        script_pk = select(TestScriptORM.id).where(
-            TestScriptORM.script_id == script_id
-        ).scalar_subquery()
-        self._s.execute(
-            delete(ScriptCaseORM).where(ScriptCaseORM.script_pk == script_pk)
-        )
+        script_pk = select(TestScriptORM.id).where(TestScriptORM.script_id == script_id).scalar_subquery()
+        self._s.execute(delete(ScriptCaseORM).where(ScriptCaseORM.script_pk == script_pk))
         self._s.flush()

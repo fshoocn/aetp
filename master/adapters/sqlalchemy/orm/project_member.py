@@ -19,9 +19,7 @@ from .base import Base, TimestampMixin
 class ProjectMember(Base, TimestampMixin):
     __tablename__ = "project_members"
     __table_args__ = (
-        UniqueConstraint(
-            "project_pk", "user_id", name="uq_project_members_project_user"
-        ),
+        UniqueConstraint("project_pk", "user_id", name="uq_project_members_project_user"),
         CheckConstraint(
             "project_role IN ('viewer','operator','maintainer','owner')",
             name="ck_project_members_role",
@@ -34,12 +32,6 @@ class ProjectMember(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    project_role: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=ProjectRole.VIEWER.value
-    )
-    assigned_by: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_role: Mapped[str] = mapped_column(String(16), nullable=False, default=ProjectRole.VIEWER.value)
+    assigned_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)

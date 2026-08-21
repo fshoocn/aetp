@@ -42,19 +42,13 @@ class RunArtifact(Base, TimestampMixin):
     # sym:artifact_id 产物业务标识（ULID），全局唯一
     artifact_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     # sym:run_pk 所属 Run 代理主键（Run 删除时级联清理）
-    run_pk: Mapped[int] = mapped_column(
-        ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    run_pk: Mapped[int] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     # sym:shard_pk 所属 Shard 代理主键（Run 级产物为空）
-    shard_pk: Mapped[int | None] = mapped_column(
-        ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True
-    )
+    shard_pk: Mapped[int | None] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True)
     # sym:node_id 上传节点业务 ID
     node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:kind 产物类型（report/log_archive/data）
-    kind: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=ArtifactKind.REPORT.value
-    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default=ArtifactKind.REPORT.value)
     # sym:file_ref 文件引用路径（data/artifacts/{run_id}/...）
     file_ref: Mapped[str] = mapped_column(String(512), nullable=False)
     # sym:size 文件字节数
@@ -62,9 +56,7 @@ class RunArtifact(Base, TimestampMixin):
     # sym:sha256 内容哈希（下载校验）
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     # sym:uploaded_at 上传时间（UTC）
-    uploaded_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, nullable=False, default=datetime.utcnow
-    )
+    uploaded_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=datetime.utcnow)
 
     # sym:run 所属 Run ORM 关系
     run: Mapped[TaskRun] = relationship()

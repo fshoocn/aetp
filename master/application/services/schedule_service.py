@@ -90,7 +90,10 @@ class ScheduleService:
 
         logger.info(
             "调度计划已创建: schedule_id=%s task=%s cron=%s interval=%s",
-            schedule.schedule_id, task_id, cron_expression, interval_seconds,
+            schedule.schedule_id,
+            task_id,
+            cron_expression,
+            interval_seconds,
         )
         return schedule
 
@@ -159,23 +162,20 @@ class ScheduleService:
                     await self._fire_schedule(uow, schedule, now)
                     triggered += 1
                 except Exception:
-                    logger.exception(
-                        "调度计划触发失败: schedule_id=%s", schedule.schedule_id
-                    )
+                    logger.exception("调度计划触发失败: schedule_id=%s", schedule.schedule_id)
         if triggered:
             logger.info("调度器本轮触发: %d 个计划", triggered)
         return triggered
 
-    async def _fire_schedule(
-        self, uow: UnitOfWork, schedule: TaskSchedule, now: datetime
-    ) -> None:
+    async def _fire_schedule(self, uow: UnitOfWork, schedule: TaskSchedule, now: datetime) -> None:
         task = uow.test_tasks.get_by_task_id(schedule.task_id, schedule.project_id)
         if task is None or not task.enabled:
             schedule.enabled = False
             uow.task_schedules.update(schedule)
             logger.warning(
                 "调度计划关联任务不存在或已停用，自动禁用: schedule=%s task=%s",
-                schedule.schedule_id, schedule.task_id,
+                schedule.schedule_id,
+                schedule.task_id,
             )
             return
 

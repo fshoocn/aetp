@@ -92,19 +92,23 @@ def test_spec_invalid_invariants():
     # 起始阶段不存在
     with pytest.raises(ValueError, match="起始阶段不存在"):
         WorkflowSpec(
-            aggregate_type="x", start="nope",
+            aggregate_type="x",
+            start="nope",
             stages={"a": WorkflowStage(name="a"), "b": WorkflowStage(name="b")},
-            terminal_success="a", terminal_failure="b",
+            terminal_success="a",
+            terminal_failure="b",
         )
     # 去向不存在（终态合法时才会走到去向校验）
     with pytest.raises(ValueError, match="去向不存在"):
         WorkflowSpec(
-            aggregate_type="x", start="a",
+            aggregate_type="x",
+            start="a",
             stages={
                 "a": WorkflowStage(name="a", on_success="ghost"),
                 "b": WorkflowStage(name="b"),
             },
-            terminal_success="a", terminal_failure="b",
+            terminal_success="a",
+            terminal_failure="b",
         )
 
 
@@ -147,7 +151,11 @@ def test_engine_timeout_fails_stage():
         stages={
             "uploaded": WorkflowStage(name="uploaded", action="persist", on_success="verify"),
             "verify": WorkflowStage(
-                name="verify", action="hang", timeout_s=0.1, retry=0, on_failure="failed",
+                name="verify",
+                action="hang",
+                timeout_s=0.1,
+                retry=0,
+                on_failure="failed",
             ),
             "ready": WorkflowStage(name="ready"),
             "failed": WorkflowStage(name="failed"),
@@ -166,9 +174,7 @@ def test_engine_events_emitted_in_order():
     store = RecordingEventStore()
     engine = WorkflowEngine(store)
     runner = ScriptRunner()
-    progress = WorkflowProgress(
-        aggregate_id="S-1", stage="uploaded", context={"project_id": "p1"}
-    )
+    progress = WorkflowProgress(aggregate_id="S-1", stage="uploaded", context={"project_id": "p1"})
     asyncio.run(engine.advance(SCRIPT_WORKFLOW, progress, runner))
     types = [e.event_type for e in store.events]
     assert types == [
@@ -188,16 +194,12 @@ def test_engine_failure_events_and_error():
     store = RecordingEventStore()
     engine = WorkflowEngine(store)
     runner = ScriptRunner(failures={"verify_script": 3})  # retry=2 耗尽
-    progress = WorkflowProgress(
-        aggregate_id="S-1", stage="uploaded", context={"project_id": "p1"}
-    )
+    progress = WorkflowProgress(aggregate_id="S-1", stage="uploaded", context={"project_id": "p1"})
     asyncio.run(engine.advance(SCRIPT_WORKFLOW, progress, runner))
     assert progress.stage == "failed"
     types = [e.event_type for e in store.events]
     assert types[-1] == "script.workflow.failed"
     assert "script.stage_failed" in types
-    failed_payload = next(
-        e.payload for e in store.events if e.event_type == "script.stage_failed"
-    )
+    failed_payload = next(e.payload for e in store.events if e.event_type == "script.stage_failed")
     assert failed_payload["stage"] == "verify"
     assert failed_payload["attempts"] == 3  # 1 次 + 2 次重试

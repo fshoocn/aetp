@@ -273,11 +273,7 @@ def test_trigger_raises_task_not_found(client) -> None:
     from master.application.errors import TaskNotFoundError
 
     with pytest.raises(TaskNotFoundError):
-        asyncio.run(
-            container.run_trigger_service().trigger(
-                "missing", project_id="p1", triggered_by_user_id=None
-            )
-        )
+        asyncio.run(container.run_trigger_service().trigger("missing", project_id="p1", triggered_by_user_id=None))
 
 
 # ---------------------------------------------------------------------------
@@ -289,9 +285,7 @@ def _run_id_after_trigger(client) -> str:
     container = client.app.state.container
     user_id, task_id = _seed(container)
     return asyncio.run(
-        container.run_trigger_service().trigger(
-            task_id, project_id="p1", triggered_by_user_id=user_id
-        )
+        container.run_trigger_service().trigger(task_id, project_id="p1", triggered_by_user_id=user_id)
     ).run_id
 
 
@@ -505,11 +499,7 @@ def test_http_list_runs(client, auth_header) -> None:
     container = client.app.state.container
     _user_id, task_id = _seed(container)
     _add_tester_as_member(container)
-    asyncio.run(
-        container.run_trigger_service().trigger(
-            task_id, project_id="p1", triggered_by_user_id=None
-        )
-    )
+    asyncio.run(container.run_trigger_service().trigger(task_id, project_id="p1", triggered_by_user_id=None))
 
     resp = client.get("/api/v1/projects/p1/runs", headers=auth_header)
     assert resp.status_code == 200
@@ -521,12 +511,8 @@ def _add_tester_as_member(container) -> None:
     with container.database().session_scope() as s:
         from sqlalchemy import text as sa_text
 
-        tester_id = s.execute(
-            sa_text("SELECT id FROM users WHERE username='tester'")
-        ).scalar_one()
-        project_pk = s.execute(
-            sa_text("SELECT id FROM projects WHERE project_id='p1'")
-        ).scalar_one()
+        tester_id = s.execute(sa_text("SELECT id FROM users WHERE username='tester'")).scalar_one()
+        project_pk = s.execute(sa_text("SELECT id FROM projects WHERE project_id='p1'")).scalar_one()
         s.execute(
             sa_text(
                 "INSERT OR IGNORE INTO project_members "
@@ -539,4 +525,3 @@ def _add_tester_as_member(container) -> None:
                 "now": datetime.now(UTC).replace(tzinfo=None),
             },
         )
-

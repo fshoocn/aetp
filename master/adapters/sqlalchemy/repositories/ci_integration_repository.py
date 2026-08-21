@@ -73,24 +73,24 @@ class ProjectIntegrationRepositoryImpl(ProjectIntegrationRepository):
         self._s = session
 
     def get_by_integration_id(self, integration_id: str) -> ProjectIntegration | None:
-        orm = self._s.execute(
-            select(IntegrationORM)
-            .options(joinedload(IntegrationORM.project))
-            .where(IntegrationORM.integration_id == integration_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(IntegrationORM)
+                .options(joinedload(IntegrationORM.project))
+                .where(IntegrationORM.integration_id == integration_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _integration_to_domain(orm) if orm is not None else None
 
-    def list_by_project(
-        self, project_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[ProjectIntegration]:
+    def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[ProjectIntegration]:
         stmt = (
             select(IntegrationORM)
             .options(joinedload(IntegrationORM.project))
             .where(
                 IntegrationORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
             .order_by(IntegrationORM.id.desc())
             .limit(limit)
@@ -135,9 +135,11 @@ class ProjectIntegrationRepositoryImpl(ProjectIntegrationRepository):
         return _integration_to_domain(orm)
 
     def delete(self, integration_id: str) -> None:
-        orm = self._s.execute(
-            select(IntegrationORM).where(IntegrationORM.integration_id == integration_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(select(IntegrationORM).where(IntegrationORM.integration_id == integration_id))
+            .scalars()
+            .one_or_none()
+        )
         if orm is None:
             raise ValueError(f"集成不存在: {integration_id}")
         self._s.delete(orm)
@@ -149,24 +151,24 @@ class CiTriggerBindingRepositoryImpl(CiTriggerBindingRepository):
         self._s = session
 
     def get_by_binding_id(self, binding_id: str) -> CiTriggerBinding | None:
-        orm = self._s.execute(
-            select(BindingORM)
-            .options(joinedload(BindingORM.integration), joinedload(BindingORM.task))
-            .where(BindingORM.binding_id == binding_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(BindingORM)
+                .options(joinedload(BindingORM.integration), joinedload(BindingORM.task))
+                .where(BindingORM.binding_id == binding_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _binding_to_domain(orm) if orm is not None else None
 
-    def list_by_integration(
-        self, integration_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[CiTriggerBinding]:
+    def list_by_integration(self, integration_id: str, *, limit: int = 100, offset: int = 0) -> list[CiTriggerBinding]:
         stmt = (
             select(BindingORM)
             .options(joinedload(BindingORM.integration), joinedload(BindingORM.task))
             .where(
                 BindingORM.integration_pk
-                == select(IntegrationORM.id)
-                .where(IntegrationORM.integration_id == integration_id)
-                .scalar_subquery()
+                == select(IntegrationORM.id).where(IntegrationORM.integration_id == integration_id).scalar_subquery()
             )
             .order_by(BindingORM.id)
             .limit(limit)
@@ -180,9 +182,7 @@ class CiTriggerBindingRepositoryImpl(CiTriggerBindingRepository):
         ).scalar_one_or_none()
         if integration_pk is None:
             raise ValueError(f"集成不存在: {binding.integration_id}")
-        task_pk = self._s.execute(
-            select(TaskORM.id).where(TaskORM.task_id == binding.task_id)
-        ).scalar_one_or_none()
+        task_pk = self._s.execute(select(TaskORM.id).where(TaskORM.task_id == binding.task_id)).scalar_one_or_none()
         if task_pk is None:
             raise ValueError(f"任务定义不存在: {binding.task_id}")
         orm = BindingORM(
@@ -210,9 +210,7 @@ class CiTriggerBindingRepositoryImpl(CiTriggerBindingRepository):
         return _binding_to_domain(orm)
 
     def delete(self, binding_id: str) -> None:
-        orm = self._s.execute(
-            select(BindingORM).where(BindingORM.binding_id == binding_id)
-        ).scalars().one_or_none()
+        orm = self._s.execute(select(BindingORM).where(BindingORM.binding_id == binding_id)).scalars().one_or_none()
         if orm is None:
             raise ValueError(f"触发绑定不存在: {binding_id}")
         self._s.delete(orm)
@@ -223,42 +221,37 @@ class CiWebhookDeliveryRepositoryImpl(CiWebhookDeliveryRepository):
     def __init__(self, session: Session) -> None:
         self._s = session
 
-    def get_by_integration_delivery(
-        self, integration_id: str, delivery_id: str
-    ) -> CiWebhookDelivery | None:
-        orm = self._s.execute(
-            select(DeliveryORM)
-            .options(joinedload(DeliveryORM.integration))
-            .where(
-                DeliveryORM.integration_pk
-                == select(IntegrationORM.id)
-                .where(IntegrationORM.integration_id == integration_id)
-                .scalar_subquery(),
-                DeliveryORM.delivery_id == delivery_id,
+    def get_by_integration_delivery(self, integration_id: str, delivery_id: str) -> CiWebhookDelivery | None:
+        orm = (
+            self._s.execute(
+                select(DeliveryORM)
+                .options(joinedload(DeliveryORM.integration))
+                .where(
+                    DeliveryORM.integration_pk
+                    == select(IntegrationORM.id)
+                    .where(IntegrationORM.integration_id == integration_id)
+                    .scalar_subquery(),
+                    DeliveryORM.delivery_id == delivery_id,
+                )
             )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _delivery_to_domain(orm) if orm is not None else None
 
-    def list_by_integration(
-        self, integration_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[CiWebhookDelivery]:
+    def list_by_integration(self, integration_id: str, *, limit: int = 100, offset: int = 0) -> list[CiWebhookDelivery]:
         stmt = (
             select(DeliveryORM)
             .options(joinedload(DeliveryORM.integration))
             .where(
                 DeliveryORM.integration_pk
-                == select(IntegrationORM.id)
-                .where(IntegrationORM.integration_id == integration_id)
-                .scalar_subquery()
+                == select(IntegrationORM.id).where(IntegrationORM.integration_id == integration_id).scalar_subquery()
             )
             .order_by(DeliveryORM.id.desc())
             .limit(limit)
             .offset(offset)
         )
-        return [
-            _delivery_to_domain(o)
-            for o in self._s.execute(stmt).scalars().all()
-        ]
+        return [_delivery_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
     def add(self, delivery: CiWebhookDelivery) -> CiWebhookDelivery:
         integration_pk = self._s.execute(

@@ -25,9 +25,7 @@ def _to_domain(orm: TestScriptORM) -> TestScript:
         size=orm.size,
         sha256=orm.sha256,
         config=dict(orm.config or {}),
-        hardware_requirements=HardwareRequirements.model_validate(
-            orm.hardware_requirements or {}
-        ),
+        hardware_requirements=HardwareRequirements.model_validate(orm.hardware_requirements or {}),
         parse_status=ScriptParseStatus(orm.parse_status),
         parse_location=ScriptParseLocation(orm.parse_location),
         result_parse_location=ScriptParseLocation(orm.result_parse_location),
@@ -44,50 +42,52 @@ class TestScriptRepositoryImpl(TestScriptRepository):
         self._s = session
 
     def get_by_script_id(self, script_id: str) -> TestScript | None:
-        orm = self._s.execute(
-            select(TestScriptORM)
-            .options(joinedload(TestScriptORM.project))
-            .where(TestScriptORM.script_id == script_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(TestScriptORM)
+                .options(joinedload(TestScriptORM.project))
+                .where(TestScriptORM.script_id == script_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def get_by_hash(self, sha256: str) -> TestScript | None:
         """按内容哈希查找（同 hash 重复上传幂等复用）。"""
-        orm = self._s.execute(
-            select(TestScriptORM)
-            .options(joinedload(TestScriptORM.project))
-            .where(TestScriptORM.sha256 == sha256)
-        ).scalars().one_or_none()
-        return _to_domain(orm) if orm is not None else None
-
-    def find_by_name_version(
-        self, project_id: str, name: str, version: int
-    ) -> TestScript | None:
-        orm = self._s.execute(
-            select(TestScriptORM)
-            .options(joinedload(TestScriptORM.project))
-            .where(
-                TestScriptORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery(),
-                TestScriptORM.name == name,
-                TestScriptORM.version == version,
+        orm = (
+            self._s.execute(
+                select(TestScriptORM).options(joinedload(TestScriptORM.project)).where(TestScriptORM.sha256 == sha256)
             )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
-    def list_by_project(
-        self, project_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[TestScript]:
+    def find_by_name_version(self, project_id: str, name: str, version: int) -> TestScript | None:
+        orm = (
+            self._s.execute(
+                select(TestScriptORM)
+                .options(joinedload(TestScriptORM.project))
+                .where(
+                    TestScriptORM.project_pk
+                    == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery(),
+                    TestScriptORM.name == name,
+                    TestScriptORM.version == version,
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        return _to_domain(orm) if orm is not None else None
+
+    def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[TestScript]:
         stmt = (
             select(TestScriptORM)
             .options(joinedload(TestScriptORM.project))
             .where(
                 TestScriptORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
             .order_by(TestScriptORM.id.desc())
             .limit(limit)
@@ -113,9 +113,7 @@ class TestScriptRepositoryImpl(TestScriptRepository):
             size=script.size,
             sha256=script.sha256,
             config=script.config,
-            hardware_requirements=script.hardware_requirements.model_dump(
-                mode="json", exclude_none=True
-            ),
+            hardware_requirements=script.hardware_requirements.model_dump(mode="json", exclude_none=True),
             parse_status=script.parse_status.value,
             parse_location=script.parse_location.value,
             result_parse_location=script.result_parse_location.value,
@@ -135,9 +133,7 @@ class TestScriptRepositoryImpl(TestScriptRepository):
         orm.size = script.size
         orm.sha256 = script.sha256
         orm.config = script.config
-        orm.hardware_requirements = script.hardware_requirements.model_dump(
-            mode="json", exclude_none=True
-        )
+        orm.hardware_requirements = script.hardware_requirements.model_dump(mode="json", exclude_none=True)
         orm.parse_status = script.parse_status.value
         orm.parse_location = script.parse_location.value
         orm.result_parse_location = script.result_parse_location.value
@@ -148,9 +144,7 @@ class TestScriptRepositoryImpl(TestScriptRepository):
         return _to_domain(orm)
 
     def delete(self, script_id: str) -> None:
-        orm = self._s.execute(
-            select(TestScriptORM).where(TestScriptORM.script_id == script_id)
-        ).scalars().one_or_none()
+        orm = self._s.execute(select(TestScriptORM).where(TestScriptORM.script_id == script_id)).scalars().one_or_none()
         if orm is None:
             raise ValueError(f"测试脚本不存在: script_id={script_id}")
         self._s.delete(orm)

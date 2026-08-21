@@ -32,11 +32,11 @@ _SETTINGS = MasterSettings(
 
 def test_backoff_increases_with_attempts():
     b = ExponentialBackoff(base_delay_s=1.0, max_delay_s=8.0, jitter_ratio=0.0)
-    assert b.next() == pytest.approx(1.0)   # 1
-    assert b.next() == pytest.approx(2.0)   # 2
-    assert b.next() == pytest.approx(4.0)   # 4
-    assert b.next() == pytest.approx(8.0)   # 封顶
-    assert b.next() == pytest.approx(8.0)   # 继续封顶
+    assert b.next() == pytest.approx(1.0)  # 1
+    assert b.next() == pytest.approx(2.0)  # 2
+    assert b.next() == pytest.approx(4.0)  # 4
+    assert b.next() == pytest.approx(8.0)  # 封顶
+    assert b.next() == pytest.approx(8.0)  # 继续封顶
     assert b.attempts == 5
 
 
@@ -111,6 +111,7 @@ def test_transport_port_contract():
 
 def _fake_aiomqtt(fail_first_connect: bool = False):
     """构造 fake aiomqtt 模块：Client 可选首次连接失败。"""
+
     class FakeClient:
         _counter = 0
         instances: list[FakeClient] = []  # noqa: RUF012 - 测试桩实例注册表

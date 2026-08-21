@@ -88,9 +88,7 @@ class ArtifactService:
                 raise RunNotFoundError(f"Run 不存在或不属于当前项目: {run_id}")
             return uow.run_artifacts.list_by_run(run_id)
 
-    def get_by_artifact_id(
-        self, artifact_id: str, project_id: str
-    ) -> RunArtifact | None:
+    def get_by_artifact_id(self, artifact_id: str, project_id: str) -> RunArtifact | None:
         """项目范围产物详情。"""
         with self._uow_factory() as uow:
             artifact = uow.run_artifacts.get_by_artifact_id(artifact_id)

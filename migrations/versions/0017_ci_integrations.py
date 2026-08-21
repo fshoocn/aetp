@@ -69,7 +69,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint(
-            "integration_pk", "task_pk",
+            "integration_pk",
+            "task_pk",
             name="uq_ci_trigger_bindings_integration_task",
         ),
     )
@@ -98,7 +99,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint(
-            "integration_pk", "delivery_id",
+            "integration_pk",
+            "delivery_id",
             name="uq_ci_webhook_deliveries_integration_delivery",
         ),
     )

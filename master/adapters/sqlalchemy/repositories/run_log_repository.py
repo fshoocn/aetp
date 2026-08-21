@@ -34,17 +34,13 @@ class RunLogRepositoryImpl(RunLogRepository):
         self._s = session
 
     def add(self, log: RunLog) -> RunLog:
-        run_pk = self._s.execute(
-            select(TaskRunORM.id).where(TaskRunORM.run_id == log.run_id)
-        ).scalar_one_or_none()
+        run_pk = self._s.execute(select(TaskRunORM.id).where(TaskRunORM.run_id == log.run_id)).scalar_one_or_none()
         if run_pk is None:
             raise ValueError(f"Run 不存在: {log.run_id}")
         shard_pk = None
         if log.shard_id is not None:
             shard_pk = self._s.execute(
-                select(RunShardORM.id).where(
-                    RunShardORM.shard_id == log.shard_id
-                )
+                select(RunShardORM.id).where(RunShardORM.shard_id == log.shard_id)
             ).scalar_one_or_none()
         orm = RunLogORM(
             run_pk=run_pk,
@@ -72,42 +68,33 @@ class RunLogRepositoryImpl(RunLogRepository):
         """按 (run_id, sequence) 判断是否已存在（幂等去重）。"""
         orm = self._s.execute(
             select(RunLogORM.id).where(
-                RunLogORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery(),
+                RunLogORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery(),
                 RunLogORM.sequence == sequence,
             )
         ).scalar_one_or_none()
         return orm is not None
 
-    def existing_sequences(
-        self, run_id: str, sequences: list[int]
-    ) -> set[int]:
+    def existing_sequences(self, run_id: str, sequences: list[int]) -> set[int]:
         """批量查询已存在的 sequence 集合，避免逐条 exists N+1。"""
         if not sequences:
             return set()
-        rows = self._s.execute(
-            select(RunLogORM.sequence).where(
-                RunLogORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery(),
-                RunLogORM.sequence.in_(sequences),
+        rows = (
+            self._s.execute(
+                select(RunLogORM.sequence).where(
+                    RunLogORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery(),
+                    RunLogORM.sequence.in_(sequences),
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return set(rows)
 
     def list_by_run(self, run_id: str, *, after_sequence: int = 0) -> list[RunLog]:
         stmt = (
             select(RunLogORM)
             .options(joinedload(RunLogORM.run), joinedload(RunLogORM.shard))
-            .where(
-                RunLogORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery()
-            )
+            .where(RunLogORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery())
             .order_by(RunLogORM.sequence)
         )
         if after_sequence:
@@ -118,12 +105,7 @@ class RunLogRepositoryImpl(RunLogRepository):
         """返回 Run 已落库的最大日志 sequence（无日志返回 0）。"""
         stmt = (
             select(RunLogORM.sequence)
-            .where(
-                RunLogORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery()
-            )
+            .where(RunLogORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery())
             .order_by(RunLogORM.sequence.desc())
             .limit(1)
         )

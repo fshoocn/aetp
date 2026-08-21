@@ -23,10 +23,7 @@ def _create_active_user(client, username: str) -> int:
     user = service.create_user(username, "user-pass-123", username)
     with client.app.state.container.database().session_scope() as session:
         session.execute(
-            text(
-                "UPDATE users SET account_status='active' "
-                "WHERE username=:username"
-            ),
+            text("UPDATE users SET account_status='active' WHERE username=:username"),
             {"username": username},
         )
     return user.id
@@ -78,9 +75,7 @@ def _create_device(client, node_id: str) -> None:
 def _add_device_to_node(client, node_id: str, device_id: str) -> None:
     """向已有 Node 添加第二个外设。"""
     with client.app.state.container.database().session_scope() as session:
-        node_pk = session.execute(
-            select(Node.id).where(Node.node_id == node_id)
-        ).scalar_one()
+        node_pk = session.execute(select(Node.id).where(Node.node_id == node_id)).scalar_one()
         session.add(
             Device(
                 device_id=device_id,
@@ -111,13 +106,9 @@ def test_admin_can_bind_update_list_and_unbind_node(client):
     assert binding["name"] == "节点 node-001"
     assert binding["online"] is False
     assert binding["devices"][0]["device_id"] == "node-001-device"
-    assert [
-        device["device_id"] for device in binding["devices"]
-    ] == ["node-001-device", "node-001-device-2"]
+    assert [device["device_id"] for device in binding["devices"]] == ["node-001-device", "node-001-device-2"]
 
-    response = client.get(
-        f"/api/v1/projects/{project_id}/nodes", headers=headers
-    )
+    response = client.get(f"/api/v1/projects/{project_id}/nodes", headers=headers)
     assert response.status_code == 200
     assert len(response.json()) == 1
 
@@ -135,9 +126,7 @@ def test_admin_can_bind_update_list_and_unbind_node(client):
     )
     assert response.status_code == 204
 
-    response = client.get(
-        f"/api/v1/projects/{project_id}/nodes", headers=headers
-    )
+    response = client.get(f"/api/v1/projects/{project_id}/nodes", headers=headers)
     assert response.status_code == 200
     assert response.json() == []
 
@@ -194,9 +183,7 @@ def test_viewer_can_list_but_cannot_manage_nodes(client):
     assert response.status_code == 201
     viewer_headers = _login(client, "node-viewer")
 
-    response = client.get(
-        f"/api/v1/projects/{project_id}/nodes", headers=viewer_headers
-    )
+    response = client.get(f"/api/v1/projects/{project_id}/nodes", headers=viewer_headers)
     assert response.status_code == 200
     assert response.json()[0]["node_id"] == "node-003"
 
@@ -222,12 +209,8 @@ def test_binding_rejects_unknown_and_duplicate_nodes(client):
 
     _create_device(client, "node-004")
     payload = {"node_id": "node-004"}
-    assert client.post(
-        f"/api/v1/projects/{project_id}/nodes", headers=headers, json=payload
-    ).status_code == 201
-    response = client.post(
-        f"/api/v1/projects/{project_id}/nodes", headers=headers, json=payload
-    )
+    assert client.post(f"/api/v1/projects/{project_id}/nodes", headers=headers, json=payload).status_code == 201
+    response = client.post(f"/api/v1/projects/{project_id}/nodes", headers=headers, json=payload)
     assert response.status_code == 409
 
 
@@ -236,15 +219,16 @@ def test_non_member_cannot_read_project_nodes(client):
     admin_headers = _create_admin(client)
     project_id = _create_project(client, admin_headers, "PRIVATE_NODES")
     _create_device(client, "node-005")
-    assert client.post(
-        f"/api/v1/projects/{project_id}/nodes",
-        headers=admin_headers,
-        json={"node_id": "node-005"},
-    ).status_code == 201
+    assert (
+        client.post(
+            f"/api/v1/projects/{project_id}/nodes",
+            headers=admin_headers,
+            json={"node_id": "node-005"},
+        ).status_code
+        == 201
+    )
 
     _create_active_user(client, "node-outsider")
     outsider_headers = _login(client, "node-outsider")
-    response = client.get(
-        f"/api/v1/projects/{project_id}/nodes", headers=outsider_headers
-    )
+    response = client.get(f"/api/v1/projects/{project_id}/nodes", headers=outsider_headers)
     assert response.status_code == 404

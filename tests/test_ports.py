@@ -92,9 +92,7 @@ class ConsoleSender:
     def __init__(self) -> None:
         self.sent: list[tuple[NotificationMessage, NotificationEndpoint]] = []
 
-    async def send(
-        self, message: NotificationMessage, endpoint: NotificationEndpoint
-    ) -> DeliveryReceipt:
+    async def send(self, message: NotificationMessage, endpoint: NotificationEndpoint) -> DeliveryReceipt:
         self.sent.append((message, endpoint))
         return DeliveryReceipt(status="succeeded", detail="console")
 
@@ -221,8 +219,8 @@ def test_business_logic_depends_on_ports_not_adapters():
 
 def test_admission_pipeline_order_and_deny():
     """准入 Hook 按 (order, name) 稳定排序；任一 deny 即拒绝（fail closed）。"""
-    allow = AllowAllHook()   # order 10
-    deny = DenyHook()        # order 20
+    allow = AllowAllHook()  # order 10
+    deny = DenyHook()  # order 20
     context = HookContext(stage="run.before_dispatch")
 
     allowed = asyncio.run(_run_admission_pipeline([deny, allow], context))

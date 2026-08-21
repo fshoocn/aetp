@@ -103,12 +103,7 @@ def test_non_member_cannot_see_project(client):
     with client.app.state.container.database().session_scope() as session:
         from sqlalchemy import text
 
-        session.execute(
-            text(
-                "UPDATE users SET account_status='active' "
-                "WHERE username='regular-user'"
-            )
-        )
+        session.execute(text("UPDATE users SET account_status='active' WHERE username='regular-user'"))
     response = client.post(
         "/api/v1/auth/login",
         json={"username": "regular-user", "password": "user-pass-123"},
@@ -132,12 +127,7 @@ def test_project_owner_can_view_project(client):
     with client.app.state.container.database().session_scope() as session:
         from sqlalchemy import text
 
-        session.execute(
-            text(
-                "UPDATE users SET account_status='active' "
-                "WHERE username='project-owner'"
-            )
-        )
+        session.execute(text("UPDATE users SET account_status='active' WHERE username='project-owner'"))
 
     response = client.post(
         "/api/v1/projects",

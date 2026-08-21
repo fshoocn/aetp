@@ -47,14 +47,10 @@ class OutboxMessage(Base, TimestampMixin):
     # sym:qos MQTT QoS（0/1/2，CHECK 约束）
     qos: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # sym:status 投递状态（pending/sending/succeeded/retrying/exhausted/cancelled）
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=OutboxStatus.PENDING.value
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=OutboxStatus.PENDING.value)
     # sym:attempts 已尝试发送次数（重试计数）
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # sym:next_attempt_at 下次发送时间（失败退避；(status, next_attempt_at) 索引）
-    next_attempt_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime, nullable=True
-    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # sym:sent_at 最近一次发送时间
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

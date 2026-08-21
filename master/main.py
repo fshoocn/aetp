@@ -211,14 +211,17 @@ class RequestLoggingMiddleware:
         except Exception:
             logger.exception(
                 "HTTP 请求异常: %s %s (%.2f ms)",
-                scope["method"], scope["path"],
+                scope["method"],
+                scope["path"],
                 (time.perf_counter() - started_at) * 1000,
             )
             raise
         else:
             logger.info(
                 "HTTP 请求完成: %s %s -> %s (%.2f ms)",
-                scope["method"], scope["path"], status_code,
+                scope["method"],
+                scope["path"],
+                status_code,
                 (time.perf_counter() - started_at) * 1000,
             )
 
@@ -250,4 +253,3 @@ if web_root is not None:
     logger.info("前端静态文件已挂载: %s", web_root)
 else:
     logger.info("未发现前端构建产物，跳过静态文件挂载（仅提供 API）")
-

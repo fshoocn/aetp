@@ -27,15 +27,11 @@ class EventDelivery(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     delivery_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    project_pk: Mapped[int] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     subscription_id: Mapped[str] = mapped_column(String(64), nullable=False)
     endpoint_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="pending"
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

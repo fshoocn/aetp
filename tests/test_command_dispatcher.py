@@ -45,9 +45,7 @@ _SETTINGS = AgentSettings(
 )
 
 
-def _make_dispatcher(
-    tmp_path, *, registered: bool = True
-) -> tuple[CommandDispatcher, SQLiteLedger]:
+def _make_dispatcher(tmp_path, *, registered: bool = True) -> tuple[CommandDispatcher, SQLiteLedger]:
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
     dispatcher = CommandDispatcher(
         _SETTINGS,
@@ -90,9 +88,7 @@ def _run_assign_envelope(
         message_id=message_id or uuid.uuid4().hex,
         message_type=MessageType.RUN_ASSIGN.value,
         sent_at=_now(),
-        sender=Sender(
-            kind=SenderKind.MASTER, id=sender_id, session_id="master-sess"
-        ),
+        sender=Sender(kind=SenderKind.MASTER, id=sender_id, session_id="master-sess"),
         trace_id="bench-001",
         payload=payload.model_dump(mode="json"),
     )
@@ -110,9 +106,7 @@ def _run_cancel_envelope(
         message_id=message_id or uuid.uuid4().hex,
         message_type=MessageType.RUN_CANCEL.value,
         sent_at=_now(),
-        sender=Sender(
-            kind=SenderKind.MASTER, id=sender_id, session_id="master-sess"
-        ),
+        sender=Sender(kind=SenderKind.MASTER, id=sender_id, session_id="master-sess"),
         trace_id="bench-001",
         payload=payload.model_dump(mode="json"),
     )
@@ -128,6 +122,7 @@ def _mqtt_message(envelope: Envelope, topic: str) -> MqttMessage:
 # -----------------------------------------------------------------------
 # run.assign：先 claim 后 ACK
 # -----------------------------------------------------------------------
+
 
 def test_run_assign_claims_and_enqueues_ack(tmp_path) -> None:
     dispatcher, ledger = _make_dispatcher(tmp_path)
@@ -156,6 +151,7 @@ def test_run_assign_claims_and_enqueues_ack(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # 重复 assign 幂等
 # -----------------------------------------------------------------------
+
 
 def test_duplicate_assign_is_idempotent(tmp_path) -> None:
     dispatcher, ledger = _make_dispatcher(tmp_path)
@@ -197,6 +193,7 @@ def test_duplicate_attempt_with_different_message_id(tmp_path) -> None:
 # 未注册不接受命令
 # -----------------------------------------------------------------------
 
+
 def test_assign_rejected_when_not_registered(tmp_path) -> None:
     dispatcher, ledger = _make_dispatcher(tmp_path, registered=False)
     env = _run_assign_envelope()
@@ -219,6 +216,7 @@ def test_cancel_rejected_when_not_registered(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # run.cancel
 # -----------------------------------------------------------------------
+
 
 def test_run_cancel_sets_cancelled_flag(tmp_path) -> None:
     dispatcher, ledger = _make_dispatcher(tmp_path)
@@ -291,6 +289,7 @@ def test_run_cancel_already_succeeded_is_silent(tmp_path) -> None:
 # 非法消息
 # -----------------------------------------------------------------------
 
+
 def test_invalid_envelope_rejected(tmp_path) -> None:
     dispatcher, ledger = _make_dispatcher(tmp_path)
     topic = command_topic("bench-001", "assign")
@@ -328,6 +327,7 @@ def test_node_id_mismatch_rejected(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # 多 Run 并行 claim
 # -----------------------------------------------------------------------
+
 
 def test_multiple_runs_claimed_independently(tmp_path) -> None:
     dispatcher, ledger = _make_dispatcher(tmp_path)

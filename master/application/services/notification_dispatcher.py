@@ -40,9 +40,7 @@ class NotificationDispatcher:
         delivered = 0
 
         with self._uow_factory() as uow:
-            subscriptions = uow.event_subscriptions.list_by_project(
-                event.project_id or "", limit=1000
-            )
+            subscriptions = uow.event_subscriptions.list_by_project(event.project_id or "", limit=1000)
 
         for sub in subscriptions:
             if not sub.enabled:
@@ -52,9 +50,7 @@ class NotificationDispatcher:
 
             # 幂等检查
             with self._uow_factory() as uow:
-                existing = uow.event_deliveries.get_by_event_subscription(
-                    event.event_id, sub.subscription_id
-                )
+                existing = uow.event_deliveries.get_by_event_subscription(event.event_id, sub.subscription_id)
                 if existing is not None:
                     continue
 

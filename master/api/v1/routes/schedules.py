@@ -57,9 +57,7 @@ def create_schedule(
             created_by=_access.user.persisted_id,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return ScheduleOut.model_validate(schedule)
 
 
@@ -83,9 +81,7 @@ def update_schedule(
             enabled=body.enabled,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return ScheduleOut.model_validate(schedule)
 
 

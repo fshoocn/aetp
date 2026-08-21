@@ -35,33 +35,22 @@ class Task(Base, TimestampMixin):
         Index("ix_tasks_project_status", "project_pk", "status"),
         Index("ix_tasks_created_at", "created_at"),
         CheckConstraint(
-            "status IN ('pending','dispatching','running','cancelling',"
-            "'succeeded','failed','cancelled','timed_out')",
+            "status IN ('pending','dispatching','running','cancelling','succeeded','failed','cancelled','timed_out')",
             name="ck_tasks_status",
         ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    project_pk: Mapped[int] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    device_pk: Mapped[int] = mapped_column(
-        ForeignKey("devices.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
-    created_by: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=TaskStatus.PENDING.value
-    )
+    project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
+    device_pk: Mapped[int] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"), nullable=False, index=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=TaskStatus.PENDING.value)
     command: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     result: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
-    finished_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime, nullable=True
-    )
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
     project: Mapped[Project] = relationship()
     device: Mapped[Device] = relationship()

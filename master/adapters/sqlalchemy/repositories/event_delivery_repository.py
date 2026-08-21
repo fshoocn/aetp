@@ -35,11 +35,15 @@ class EventDeliveryRepositoryImpl(EventDeliveryRepository):
         self._s = session
 
     def get_by_delivery_id(self, delivery_id: str) -> EventDelivery | None:
-        orm = self._s.execute(
-            select(DeliveryORM)
-            .options(joinedload(DeliveryORM.project))
-            .where(DeliveryORM.delivery_id == delivery_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(DeliveryORM)
+                .options(joinedload(DeliveryORM.project))
+                .where(DeliveryORM.delivery_id == delivery_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def list_by_project(
@@ -55,9 +59,7 @@ class EventDeliveryRepositoryImpl(EventDeliveryRepository):
             .options(joinedload(DeliveryORM.project))
             .where(
                 DeliveryORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
             .order_by(DeliveryORM.id.desc())
             .limit(limit)
@@ -91,17 +93,19 @@ class EventDeliveryRepositoryImpl(EventDeliveryRepository):
         self._s.refresh(orm)
         return _to_domain(orm)
 
-    def get_by_event_subscription(
-        self, event_id: str, subscription_id: str
-    ) -> EventDelivery | None:
-        orm = self._s.execute(
-            select(DeliveryORM)
-            .options(joinedload(DeliveryORM.project))
-            .where(
-                DeliveryORM.event_id == event_id,
-                DeliveryORM.subscription_id == subscription_id,
+    def get_by_event_subscription(self, event_id: str, subscription_id: str) -> EventDelivery | None:
+        orm = (
+            self._s.execute(
+                select(DeliveryORM)
+                .options(joinedload(DeliveryORM.project))
+                .where(
+                    DeliveryORM.event_id == event_id,
+                    DeliveryORM.subscription_id == subscription_id,
+                )
             )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def update(self, delivery: EventDelivery) -> EventDelivery:

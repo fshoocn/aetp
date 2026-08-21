@@ -61,10 +61,7 @@ class ArtifactUploadService:
         body = b"".join(
             [
                 f"--{boundary}\r\n".encode(),
-                (
-                    f'Content-Disposition: form-data; name="file"; '
-                    f'filename="{upload_name}"\r\n'
-                ).encode(),
+                (f'Content-Disposition: form-data; name="file"; filename="{upload_name}"\r\n').encode(),
                 f"Content-Type: {content_type}\r\n\r\n".encode(),
                 data,
                 f"\r\n--{boundary}--\r\n".encode(),
@@ -73,9 +70,7 @@ class ArtifactUploadService:
         parts = urlsplit(url)
         query = list(parse_qsl(parts.query, keep_blank_values=True))
         query.append(("kind", kind))
-        target = urlunsplit(
-            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
-        )
+        target = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
         request = Request(
             target,
             data=body,
@@ -90,9 +85,7 @@ class ArtifactUploadService:
                 payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise ArtifactUploadError(
-                f"Master 产物上传失败: HTTP {exc.code}: {detail[:500]}"
-            ) from exc
+            raise ArtifactUploadError(f"Master 产物上传失败: HTTP {exc.code}: {detail[:500]}") from exc
         except (URLError, OSError, json.JSONDecodeError) as exc:
             raise ArtifactUploadError(f"Master 产物上传失败: {exc}") from exc
         if not isinstance(payload, dict) or not payload.get("artifact_id"):

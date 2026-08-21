@@ -55,9 +55,7 @@ def _issue_token_response(auth: AuthService, user: User) -> TokenResponse:
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(
-    body: RegisterRequest, auth: AuthDep, request: Request
-) -> UserOut:
+def register(body: RegisterRequest, auth: AuthDep, request: Request) -> UserOut:
     """注册新用户，初始状态为 pending；按 IP 限流防滥用。"""
     if not register_limiter.allow(client_ip(request)):
         raise HTTPException(

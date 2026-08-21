@@ -86,8 +86,7 @@ def test_case_duration_settings_are_loaded_from_env(tmp_path):
 
     env = tmp_path / "duration.env"
     env.write_text(
-        "AETP_MASTER_CASE_DURATION_DEFAULT_S=45.5\n"
-        "AETP_MASTER_CASE_DURATION_ANOMALY_PERCENT=75\n",
+        "AETP_MASTER_CASE_DURATION_DEFAULT_S=45.5\nAETP_MASTER_CASE_DURATION_ANOMALY_PERCENT=75\n",
         encoding="utf-8",
     )
     settings = MasterSettings.from_env_file(env)

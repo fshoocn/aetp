@@ -32,26 +32,18 @@ class ProjectRepositoryImpl(ProjectRepository):
         self._s = session
 
     def get_by_project_id(self, project_id: str) -> Project | None:
-        orm = self._s.execute(
-            select(ProjectORM).where(ProjectORM.project_id == project_id)
-        ).scalar_one_or_none()
+        orm = self._s.execute(select(ProjectORM).where(ProjectORM.project_id == project_id)).scalar_one_or_none()
         return _to_domain(orm) if orm is not None else None
 
     def get_by_key(self, project_key: str) -> Project | None:
-        orm = self._s.execute(
-            select(ProjectORM).where(ProjectORM.project_key == project_key)
-        ).scalar_one_or_none()
+        orm = self._s.execute(select(ProjectORM).where(ProjectORM.project_key == project_key)).scalar_one_or_none()
         return _to_domain(orm) if orm is not None else None
 
     def list_all(self, *, limit: int = 100, offset: int = 0) -> list[Project]:
-        stmt = (
-            select(ProjectORM).order_by(ProjectORM.id.desc()).limit(limit).offset(offset)
-        )
+        stmt = select(ProjectORM).order_by(ProjectORM.id.desc()).limit(limit).offset(offset)
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
-    def list_visible_to_user(
-        self, user_id: int, *, limit: int = 100, offset: int = 0
-    ) -> list[Project]:
+    def list_visible_to_user(self, user_id: int, *, limit: int = 100, offset: int = 0) -> list[Project]:
         stmt = (
             select(ProjectORM, ProjectMemberORM.project_role)
             .join(
@@ -63,10 +55,7 @@ class ProjectRepositoryImpl(ProjectRepository):
             .limit(limit)
             .offset(offset)
         )
-        return [
-            _to_domain(project, role)
-            for project, role in self._s.execute(stmt).all()
-        ]
+        return [_to_domain(project, role) for project, role in self._s.execute(stmt).all()]
 
     def add(self, project: Project) -> Project:
         orm = ProjectORM(

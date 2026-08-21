@@ -18,15 +18,11 @@ class MySQLDatabase(BaseDatabase):
         connect_args = dict(config.connect_args)
         # 常用默认：utf8mb4 字符集
         connect_args.setdefault("charset", "utf8mb4")
-        return create_engine(
-            url, **config.engine_kwargs, connect_args=connect_args
-        )
+        return create_engine(url, **config.engine_kwargs, connect_args=connect_args)
 
 
 def _ensure_driver_installed(driver: str, db_label: str) -> None:
     try:
         __import__(driver)
     except ImportError as exc:
-        raise RuntimeError(
-            f"使用 {db_label} 需要安装驱动 {driver}: pip install {driver}"
-        ) from exc
+        raise RuntimeError(f"使用 {db_label} 需要安装驱动 {driver}: pip install {driver}") from exc

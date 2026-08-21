@@ -10,9 +10,7 @@ from master.domain.state_machine import InvalidStateTransitionError
 
 
 def _task(status: TaskStatus | None = None) -> Task:
-    task = Task.create(
-        task_id="T-1", project_id="p1", device_id="d1", command={}, created_by=1
-    )
+    task = Task.create(task_id="T-1", project_id="p1", device_id="d1", command={}, created_by=1)
     if status is not None:
         task.status = status
     return task

@@ -35,18 +35,12 @@ def upgrade() -> None:
         sa.Column("replaced_by_hash", sa.String(length=64), nullable=True),
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["user_pk"], ["users.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["user_pk"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("token_hash"),
     )
-    op.create_index(
-        "ix_refresh_tokens_user_pk", "refresh_tokens", ["user_pk"]
-    )
-    op.create_index(
-        "ix_refresh_tokens_expires_at", "refresh_tokens", ["expires_at"]
-    )
+    op.create_index("ix_refresh_tokens_user_pk", "refresh_tokens", ["user_pk"])
+    op.create_index("ix_refresh_tokens_expires_at", "refresh_tokens", ["expires_at"])
 
 
 def downgrade() -> None:

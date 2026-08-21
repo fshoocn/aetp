@@ -103,9 +103,7 @@ class RunRetryService:
             case_filter: list[str] | None = None
             retried: tuple[str, ...] = ()
             if only_failed:
-                failed = self._failed_case_keys(
-                    uow.run_case_results.list_by_run(run_id)
-                )
+                failed = self._failed_case_keys(uow.run_case_results.list_by_run(run_id))
                 case_filter = sorted(failed)
                 retried = tuple(case_filter)
 
@@ -148,8 +146,4 @@ class RunRetryService:
             current = latest.get(result.case_key)
             if current is None or result.attempt_no > current.attempt_no:
                 latest[result.case_key] = result
-        return {
-            case_key
-            for case_key, result in latest.items()
-            if result.status in _RETRYABLE_CASE_STATUS
-        }
+        return {case_key for case_key, result in latest.items() if result.status in _RETRYABLE_CASE_STATUS}

@@ -30,12 +30,9 @@ if TYPE_CHECKING:
 class ShardAttempt(Base, TimestampMixin):
     __tablename__ = "shard_attempts"
     __table_args__ = (
-        UniqueConstraint(
-            "shard_pk", "attempt_no", name="uq_shard_attempts_shard_attempt"
-        ),
+        UniqueConstraint("shard_pk", "attempt_no", name="uq_shard_attempts_shard_attempt"),
         CheckConstraint(
-            "status IN ('created','dispatched','acked','running','succeeded',"
-            "'failed','cancelled','timed_out')",
+            "status IN ('created','dispatched','acked','running','succeeded','failed','cancelled','timed_out')",
             name="ck_shard_attempts_status",
         ),
     )
@@ -45,9 +42,7 @@ class ShardAttempt(Base, TimestampMixin):
     # sym:attempt_id Attempt 业务标识（ULID），全局唯一
     attempt_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     # sym:shard_pk 所属 Shard 代理主键（Shard 删除时级联清理）
-    shard_pk: Mapped[int] = mapped_column(
-        ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    shard_pk: Mapped[int] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=False, index=True)
     # sym:attempt_no 尝试序号（自 1 递增）；(shard_pk, attempt_no) 唯一
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
     # sym:node_id 执行节点业务 ID（failover 换节点时变化，无 FK 保留业务键）
@@ -55,9 +50,7 @@ class ShardAttempt(Base, TimestampMixin):
     # sym:device_ids 本次 Attempt 占用的全部设备业务 ID；历史 Attempt 可为空
     device_ids: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # sym:status 尝试状态（created/dispatched/acked/running/...）
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=ShardAttemptStatus.CREATED.value
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=ShardAttemptStatus.CREATED.value)
     # sym:error_code 领域错误码（如 NODE_CAPABILITY_MISMATCH）
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:error_message 失败描述（历史失败信息全量保留，D-20）

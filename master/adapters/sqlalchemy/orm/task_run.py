@@ -40,8 +40,7 @@ class TaskRun(Base, TimestampMixin):
             name="ck_task_runs_trigger_type",
         ),
         CheckConstraint(
-            "status IN ('created','dispatched','acked','running','succeeded',"
-            "'failed','cancelled','timed_out','lost')",
+            "status IN ('created','dispatched','acked','running','succeeded','failed','cancelled','timed_out','lost')",
             name="ck_task_runs_status",
         ),
     )
@@ -51,9 +50,7 @@ class TaskRun(Base, TimestampMixin):
     # sym:run_id Run 业务标识（ULID），全局唯一，对外暴露
     run_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     # sym:project_pk 所属项目代理主键（Run 的 project 必须与任务定义一致）
-    project_pk: Mapped[int] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
+    project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
     # sym:task_pk 引用的任务定义代理主键（只引用不复制，FK RESTRICT）
     # nullable: 任务定义删除后置空，Run 依赖自身快照仍可展示历史
     task_pk: Mapped[int | None] = mapped_column(
@@ -66,33 +63,23 @@ class TaskRun(Base, TimestampMixin):
     # sym:split_policy 本次 Run 的分割策略快照（§18.6）
     split_policy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # sym:trigger_type 触发来源（manual_web/api/schedule/ci_webhook/retry/recovery）
-    trigger_type: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=TriggerType.MANUAL_WEB.value
-    )
+    trigger_type: Mapped[str] = mapped_column(String(16), nullable=False, default=TriggerType.MANUAL_WEB.value)
     # sym:triggered_by_user_pk 触发用户代理主键（系统触发时为空）
-    triggered_by_user_pk: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
-    )
+    triggered_by_user_pk: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     # sym:integration_id 触发来源 CI 集成标识（非 CI 触发为空；集成表后续阶段建）
     integration_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:trigger_context 触发上下文 JSON（retry 引用原 run_id、webhook 事件等）
     trigger_context: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     # sym:status Run 总体状态（created/dispatched/acked/running/...，§6.4）
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=RunStatus.CREATED.value
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=RunStatus.CREATED.value)
     # sym:started_at 首次进入 running 的时间
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # sym:finished_at 进入终态的时间
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # sym:log_complete 日志围栏：Agent 发布 run.log-complete 后置位（P6.6）
-    log_complete: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    log_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # sym:last_log_sequence 围栏时记录的末条日志 sequence
-    last_log_sequence: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    last_log_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # sym:project 所属项目 ORM 关系
     project: Mapped[Project] = relationship()

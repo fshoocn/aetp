@@ -27,9 +27,7 @@ class FakeOutboxRepo:
     """内存 outbox 仓储（与 SQLAlchemy 实现同语义的事务性 claim）。"""
 
     def __init__(self, messages: list[OutboxMessage] | None = None) -> None:
-        self._messages: dict[str, OutboxMessage] = {
-            m.outbox_id: m for m in (messages or [])
-        }
+        self._messages: dict[str, OutboxMessage] = {m.outbox_id: m for m in (messages or [])}
         self.claimed: list[OutboxMessage] = []
         self.updated: list[OutboxMessage] = []
 
@@ -242,9 +240,7 @@ def test_outbox_worker_background_loop_polls_and_sends():
     """后台循环：start 后周期轮询，新入队消息被自动发送，stop 停止。"""
     repo = FakeOutboxRepo()
     transport = FakeTransport()
-    worker = _make_worker(
-        repo, transport, poll_interval_s=0.01, batch_size=10
-    )
+    worker = _make_worker(repo, transport, poll_interval_s=0.01, batch_size=10)
 
     async def scenario():
         await worker.start()

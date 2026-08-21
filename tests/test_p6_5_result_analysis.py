@@ -69,9 +69,7 @@ def _make(tmp_path, plugin):
     registry = AgentPluginRegistry()
     registry.register_installed(plugin)
     execution = ExecutionService(_SETTINGS, ledger)
-    orchestrator = RunOrchestrator(
-        _SETTINGS, ledger, execution, registry, session_id=lambda: "s", now=_now
-    )
+    orchestrator = RunOrchestrator(_SETTINGS, ledger, execution, registry, session_id=lambda: "s", now=_now)
     return ledger, orchestrator
 
 

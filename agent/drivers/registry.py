@@ -31,8 +31,6 @@ class DriverRegistry:
             raise KeyError(f"未注册硬件驱动: {resource_type}")
         return driver
 
-    def detect(
-        self, resource_type: str, connection: Mapping[str, Any]
-    ) -> ResourceMeta | None:
+    def detect(self, resource_type: str, connection: Mapping[str, Any]) -> ResourceMeta | None:
         driver = self.get(resource_type)
         return None if driver is None else driver.detect(connection)

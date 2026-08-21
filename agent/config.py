@@ -119,11 +119,7 @@ class AgentSettings:
     @classmethod
     def from_env_file(cls, env_file: str | Path | None = None) -> AgentSettings:
         """从外置 .env 文件读取并构造，首次缺失节点 ID 时写回生成值。"""
-        path = (
-            Path(env_file).resolve()
-            if env_file is not None
-            else cls.default_env_file()
-        )
+        path = Path(env_file).resolve() if env_file is not None else cls.default_env_file()
         values = load_env_file(path)
         base_dir = path.parent
 
@@ -152,11 +148,7 @@ class AgentSettings:
             plugin_dir = base_dir / plugin_dir
 
         raw_script_cache_dir = values.get("AETP_AGENT_SCRIPT_CACHE_DIR")
-        script_cache_dir = (
-            Path(raw_script_cache_dir)
-            if raw_script_cache_dir
-            else cls.script_cache_dir
-        )
+        script_cache_dir = Path(raw_script_cache_dir) if raw_script_cache_dir else cls.script_cache_dir
         if not script_cache_dir.is_absolute():
             script_cache_dir = base_dir / script_cache_dir
 
@@ -173,19 +165,12 @@ class AgentSettings:
             name=values.get("AETP_AGENT_NAME", cls.name),
             master_id=values.get("AETP_AGENT_MASTER_ID", cls.master_id),
             mqtt_host=values.get("AETP_AGENT_MQTT_HOST"),
-            mqtt_port=parse_int(
-                values.get("AETP_AGENT_MQTT_PORT"), cls.mqtt_port
-            ),
+            mqtt_port=parse_int(values.get("AETP_AGENT_MQTT_PORT"), cls.mqtt_port),
             mqtt_username=values.get("AETP_AGENT_MQTT_USERNAME"),
             mqtt_password=values.get("AETP_AGENT_MQTT_PASSWORD"),
-            mqtt_client_id=(
-                values.get("AETP_AGENT_MQTT_CLIENT_ID")
-                or f"aetp-agent-{node_id}"
-            ),
+            mqtt_client_id=(values.get("AETP_AGENT_MQTT_CLIENT_ID") or f"aetp-agent-{node_id}"),
             mqtt_ca_cert_path=ca_cert_path,
-            mqtt_use_tls=parse_bool(
-                values.get("AETP_AGENT_MQTT_USE_TLS"), cls.mqtt_use_tls
-            ),
+            mqtt_use_tls=parse_bool(values.get("AETP_AGENT_MQTT_USE_TLS"), cls.mqtt_use_tls),
             ledger_url=values.get("AETP_AGENT_LEDGER_URL", cls.ledger_url),
             serial_map_file=serial_map_file,
             plugin_dir=plugin_dir,
@@ -204,9 +189,7 @@ class AgentSettings:
             ),
             log_file=log_file,
             log_level=values.get("AETP_AGENT_LOG_LEVEL", cls.log_level),
-            log_console=parse_bool(
-                values.get("AETP_AGENT_LOG_CONSOLE"), cls.log_console
-            ),
+            log_console=parse_bool(values.get("AETP_AGENT_LOG_CONSOLE"), cls.log_console),
             task_log_batch_size=parse_int(
                 values.get("AETP_AGENT_TASK_LOG_BATCH_SIZE"),
                 cls.task_log_batch_size,
@@ -234,14 +217,9 @@ def configure(env_file: str | Path | None = None) -> AgentSettings:
     """
     global _settings
     if _settings is not None:
-        requested = (
-            Path(env_file).resolve() if env_file is not None else None
-        )
+        requested = Path(env_file).resolve() if env_file is not None else None
         if requested is not None and requested != _settings.env_file:
-            raise RuntimeError(
-                f"配置已初始化（{_settings.env_file}），"
-                f"不能再用 {requested} 重新初始化"
-            )
+            raise RuntimeError(f"配置已初始化（{_settings.env_file}），不能再用 {requested} 重新初始化")
         return _settings
 
     _settings = AgentSettings.from_env_file(env_file).validate()
@@ -252,9 +230,7 @@ def configure(env_file: str | Path | None = None) -> AgentSettings:
 def get_settings() -> AgentSettings:
     """只读获取进程级配置；未初始化时明确报错而不是猜路径。"""
     if _settings is None:
-        raise RuntimeError(
-            "配置未初始化：请在入口先调用 agent.config.configure()"
-        )
+        raise RuntimeError("配置未初始化：请在入口先调用 agent.config.configure()")
     return _settings
 
 

@@ -260,9 +260,7 @@ def test_heartbeat_old_session_rejected(client):
 
     try:
         svc.handle_heartbeat(
-            envelope=_envelope(
-                "bench-001", "sess-old", MessageType.NODE_HEARTBEAT.value
-            ),
+            envelope=_envelope("bench-001", "sess-old", MessageType.NODE_HEARTBEAT.value),
             payload=_heartbeat(),
         )
         raise AssertionError("应拒绝旧 session 的心跳")

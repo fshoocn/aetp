@@ -40,9 +40,7 @@ _SETTINGS = AgentSettings(
 )
 
 
-def _make_context(
-    tmp_path, *, cancelled: bool = False
-) -> tuple[TaskContext, SQLiteLedger]:
+def _make_context(tmp_path, *, cancelled: bool = False) -> tuple[TaskContext, SQLiteLedger]:
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
     ctx = TaskContext(
         _SETTINGS,
@@ -61,6 +59,7 @@ def _make_context(
 # -----------------------------------------------------------------------
 # log / capture_log
 # -----------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_log_writes_spool(tmp_path) -> None:
@@ -83,9 +82,7 @@ async def test_log_sequence_idempotent_by_ledger(tmp_path) -> None:
     await ctx.log("info", "first")
 
     # 直接向账本追加同 sequence：被唯一约束忽略
-    ledger.append_task_log(
-        TaskLogSpoolEntry(run_id="R-1", sequence=1, level="info", message="dup")
-    )
+    ledger.append_task_log(TaskLogSpoolEntry(run_id="R-1", sequence=1, level="info", message="dup"))
     assert len(ctx.collect_pending_logs(10)) == 1
 
 
@@ -121,6 +118,7 @@ async def test_log_rejects_invalid_level(tmp_path) -> None:
 # progress / case_status
 # -----------------------------------------------------------------------
 
+
 def _claim_outbox_envelopes(ledger, count: int) -> list[Envelope]:
     pending = ledger.claim_due_outbox(count, datetime(2099, 1, 1, tzinfo=UTC).replace(tzinfo=None))
     return [Envelope.model_validate(e.payload) for e in pending]
@@ -153,6 +151,7 @@ async def test_case_status_enqueues_run_case_status(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # RunLogBatch 生成
 # -----------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_build_log_batch_strict_sequence(tmp_path) -> None:
@@ -191,6 +190,7 @@ async def test_mark_logs_published(tmp_path) -> None:
 # 取消信号
 # -----------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_raise_if_cancelled(tmp_path) -> None:
     ctx, _ledger = _make_context(tmp_path, cancelled=True)
@@ -207,6 +207,7 @@ async def test_raise_if_not_cancelled_passes(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # 协议层：RunLogEntry/RunLogBatch 校验
 # -----------------------------------------------------------------------
+
 
 def test_run_log_batch_rejects_non_strict_sequence() -> None:
     entry = {

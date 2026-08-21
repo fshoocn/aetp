@@ -42,20 +42,12 @@ def upgrade() -> None:
         sa.Column("created_by", sa.Integer(), nullable=False),
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["project_pk"], ["projects.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["script_pk"], ["test_scripts.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["created_by"], ["users.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["project_pk"], ["projects.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["script_pk"], ["test_scripts.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("task_id"),
-        sa.UniqueConstraint(
-            "project_pk", "name", name="uq_test_tasks_project_name"
-        ),
+        sa.UniqueConstraint("project_pk", "name", name="uq_test_tasks_project_name"),
     )
     op.create_index("ix_test_tasks_project_pk", "test_tasks", ["project_pk"])
     op.create_index("ix_test_tasks_script_pk", "test_tasks", ["script_pk"])
@@ -67,9 +59,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_test_tasks_project_enabled_created", table_name="test_tasks"
-    )
+    op.drop_index("ix_test_tasks_project_enabled_created", table_name="test_tasks")
     op.drop_index("ix_test_tasks_script_pk", table_name="test_tasks")
     op.drop_index("ix_test_tasks_project_pk", table_name="test_tasks")
     op.drop_table("test_tasks")

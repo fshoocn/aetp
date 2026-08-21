@@ -40,9 +40,7 @@ def new_ulid() -> str:
     """生成 26 字符 ULID（48-bit 毫秒时间戳 + 80-bit 密码学安全随机）。"""
     timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFFFFFF  # 48-bit
     random_int = int.from_bytes(secrets.token_bytes(10), "big")  # 80-bit
-    return _encode(timestamp_ms, _TIMESTAMP_CHARS) + _encode(
-        random_int, _RANDOM_CHARS
-    )
+    return _encode(timestamp_ms, _TIMESTAMP_CHARS) + _encode(random_int, _RANDOM_CHARS)
 
 
 # 别名：业务标识统一入口（D-11：外部业务 ID 一律纯 ULID）

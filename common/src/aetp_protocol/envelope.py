@@ -64,9 +64,7 @@ class Envelope(BaseModel):
     @classmethod
     def _check_protocol_version(cls, value: int) -> int:
         if value != PROTOCOL_VERSION:
-            raise ProtocolVersionMismatchError(
-                f"协议版本不支持: {value}（期望 {PROTOCOL_VERSION}）"
-            )
+            raise ProtocolVersionMismatchError(f"协议版本不支持: {value}（期望 {PROTOCOL_VERSION}）")
         return value
 
     @field_validator("message_type")

@@ -44,9 +44,7 @@ class MaintenanceWorker:
             return
         self._running = True
         self._task = asyncio.create_task(self._loop())
-        logger.info(
-            "维护 worker 启动（interval=%.1fs）", self._interval_s
-        )
+        logger.info("维护 worker 启动（interval=%.1fs）", self._interval_s)
 
     async def stop(self) -> None:
         """停止循环（幂等）。"""

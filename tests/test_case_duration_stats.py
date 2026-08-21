@@ -93,9 +93,7 @@ def _record(service, container, **kwargs):
 def test_success_duration_uses_rolling_average(client) -> None:
     container = client.app.state.container
     _seed(container)
-    service = CaseDurationStatsService(
-        default_duration_s=60.0, anomaly_percent=300.0
-    )
+    service = CaseDurationStatsService(default_duration_s=60.0, anomaly_percent=300.0)
 
     first = _record(service, container, duration_ms=10_000)
     second = _record(service, container, duration_ms=20_000)
@@ -107,9 +105,7 @@ def test_success_duration_uses_rolling_average(client) -> None:
     assert second.duration_samples == 2
 
     with _uow(container) as uow:
-        case = uow.script_cases.get_by_stable_key(
-            "S-duration", "test_duration.py::test_case"
-        )
+        case = uow.script_cases.get_by_stable_key("S-duration", "test_duration.py::test_case")
         assert case is not None
         assert case.avg_duration_s == 15.0
         assert case.duration_samples == 2
@@ -125,9 +121,7 @@ def test_missing_duration_is_not_counted(client) -> None:
     assert result.accepted is False
     assert result.reason == "missing_duration"
     with _uow(container) as uow:
-        case = uow.script_cases.get_by_stable_key(
-            "S-duration", "test_duration.py::test_case"
-        )
+        case = uow.script_cases.get_by_stable_key("S-duration", "test_duration.py::test_case")
         assert case is not None
         assert case.avg_duration_s is None
         assert case.duration_samples == 0
@@ -136,9 +130,7 @@ def test_missing_duration_is_not_counted(client) -> None:
 def test_anomalous_duration_is_discarded_and_notified(client) -> None:
     container = client.app.state.container
     _seed(container)
-    service = CaseDurationStatsService(
-        default_duration_s=60.0, anomaly_percent=50.0
-    )
+    service = CaseDurationStatsService(default_duration_s=60.0, anomaly_percent=50.0)
     _record(service, container, duration_ms=10_000)
 
     result = _record(service, container, duration_ms=20_000)
@@ -146,9 +138,7 @@ def test_anomalous_duration_is_discarded_and_notified(client) -> None:
     assert result.accepted is False
     assert result.reason == "deviation_exceeded"
     with _uow(container) as uow:
-        case = uow.script_cases.get_by_stable_key(
-            "S-duration", "test_duration.py::test_case"
-        )
+        case = uow.script_cases.get_by_stable_key("S-duration", "test_duration.py::test_case")
         assert case is not None
         assert case.avg_duration_s == 10.0
         assert case.duration_samples == 1

@@ -10,7 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib.metadata import entry_points
 
-from aetp_protocol.plugin import AgentExecutionPlugin, PluginPackage
+from aetp_protocol.plugin import (
+    AgentExecutionPlugin,
+    AgentTaskContext,  # noqa: F401 - 供 agent.plugins.__init__ re-export
+    PluginPackage,
+)
 
 from agent.plugins.errors import (
     PluginLoadError,

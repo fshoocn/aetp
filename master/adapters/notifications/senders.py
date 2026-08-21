@@ -107,11 +107,7 @@ class GenericWebhookSender(HttpSender):
                 "event_type": message.event.event_type,
                 "project_id": message.event.project_id,
                 "aggregate_id": message.event.aggregate_id,
-                "occurred_at": (
-                    message.event.occurred_at.isoformat()
-                    if message.event.occurred_at
-                    else None
-                ),
+                "occurred_at": (message.event.occurred_at.isoformat() if message.event.occurred_at else None),
                 "payload": message.event.payload,
             }
 
@@ -120,11 +116,7 @@ class GenericWebhookSender(HttpSender):
         }
 
         if secret_value and message.event:
-            timestamp = (
-                message.event.occurred_at.isoformat()
-                if message.event.occurred_at
-                else ""
-            )
+            timestamp = message.event.occurred_at.isoformat() if message.event.occurred_at else ""
             body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             signature = hmac.new(
                 secret_value.encode("utf-8"),
@@ -159,9 +151,7 @@ class FeishuSender(HttpSender):
                 "header": {
                     "title": {"tag": "plain_text", "content": message.subject},
                     "template": (
-                        "red"
-                        if message.severity == "error"
-                        else ("orange" if message.severity == "warn" else "blue")
+                        "red" if message.severity == "error" else ("orange" if message.severity == "warn" else "blue")
                     ),
                 },
                 "elements": [

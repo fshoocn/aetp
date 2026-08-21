@@ -29,25 +29,15 @@ class Node(Base, TimestampMixin):
     node_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="offline"
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="offline")
     online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     tags: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     capabilities: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
-    protocol_version: Mapped[str] = mapped_column(
-        String(32), nullable=False, default=""
-    )
-    plugin_versions: Mapped[dict] = mapped_column(
-        JSONType, nullable=False, default=dict
-    )
-    plugin_supported_versions: Mapped[dict] = mapped_column(
-        JSONType, nullable=False, default=dict
-    )
-    last_seen_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime, nullable=True
-    )
+    protocol_version: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    plugin_versions: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    plugin_supported_versions: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     load: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
 
     devices: Mapped[list[Device]] = relationship(

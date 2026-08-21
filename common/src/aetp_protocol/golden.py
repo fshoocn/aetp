@@ -133,9 +133,7 @@ GOLDEN_SCRIPT_PARSE_RESULT: dict = _base("script.parse-result", "agent", "bench-
 GOLDEN_SCRIPT_PARSE_RESULT["payload"] = {
     "parse_id": "P-1",
     "script_id": "S-1",
-    "cases": [
-        {"stable_key": "case-1", "name": "Case 1", "parent_path": "", "tags": [], "params": {}}
-    ],
+    "cases": [{"stable_key": "case-1", "name": "Case 1", "parent_path": "", "tags": [], "params": {}}],
     "errors": [],
 }
 

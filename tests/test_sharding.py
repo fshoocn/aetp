@@ -21,6 +21,7 @@ def _case(key: str, duration: float | None) -> CaseInfo:
 # none（不分割）
 # -----------------------------------------------------------------------
 
+
 def test_split_none_single_shard() -> None:
     cases = [_case("a", 1), _case("b", 2)]
     shards = split_none(cases)
@@ -32,6 +33,7 @@ def test_split_none_single_shard() -> None:
 # -----------------------------------------------------------------------
 # by_case_count
 # -----------------------------------------------------------------------
+
 
 def test_split_by_case_count() -> None:
     cases = [_case("a", 1), _case("b", 2), _case("c", 3), _case("d", 4), _case("e", 5)]
@@ -51,6 +53,7 @@ def test_split_by_case_count_rejects_non_positive() -> None:
 # -----------------------------------------------------------------------
 # by_time
 # -----------------------------------------------------------------------
+
 
 def test_split_by_time_balances_by_duration() -> None:
     cases = [

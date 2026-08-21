@@ -108,9 +108,7 @@ class RunProjectionService:
 
     # -- ACK ----------------------------------------------------------------
 
-    def handle_ack(
-        self, node_id: str, payload: RunAckPayload
-    ) -> ProjectionResult:
+    def handle_ack(self, node_id: str, payload: RunAckPayload) -> ProjectionResult:
         """ACK 投影：accepted=false 记录拒绝；true 推进 attempt → acked。"""
         with self._uow_factory() as uow:
             run = uow.task_runs.get_by_run_id(payload.run_id)
@@ -139,11 +137,7 @@ class RunProjectionService:
                     for device_id in attempt.device_ids:
                         device = uow.devices.get_by_id(device_id)
                         if device is not None:
-                            device.status = (
-                                DeviceStatus.ONLINE
-                                if device.online
-                                else DeviceStatus.OFFLINE
-                            )
+                            device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
                             uow.devices.update(device)
 
                 return ProjectionResult(
@@ -175,9 +169,7 @@ class RunProjectionService:
 
     # -- progress -----------------------------------------------------------
 
-    def handle_progress(
-        self, node_id: str, payload: RunProgressPayload
-    ) -> ProjectionResult:
+    def handle_progress(self, node_id: str, payload: RunProgressPayload) -> ProjectionResult:
         """进度投影：run 级覆盖式更新（无持久化列，以 SSE + 日志为主）。"""
         with self._uow_factory() as uow:
             run = uow.task_runs.get_by_run_id(payload.run_id)
@@ -197,9 +189,7 @@ class RunProjectionService:
             },
         )
 
-    def handle_case_status(
-        self, node_id: str, payload: RunCaseStatusPayload
-    ) -> ProjectionResult:
+    def handle_case_status(self, node_id: str, payload: RunCaseStatusPayload) -> ProjectionResult:
         """case 级状态投影（仅支持实时 case 结果的插件，§8.4）。"""
         with self._uow_factory() as uow:
             run = uow.task_runs.get_by_run_id(payload.run_id)
@@ -215,9 +205,7 @@ class RunProjectionService:
 
     # -- log ----------------------------------------------------------------
 
-    def handle_log(
-        self, node_id: str, payload: RunLogBatch
-    ) -> ProjectionResult:
+    def handle_log(self, node_id: str, payload: RunLogBatch) -> ProjectionResult:
         """日志批投影：按 (run_id, sequence) 幂等落库，重复跳过。
 
         P6.6 日志围栏：run 已 log_complete 时拒绝任何日志条目。
@@ -228,11 +216,7 @@ class RunProjectionService:
                 return ProjectionResult(False)
             if run.log_complete:
                 last_sequence = run.last_log_sequence or 0
-                entries = [
-                    entry
-                    for entry in payload.entries
-                    if entry.sequence <= last_sequence
-                ]
+                entries = [entry for entry in payload.entries if entry.sequence <= last_sequence]
                 if not entries:
                     logger.debug(
                         "日志围栏已关闭，拒绝超范围日志: run_id=%s",
@@ -244,12 +228,8 @@ class RunProjectionService:
 
             # 批量查询已存在的 sequence，避免逐条 exists N+1
             sequences = [e.sequence for e in entries]
-            existing = uow.run_logs.existing_sequences(
-                payload.run_id, sequences
-            )
-            new_entries = [
-                e for e in entries if e.sequence not in existing
-            ]
+            existing = uow.run_logs.existing_sequences(payload.run_id, sequences)
+            new_entries = [e for e in entries if e.sequence not in existing]
             if not new_entries:
                 return ProjectionResult(False)
 
@@ -275,9 +255,7 @@ class RunProjectionService:
                 project_id=run.project_id,
             )
 
-    def handle_log_complete(
-        self, node_id: str, payload: RunLogCompletePayload
-    ) -> ProjectionResult:
+    def handle_log_complete(self, node_id: str, payload: RunLogCompletePayload) -> ProjectionResult:
         """日志围栏（P6.6）：置位 log_complete 并记录末 sequence（幂等）。
 
         此后 Master 拒绝该 run 的任何日志条目；触发 ``run.log_complete``
@@ -313,9 +291,7 @@ class RunProjectionService:
 
     # -- result -------------------------------------------------------------
 
-    def handle_result(
-        self, node_id: str, payload: RunResultPayload
-    ) -> ProjectionResult:
+    def handle_result(self, node_id: str, payload: RunResultPayload) -> ProjectionResult:
         """最终结果投影：锁定 attempt → 终态 → 设备释放 → Run 汇总。"""
         with self._uow_factory() as uow:
             run = uow.task_runs.get_by_run_id(payload.run_id)
@@ -350,11 +326,12 @@ class RunProjectionService:
                 return ProjectionResult(False)
 
             self._finalize_attempt(uow, attempt, attempt_status, payload)
-            self._finalize_shard_and_release_devices(
-                uow, payload.shard_id, node_id, payload.status, attempt.device_ids
-            )
+            self._finalize_shard_and_release_devices(uow, payload.shard_id, node_id, payload.status, attempt.device_ids)
             anomaly_events = self._persist_case_results(
-                uow, run, payload.shard_id, payload.attempt_no,
+                uow,
+                run,
+                payload.shard_id,
+                payload.attempt_no,
                 payload.case_results,
             )
             self._project_run_result(uow, run, node_id, payload)
@@ -368,9 +345,7 @@ class RunProjectionService:
                 anomaly_events=anomaly_events or None,
             )
 
-    def _finalize_attempt(
-        self, uow, attempt, attempt_status, payload: RunResultPayload
-    ) -> None:
+    def _finalize_attempt(self, uow, attempt, attempt_status, payload: RunResultPayload) -> None:
         """推进 attempt 状态：acked → running → 终态。"""
         if attempt.status is ShardAttemptStatus.ACKED:
             assert_transition(attempt.status, ShardAttemptStatus.RUNNING)
@@ -412,9 +387,7 @@ class RunProjectionService:
         for device_id in device_ids:
             device = uow.devices.get_by_id(device_id)
             if device is not None:
-                device.status = (
-                    DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
-                )
+                device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
                 uow.devices.update(device)
 
     # -- 内部 ---------------------------------------------------------------
@@ -423,9 +396,7 @@ class RunProjectionService:
     def _find_attempt(uow, shard_id: str, attempt_no: int):
         return uow.shard_attempts.get_by_shard_attempt(shard_id, attempt_no)
 
-    def _persist_case_results(
-        self, uow, run, shard_id: str, attempt_no: int, case_results: list
-    ) -> list:
+    def _persist_case_results(self, uow, run, shard_id: str, attempt_no: int, case_results: list) -> list:
         """落库结构化 case 结果（D-19：按 attempt 全量保留，不覆盖）。
 
         Returns:
@@ -436,24 +407,12 @@ class RunProjectionService:
             case_key = item.case_key if isinstance(item, CaseResultEntry) else item.get("case_key")
             if not case_key:
                 continue
-            status_raw = (
-                item.status if isinstance(item, CaseResultEntry) else item.get("status", "")
-            )
+            status_raw = item.status if isinstance(item, CaseResultEntry) else item.get("status", "")
             status = _CASE_STATUS.get(status_raw, CaseStatus.ERROR)
-            duration_ms = (
-                item.duration_ms
-                if isinstance(item, CaseResultEntry)
-                else item.get("duration_ms")
-            )
-            error_summary = (
-                item.error_summary
-                if isinstance(item, CaseResultEntry)
-                else item.get("error_summary")
-            )
+            duration_ms = item.duration_ms if isinstance(item, CaseResultEntry) else item.get("duration_ms")
+            error_summary = item.error_summary if isinstance(item, CaseResultEntry) else item.get("error_summary")
             detail = item.detail if isinstance(item, CaseResultEntry) else item.get("detail")
-            existing = uow.run_case_results.get_by_key(
-                run.run_id, shard_id, case_key, attempt_no
-            )
+            existing = uow.run_case_results.get_by_key(run.run_id, shard_id, case_key, attempt_no)
             if existing is not None:
                 continue
             uow.run_case_results.add_many(
@@ -487,9 +446,7 @@ class RunProjectionService:
                         anomaly_events.append(update.anomaly_event)
         return anomaly_events
 
-    def _project_run_result(
-        self, uow, run, node_id: str, payload: RunResultPayload
-    ) -> None:
+    def _project_run_result(self, uow, run, node_id: str, payload: RunResultPayload) -> None:
         """把 Run 推进到终态并 upsert Run 级汇总投影（results 表）。
 
         状态机：Agent 直接 ack → result，无独立 running 消息。因此进入
@@ -510,13 +467,18 @@ class RunProjectionService:
             for shard in shards
         )
 
-        if run_status is not None and all_terminal and run.status not in {
-            RunStatus.SUCCEEDED,
-            RunStatus.FAILED,
-            RunStatus.CANCELLED,
-            RunStatus.TIMED_OUT,
-            RunStatus.LOST,
-        }:
+        if (
+            run_status is not None
+            and all_terminal
+            and run.status
+            not in {
+                RunStatus.SUCCEEDED,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+                RunStatus.TIMED_OUT,
+                RunStatus.LOST,
+            }
+        ):
             # 非终态先补齐 running（从 created/dispatched/acked 合法过渡）
             if run.status is not RunStatus.RUNNING:
                 assert_transition(run.status, RunStatus.RUNNING)

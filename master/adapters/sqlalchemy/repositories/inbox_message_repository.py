@@ -28,15 +28,17 @@ class InboxMessageRepositoryImpl(InboxMessageRepository):
     def __init__(self, session: Session) -> None:
         self._s = session
 
-    def get_by_origin_message(
-        self, origin_id: str, message_id: str
-    ) -> InboxMessage | None:
-        orm = self._s.execute(
-            select(InboxMessageORM).where(
-                InboxMessageORM.origin_id == origin_id,
-                InboxMessageORM.message_id == message_id,
+    def get_by_origin_message(self, origin_id: str, message_id: str) -> InboxMessage | None:
+        orm = (
+            self._s.execute(
+                select(InboxMessageORM).where(
+                    InboxMessageORM.origin_id == origin_id,
+                    InboxMessageORM.message_id == message_id,
+                )
             )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def add(self, message: InboxMessage) -> InboxMessage:

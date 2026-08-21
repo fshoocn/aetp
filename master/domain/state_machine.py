@@ -43,12 +43,8 @@ class InvalidStateTransitionError(ValueError):
 _TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
     # pending → dispatching → running → succeeded/failed/timed_out
     # pending → cancelled；dispatching → failed（派发耗尽）；running → cancelling → cancelled
-    TaskStatus.PENDING: frozenset(
-        {TaskStatus.DISPATCHING, TaskStatus.CANCELLED}
-    ),
-    TaskStatus.DISPATCHING: frozenset(
-        {TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED}
-    ),
+    TaskStatus.PENDING: frozenset({TaskStatus.DISPATCHING, TaskStatus.CANCELLED}),
+    TaskStatus.DISPATCHING: frozenset({TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED}),
     TaskStatus.RUNNING: frozenset(
         {
             TaskStatus.SUCCEEDED,
@@ -63,9 +59,7 @@ _TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     # created → dispatched → acked → running → succeeded/failed/cancelled/timed_out/lost
     # 无 cancelling 中间态：取消由 Shard 投影（所有 active shard 终态后 Run 到终态，§5.4）
-    RunStatus.CREATED: frozenset(
-        {RunStatus.DISPATCHED, RunStatus.FAILED, RunStatus.CANCELLED}
-    ),
+    RunStatus.CREATED: frozenset({RunStatus.DISPATCHED, RunStatus.FAILED, RunStatus.CANCELLED}),
     RunStatus.DISPATCHED: frozenset(
         {
             RunStatus.ACKED,
@@ -74,9 +68,7 @@ _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
             RunStatus.CANCELLED,
         }
     ),
-    RunStatus.ACKED: frozenset(
-        {RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED}
-    ),
+    RunStatus.ACKED: frozenset({RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED}),
     RunStatus.RUNNING: frozenset(
         {
             RunStatus.SUCCEEDED,
@@ -91,12 +83,8 @@ _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
 _SHARD_TRANSITIONS: dict[ShardStatus, frozenset[ShardStatus]] = {
     # pending → dispatching → running → succeeded/failed/cancelled/timed_out
     # running → waiting_recovery（节点离线等待恢复）；恢复后重新派发/继续
-    ShardStatus.PENDING: frozenset(
-        {ShardStatus.DISPATCHING, ShardStatus.FAILED, ShardStatus.CANCELLED}
-    ),
-    ShardStatus.DISPATCHING: frozenset(
-        {ShardStatus.RUNNING, ShardStatus.FAILED, ShardStatus.CANCELLED}
-    ),
+    ShardStatus.PENDING: frozenset({ShardStatus.DISPATCHING, ShardStatus.FAILED, ShardStatus.CANCELLED}),
+    ShardStatus.DISPATCHING: frozenset({ShardStatus.RUNNING, ShardStatus.FAILED, ShardStatus.CANCELLED}),
     ShardStatus.RUNNING: frozenset(
         {
             ShardStatus.SUCCEEDED,
@@ -146,9 +134,7 @@ _ATTEMPT_TRANSITIONS: dict[ShardAttemptStatus, frozenset[ShardAttemptStatus]] = 
 
 # 终态表（终态不可再迁移）
 _TERMINAL: dict[type, frozenset] = {
-    TaskStatus: frozenset(
-        {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMED_OUT}
-    ),
+    TaskStatus: frozenset({TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMED_OUT}),
     RunStatus: frozenset(
         {
             RunStatus.SUCCEEDED,
@@ -158,9 +144,7 @@ _TERMINAL: dict[type, frozenset] = {
             RunStatus.LOST,
         }
     ),
-    ShardStatus: frozenset(
-        {ShardStatus.SUCCEEDED, ShardStatus.FAILED, ShardStatus.CANCELLED, ShardStatus.TIMED_OUT}
-    ),
+    ShardStatus: frozenset({ShardStatus.SUCCEEDED, ShardStatus.FAILED, ShardStatus.CANCELLED, ShardStatus.TIMED_OUT}),
     ShardAttemptStatus: frozenset(
         {
             ShardAttemptStatus.SUCCEEDED,
@@ -201,9 +185,7 @@ def can_transition(status: _StatusT, target: _StatusT) -> bool:
 def assert_transition(status: _StatusT, target: _StatusT) -> None:
     """校验迁移合法性，非法抛出 InvalidStateTransitionError。"""
     if not can_transition(status, target):
-        raise InvalidStateTransitionError(
-            f"非法状态迁移: {type(status).__name__} {status.value} -> {target.value}"
-        )
+        raise InvalidStateTransitionError(f"非法状态迁移: {type(status).__name__} {status.value} -> {target.value}")
 
 
 def is_terminal(status: _StatusT) -> bool:

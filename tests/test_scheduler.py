@@ -70,9 +70,7 @@ def test_scheduler_waits_when_device_is_occupied() -> None:
     ]
 
     selected = scheduler.select_node(
-        requirements=HardwareRequirements(
-            devices=(DeviceRequirement(resource_type="generic"),)
-        ),
+        requirements=HardwareRequirements(devices=(DeviceRequirement(resource_type="generic"),)),
         candidates=candidates,
     )
 
@@ -154,9 +152,7 @@ def test_scheduler_respects_required_labels() -> None:
             devices=(
                 _device(
                     "can-a",
-                    capability=PhysicalDeviceCapability(
-                        resource_type="can_channel", labels={"project": "P1"}
-                    ),
+                    capability=PhysicalDeviceCapability(resource_type="can_channel", labels={"project": "P1"}),
                 ),
             ),
         ),
@@ -165,19 +161,13 @@ def test_scheduler_respects_required_labels() -> None:
             devices=(
                 _device(
                     "can-b",
-                    capability=PhysicalDeviceCapability(
-                        resource_type="can_channel", labels={"project": "P3"}
-                    ),
+                    capability=PhysicalDeviceCapability(resource_type="can_channel", labels={"project": "P3"}),
                 ),
             ),
         ),
     ]
     requirements = HardwareRequirements(
-        devices=(
-            DeviceRequirement(
-                resource_type="can_channel", required_labels={"project": "P3"}
-            ),
-        )
+        devices=(DeviceRequirement(resource_type="can_channel", required_labels={"project": "P3"}),)
     )
 
     selected = scheduler.select_node(requirements=requirements, candidates=candidates)
@@ -199,26 +189,18 @@ def test_allocator_prefers_matching_labels() -> None:
         devices=[
             _device(
                 "can-a",
-                capability=PhysicalDeviceCapability(
-                    resource_type="can_channel", labels={"project": "P1"}
-                ),
+                capability=PhysicalDeviceCapability(resource_type="can_channel", labels={"project": "P1"}),
             ),
             _device(
                 "can-b",
-                capability=PhysicalDeviceCapability(
-                    resource_type="can_channel", labels={"project": "P3"}
-                ),
+                capability=PhysicalDeviceCapability(resource_type="can_channel", labels={"project": "P3"}),
             ),
         ],
     )
 
     result = allocator.allocate(
         node,
-        (
-            DeviceRequirement(
-                resource_type="can_channel", preferred_labels={"project": "P3"}
-            ),
-        ),
+        (DeviceRequirement(resource_type="can_channel", preferred_labels={"project": "P3"}),),
         frozenset(),
     )
 
@@ -270,9 +252,7 @@ def test_allocator_routes_via_switch_when_device_labels_mismatch() -> None:
 
     assert result is not None
     assert [device.device_id for device in result.devices] == ["can-1640-1"]
-    assert result.routes_by_device["can-1640-1"] == SwitchRoute(
-        switch_device_id="relay-board-1", port="port3"
-    )
+    assert result.routes_by_device["can-1640-1"] == SwitchRoute(switch_device_id="relay-board-1", port="port3")
 
 
 def test_allocator_waits_when_switch_port_taken() -> None:
@@ -341,14 +321,16 @@ def test_allocator_uses_distinct_switch_ports() -> None:
             _device(
                 "can-a",
                 capability=PhysicalDeviceCapability(
-                    resource_type="can_channel", channel="can1",
+                    resource_type="can_channel",
+                    channel="can1",
                     connection=connection,
                 ),
             ),
             _device(
                 "can-b",
                 capability=PhysicalDeviceCapability(
-                    resource_type="can_channel", channel="can2",
+                    resource_type="can_channel",
+                    channel="can2",
                     connection=connection,
                 ),
             ),

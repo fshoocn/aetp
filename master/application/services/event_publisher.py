@@ -79,7 +79,6 @@ class EventPublisher:
             occurred_at=event.occurred_at,
         )
 
-
     async def _dispatch_to_notifications(self, event: DomainEvent) -> None:
         """将事件分发给通知 dispatcher（失败不阻塞主流程）。"""
         if self._dispatcher is None:

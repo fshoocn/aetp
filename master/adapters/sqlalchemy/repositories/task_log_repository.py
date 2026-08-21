@@ -29,9 +29,7 @@ class TaskLogRepositoryImpl(TaskLogRepository):
     def __init__(self, session: Session) -> None:
         self._s = session
 
-    def list_by_task(
-        self, task_id: str, project_id: str | None = None
-    ) -> list[TaskLog]:
+    def list_by_task(self, task_id: str, project_id: str | None = None) -> list[TaskLog]:
         stmt = (
             select(TaskLogORM)
             .join(TaskORM, TaskORM.id == TaskLogORM.task_pk)
@@ -40,19 +38,14 @@ class TaskLogRepositoryImpl(TaskLogRepository):
         )
         if project_id is not None:
             stmt = stmt.where(
-                TaskORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                TaskORM.project_pk == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
 
     def add_many(self, logs: list[TaskLog]) -> list[TaskLog]:
         persisted: list[TaskLog] = []
         for log in logs:
-            task_pk = self._s.execute(
-                select(TaskORM.id).where(TaskORM.task_id == log.task_id)
-            ).scalar_one_or_none()
+            task_pk = self._s.execute(select(TaskORM.id).where(TaskORM.task_id == log.task_id)).scalar_one_or_none()
             if task_pk is None:
                 raise ValueError(f"任务不存在: {log.task_id}")
             orm = TaskLogORM(

@@ -84,12 +84,8 @@ class SchedulerConfig:
     """Shard 调度器外部回调配置，聚合可选参数。"""
 
     download_url_builder: Callable[[str], str] | None = None
-    artifact_upload_url_builder: (
-        Callable[[str, str, str, str], str] | None
-    ) = None
-    plugin_ref_builder: (
-        Callable[[str, str], PluginPackageRef | None] | None
-    ) = None
+    artifact_upload_url_builder: Callable[[str, str, str, str], str] | None = None
+    plugin_ref_builder: Callable[[str, str], PluginPackageRef | None] | None = None
 
 
 class ShardSchedulerService:
@@ -151,9 +147,7 @@ class ShardSchedulerService:
                     pending.append(shard.shard_id)
                     continue
                 node = assignment.node
-                states[node.node_id] = self._scheduler.reserve_devices(
-                    states[node.node_id], assignment.device_ids
-                )
+                states[node.node_id] = self._scheduler.reserve_devices(states[node.node_id], assignment.device_ids)
 
                 dispatch = self._persist_dispatch(
                     uow=uow,
@@ -177,9 +171,7 @@ class ShardSchedulerService:
                 pending_shard_ids=tuple(pending),
             )
 
-    def _load_context(
-        self, uow: UnitOfWork, run_id: str
-    ) -> tuple[TaskRun, TestTask, TestScript]:
+    def _load_context(self, uow: UnitOfWork, run_id: str) -> tuple[TaskRun, TestTask, TestScript]:
         run = uow.task_runs.get_by_run_id(run_id)
         if run is None:
             raise RunNotFoundError(f"Run 不存在: {run_id}")
@@ -187,14 +179,8 @@ class ShardSchedulerService:
         if task is None:
             raise TaskNotFoundError(f"任务定义不存在: {run.task_id}")
         script = uow.test_scripts.get_by_script_id(task.script_id)
-        if (
-            script is None
-            or script.project_id != run.project_id
-            or script.version != task.script_version
-        ):
-            raise ScriptNotFoundError(
-                f"脚本版本不存在或不属于当前项目: {task.script_id} v{task.script_version}"
-            )
+        if script is None or script.project_id != run.project_id or script.version != task.script_version:
+            raise ScriptNotFoundError(f"脚本版本不存在或不属于当前项目: {task.script_id} v{task.script_version}")
         return run, task, script
 
     @staticmethod
@@ -203,16 +189,9 @@ class ShardSchedulerService:
         bound_ids = {binding.node_id for binding in bindings}
         invalid = sorted(set(task.node_ids) - bound_ids)
         if invalid:
-            raise ProjectAccessDeniedError(
-                "任务目标节点不在项目绑定范围（D-23）: "
-                + ", ".join(invalid)
-            )
+            raise ProjectAccessDeniedError("任务目标节点不在项目绑定范围（D-23）: " + ", ".join(invalid))
 
-        enabled_binding_ids = {
-            binding.node_id
-            for binding in bindings
-            if binding.enabled and binding.node_enabled
-        }
+        enabled_binding_ids = {binding.node_id for binding in bindings if binding.enabled and binding.node_enabled}
         selected_ids = set(task.node_ids) if task.node_ids else enabled_binding_ids
         return [
             node
@@ -224,19 +203,12 @@ class ShardSchedulerService:
         self,
         nodes: Iterable[Node],
     ) -> dict[str, NodeSchedulingState]:
-        return {
-            node.node_id: NodeSchedulingState(node=node)
-            for node in nodes
-        }
+        return {node.node_id: NodeSchedulingState(node=node) for node in nodes}
 
-    def _raise_if_capabilities_unavailable(
-        self, nodes: list[Node], script: TestScript, task: TestTask
-    ) -> None:
+    def _raise_if_capabilities_unavailable(self, nodes: list[Node], script: TestScript, task: TestTask) -> None:
         online_nodes = [node for node in nodes if node.online and node.enabled]
         capable = [
-            node
-            for node in online_nodes
-            if self._capability.evaluate(node, script.hardware_requirements).matched
+            node for node in online_nodes if self._capability.evaluate(node, script.hardware_requirements).matched
         ]
         if online_nodes and not capable:
             first = online_nodes[0]
@@ -250,10 +222,7 @@ class ShardSchedulerService:
             capable
             and script.hardware_requirements.devices
             and not any(
-                self._scheduler.supports_resources(
-                    node, script.hardware_requirements.devices
-                )
-                for node in capable
+                self._scheduler.supports_resources(node, script.hardware_requirements.devices) for node in capable
             )
         ):
             first = capable[0]
@@ -261,10 +230,7 @@ class ShardSchedulerService:
                 first.node_id,
                 (
                     "没有节点具备脚本要求的完整物理设备集合: "
-                    + ", ".join(
-                        requirement.resource_type
-                        for requirement in script.hardware_requirements.devices
-                    ),
+                    + ", ".join(requirement.resource_type for requirement in script.hardware_requirements.devices),
                 ),
                 available=list_capability_paths(first.capabilities),
             )
@@ -295,12 +261,11 @@ class ShardSchedulerService:
         )
 
     @staticmethod
-    def _is_dispatchable(
-        shard: RunShard, attempts: list[ShardAttempt]
-    ) -> bool:
+    def _is_dispatchable(shard: RunShard, attempts: list[ShardAttempt]) -> bool:
         if shard.status in {ShardStatus.PENDING, ShardStatus.WAITING_RECOVERY}:
             return not any(
-                attempt.status in {
+                attempt.status
+                in {
                     ShardAttemptStatus.CREATED,
                     ShardAttemptStatus.DISPATCHED,
                     ShardAttemptStatus.ACKED,
@@ -309,9 +274,7 @@ class ShardSchedulerService:
                 for attempt in attempts
             )
         if shard.status is ShardStatus.DISPATCHING:
-            return bool(attempts) and max(
-                attempts, key=lambda attempt: attempt.attempt_no
-            ).status in {
+            return bool(attempts) and max(attempts, key=lambda attempt: attempt.attempt_no).status in {
                 ShardAttemptStatus.FAILED,
                 ShardAttemptStatus.TIMED_OUT,
             }
@@ -355,17 +318,18 @@ class ShardSchedulerService:
         outbox_id = new_id()
         script_ref = dict(run.script_ref)
         if self._download_url_builder is not None:
-            script_ref["download_url"] = self._download_url_builder(
-                script.script_id
-            )
+            script_ref["download_url"] = self._download_url_builder(script.script_id)
         artifact_upload_url = None
         if self._artifact_upload_url_builder is not None:
-            artifact_upload_url = self._artifact_upload_url_builder(
-                run.run_id,
-                run.project_id,
-                assignment.node.node_id,
-                shard.shard_id,
-            ) or None
+            artifact_upload_url = (
+                self._artifact_upload_url_builder(
+                    run.run_id,
+                    run.project_id,
+                    assignment.node.node_id,
+                    shard.shard_id,
+                )
+                or None
+            )
         plugin_ref = (
             self._plugin_ref_builder(task.task_type, script.plugin_version)
             if self._plugin_ref_builder is not None
@@ -383,9 +347,7 @@ class ShardSchedulerService:
                     device_id=device.device_id,
                     resource_type=device.capability.resource_type,
                     labels=dict(device.capability.labels),
-                    switch_route=_switch_route_allocation(
-                        assignment.routes_by_device.get(device.device_id)
-                    ),
+                    switch_route=_switch_route_allocation(assignment.routes_by_device.get(device.device_id)),
                 )
                 for device in assignment.devices
             ],
@@ -442,15 +404,14 @@ class ShardSchedulerService:
                 device = uow.devices.get_by_id(device_id)
                 if device is None:
                     continue
-                device.status = (
-                    DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
-                )
+                device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
                 uow.devices.update(device)
 
     def release_device(self, device_id: str) -> None:
         """兼容单资源调用方，转发到批量释放。"""
 
         self.release_devices((device_id,))
+
 
 def _switch_route_allocation(
     route: SwitchRoute | None,

@@ -46,6 +46,4 @@ class PluginDownloadService:
 
     def verify(self, plugin_id: str, expires: int, signature: str) -> bool:
         """校验插件签名 URL 是否有效。"""
-        return verify_signed_path(
-            plugin_id, expires, signature, self._secret
-        )
+        return verify_signed_path(plugin_id, expires, signature, self._secret)

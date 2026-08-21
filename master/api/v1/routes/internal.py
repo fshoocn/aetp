@@ -109,9 +109,7 @@ def download_plugin(
         media_type="application/zip",
         headers={
             "X-Checksum-Sha256": record.sha256,
-            "Content-Disposition": (
-                f"attachment; filename*=UTF-8''{quote(record.filename, safe='')}"
-            ),
+            "Content-Disposition": (f"attachment; filename*=UTF-8''{quote(record.filename, safe='')}"),
         },
     )
 

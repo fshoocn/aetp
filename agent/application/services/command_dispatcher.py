@@ -99,9 +99,7 @@ class CommandDispatcher:
             if envelope is None:
                 return False
         except Exception:
-            logger.warning(
-                "命令校验失败: topic=%s", message.topic, exc_info=True
-            )
+            logger.warning("命令校验失败: topic=%s", message.topic, exc_info=True)
             return False
 
         msg_type = envelope.message_type
@@ -115,9 +113,7 @@ class CommandDispatcher:
 
     # -- 校验 ---------------------------------------------------------------
 
-    def _parse_and_validate(
-        self, topic: str, payload: bytes
-    ) -> Envelope | None:
+    def _parse_and_validate(self, topic: str, payload: bytes) -> Envelope | None:
         """严格 Envelope 校验：解析 + topic/sender/message_type 匹配。"""
         envelope = Envelope.model_validate(json.loads(payload.decode("utf-8")))
         validate_sender_for_topic(topic, envelope.sender)
@@ -125,8 +121,7 @@ class CommandDispatcher:
         # commands 主题额外校验 sender.id 为已知 Master
         if envelope.sender.id != self._settings.master_id:
             raise InvalidSenderError(
-                f"sender.id 不是已知 Master: {envelope.sender.id}"
-                f"（期望 {self._settings.master_id}）"
+                f"sender.id 不是已知 Master: {envelope.sender.id}（期望 {self._settings.master_id}）"
             )
         return envelope
 
@@ -170,36 +165,25 @@ class CommandDispatcher:
                 )
             except PluginNotFoundError as exc:
                 logger.warning("run.assign 插件缺失: %s", exc)
-                self._ack_run_assign(
-                    envelope, accepted=False, reason=str(exc)
-                )
+                self._ack_run_assign(envelope, accepted=False, reason=str(exc))
                 return True  # 已回 ACK，不重试
             except PluginVersionMismatchError as exc:
                 logger.warning("run.assign 插件版本不兼容: %s", exc)
-                self._ack_run_assign(
-                    envelope, accepted=False, reason=str(exc)
-                )
+                self._ack_run_assign(envelope, accepted=False, reason=str(exc))
                 return True  # 已回 ACK，不重试
             except PluginInstallError as exc:
                 logger.warning("run.assign 插件安装失败: %s", exc)
-                self._ack_run_assign(
-                    envelope, accepted=False, reason=f"{exc.code}: {exc}"
-                )
+                self._ack_run_assign(envelope, accepted=False, reason=f"{exc.code}: {exc}")
                 return True
 
         # 脚本下载/校验/缓存（P5.6）：先于 Inbox 去重与 claim，失败回 ACK(rejected)
         # 且不写 Inbox，允许同一消息重试（§9.8：hash 不符丢弃缓存重下）。
-        if (
-            self._script_cache is not None
-            and payload.script_ref.get("download_url")
-        ):
+        if self._script_cache is not None and payload.script_ref.get("download_url"):
             try:
                 self._script_cache.ensure_cached(payload.script_ref)
             except ScriptCacheError as exc:
                 logger.warning("run.assign 脚本准备失败: %s", exc)
-                self._ack_run_assign(
-                    envelope, accepted=False, reason=f"{exc.code}: {exc}"
-                )
+                self._ack_run_assign(envelope, accepted=False, reason=f"{exc.code}: {exc}")
                 return True
 
         # Inbox 去重在插件/脚本准备成功后执行，避免准备失败把命令永久吞掉。
@@ -279,9 +263,7 @@ class CommandDispatcher:
 
         run = self._ledger.get_run(payload.run_id)
         if run is None:
-            logger.debug(
-                "run.cancel 目标 run 不存在: run_id=%s", payload.run_id
-            )
+            logger.debug("run.cancel 目标 run 不存在: run_id=%s", payload.run_id)
             return True  # 不报错，静默忽略
 
         if run.status in {
@@ -346,6 +328,4 @@ class CommandDispatcher:
         )
         topic = event_topic(self._settings.node_id, "ack")
         outbox_id = f"run-ack:{run_id}:{attempt_no}"
-        self._ledger.replace_outbox(
-            outbox_id, topic, ack_envelope.model_dump(mode="json")
-        )
+        self._ledger.replace_outbox(outbox_id, topic, ack_envelope.model_dump(mode="json"))

@@ -56,9 +56,7 @@ class NodePresenceService:
 
     # -- 注册 ---------------------------------------------------------------
 
-    def handle_register(
-        self, *, envelope: Envelope, payload: NodeRegisterPayload
-    ) -> OutboxMessage:
+    def handle_register(self, *, envelope: Envelope, payload: NodeRegisterPayload) -> OutboxMessage:
         """节点注册：upsert 节点 + 会话切换 + outbox 回 register-ack。"""
         self._validate_agent_sender(envelope, payload.node_id)
         now = utcnow()
@@ -80,10 +78,7 @@ class NodePresenceService:
                     capabilities=caps,
                     protocol_version=str(envelope.protocol_version),
                     plugin_versions=dict(payload.plugin_versions),
-                    plugin_supported_versions={
-                        key: list(value)
-                        for key, value in payload.supported_versions.items()
-                    },
+                    plugin_supported_versions={key: list(value) for key, value in payload.supported_versions.items()},
                     last_seen_at=now,
                     load={},
                 )
@@ -95,20 +90,14 @@ class NodePresenceService:
                 node.capabilities = caps
                 node.protocol_version = str(envelope.protocol_version)
                 node.plugin_versions = dict(payload.plugin_versions)
-                node.plugin_supported_versions = {
-                    key: list(value)
-                    for key, value in payload.supported_versions.items()
-                }
+                node.plugin_supported_versions = {key: list(value) for key, value in payload.supported_versions.items()}
                 node.last_seen_at = now
             node = uow.nodes.save(node)
             assert node.id is not None  # save 后必有代理主键（后续会话查询用）
 
             # 关闭旧会话（同节点不同 session_id → SESSION_REPLACED）
             current = uow.node_sessions.get_current(node.id)
-            if (
-                current is not None
-                and current.session_id != envelope.sender.session_id
-            ):
+            if current is not None and current.session_id != envelope.sender.session_id:
                 uow.node_sessions.close(
                     current,
                     reason=DisconnectReason.SESSION_REPLACED,
@@ -157,9 +146,7 @@ class NodePresenceService:
 
     # -- 心跳 ---------------------------------------------------------------
 
-    def handle_heartbeat(
-        self, *, envelope: Envelope, payload: NodeHeartbeatPayload
-    ) -> None:
+    def handle_heartbeat(self, *, envelope: Envelope, payload: NodeHeartbeatPayload) -> None:
         """心跳：只刷新在线投影（会话校验失败抛 NodePresenceError）。"""
         self._validate_agent_sender(envelope, payload.node_id)
         now = utcnow()
@@ -167,30 +154,23 @@ class NodePresenceService:
         with self._uow_factory() as uow:
             node = uow.nodes.get_by_id(payload.node_id)
             if node is None:
-                raise NodePresenceError(
-                    f"未注册节点心跳被拒: {payload.node_id}"
-                )
+                raise NodePresenceError(f"未注册节点心跳被拒: {payload.node_id}")
             assert node.id is not None  # 已存在节点必有代理主键
             current = uow.node_sessions.get_current(node.id)
             if current is None or current.session_id != envelope.sender.session_id:
                 raise NodePresenceError(
-                    f"旧 session 消息被拒绝: node={payload.node_id} "
-                    f"session={envelope.sender.session_id}"
+                    f"旧 session 消息被拒绝: node={payload.node_id} session={envelope.sender.session_id}"
                 )
             node.online = True
             node.status = NodeStatus.ONLINE if node.enabled else NodeStatus.DISABLED
             node.last_seen_at = now
             node.load = payload.load
             uow.nodes.save(node)
-            logger.debug(
-                "节点心跳: node=%s load=%s", payload.node_id, payload.load
-            )
+            logger.debug("节点心跳: node=%s load=%s", payload.node_id, payload.load)
 
     # -- LWT（非正常离线） ----------------------------------------------------
 
-    def handle_presence(
-        self, *, envelope: Envelope, payload: PresencePayload
-    ) -> None:
+    def handle_presence(self, *, envelope: Envelope, payload: PresencePayload) -> None:
         """LWT：关闭当前会话并把节点投影为 offline（§8.6 步骤 1-2）。"""
         self._validate_agent_sender(envelope, payload.node_id)
         now = utcnow()
@@ -205,8 +185,7 @@ class NodePresenceService:
             if current is not None:
                 if current.session_id != envelope.sender.session_id:
                     raise NodePresenceError(
-                        f"旧 session 消息被拒绝: node={payload.node_id} "
-                        f"session={envelope.sender.session_id}"
+                        f"旧 session 消息被拒绝: node={payload.node_id} session={envelope.sender.session_id}"
                     )
                 reason = DisconnectReason(payload.reason or "unexpected_disconnect")
                 uow.node_sessions.close(current, reason=reason, at=now)
@@ -242,13 +221,9 @@ class NodePresenceService:
     def _validate_agent_sender(self, envelope: Envelope, node_id: str) -> None:
         """sender 身份校验（§8.3：agent 事件必须 sender.kind=agent 且 id==node_id）。"""
         if envelope.sender.kind is not SenderKind.AGENT:
-            raise NodePresenceError(
-                f"sender.kind 必须为 agent: {envelope.sender.kind}"
-            )
+            raise NodePresenceError(f"sender.kind 必须为 agent: {envelope.sender.kind}")
         if envelope.sender.id != node_id:
-            raise NodePresenceError(
-                f"sender.id 与 node_id 不一致: {envelope.sender.id} != {node_id}"
-            )
+            raise NodePresenceError(f"sender.id 与 node_id 不一致: {envelope.sender.id} != {node_id}")
 
     def _build_ack_envelope(self, request: Envelope, node_id: str) -> dict:
         """构造 register-ack 的 Envelope JSON（sender=master，correlation_id=原消息）。"""

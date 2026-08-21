@@ -12,10 +12,7 @@ def _active_user(client, username: str) -> tuple[int, dict[str, str]]:
     user = service.create_user(username, "user-pass-123", username)
     with client.app.state.container.database().session_scope() as session:
         session.execute(
-            text(
-                "UPDATE users SET account_status='active' "
-                "WHERE username=:username"
-            ),
+            text("UPDATE users SET account_status='active' WHERE username=:username"),
             {"username": username},
         )
     response = client.post(

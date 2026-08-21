@@ -27,9 +27,7 @@ class TaskSchedule(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     schedule_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    task_pk: Mapped[int] = mapped_column(
-        ForeignKey("test_tasks.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    task_pk: Mapped[int] = mapped_column(ForeignKey("test_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
     cron_expression: Mapped[str | None] = mapped_column(String(128), nullable=True)
     interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")

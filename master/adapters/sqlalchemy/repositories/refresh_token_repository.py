@@ -32,9 +32,7 @@ class RefreshTokenRepositoryImpl(RefreshTokenRepository):
 
     def get_by_hash(self, token_hash: str) -> RefreshToken | None:
         orm = self._s.execute(
-            select(RefreshTokenORM).where(
-                RefreshTokenORM.token_hash == token_hash
-            )
+            select(RefreshTokenORM).where(RefreshTokenORM.token_hash == token_hash)
         ).scalar_one_or_none()
         return _to_domain(orm) if orm is not None else None
 

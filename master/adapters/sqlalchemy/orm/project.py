@@ -22,9 +22,5 @@ class Project(Base, TimestampMixin):
     project_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default=ProjectStatus.ACTIVE.value
-    )
-    created_by: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=ProjectStatus.ACTIVE.value)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)

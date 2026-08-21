@@ -118,13 +118,10 @@ def _seed(
                     status=NodeStatus.ONLINE,
                     online=True,
                     enabled=True,
-                    capabilities=NodeCapabilities(
-                    ),
+                    capabilities=NodeCapabilities(),
                     devices=[],
                     load={"queued_shards": index},
-                    last_seen_at=datetime(
-                        2026, 1, 1, 0, 0, index, tzinfo=UTC
-                    ),
+                    last_seen_at=datetime(2026, 1, 1, 0, 0, index, tzinfo=UTC),
                 )
             )
             assert node.id is not None
@@ -140,11 +137,7 @@ def _seed(
                         node_id=node_id,
                         name=device_id,
                         capability=capability,
-                        status=(
-                            DeviceStatus.BUSY
-                            if node_id in busy_node_ids
-                            else DeviceStatus.ONLINE
-                        ),
+                        status=(DeviceStatus.BUSY if node_id in busy_node_ids else DeviceStatus.ONLINE),
                         online=True,
                     )
                 )
@@ -220,9 +213,7 @@ def test_schedule_run_persists_attempt_and_run_assign_outbox(client) -> None:
     dispatch = result.scheduled[0]
     with _uow(container) as uow:
         attempts = uow.shard_attempts.list_by_shard(dispatch.shard_id)
-        assert [(a.attempt_no, a.node_id, a.status) for a in attempts] == [
-            (1, "node-b", ShardAttemptStatus.DISPATCHED)
-        ]
+        assert [(a.attempt_no, a.node_id, a.status) for a in attempts] == [(1, "node-b", ShardAttemptStatus.DISPATCHED)]
         message = uow.outbox_messages.get_by_outbox_id(dispatch.outbox_id)
         assert message is not None
         assert message.topic.endswith("/node-b/commands/assign")
@@ -249,15 +240,15 @@ def test_schedule_run_is_idempotent(client) -> None:
     assert len(first.scheduled) == 2
     assert first.pending_shard_ids == ()
     assert second.scheduled == ()
+
+
 def test_schedule_run_keeps_shard_pending_when_all_devices_are_busy(client) -> None:
     container = client.app.state.container
     run_id = _seed(
         container,
         node_ids=("node-a",),
         busy_node_ids={"node-a"},
-        requirements=HardwareRequirements(
-            devices=(DeviceRequirement(resource_type="generic"),)
-        ),
+        requirements=HardwareRequirements(devices=(DeviceRequirement(resource_type="generic"),)),
         shard_count=1,
     )
 
@@ -277,9 +268,7 @@ def test_schedule_run_reserves_each_free_device_once_per_round(client) -> None:
     run_id = _seed(
         container,
         node_ids=("node-a",),
-        requirements=HardwareRequirements(
-            devices=(DeviceRequirement(resource_type="generic"),)
-        ),
+        requirements=HardwareRequirements(devices=(DeviceRequirement(resource_type="generic"),)),
         shard_count=2,
     )
 
@@ -380,9 +369,7 @@ def test_schedule_run_allocates_multiple_and_specific_devices_atomically(client)
         assert set(attempt.device_ids) == expected_ids
         message = uow.outbox_messages.get_by_outbox_id(dispatch.outbox_id)
         assert message is not None
-        payload = RunAssignPayload.model_validate(
-            Envelope.model_validate(message.payload).payload
-        )
+        payload = RunAssignPayload.model_validate(Envelope.model_validate(message.payload).payload)
         assert {allocation.device_id for allocation in payload.device_allocations} == expected_ids
 
 

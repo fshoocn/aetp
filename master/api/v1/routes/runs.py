@@ -79,9 +79,7 @@ def list_runs(
 ) -> list[RunOut]:
     """列出项目内的 Run（分页，最新在前）。"""
     with uow_factory() as uow:
-        runs = uow.task_runs.list(
-            project_id=project_id, limit=limit, offset=offset
-        )
+        runs = uow.task_runs.list(project_id=project_id, limit=limit, offset=offset)
     return [
         RunOut(
             run_id=run.run_id,
@@ -219,9 +217,7 @@ def download_run_artifact(
         media_type="application/octet-stream",
         headers={
             "X-Checksum-Sha256": artifact.sha256,
-            "Content-Disposition": (
-                f'attachment; filename="{artifact.file_ref.rsplit("/", 1)[-1]}"'
-            ),
+            "Content-Disposition": (f'attachment; filename="{artifact.file_ref.rsplit("/", 1)[-1]}"'),
         },
     )
 

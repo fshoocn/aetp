@@ -68,6 +68,7 @@ def get_plugin_registry(
     """获取已加载的受信任任务类型插件注册表。"""
     return container.plugin_registry()
 
+
 def get_plugin_manager(container: Annotated[Container, Depends(get_container)]) -> PluginManager:
     return container.plugin_manager()
 
@@ -227,9 +228,7 @@ def get_test_task_service(
 
 
 def get_current_user(
-    credentials: Annotated[
-        HTTPAuthorizationCredentials | None, Depends(_bearer)
-    ],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     uow_factory: Annotated[Callable[[], UnitOfWork], Depends(get_uow_factory)],
 ) -> User:
     """解析 Bearer 令牌并加载当前 active 用户。"""
@@ -262,19 +261,13 @@ def get_current_user(
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 DbDep = Annotated[DatabaseInterface, Depends(get_database)]
-UowFactoryDep = Annotated[
-    SqlAlchemyUnitOfWorkFactory, Depends(get_uow_factory)
-]
+UowFactoryDep = Annotated[SqlAlchemyUnitOfWorkFactory, Depends(get_uow_factory)]
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
 EventPublisherDep = Annotated[EventPublisher, Depends(get_event_publisher)]
 AuthDep = Annotated[AuthService, Depends(get_auth_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
-RunTriggerServiceDep = Annotated[
-    RunTriggerService, Depends(get_run_trigger_service)
-]
-RunProjectionServiceDep = Annotated[
-    RunProjectionService, Depends(get_run_projection_service)
-]
+RunTriggerServiceDep = Annotated[RunTriggerService, Depends(get_run_trigger_service)]
+RunProjectionServiceDep = Annotated[RunProjectionService, Depends(get_run_projection_service)]
 PluginRegistryDep = Annotated[PluginRegistry, Depends(get_plugin_registry)]
 PluginManagerDep = Annotated[PluginManager, Depends(get_plugin_manager)]
 RunRetryServiceDep = Annotated[RunRetryService, Depends(get_run_retry_service)]
@@ -282,26 +275,14 @@ RunCancelServiceDep = Annotated[RunCancelService, Depends(get_run_cancel_service
 ArtifactServiceDep = Annotated[ArtifactService, Depends(get_artifact_service)]
 DeviceServiceDep = Annotated[DeviceService, Depends(get_device_service)]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
-ProjectMemberServiceDep = Annotated[
-    ProjectMemberService, Depends(get_project_member_service)
-]
-ProjectNodeBindingServiceDep = Annotated[
-    ProjectNodeBindingService, Depends(get_project_node_binding_service)
-]
+ProjectMemberServiceDep = Annotated[ProjectMemberService, Depends(get_project_member_service)]
+ProjectNodeBindingServiceDep = Annotated[ProjectNodeBindingService, Depends(get_project_node_binding_service)]
 NodeServiceDep = Annotated[NodeService, Depends(get_node_service)]
-ScriptDownloadServiceDep = Annotated[
-    ScriptDownloadService, Depends(get_script_download_service)
-]
-PluginDownloadServiceDep = Annotated[
-    PluginDownloadService, Depends(get_plugin_download_service)
-]
-ScriptStorageServiceDep = Annotated[
-    ScriptStorageService, Depends(get_script_storage_service)
-]
+ScriptDownloadServiceDep = Annotated[ScriptDownloadService, Depends(get_script_download_service)]
+PluginDownloadServiceDep = Annotated[PluginDownloadService, Depends(get_plugin_download_service)]
+ScriptStorageServiceDep = Annotated[ScriptStorageService, Depends(get_script_storage_service)]
 ScriptServiceDep = Annotated[ScriptService, Depends(get_script_service)]
-ScriptVerificationServiceDep = Annotated[
-    ScriptVerificationService, Depends(get_script_verification_service)
-]
+ScriptVerificationServiceDep = Annotated[ScriptVerificationService, Depends(get_script_verification_service)]
 TestTaskServiceDep = Annotated[TestTaskService, Depends(get_test_task_service)]
 
 
@@ -312,9 +293,7 @@ def get_notification_service(
     return container.notification_service()
 
 
-NotificationServiceDep = Annotated[
-    NotificationService, Depends(get_notification_service)
-]
+NotificationServiceDep = Annotated[NotificationService, Depends(get_notification_service)]
 
 
 def get_schedule_service(
@@ -324,9 +303,7 @@ def get_schedule_service(
     return container.schedule_service()
 
 
-ScheduleServiceDep = Annotated[
-    ScheduleService, Depends(get_schedule_service)
-]
+ScheduleServiceDep = Annotated[ScheduleService, Depends(get_schedule_service)]
 
 
 def get_ci_integration_service(
@@ -336,9 +313,7 @@ def get_ci_integration_service(
     return container.ci_integration_service()
 
 
-CiIntegrationServiceDep = Annotated[
-    CiIntegrationService, Depends(get_ci_integration_service)
-]
+CiIntegrationServiceDep = Annotated[CiIntegrationService, Depends(get_ci_integration_service)]
 
 
 def get_hook_runner(
@@ -348,6 +323,4 @@ def get_hook_runner(
     return container.hook_runner()
 
 
-HookRunnerDep = Annotated[
-    HookRunner, Depends(get_hook_runner)
-]
+HookRunnerDep = Annotated[HookRunner, Depends(get_hook_runner)]

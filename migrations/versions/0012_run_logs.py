@@ -39,19 +39,13 @@ def upgrade() -> None:
             "level IN ('debug','info','warn','error')",
             name="ck_run_logs_level",
         ),
-        sa.ForeignKeyConstraint(
-            ["run_pk"], ["task_runs.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["shard_pk"], ["run_shards.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["run_pk"], ["task_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["shard_pk"], ["run_shards.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("run_pk", "sequence", name="uq_run_logs_run_sequence"),
     )
     op.create_index("ix_run_logs_run_pk", "run_logs", ["run_pk"])
-    op.create_index(
-        "ix_run_logs_run_sequence", "run_logs", ["run_pk", "sequence"]
-    )
+    op.create_index("ix_run_logs_run_sequence", "run_logs", ["run_pk", "sequence"])
 
 
 def downgrade() -> None:

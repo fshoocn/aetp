@@ -1,4 +1,5 @@
-﻿"""AuthService unit and integration tests."""
+"""AuthService unit and integration tests."""
+
 from __future__ import annotations
 
 
@@ -47,24 +48,14 @@ def test_me_rejects_non_active_account(client, auth_token, auth_header):
 
         from master.adapters.sqlalchemy.orm import User
 
-        user = session.execute(
-            select(User).where(User.username == "tester")
-        ).scalar_one()
-        session.execute(
-            update(User)
-            .where(User.id == user.id)
-            .values(account_status="disabled")
-        )
+        user = session.execute(select(User).where(User.username == "tester")).scalar_one()
+        session.execute(update(User).where(User.id == user.id).values(account_status="disabled"))
 
     response = client.get("/api/v1/auth/me", headers=auth_header)
     assert response.status_code == 401
 
     with container.database().session_scope() as session:
-        session.execute(
-            update(User)
-            .where(User.username == "tester")
-            .values(account_status="pending")
-        )
+        session.execute(update(User).where(User.username == "tester").values(account_status="pending"))
 
     response = client.get("/api/v1/auth/me", headers=auth_header)
     assert response.status_code == 401
@@ -76,6 +67,7 @@ def test_change_password(client):
     svc.create_user("cpw", "pass123456", "CPW")
     with container.database().session_scope() as s:
         from sqlalchemy import text as sa_text
+
         s.execute(sa_text("UPDATE users SET account_status='active' WHERE username='cpw'"))
     assert svc.authenticate("cpw", "pass123456") is not None
     assert svc.change_password("cpw", "newpass123")

@@ -57,29 +57,33 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
         self._s.refresh(orm)
         return _to_domain(orm)
 
-    def get_by_shard_attempt(
-        self, shard_id: str, attempt_no: int
-    ) -> ShardAttempt | None:
-        orm = self._s.execute(
-            select(ShardAttemptORM)
-            .options(joinedload(ShardAttemptORM.shard))
-            .where(
-                ShardAttemptORM.shard_pk
-                == select(RunShardORM.id)
-                .where(RunShardORM.shard_id == shard_id)
-                .scalar_subquery(),
-                ShardAttemptORM.attempt_no == attempt_no,
+    def get_by_shard_attempt(self, shard_id: str, attempt_no: int) -> ShardAttempt | None:
+        orm = (
+            self._s.execute(
+                select(ShardAttemptORM)
+                .options(joinedload(ShardAttemptORM.shard))
+                .where(
+                    ShardAttemptORM.shard_pk
+                    == select(RunShardORM.id).where(RunShardORM.shard_id == shard_id).scalar_subquery(),
+                    ShardAttemptORM.attempt_no == attempt_no,
+                )
             )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def get_by_attempt_id(self, attempt_id: str) -> ShardAttempt | None:
         """按 attempt 业务标识查询（dispatch_id == attempt_id，§8.4）。"""
-        orm = self._s.execute(
-            select(ShardAttemptORM)
-            .options(joinedload(ShardAttemptORM.shard))
-            .where(ShardAttemptORM.attempt_id == attempt_id)
-        ).scalars().one_or_none()
+        orm = (
+            self._s.execute(
+                select(ShardAttemptORM)
+                .options(joinedload(ShardAttemptORM.shard))
+                .where(ShardAttemptORM.attempt_id == attempt_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def list_by_shard(self, shard_id: str) -> list[ShardAttempt]:
@@ -88,9 +92,7 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
             .options(joinedload(ShardAttemptORM.shard))
             .where(
                 ShardAttemptORM.shard_pk
-                == select(RunShardORM.id)
-                .where(RunShardORM.shard_id == shard_id)
-                .scalar_subquery()
+                == select(RunShardORM.id).where(RunShardORM.shard_id == shard_id).scalar_subquery()
             )
             .order_by(ShardAttemptORM.attempt_no)
         )
@@ -99,16 +101,12 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
     def list_by_run(self, run_id: str) -> list[ShardAttempt]:
         """按 run_id 一次查回所有 attempt，避免 N+1 查询。"""
         from master.adapters.sqlalchemy.orm import TaskRun as TaskRunORM
+
         stmt = (
             select(ShardAttemptORM)
             .options(joinedload(ShardAttemptORM.shard))
             .join(ShardAttemptORM.shard)
-            .where(
-                RunShardORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery()
-            )
+            .where(RunShardORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery())
             .order_by(ShardAttemptORM.shard_pk, ShardAttemptORM.attempt_no)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
@@ -135,11 +133,13 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
             .options(joinedload(ShardAttemptORM.shard))
             .where(
                 ShardAttemptORM.node_id == node_id,
-                ShardAttemptORM.status.in_([
-                    ShardAttemptStatus.DISPATCHED.value,
-                    ShardAttemptStatus.ACKED.value,
-                    ShardAttemptStatus.RUNNING.value,
-                ]),
+                ShardAttemptORM.status.in_(
+                    [
+                        ShardAttemptStatus.DISPATCHED.value,
+                        ShardAttemptStatus.ACKED.value,
+                        ShardAttemptStatus.RUNNING.value,
+                    ]
+                ),
             )
             .order_by(ShardAttemptORM.id)
         )

@@ -13,9 +13,7 @@ TEST_PASSWORD = "**********"
 
 
 def _login(client, username="tester", password=TEST_PASSWORD) -> dict:
-    resp = client.post(
-        "/api/v1/auth/login", json={"username": username, "password": password}
-    )
+    resp = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -33,44 +31,32 @@ def test_refresh_rotates_token_and_revokes_old(client, auth_token):
     data = _login(client)
     old_refresh = data["refresh_token"]
 
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
     assert resp.status_code == 200, resp.text
     new_data = resp.json()
     assert new_data["refresh_token"] != old_refresh
     assert new_data["access_token"]
 
     # 旧刷新令牌已撤销，重放应被拒绝
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": old_refresh}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
     assert resp.status_code == 401
 
     # 新令牌仍可用
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": new_data["refresh_token"]}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": new_data["refresh_token"]})
     assert resp.status_code == 200
 
 
 def test_refresh_unknown_token_rejected(client):
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": "unknown-token-value-123456"}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": "unknown-token-value-123456"})
     assert resp.status_code == 401
 
 
 def test_logout_revokes_refresh_token(client, auth_token):
     data = _login(client)
-    resp = client.post(
-        "/api/v1/auth/logout", json={"refresh_token": data["refresh_token"]}
-    )
+    resp = client.post("/api/v1/auth/logout", json={"refresh_token": data["refresh_token"]})
     assert resp.status_code == 204
 
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]})
     assert resp.status_code == 401
 
 
@@ -81,16 +67,12 @@ def test_change_password_revokes_refresh_tokens(client, auth_token):
 
     assert svc.change_password("tester", "newpass123")
 
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]})
     assert resp.status_code == 401
 
     # 新密码登录正常，且新会话可刷新
     new_data = _login(client, username="tester", password="newpass123")
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": new_data["refresh_token"]}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": new_data["refresh_token"]})
     assert resp.status_code == 200
 
 
@@ -99,19 +81,13 @@ def test_disabled_user_cannot_refresh(client, auth_token):
     data = _login(client)
 
     with container.database().session_scope() as s:
-        s.execute(
-            sa_text("UPDATE users SET account_status='disabled' WHERE username='tester'")
-        )
+        s.execute(sa_text("UPDATE users SET account_status='disabled' WHERE username='tester'"))
 
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]})
     assert resp.status_code == 401
 
     with container.database().session_scope() as s:
-        s.execute(
-            sa_text("UPDATE users SET account_status='active' WHERE username='tester'")
-        )
+        s.execute(sa_text("UPDATE users SET account_status='active' WHERE username='tester'"))
 
 
 def test_expired_refresh_token_rejected(client, auth_token):
@@ -122,13 +98,9 @@ def test_expired_refresh_token_rejected(client, auth_token):
     assert user is not None
 
     expired_hash = hash_refresh_token("expired-token-value-123456")
-    svc.issue_refresh_token(
-        user.id, expired_hash, utcnow() - timedelta(seconds=1)
-    )
+    svc.issue_refresh_token(user.id, expired_hash, utcnow() - timedelta(seconds=1))
 
-    resp = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": "expired-token-value-123456"}
-    )
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": "expired-token-value-123456"})
     assert resp.status_code == 401
 
 

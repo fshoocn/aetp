@@ -70,8 +70,7 @@ def test_from_env_file_ignores_system_env(tmp_path, monkeypatch) -> None:
 def test_relative_paths_resolve_against_env_dir(tmp_path) -> None:
     env_file = _write_env(
         tmp_path,
-        "AETP_AGENT_LOG_FILE=logs/agent.log\n"
-        "AETP_AGENT_MQTT_CA_CERT_PATH=emqxsl-ca.crt\n",
+        "AETP_AGENT_LOG_FILE=logs/agent.log\nAETP_AGENT_MQTT_CA_CERT_PATH=emqxsl-ca.crt\n",
     )
     settings = AgentSettings.from_env_file(env_file)
     assert settings.log_file == tmp_path / "logs" / "agent.log"
@@ -106,9 +105,7 @@ def test_missing_node_id_is_generated_and_persisted(tmp_path) -> None:
 
     first = AgentSettings.from_env_file(env_file).validate()
     assert re.fullmatch(r"agent-[0-9a-f]{32}", first.node_id)
-    assert f"AETP_AGENT_NODE_ID={first.node_id}" in env_file.read_text(
-        encoding="utf-8"
-    )
+    assert f"AETP_AGENT_NODE_ID={first.node_id}" in env_file.read_text(encoding="utf-8")
 
     second = AgentSettings.from_env_file(env_file).validate()
     assert second.node_id == first.node_id
@@ -121,6 +118,4 @@ def test_placeholder_node_id_is_replaced(tmp_path) -> None:
     settings = AgentSettings.from_env_file(env_file).validate()
 
     assert settings.node_id != "<node-id>"
-    assert f"AETP_AGENT_NODE_ID={settings.node_id}" in env_file.read_text(
-        encoding="utf-8"
-    )
+    assert f"AETP_AGENT_NODE_ID={settings.node_id}" in env_file.read_text(encoding="utf-8")

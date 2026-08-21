@@ -33,12 +33,8 @@ class Container(containers.DeclarativeContainer):
     # 本地账本单例（P5.2：SQLite，agent_runs/inbox/outbox/spool/cache）
     ledger = providers.Singleton(
         SQLiteLedger,
-        url=providers.Callable(
-            lambda: resolve_sqlite_url(get_settings().ledger_url)
-        ),
-        max_spool_bytes=providers.Callable(
-            lambda: get_settings().task_log_spool_max_bytes
-        ),
+        url=providers.Callable(lambda: resolve_sqlite_url(get_settings().ledger_url)),
+        max_spool_bytes=providers.Callable(lambda: get_settings().task_log_spool_max_bytes),
     )
 
     # MQTT 传输单例（P5.3：aiomqtt + 指数退避重连 + 固定 LWT）
@@ -82,9 +78,7 @@ class Container(containers.DeclarativeContainer):
         transport=transport,
         ledger=ledger,
         settings=settings,
-        capabilities=providers.Callable(
-            lambda: scan_capabilities(get_settings().serial_map_file)
-        ),
+        capabilities=providers.Callable(lambda: scan_capabilities(get_settings().serial_map_file)),
         plugin_registry=plugin_registry,
     )
 

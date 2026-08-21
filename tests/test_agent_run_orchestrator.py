@@ -92,9 +92,7 @@ class _FailedResultPlugin(_ExecPlugin):
     async def analyze_results(self, execution_result, context):
         return {
             "passed": False,
-            "case_results": [
-                {"case_key": "c0", "status": "failed", "duration_ms": 10}
-            ],
+            "case_results": [{"case_key": "c0", "status": "failed", "duration_ms": 10}],
         }
 
 
@@ -110,9 +108,7 @@ class _FakeArtifactUploader:
         self.calls: list[dict] = []
 
     async def upload(self, url, path, *, kind, filename=None):
-        self.calls.append(
-            {"url": url, "path": str(path), "kind": kind, "filename": filename}
-        )
+        self.calls.append({"url": url, "path": str(path), "kind": kind, "filename": filename})
         return {"artifact_id": "A-1", "kind": kind, "filename": filename}
 
 
@@ -169,9 +165,7 @@ async def test_orchestrator_executes_and_reports_result(tmp_path) -> None:
     assert run.status is AgentRunStatus.SUCCEEDED
 
     envelopes = _claim_outbox(ledger)
-    results = [
-        e for e in envelopes if e.message_type == MessageType.RUN_RESULT.value
-    ]
+    results = [e for e in envelopes if e.message_type == MessageType.RUN_RESULT.value]
     assert len(results) == 1
     result = RunResultPayload.model_validate(results[0].payload)
     assert result.run_id == "R-1"
@@ -236,9 +230,7 @@ async def test_orchestrator_uploads_report_and_reports_artifact_refs(tmp_path) -
     result = RunResultPayload.model_validate(
         next(e.payload for e in envelopes if e.message_type == MessageType.RUN_RESULT.value)
     )
-    complete = next(
-        e.payload for e in envelopes if e.message_type == MessageType.RUN_LOG_COMPLETE.value
-    )
+    complete = next(e.payload for e in envelopes if e.message_type == MessageType.RUN_LOG_COMPLETE.value)
     assert result.artifact_refs == [{"artifact_id": "A-1", "kind": "report", "filename": "pytest-junit.xml"}]
     assert complete["artifact_refs"] == result.artifact_refs
 
@@ -272,9 +264,7 @@ async def test_orchestrator_result_outbox_id_stable(tmp_path) -> None:
     await orchestrator._run(_payload())
 
     envelopes = _claim_outbox(ledger)
-    results = [
-        e for e in envelopes if e.message_type == MessageType.RUN_RESULT.value
-    ]
+    results = [e for e in envelopes if e.message_type == MessageType.RUN_RESULT.value]
     assert len(results) == 1
 
 

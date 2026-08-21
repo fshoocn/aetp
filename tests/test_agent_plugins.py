@@ -179,9 +179,7 @@ def test_registration_payload_includes_plugin_versions(tmp_path) -> None:
 
 def test_registration_payload_empty_without_registry(tmp_path) -> None:
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
-    service = RegistrationService(
-        FakeTransport(), ledger, _SETTINGS, session_id="sess-1", now=_now
-    )
+    service = RegistrationService(FakeTransport(), ledger, _SETTINGS, session_id="sess-1", now=_now)
     payload = service.build_register_payload()
     assert payload.plugin_versions == {}
     assert payload.supported_versions == {}
@@ -204,9 +202,7 @@ def _make_dispatcher(tmp_path, *, plugin_registry=None):
     return dispatcher, ledger
 
 
-def _run_assign_envelope(
-    *, task_type: str = "fake_task", plugin_version: str = "1.0.0"
-) -> Envelope:
+def _run_assign_envelope(*, task_type: str = "fake_task", plugin_version: str = "1.0.0") -> Envelope:
     payload = RunAssignPayload(
         project_id="p1",
         task_id="T-1",
@@ -258,9 +254,7 @@ def test_assign_rejected_with_version_mismatch(tmp_path) -> None:
     registry.register_installed(FakeExecutionPlugin())
     dispatcher, ledger = _make_dispatcher(tmp_path, plugin_registry=registry)
 
-    assert dispatcher.handle_command(
-        _mqtt(_run_assign_envelope(plugin_version="99.0.0"))
-    ) is True
+    assert dispatcher.handle_command(_mqtt(_run_assign_envelope(plugin_version="99.0.0"))) is True
     assert ledger.get_run("R-1") is None
     pending = ledger.claim_due_outbox(10, _now())
     assert len(pending) == 1
@@ -268,19 +262,13 @@ def test_assign_rejected_with_version_mismatch(tmp_path) -> None:
 
 
 def test_assign_rejected_with_plugin_not_found(tmp_path) -> None:
-    dispatcher, ledger = _make_dispatcher(
-        tmp_path, plugin_registry=AgentPluginRegistry()
-    )
+    dispatcher, ledger = _make_dispatcher(tmp_path, plugin_registry=AgentPluginRegistry())
 
-    assert dispatcher.handle_command(
-        _mqtt(_run_assign_envelope(task_type="missing_task"))
-    ) is True
+    assert dispatcher.handle_command(_mqtt(_run_assign_envelope(task_type="missing_task"))) is True
     assert ledger.get_run("R-1") is None
 
 
 def test_assign_skips_version_check_without_registry(tmp_path) -> None:
     dispatcher, ledger = _make_dispatcher(tmp_path)
-    assert dispatcher.handle_command(
-        _mqtt(_run_assign_envelope(task_type="anything", plugin_version="99.0.0"))
-    ) is True
+    assert dispatcher.handle_command(_mqtt(_run_assign_envelope(task_type="anything", plugin_version="99.0.0"))) is True
     assert ledger.get_run("R-1") is not None

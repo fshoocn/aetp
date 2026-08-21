@@ -90,12 +90,8 @@ def test_envelope_rejects_missing_required_field():
 
 
 def test_topic_build_and_parse():
-    assert command_topic("bench-001", "assign") == (
-        "aetp/v1/master/agents/bench-001/commands/assign"
-    )
-    assert event_topic("bench-001", "heartbeat") == (
-        "aetp/v1/agents/bench-001/events/heartbeat"
-    )
+    assert command_topic("bench-001", "assign") == ("aetp/v1/master/agents/bench-001/commands/assign")
+    assert event_topic("bench-001", "heartbeat") == ("aetp/v1/agents/bench-001/events/heartbeat")
     info = parse_topic("aetp/v1/agents/bench-001/events/result")
     assert info.direction == "events"
     assert info.node_id == "bench-001"
@@ -104,9 +100,9 @@ def test_topic_build_and_parse():
 
 def test_parse_topic_rejects_malformed():
     for bad in (
-        "aetp/v1/agents/bench-001/events",        # 段数不足
-        "x/v1/agents/bench-001/events/result",    # 前缀错误
-        "aetp/v1/agents//events/result",          # node_id 为空
+        "aetp/v1/agents/bench-001/events",  # 段数不足
+        "x/v1/agents/bench-001/events/result",  # 前缀错误
+        "aetp/v1/agents//events/result",  # node_id 为空
         "aetp/v1/agents/bench-001/bogus/result",  # 方向错误
     ):
         with pytest.raises(ProtocolError):
@@ -143,9 +139,7 @@ def test_message_type_must_match_topic():
         validate_message_type_for_topic(ok_topic, MessageType.NODE_HEARTBEAT)
     # 方向不匹配：事件主题 + 命令消息
     with pytest.raises(ProtocolError, match="不匹配"):
-        validate_message_type_for_topic(
-            "aetp/v1/agents/bench-001/events/register", MessageType.RUN_ASSIGN
-        )
+        validate_message_type_for_topic("aetp/v1/agents/bench-001/events/register", MessageType.RUN_ASSIGN)
 
 
 # ---------------------------------------------------------------------------
@@ -181,9 +175,7 @@ def test_node_register_payload():
 
 
 def test_node_heartbeat_payload():
-    p = NodeHeartbeatPayload.model_validate(
-        {"node_id": "bench-001", "load": {"running_shards": 1}}
-    )
+    p = NodeHeartbeatPayload.model_validate({"node_id": "bench-001", "load": {"running_shards": 1}})
     assert p.status == "online"  # 默认
     assert p.load["running_shards"] == 1
 

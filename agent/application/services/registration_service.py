@@ -100,9 +100,7 @@ class RegistrationService:
         """当前注册消息 ID，ACK 必须通过 correlation_id 关联。"""
         return self._pending_register_message_id
 
-    async def handle_connection_change(
-        self, connected: bool, session_id: str | None = None
-    ) -> None:
+    async def handle_connection_change(self, connected: bool, session_id: str | None = None) -> None:
         """处理 Transport 连接变化。
 
         每次底层连接都重新注册；断开时立即撤销 registered 状态并停止心跳，
@@ -154,11 +152,7 @@ class RegistrationService:
         return NodeRegisterPayload(
             node_id=s.node_id,
             name=s.name,
-            capabilities=(
-                self._capabilities
-                if self._capabilities is not None
-                else NodeCapabilities()
-            ),
+            capabilities=(self._capabilities if self._capabilities is not None else NodeCapabilities()),
             tags=self._tags,
             supported_versions=supported_versions,
             plugin_versions=plugin_versions,
@@ -176,9 +170,7 @@ class RegistrationService:
         # 注册是可重放的单一逻辑消息；重连时替换旧 session 的 pending/sent 记录，
         # 避免旧注册消息在新 session 之后迟到并反向替换当前会话。
         outbox_id = f"register:{self._settings.node_id}"
-        self._ledger.replace_outbox(
-            outbox_id, topic, envelope.model_dump(mode="json")
-        )
+        self._ledger.replace_outbox(outbox_id, topic, envelope.model_dump(mode="json"))
         logger.info("已写入 node.register outbox: %s", outbox_id)
         return outbox_id
 
@@ -187,9 +179,7 @@ class RegistrationService:
         envelope = self._build_register_envelope()
         self._pending_register_message_id = envelope.message_id
         topic = event_topic(self._settings.node_id, "register")
-        await self._transport.publish(
-            topic, json.dumps(envelope.model_dump(mode="json")).encode("utf-8"), qos=1
-        )
+        await self._transport.publish(topic, json.dumps(envelope.model_dump(mode="json")).encode("utf-8"), qos=1)
 
     async def wait_for_register_ack(self) -> None:
         """等待当前注册消息的有效 ACK，超时或拒绝时抛出明确异常。"""
@@ -199,9 +189,7 @@ class RegistrationService:
                 timeout=self._settings.registration_timeout_s,
             )
         except TimeoutError as exc:
-            raise RegistrationTimeoutError(
-                f"等待 register-ack 超时: node={self._settings.node_id}"
-            ) from exc
+            raise RegistrationTimeoutError(f"等待 register-ack 超时: node={self._settings.node_id}") from exc
         if self._registration_error is not None:
             raise self._registration_error
         if not self._registered:
@@ -218,13 +206,9 @@ class RegistrationService:
         if topic_info.direction != "commands" or topic_info.segment != "register-ack":
             return False
         try:
-            envelope = Envelope.model_validate(
-                json.loads(message.payload.decode("utf-8"))
-            )
+            envelope = Envelope.model_validate(json.loads(message.payload.decode("utf-8")))
             validate_sender_for_topic(message.topic, envelope.sender)
-            validate_message_type_for_topic(
-                message.topic, MessageType(envelope.message_type)
-            )
+            validate_message_type_for_topic(message.topic, MessageType(envelope.message_type))
             payload = RegisterAckPayload.model_validate(envelope.payload)
         except Exception:  # noqa: BLE001 - 非法消息静默忽略
             logger.warning("register-ack 解析失败: topic=%s", message.topic)
@@ -233,10 +217,7 @@ class RegistrationService:
             return False
         if envelope.sender.id != self._settings.master_id:
             return False
-        if (
-            topic_info.direction != "commands"
-            or topic_info.node_id != self._settings.node_id
-        ):
+        if topic_info.direction != "commands" or topic_info.node_id != self._settings.node_id:
             return False
         if envelope.correlation_id != self._pending_register_message_id:
             return False
@@ -245,9 +226,7 @@ class RegistrationService:
         if payload.session_id != self._session_id:
             return False
         if not payload.accepted:
-            self._registration_error = RegistrationRejectedError(
-                payload.reason or "Master 拒绝 Agent 注册"
-            )
+            self._registration_error = RegistrationRejectedError(payload.reason or "Master 拒绝 Agent 注册")
             self._registered = False
             self._register_ack_event.set()
             return False
@@ -273,16 +252,8 @@ class RegistrationService:
         """
 
         active = self._ledger.list_active_runs()
-        running_ids = [
-            run.run_id
-            for run in active
-            if run.status is AgentRunStatus.RUNNING
-        ]
-        queued_ids = [
-            run.run_id
-            for run in active
-            if run.status is AgentRunStatus.CLAIMED
-        ]
+        running_ids = [run.run_id for run in active if run.status is AgentRunStatus.RUNNING]
+        queued_ids = [run.run_id for run in active if run.status is AgentRunStatus.CLAIMED]
         return NodeHeartbeatPayload(
             node_id=self._settings.node_id,
             status="online",
@@ -310,9 +281,7 @@ class RegistrationService:
             payload=self.build_heartbeat_payload().model_dump(mode="json"),
         )
         topic = event_topic(self._settings.node_id, "heartbeat")
-        await self._transport.publish(
-            topic, json.dumps(envelope.model_dump(mode="json")).encode("utf-8"), qos=0
-        )
+        await self._transport.publish(topic, json.dumps(envelope.model_dump(mode="json")).encode("utf-8"), qos=0)
 
     async def start_heartbeat(self) -> None:
         """启动心跳循环（幂等）。"""

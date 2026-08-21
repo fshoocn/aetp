@@ -242,9 +242,7 @@ def test_script_verification_dispatches_and_persists_result(client) -> None:
     assert dispatched["status"] == "dispatched"
 
     with _uow(container) as uow:
-        outbox = uow.outbox_messages.get_by_outbox_id(
-            f"script-verify:{dispatched['verify_id']}"
-        )
+        outbox = uow.outbox_messages.get_by_outbox_id(f"script-verify:{dispatched['verify_id']}")
         assert outbox is not None
         envelope = Envelope.model_validate(outbox.payload)
         assert envelope.payload["project_id"] == "p-verify"

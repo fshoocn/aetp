@@ -141,9 +141,7 @@ def _make_shard(run_id: str, shard_id: str, index: int, **kw) -> RunShard:
     return shard
 
 
-def _make_attempt(
-    shard_id: str, attempt_no: int, node_id: str = "bench-001", **kw
-) -> ShardAttempt:
+def _make_attempt(shard_id: str, attempt_no: int, node_id: str = "bench-001", **kw) -> ShardAttempt:
     attempt = ShardAttempt(
         attempt_id=f"A-{shard_id}-{attempt_no}",
         shard_id=shard_id,
@@ -156,9 +154,7 @@ def _make_attempt(
     return attempt
 
 
-def _make_case_result(
-    run_id: str, shard_id: str, case_key: str, attempt_no: int, **kw
-) -> RunCaseResult:
+def _make_case_result(run_id: str, shard_id: str, case_key: str, attempt_no: int, **kw) -> RunCaseResult:
     result = RunCaseResult(
         run_id=run_id,
         shard_id=shard_id,
@@ -312,9 +308,7 @@ def test_shards_duplicate_index_raises(client):
     with _uow(container) as uow:
         uow.task_runs.add(_make_run(user_id, task_id))
     with pytest.raises(IntegrityError), _uow(container) as uow:
-        uow.run_shards.add_many(
-            [_make_shard("R-1", "SH-1", 0), _make_shard("R-1", "SH-2", 0)]
-        )
+        uow.run_shards.add_many([_make_shard("R-1", "SH-1", 0), _make_shard("R-1", "SH-2", 0)])
 
 
 # ---------- shard_attempts ----------
@@ -327,12 +321,8 @@ def test_attempts_history_preserved(client):
     with _uow(container) as uow:
         uow.task_runs.add(_make_run(user_id, task_id))
         uow.run_shards.add(_make_shard("R-1", "SH-1", 0))
-        a1 = uow.shard_attempts.add(
-            _make_attempt("SH-1", 1, node_id="bench-001", status=ShardAttemptStatus.FAILED)
-        )
-        a2 = uow.shard_attempts.add(
-            _make_attempt("SH-1", 2, node_id="bench-002", status=ShardAttemptStatus.RUNNING)
-        )
+        a1 = uow.shard_attempts.add(_make_attempt("SH-1", 1, node_id="bench-001", status=ShardAttemptStatus.FAILED))
+        a2 = uow.shard_attempts.add(_make_attempt("SH-1", 2, node_id="bench-002", status=ShardAttemptStatus.RUNNING))
         assert a1.attempt_no == 1 and a2.attempt_no == 2
     with _uow(container) as uow:
         history = uow.shard_attempts.list_by_shard("SH-1")
@@ -366,12 +356,20 @@ def test_case_results_by_attempt_preserved(client):
         uow.run_case_results.add_many(
             [
                 _make_case_result(
-                    "R-1", "SH-1", "c0", 1,
-                    status=CaseStatus.FAILED, error_summary="boom",
+                    "R-1",
+                    "SH-1",
+                    "c0",
+                    1,
+                    status=CaseStatus.FAILED,
+                    error_summary="boom",
                 ),
                 _make_case_result(
-                    "R-1", "SH-1", "c0", 2,
-                    status=CaseStatus.PASSED, duration_ms=1500,
+                    "R-1",
+                    "SH-1",
+                    "c0",
+                    2,
+                    status=CaseStatus.PASSED,
+                    duration_ms=1500,
                 ),
             ]
         )
@@ -415,8 +413,10 @@ def test_artifacts_add_and_list_by_run(client):
         uow.run_artifacts.add(_make_artifact("R-1", "ART-1"))
         uow.run_artifacts.add(
             _make_artifact(
-                "R-1", "ART-2",
-                shard_id="SH-1", kind=ArtifactKind.LOG_ARCHIVE,
+                "R-1",
+                "ART-2",
+                shard_id="SH-1",
+                kind=ArtifactKind.LOG_ARCHIVE,
                 file_ref="data/artifacts/R-1/logs.zip",
             )
         )

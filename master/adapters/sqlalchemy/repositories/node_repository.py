@@ -21,9 +21,7 @@ def _device_to_domain(orm: DeviceORM) -> Device:
         name=orm.name,
         status=DeviceStatus(orm.status),
         online=orm.online,
-        capability=PhysicalDeviceCapability.model_validate(
-            orm.capabilities or {"resource_type": "generic"}
-        ),
+        capability=PhysicalDeviceCapability.model_validate(orm.capabilities or {"resource_type": "generic"}),
         last_seen_at=orm.last_seen_at,
         created_at=orm.created_at,
         updated_at=orm.updated_at,
@@ -43,10 +41,7 @@ def _to_domain(orm: NodeORM) -> Node:
         capabilities=NodeCapabilities.model_validate(orm.capabilities or {}),
         protocol_version=orm.protocol_version,
         plugin_versions=dict(orm.plugin_versions or {}),
-        plugin_supported_versions={
-            key: list(value)
-            for key, value in (orm.plugin_supported_versions or {}).items()
-        },
+        plugin_supported_versions={key: list(value) for key, value in (orm.plugin_supported_versions or {}).items()},
         last_seen_at=orm.last_seen_at,
         load=dict(orm.load or {}),
         created_at=orm.created_at,
@@ -59,14 +54,8 @@ class NodeRepositoryImpl(NodeRepository):
     def __init__(self, session: Session) -> None:
         self._s = session
 
-    def list_all(
-        self, *, online: bool | None = None, enabled: bool | None = None
-    ) -> list[Node]:
-        stmt = (
-            select(NodeORM)
-            .options(selectinload(NodeORM.devices))
-            .order_by(NodeORM.id)
-        )
+    def list_all(self, *, online: bool | None = None, enabled: bool | None = None) -> list[Node]:
+        stmt = select(NodeORM).options(selectinload(NodeORM.devices)).order_by(NodeORM.id)
         if online is not None:
             stmt = stmt.where(NodeORM.online.is_(online))
         if enabled is not None:
@@ -75,17 +64,13 @@ class NodeRepositoryImpl(NodeRepository):
 
     def get_by_id(self, node_id: str) -> Node | None:
         orm = self._s.execute(
-            select(NodeORM)
-            .options(selectinload(NodeORM.devices))
-            .where(NodeORM.node_id == node_id)
+            select(NodeORM).options(selectinload(NodeORM.devices)).where(NodeORM.node_id == node_id)
         ).scalar_one_or_none()
         return _to_domain(orm) if orm is not None else None
 
     def save(self, node: Node) -> Node:
         """创建或更新节点（按 node_id upsert，P4.4 注册/心跳投影用）。"""
-        orm = self._s.execute(
-            select(NodeORM).where(NodeORM.node_id == node.node_id)
-        ).scalar_one_or_none()
+        orm = self._s.execute(select(NodeORM).where(NodeORM.node_id == node.node_id)).scalar_one_or_none()
         if orm is None:
             orm = NodeORM(node_id=node.node_id)
             self._s.add(orm)
@@ -95,9 +80,7 @@ class NodeRepositoryImpl(NodeRepository):
         orm.online = node.online
         orm.enabled = node.enabled
         orm.tags = node.tags
-        orm.capabilities = node.capabilities.model_dump(
-            mode="json", exclude_none=True
-        )
+        orm.capabilities = node.capabilities.model_dump(mode="json", exclude_none=True)
         orm.protocol_version = node.protocol_version
         orm.plugin_versions = node.plugin_versions
         orm.plugin_supported_versions = node.plugin_supported_versions
@@ -120,6 +103,7 @@ class NodeRepositoryImpl(NodeRepository):
 
         from sqlalchemy import update as sa_update
         from sqlalchemy.engine import Result
+
         result: Result[Any] = self._s.execute(
             sa_update(NodeORM).values(
                 online=False,

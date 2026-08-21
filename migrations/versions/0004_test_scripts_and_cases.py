@@ -57,23 +57,19 @@ def upgrade() -> None:
             "result_parse_location IN ('master','agent')",
             name="ck_test_scripts_result_parse_location",
         ),
-        sa.ForeignKeyConstraint(
-            ["project_pk"], ["projects.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["created_by"], ["users.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["project_pk"], ["projects.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("script_id"),
         sa.UniqueConstraint(
-            "project_pk", "name", "version",
+            "project_pk",
+            "name",
+            "version",
             name="uq_test_scripts_project_name_version",
         ),
     )
     op.create_index("ix_test_scripts_project_pk", "test_scripts", ["project_pk"])
-    op.create_index(
-        "ix_test_scripts_project_created", "test_scripts", ["project_pk", "created_at"]
-    )
+    op.create_index("ix_test_scripts_project_created", "test_scripts", ["project_pk", "created_at"])
 
     op.create_table(
         "script_cases",
@@ -91,19 +87,13 @@ def upgrade() -> None:
         sa.Column("deleted", sa.Boolean(), nullable=False),
         sa.Column("created_at", UTCDateTime(), nullable=False),
         sa.Column("updated_at", UTCDateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["script_pk"], ["test_scripts.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["script_pk"], ["test_scripts.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("case_id"),
-        sa.UniqueConstraint(
-            "script_pk", "stable_key", name="uq_script_cases_script_stable_key"
-        ),
+        sa.UniqueConstraint("script_pk", "stable_key", name="uq_script_cases_script_stable_key"),
     )
     op.create_index("ix_script_cases_script_pk", "script_cases", ["script_pk"])
-    op.create_index(
-        "ix_script_cases_script_order", "script_cases", ["script_pk", "order_index"]
-    )
+    op.create_index("ix_script_cases_script_order", "script_cases", ["script_pk", "order_index"])
 
 
 def downgrade() -> None:

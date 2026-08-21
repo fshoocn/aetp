@@ -176,9 +176,7 @@ class MqttTransport(Transport):
                 if self._connected:
                     await self._set_disconnected()
 
-    async def _notify_connection_change(
-        self, connected: bool, session_id: str | None
-    ) -> None:
+    async def _notify_connection_change(self, connected: bool, session_id: str | None) -> None:
         """通知上层连接变化；回调失败不打断 MQTT 循环。"""
         handler = self._connection_handler
         if handler is None:

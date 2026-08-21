@@ -138,9 +138,7 @@ class ExecutionService:
         """执行一个已 claim 的 Run，返回最终结果并回写账本。"""
         token = self._tokens.setdefault(run_id, CancellationToken())
         try:
-            summary = await self._bounded_run(
-                run_id, plugin, context, token, timeout_s
-            )
+            summary = await self._bounded_run(run_id, plugin, context, token, timeout_s)
             status = AgentRunStatus.SUCCEEDED
             error = ""
         except ExecutionCancelled as exc:
@@ -152,9 +150,7 @@ class ExecutionService:
         except Exception as exc:  # noqa: BLE001 - 插件异常统一映射 FAILED
             status = AgentRunStatus.FAILED
             summary, error = {}, f"{type(exc).__name__}: {exc}"
-            logger.warning(
-                "run 执行失败: run_id=%s error=%r", run_id, exc
-            )
+            logger.warning("run 执行失败: run_id=%s error=%r", run_id, exc)
         finally:
             self._tokens.pop(run_id, None)
         return self._finalize(run_id, status, summary, error)
@@ -174,9 +170,7 @@ class ExecutionService:
         try:
             token.raise_if_cancelled()
             self._mark_status(run_id, AgentRunStatus.RUNNING)
-            return await self._run_with_timeout(
-                plugin, context, token, timeout_s
-            )
+            return await self._run_with_timeout(plugin, context, token, timeout_s)
         finally:
             self._active.discard(run_id)
             self._semaphore.release()
@@ -216,9 +210,7 @@ class ExecutionService:
                     timeout=timeout_s,
                 )
             except TimeoutError as exc:
-                raise ExecutionTimedOut(
-                    f"run 执行超时: {timeout_s}s"
-                ) from exc
+                raise ExecutionTimedOut(f"run 执行超时: {timeout_s}s") from exc
         return await self._run_plugin(plugin, context, token)
 
     async def _run_plugin(self, plugin, context, token: CancellationToken) -> dict:
@@ -264,6 +256,4 @@ class ExecutionService:
             if status is AgentRunStatus.CANCELLED:
                 run.cancelled = True
             self._ledger.update_run(run)
-        return ExecutionResult(
-            run_id=run_id, status=status, summary=dict(summary or {}), error=error
-        )
+        return ExecutionResult(run_id=run_id, status=status, summary=dict(summary or {}), error=error)

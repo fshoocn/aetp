@@ -154,9 +154,7 @@ def test_list_by_project_pagination(client):
     user_id = _seed_user_and_project(container)
     with _uow(container) as uow:
         for i in range(3):
-            uow.test_scripts.add(
-                _make_script(user_id, name=f"script-{i}", version=1)
-            )
+            uow.test_scripts.add(_make_script(user_id, name=f"script-{i}", version=1))
     with _uow(container) as uow:
         page1 = uow.test_scripts.list_by_project("p1", limit=2, offset=0)
         page2 = uow.test_scripts.list_by_project("p1", limit=2, offset=2)
@@ -246,7 +244,5 @@ def test_case_deleted_excluded_by_default(client):
     with _uow(container) as uow:
         listed = uow.script_cases.list_by_script(script.script_id)
         assert [c.stable_key for c in listed] == ["alive"]
-        with_deleted = uow.script_cases.list_by_script(
-            script.script_id, include_deleted=True
-        )
+        with_deleted = uow.script_cases.list_by_script(script.script_id, include_deleted=True)
         assert {c.stable_key for c in with_deleted} == {"alive", "gone"}

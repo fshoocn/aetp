@@ -12,7 +12,5 @@ class SecretValue(Base, TimestampMixin):
     __tablename__ = "secret_values"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    secret_ref: Mapped[str] = mapped_column(
-        String(128), unique=True, nullable=False, index=True
-    )
+    secret_ref: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     cipher_text: Mapped[str] = mapped_column(Text, nullable=False)

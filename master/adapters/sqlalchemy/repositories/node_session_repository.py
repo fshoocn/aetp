@@ -22,11 +22,7 @@ def _to_domain(orm: NodeSessionORM) -> NodeSession:
         client_id=orm.client_id,
         connected_at=orm.connected_at,
         disconnected_at=orm.disconnected_at,
-        disconnect_reason=(
-            DisconnectReason(orm.disconnect_reason)
-            if orm.disconnect_reason is not None
-            else None
-        ),
+        disconnect_reason=(DisconnectReason(orm.disconnect_reason) if orm.disconnect_reason is not None else None),
         created_at=orm.created_at,
         updated_at=orm.updated_at,
     )
@@ -37,23 +33,31 @@ class NodeSessionRepositoryImpl(NodeSessionRepository):
         self._s = session
 
     def get(self, node_pk: int, session_id: str) -> NodeSession | None:
-        orm = self._s.execute(
-            select(NodeSessionORM).where(
-                NodeSessionORM.node_pk == node_pk,
-                NodeSessionORM.session_id == session_id,
+        orm = (
+            self._s.execute(
+                select(NodeSessionORM).where(
+                    NodeSessionORM.node_pk == node_pk,
+                    NodeSessionORM.session_id == session_id,
+                )
             )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def get_current(self, node_pk: int) -> NodeSession | None:
-        orm = self._s.execute(
-            select(NodeSessionORM)
-            .where(
-                NodeSessionORM.node_pk == node_pk,
-                NodeSessionORM.disconnected_at.is_(None),
+        orm = (
+            self._s.execute(
+                select(NodeSessionORM)
+                .where(
+                    NodeSessionORM.node_pk == node_pk,
+                    NodeSessionORM.disconnected_at.is_(None),
+                )
+                .order_by(NodeSessionORM.id.desc())
             )
-            .order_by(NodeSessionORM.id.desc())
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def create(self, session: NodeSession) -> NodeSession:
@@ -95,6 +99,7 @@ class NodeSessionRepositoryImpl(NodeSessionRepository):
 
         from sqlalchemy import update as sa_update
         from sqlalchemy.engine import Result
+
         result: Result[Any] = self._s.execute(
             sa_update(NodeSessionORM)
             .where(NodeSessionORM.disconnected_at.is_(None))

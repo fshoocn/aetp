@@ -91,9 +91,7 @@ def _ack(correlation_id: str, session_id: str) -> bytes:
 async def test_runtime_connects_registers_then_starts_heartbeat(tmp_path) -> None:
     transport = RuntimeTransport()
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
-    registration = RegistrationService(
-        transport, ledger, _SETTINGS, session_id="old-session"
-    )
+    registration = RegistrationService(transport, ledger, _SETTINGS, session_id="old-session")
     runtime = AgentRuntime(_SETTINGS, transport, ledger, registration)
 
     await runtime.start()
@@ -183,9 +181,7 @@ async def test_runtime_handles_run_assign_after_registration(tmp_path) -> None:
     """P5.4：注册成功后，run.assign 被路由到 CommandDispatcher 并写 ACK outbox。"""
     transport = RuntimeTransport()
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
-    registration = RegistrationService(
-        transport, ledger, _SETTINGS, session_id="session-1"
-    )
+    registration = RegistrationService(transport, ledger, _SETTINGS, session_id="session-1")
     runtime = AgentRuntime(_SETTINGS, transport, ledger, registration)
 
     await runtime.start()
@@ -243,9 +239,7 @@ async def test_runtime_handles_run_assign_after_registration(tmp_path) -> None:
     assert run.attempt_no == 1
 
     # ACK outbox 已写入（通过 outbox loop 发布）
-    ack_topics = [
-        t for t, _, _ in transport.published if "/events/ack" in t
-    ]
+    ack_topics = [t for t, _, _ in transport.published if "/events/ack" in t]
     assert len(ack_topics) >= 1
 
     await runtime.stop()

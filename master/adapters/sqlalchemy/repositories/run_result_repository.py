@@ -38,9 +38,7 @@ class RunResultRepositoryImpl(RunResultRepository):
         self._s = session
 
     def add(self, result: RunResult) -> RunResult:
-        run_pk = self._s.execute(
-            select(TaskRunORM.id).where(TaskRunORM.run_id == result.run_id)
-        ).scalar_one_or_none()
+        run_pk = self._s.execute(select(TaskRunORM.id).where(TaskRunORM.run_id == result.run_id)).scalar_one_or_none()
         if run_pk is None:
             raise ValueError(f"Run 不存在: {result.run_id}")
         project_pk = self._s.execute(
@@ -72,20 +70,21 @@ class RunResultRepositoryImpl(RunResultRepository):
         return _to_domain(orm)
 
     def get_by_run_id(self, run_id: str) -> RunResult | None:
-        orm = self._s.execute(
-            select(RunResultORM)
-            .options(
-                joinedload(RunResultORM.run),
-                joinedload(RunResultORM.project),
-                joinedload(RunResultORM.task),
+        orm = (
+            self._s.execute(
+                select(RunResultORM)
+                .options(
+                    joinedload(RunResultORM.run),
+                    joinedload(RunResultORM.project),
+                    joinedload(RunResultORM.task),
+                )
+                .where(
+                    RunResultORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery()
+                )
             )
-            .where(
-                RunResultORM.run_pk
-                == select(TaskRunORM.id)
-                .where(TaskRunORM.run_id == run_id)
-                .scalar_subquery()
-            )
-        ).scalars().one_or_none()
+            .scalars()
+            .one_or_none()
+        )
         return _to_domain(orm) if orm is not None else None
 
     def update(self, result: RunResult) -> RunResult:
@@ -113,13 +112,11 @@ class RunResultRepositoryImpl(RunResultRepository):
 
         from sqlalchemy import update as sa_update
         from sqlalchemy.engine import Result
+
         result: Result[Any] = self._s.execute(
             sa_update(RunResultORM)
             .where(
-                RunResultORM.task_pk
-                == select(TestTaskORM.id)
-                .where(TestTaskORM.task_id == task_id)
-                .scalar_subquery()
+                RunResultORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery()
             )
             .values(task_pk=None)
         )

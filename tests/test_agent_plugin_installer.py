@@ -86,14 +86,10 @@ def test_compatible_plugin_skips_installer(tmp_path) -> None:
 def test_missing_plugin_downloads_verifies_and_loads(tmp_path) -> None:
     data = _package_bytes()
     ref = _ref(data)
-    installer = LocalPluginInstaller(
-        tmp_path / "plugins", fetcher=lambda url: data
-    )
+    installer = LocalPluginInstaller(tmp_path / "plugins", fetcher=lambda url: data)
     registry = AgentPluginRegistry()
 
-    plugin = registry.ensure_compatible(
-        "remote_can", "2.0.0", package_ref=ref, installer=installer
-    )
+    plugin = registry.ensure_compatible("remote_can", "2.0.0", package_ref=ref, installer=installer)
 
     assert plugin.task_type == "remote_can"
     assert registry.supported_task_types() == ["remote_can"]
@@ -107,9 +103,7 @@ def test_missing_plugin_downloads_verifies_and_loads(tmp_path) -> None:
 def test_plugin_sha256_mismatch_rejected(tmp_path) -> None:
     data = _package_bytes()
     ref = _ref(data).model_copy(update={"sha256": "0" * 64})
-    installer = LocalPluginInstaller(
-        tmp_path / "plugins", fetcher=lambda url: data
-    )
+    installer = LocalPluginInstaller(tmp_path / "plugins", fetcher=lambda url: data)
 
     with pytest.raises(PluginInstallError, match="SHA-256"):
         installer.install(ref)
@@ -121,9 +115,7 @@ def test_plugin_archive_path_traversal_rejected(tmp_path) -> None:
         archive.writestr("../escape.py", "class Bad: pass")
     data = stream.getvalue()
     ref = _ref(data)
-    installer = LocalPluginInstaller(
-        tmp_path / "plugins", fetcher=lambda url: data
-    )
+    installer = LocalPluginInstaller(tmp_path / "plugins", fetcher=lambda url: data)
 
     with pytest.raises(PluginInstallError, match="非法路径"):
         installer.install(ref)
@@ -141,9 +133,7 @@ def test_assign_installs_missing_plugin_before_claim(tmp_path) -> None:
     )
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
     registry = AgentPluginRegistry()
-    installer = LocalPluginInstaller(
-        tmp_path / "plugins", fetcher=lambda url: data
-    )
+    installer = LocalPluginInstaller(tmp_path / "plugins", fetcher=lambda url: data)
     dispatcher = CommandDispatcher(
         settings,
         ledger,

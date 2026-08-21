@@ -83,9 +83,7 @@ class ScriptVerificationService:
                     "script_id": script.script_id,
                     "version": script.version,
                     "sha256": script.sha256,
-                    "download_url": self._script_download.build_download_url(
-                        script.script_id
-                    ),
+                    "download_url": self._script_download.build_download_url(script.script_id),
                 },
                 config=dict(config or script.config or {}),
             )
@@ -135,17 +133,14 @@ class ScriptVerificationService:
             "status": "dispatched",
         }
 
-    def handle_result(
-        self, node_id: str, payload: ScriptVerifyResultPayload
-    ) -> ScriptVerificationResult | None:
+    def handle_result(self, node_id: str, payload: ScriptVerifyResultPayload) -> ScriptVerificationResult | None:
         """持久化 Agent 验证结果，供 SSE/插件 UI 查询。"""
         with self._uow_factory() as uow:
             request_event = next(
                 (
                     event
                     for event in reversed(uow.domain_events.list(limit=10000))
-                    if event.event_type == "script.verify_requested"
-                    and event.aggregate_id == payload.verify_id
+                    if event.event_type == "script.verify_requested" and event.aggregate_id == payload.verify_id
                 ),
                 None,
             )
@@ -165,8 +160,7 @@ class ScriptVerificationService:
                 (
                     event
                     for event in reversed(uow.domain_events.list(project_id=project_id, limit=10000))
-                    if event.event_type == "script.verify_result"
-                    and event.aggregate_id == payload.verify_id
+                    if event.event_type == "script.verify_result" and event.aggregate_id == payload.verify_id
                 ),
                 None,
             )

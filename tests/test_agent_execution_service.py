@@ -100,6 +100,7 @@ def _claim(ledger, run_id: str) -> None:
 # 正常执行与异常映射
 # -----------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_execute_success_marks_succeeded(tmp_path) -> None:
     service, ledger = _service(tmp_path)
@@ -128,6 +129,7 @@ async def test_execute_exception_maps_to_failed(tmp_path) -> None:
 # 超时
 # -----------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_execute_timeout_maps_to_timed_out(tmp_path) -> None:
     service, ledger = _service(tmp_path)
@@ -153,6 +155,7 @@ async def test_execute_timeout_zero_means_unlimited(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # 取消
 # -----------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_cancel_queued_run_maps_to_cancelled(tmp_path) -> None:
@@ -209,6 +212,7 @@ async def test_cancel_unknown_run_returns_false_but_sets_flag(tmp_path) -> None:
 # 并发上限
 # -----------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_max_concurrent_runs_enforced(tmp_path) -> None:
     service, ledger = _service(tmp_path, max_concurrent=2)
@@ -216,10 +220,7 @@ async def test_max_concurrent_runs_enforced(tmp_path) -> None:
         _claim(ledger, run_id)
 
     plugins = {rid: _Plugin() for rid in ("R-1", "R-2", "R-3")}
-    tasks = {
-        rid: asyncio.create_task(service.execute(rid, plugins[rid], _Context()))
-        for rid in ("R-1", "R-2", "R-3")
-    }
+    tasks = {rid: asyncio.create_task(service.execute(rid, plugins[rid], _Context())) for rid in ("R-1", "R-2", "R-3")}
 
     # 等待前两个真正开始执行
     await asyncio.wait(
@@ -248,6 +249,7 @@ async def test_max_concurrent_runs_enforced(tmp_path) -> None:
 # -----------------------------------------------------------------------
 # CancellationToken 单元语义
 # -----------------------------------------------------------------------
+
 
 def test_cancellation_token_raise_if_cancelled() -> None:
     token = CancellationToken()

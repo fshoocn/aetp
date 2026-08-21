@@ -126,9 +126,7 @@ def _seed(container, *, capabilities=None, tags=None) -> None:
                 sha256="a" * 64,
                 config={},
                 hardware_requirements=HardwareRequirements(
-                    vehicle=VehicleRequirement(
-                        all_of=(BusRequirement(bus_type="can", minimum_channels=2),)
-                    ),
+                    vehicle=VehicleRequirement(all_of=(BusRequirement(bus_type="can", minimum_channels=2),)),
                     required_tags=("can",),
                 ),
                 parse_status=ScriptParseStatus.PARSED,
@@ -234,9 +232,7 @@ def test_validate_selection_no_match_warns_but_does_not_raise(client):
         tags=["other"],
     )
 
-    result = _service(container).validate_node_selection(
-        "p1", ["bench-001"], "S-1"
-    )
+    result = _service(container).validate_node_selection("p1", ["bench-001"], "S-1")
     assert result.matched_count == 0
     assert result.warning is not None
     assert "NODE_CAPABILITY_MISMATCH" in result.warning

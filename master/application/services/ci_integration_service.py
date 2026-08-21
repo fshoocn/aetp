@@ -111,15 +111,11 @@ class CiIntegrationService:
         logger.info("CI 集成已创建: integration_id=%s provider=%s", integration.integration_id, provider)
         return integration
 
-    def list_integrations(
-        self, project_id: str, *, limit: int = 100, offset: int = 0
-    ) -> list[ProjectIntegration]:
+    def list_integrations(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[ProjectIntegration]:
         with self._uow_factory() as uow:
             return uow.project_integrations.list_by_project(project_id, limit=limit, offset=offset)
 
-    def get_integration(
-        self, integration_id: str, project_id: str
-    ) -> ProjectIntegration | None:
+    def get_integration(self, integration_id: str, project_id: str) -> ProjectIntegration | None:
         with self._uow_factory() as uow:
             integration = uow.project_integrations.get_by_integration_id(integration_id)
             if integration is None or integration.project_id != project_id:
@@ -157,11 +153,7 @@ class CiIntegrationService:
                     audit_id=new_id(),
                     project_id=project_id,
                     actor_id=integration.created_by,
-                    action=(
-                        "integration.key_rotate"
-                        if secret_value is not None
-                        else "integration.update"
-                    ),
+                    action=("integration.key_rotate" if secret_value is not None else "integration.update"),
                     resource_type="integration",
                     resource_id=integration.integration_id,
                 )
@@ -280,13 +272,12 @@ class CiIntegrationService:
             project_id = integration.project_id
 
             # 3. 去重
-            existing = uow.ci_webhook_deliveries.get_by_integration_delivery(
-                integration_id, delivery_id
-            )
+            existing = uow.ci_webhook_deliveries.get_by_integration_delivery(integration_id, delivery_id)
             if existing is not None:
                 logger.info(
                     "Webhook 投递已处理（幂等返回）: integration=%s delivery=%s",
-                    integration_id, delivery_id,
+                    integration_id,
+                    delivery_id,
                 )
                 return WebhookResult(
                     status="already_processed",
@@ -296,9 +287,7 @@ class CiIntegrationService:
                 )
 
             # 2. 验证签名
-            if not self._verify_signature(
-                integration.secret_ref, signature, payload_body, headers
-            ):
+            if not self._verify_signature(integration.secret_ref, signature, payload_body, headers):
                 uow.ci_webhook_deliveries.add(
                     CiWebhookDelivery(
                         integration_id=integration_id,
@@ -354,7 +343,10 @@ class CiIntegrationService:
 
         logger.info(
             "Webhook 处理完成: integration=%s delivery=%s runs=%d status=%s",
-            integration_id, delivery_id, len(triggered_run_ids), status,
+            integration_id,
+            delivery_id,
+            len(triggered_run_ids),
+            status,
         )
         return WebhookResult(
             status=status,
@@ -363,14 +355,10 @@ class CiIntegrationService:
             error=error_message,
         )
 
-    def list_deliveries(
-        self, integration_id: str, *, limit: int = 100
-    ) -> list[CiWebhookDelivery]:
+    def list_deliveries(self, integration_id: str, *, limit: int = 100) -> list[CiWebhookDelivery]:
         """查询集成的投递记录（按 received_at 倒序）。"""
         with self._uow_factory() as uow:
-            return uow.ci_webhook_deliveries.list_by_integration(
-                integration_id, limit=limit
-            )
+            return uow.ci_webhook_deliveries.list_by_integration(integration_id, limit=limit)
 
     def _verify_signature(
         self,
@@ -397,16 +385,12 @@ class CiIntegrationService:
         # 支持 sha256=<hex> 格式（GitHub 风格）
         if signature.startswith("sha256="):
             expected_sig = signature[7:]
-            computed = hmac.new(
-                secret.encode("utf-8"), payload_body, hashlib.sha256
-            ).hexdigest()
+            computed = hmac.new(secret.encode("utf-8"), payload_body, hashlib.sha256).hexdigest()
             return hmac.compare_digest(expected_sig, computed)
 
         # 支持原始 hex 格式（GitLab 的 X-Gitlab-Token 走这里由上层传 token，
         # 此处仅兜底 raw hex HMAC）
-        computed = hmac.new(
-            secret.encode("utf-8"), payload_body, hashlib.sha256
-        ).hexdigest()
+        computed = hmac.new(secret.encode("utf-8"), payload_body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(signature, computed)
 
     def _store_secret(self, secret_ref: str, value: str) -> None:

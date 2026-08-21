@@ -60,9 +60,7 @@ class TaskRepositoryImpl(TaskRepository):
         self._s.flush()
         return _to_domain(orm)
 
-    def get_by_task_id(
-        self, task_id: str, project_id: str | None = None
-    ) -> Task | None:
+    def get_by_task_id(self, task_id: str, project_id: str | None = None) -> Task | None:
         stmt = (
             select(TaskORM)
             .options(joinedload(TaskORM.project), joinedload(TaskORM.device))
@@ -70,10 +68,7 @@ class TaskRepositoryImpl(TaskRepository):
         )
         if project_id is not None:
             stmt = stmt.where(
-                TaskORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                TaskORM.project_pk == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         orm = self._s.execute(stmt).scalars().one_or_none()
         return _to_domain(orm) if orm is not None else None
@@ -96,17 +91,11 @@ class TaskRepositoryImpl(TaskRepository):
         )
         if project_id is not None:
             stmt = stmt.where(
-                TaskORM.project_pk
-                == select(ProjectORM.id)
-                .where(ProjectORM.project_id == project_id)
-                .scalar_subquery()
+                TaskORM.project_pk == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         if device_id:
             stmt = stmt.where(
-                TaskORM.device_pk
-                == select(DeviceORM.id)
-                .where(DeviceORM.device_id == device_id)
-                .scalar_subquery()
+                TaskORM.device_pk == select(DeviceORM.id).where(DeviceORM.device_id == device_id).scalar_subquery()
             )
         if status:
             stmt = stmt.where(TaskORM.status == status)

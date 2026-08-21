@@ -43,9 +43,7 @@ class TestTask(Base, TimestampMixin):
     # sym:task_id 任务定义业务标识（ULID），全局唯一，对外暴露
     task_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     # sym:project_pk 所属项目代理主键（项目边界 D-12）
-    project_pk: Mapped[int] = mapped_column(
-        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True
-    )
+    project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
     # sym:script_pk 引用脚本版本的代理主键（FK RESTRICT=引用保护，§18.4 删除保护）
     # nullable: 已停用任务在脚本删除前置空，解除 FK 引用
     script_pk: Mapped[int | None] = mapped_column(
@@ -56,9 +54,7 @@ class TestTask(Base, TimestampMixin):
     # sym:name 定义名，项目内唯一（(project_pk, name) 唯一约束）
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     # sym:default_case_selection 默认勾选用例集合（case 的 stable_key 列表，D-15）
-    default_case_selection: Mapped[list] = mapped_column(
-        JSONType, nullable=False, default=list
-    )
+    default_case_selection: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # sym:node_ids 绑定执行节点业务 ID 列表（⊆ 项目绑定节点，D-23）
     node_ids: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # sym:split_policy 分割策略 JSON：{type: none|by_time|by_case_count|custom, ...}（§18.6）
@@ -72,9 +68,7 @@ class TestTask(Base, TimestampMixin):
     # sym:priority 优先级（数值越大越优先）
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # sym:created_by 创建者（users.id），审计字段
-    created_by: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
     # sym:project 所属项目 ORM 关系（查询时反查 project_id）
     project: Mapped[Project] = relationship()

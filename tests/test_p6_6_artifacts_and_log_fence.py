@@ -57,9 +57,7 @@ def test_log_complete_fences_log(client) -> None:
     service = container.run_projection_service()
 
     # 围栏前日志可落库
-    service.handle_log("node-a", RunLogBatch(
-        run_id=run_id, first_sequence=1, entries=[_log_entry(run_id, 1, "hello")]
-    ))
+    service.handle_log("node-a", RunLogBatch(run_id=run_id, first_sequence=1, entries=[_log_entry(run_id, 1, "hello")]))
 
     # 发布围栏
     pr = service.handle_log_complete(
@@ -91,12 +89,8 @@ def test_log_complete_idempotent(client) -> None:
     run_id = _seed_run(container)
     service = container.run_projection_service()
 
-    first = service.handle_log_complete(
-        "node-a", RunLogCompletePayload(run_id=run_id, last_sequence=0, entry_count=0)
-    )
-    second = service.handle_log_complete(
-        "node-a", RunLogCompletePayload(run_id=run_id, last_sequence=0, entry_count=0)
-    )
+    first = service.handle_log_complete("node-a", RunLogCompletePayload(run_id=run_id, last_sequence=0, entry_count=0))
+    second = service.handle_log_complete("node-a", RunLogCompletePayload(run_id=run_id, last_sequence=0, entry_count=0))
     assert first.handled is True
     assert second.handled is False
 
@@ -187,8 +181,12 @@ def test_list_and_get_artifact_project_scoped(client) -> None:
     run_id = _seed_run(container)
     service = container.artifact_service()
     service.register_artifact(
-        run_id=run_id, project_id="p1", node_id="node-a",
-        kind="log_archive", filename="logs.jsonl", data=b'{"a":1}',
+        run_id=run_id,
+        project_id="p1",
+        node_id="node-a",
+        kind="log_archive",
+        filename="logs.jsonl",
+        data=b'{"a":1}',
     )
 
     artifacts = service.list_by_run(run_id, "p1")
@@ -247,23 +245,37 @@ def test_orchestrator_publishes_log_complete(tmp_path) -> None:
             return []
 
     settings = AgentSettings(
-        node_id="bench-001", name="bench", master_id="aetp-master",
-        mqtt_client_id="aetp-agent-bench-001", mqtt_use_tls=False,
+        node_id="bench-001",
+        name="bench",
+        master_id="aetp-master",
+        mqtt_client_id="aetp-agent-bench-001",
+        mqtt_use_tls=False,
         max_concurrent_runs=1,
     )
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
     registry = AgentPluginRegistry()
     registry.register_installed(_Plugin())
     orchestrator = RunOrchestrator(
-        settings, ledger, ExecutionService(settings, ledger), registry,
-        session_id=lambda: "s", now=lambda: datetime(2099, 1, 1, tzinfo=UTC),
+        settings,
+        ledger,
+        ExecutionService(settings, ledger),
+        registry,
+        session_id=lambda: "s",
+        now=lambda: datetime(2099, 1, 1, tzinfo=UTC),
     )
     payload = RunAssignPayload(
-        project_id="p1", task_id="T-1", shard_id="SH-1", shard_index=0,
-        run_id="R-1", attempt_no=1, dispatch_id="D-1", task_type="t",
+        project_id="p1",
+        task_id="T-1",
+        shard_id="SH-1",
+        shard_index=0,
+        run_id="R-1",
+        attempt_no=1,
+        dispatch_id="D-1",
+        task_type="t",
         plugin_version="1.0.0",
         script_ref={"script_id": "S-1", "version": 1, "sha256": "a" * 64},
-        case_keys=["c0"], timeout_s=30,
+        case_keys=["c0"],
+        timeout_s=30,
     )
     ledger.claim_run("R-1", 1)
     asyncio.run(orchestrator._run(payload))
@@ -306,38 +318,79 @@ def _seed_run(container) -> str:
 
     with _uow(container) as uow:
         user = uow.users.add(
-            User(id=None, username="p66_owner", password_hash="h", display_name="",
-                 account_status=AccountStatus.ACTIVE, platform_role=PlatformRole.USER,
-                 created_at=utcnow(), updated_at=utcnow())
+            User(
+                id=None,
+                username="p66_owner",
+                password_hash="h",
+                display_name="",
+                account_status=AccountStatus.ACTIVE,
+                platform_role=PlatformRole.USER,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
         )
         uow.projects.add(
-            Project(id=None, project_id="p1", project_key="P1", name="P", description="",
-                    status=ProjectStatus.ACTIVE, created_by=user.id,
-                    created_at=utcnow(), updated_at=utcnow())
+            Project(
+                id=None,
+                project_id="p1",
+                project_key="P1",
+                name="P",
+                description="",
+                status=ProjectStatus.ACTIVE,
+                created_by=user.id,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
         )
     with _uow(container) as uow:
         script = uow.test_scripts.add(
-            TestScript(id=None, project_id="p1", script_id="S-p66", task_type="t",
-                       name="p66", version=1, file_ref="data/scripts/S-p66/1", size=1,
-                       sha256="a" * 64, config={},
-                       hardware_requirements=HardwareRequirements(),
-                       parse_status=ScriptParseStatus.PARSED,
-                       parse_location=ScriptParseLocation.MASTER,
-                       result_parse_location=ScriptParseLocation.MASTER,
-                       plugin_version="1.0.0", created_by=user.id)
+            TestScript(
+                id=None,
+                project_id="p1",
+                script_id="S-p66",
+                task_type="t",
+                name="p66",
+                version=1,
+                file_ref="data/scripts/S-p66/1",
+                size=1,
+                sha256="a" * 64,
+                config={},
+                hardware_requirements=HardwareRequirements(),
+                parse_status=ScriptParseStatus.PARSED,
+                parse_location=ScriptParseLocation.MASTER,
+                result_parse_location=ScriptParseLocation.MASTER,
+                plugin_version="1.0.0",
+                created_by=user.id,
+            )
         )
         task = uow.test_tasks.add(
-            TestTask(project_id="p1", task_id="T-p66", script_id=script.script_id,
-                     script_version=1, task_type="t", name="p66-task",
-                     default_case_selection=["c0"], node_ids=[],
-                     split_policy={"type": "none"}, retry_policy={},
-                     timeout_s=30, enabled=True, created_by=user.id)
+            TestTask(
+                project_id="p1",
+                task_id="T-p66",
+                script_id=script.script_id,
+                script_version=1,
+                task_type="t",
+                name="p66-task",
+                default_case_selection=["c0"],
+                node_ids=[],
+                split_policy={"type": "none"},
+                retry_policy={},
+                timeout_s=30,
+                enabled=True,
+                created_by=user.id,
+            )
         )
         run = uow.task_runs.add(
-            TaskRun(run_id="R-p66", project_id="p1", task_id=task.task_id,
-                    script_ref={"script_id": "S-p66", "version": 1, "sha256": "a" * 64},
-                    case_selection=["c0"], split_policy={"type": "none"},
-                    trigger_type=TriggerType.MANUAL_WEB, triggered_by_user_id=user.id,
-                    status=RunStatus.CREATED)
+            TaskRun(
+                run_id="R-p66",
+                project_id="p1",
+                task_id=task.task_id,
+                script_ref={"script_id": "S-p66", "version": 1, "sha256": "a" * 64},
+                case_selection=["c0"],
+                split_policy={"type": "none"},
+                trigger_type=TriggerType.MANUAL_WEB,
+                triggered_by_user_id=user.id,
+                status=RunStatus.CREATED,
+            )
         )
     return run.run_id
