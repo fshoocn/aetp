@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.metadata import entry_points
-from aetp_protocol.plugin import AgentExecutionPlugin, AgentTaskContext, PluginPackage
+
+from aetp_protocol.plugin import AgentExecutionPlugin, PluginPackage
 
 from agent.plugins.errors import (
     PluginLoadError,

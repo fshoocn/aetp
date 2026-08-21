@@ -10,14 +10,15 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
-from pathlib import Path
 import shutil
 import sys
 import tempfile
-from typing import Callable, Protocol
-from urllib.request import urlopen
 import uuid
 import zipfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Protocol
+from urllib.request import urlopen
 
 from aetp_protocol.payloads import PluginPackageRef
 from aetp_protocol.plugin import PluginPackage
