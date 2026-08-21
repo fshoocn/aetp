@@ -60,6 +60,63 @@ export interface TaskLog {
   ts: string;
 }
 
+export interface HardwareChannel {
+  name: string;
+  hardware_model?: string | null;
+  enabled?: boolean;
+}
+
+export interface VehicleBus {
+  bus_type: string;
+  channels: HardwareChannel[];
+}
+
+export interface VehicleVendor {
+  name: string;
+  buses: VehicleBus[];
+}
+
+export interface VehicleCapability {
+  vendors: VehicleVendor[];
+}
+
+export interface LanguageRuntime {
+  name: string;
+  version: string;
+}
+
+export interface LanguageCapability {
+  runtimes: LanguageRuntime[];
+}
+
+export interface OperatingSystem {
+  name: string;
+  version: string;
+}
+
+export interface SystemCapability {
+  operating_system?: OperatingSystem | null;
+  memory_mb?: number | null;
+  cpu_cores?: number | null;
+}
+
+export interface SerialPortCapability {
+  function: string;
+  port: string;
+  enabled?: boolean;
+}
+
+export interface SerialCapability {
+  ports: SerialPortCapability[];
+}
+
+export interface NodeCapabilities {
+  vehicle?: VehicleCapability | null;
+  language?: LanguageCapability | null;
+  system?: SystemCapability | null;
+  serial?: SerialCapability | null;
+}
+
 export interface Node {
   id: number;
   node_id: string;
@@ -69,7 +126,7 @@ export interface Node {
   online: boolean;
   enabled: boolean;
   tags: unknown[];
-  capabilities: Record<string, unknown>;
+  capabilities: NodeCapabilities;
   plugin_versions: Record<string, string>;
   load: Record<string, unknown>;
   protocol_version: string;
@@ -127,7 +184,7 @@ export interface ProjectNodeBinding {
   assigned_by: number;
   created_at: string;
   updated_at: string;
-  capabilities: Record<string, unknown>;
+  capabilities: NodeCapabilities;
   plugin_versions: Record<string, string>;
   devices: Device[];
 }
@@ -247,7 +304,7 @@ export interface TaskTypeConfigContext {
     status: string;
     online: boolean;
     enabled: boolean;
-    capabilities: Record<string, unknown>;
+    capabilities: NodeCapabilities;
     plugin_versions: Record<string, string>;
   }>;
   verification: {
