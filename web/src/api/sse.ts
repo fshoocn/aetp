@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SSE 实时事件流客户端。
  *
  * 使用 fetch + ReadableStream（而非 EventSource），以便携带 Authorization
@@ -23,7 +23,8 @@ export interface DomainEvent {
 
 export function connectEvents(
   projectId: string,
-  onEvent: (ev: DomainEvent) => void
+  onEvent: (ev: DomainEvent) => void,
+  onError?: (error: Error) => void
 ): () => void {
   const token = localStorage.getItem("token");
   if (!token || !projectId) return () => {};
@@ -45,11 +46,13 @@ export function connectEvents(
       const resp = await fetch(
         `${BASE}/api/v1/events?project_id=${encodeURIComponent(projectId)}`,
         {
-        headers,
-        signal: controller.signal,
+          headers,
+          signal: controller.signal,
         }
       );
-      if (!resp.ok || !resp.body) throw new Error(`sse status ${resp.status}`);
+      if (!resp.ok || !resp.body) {
+        throw new Error(`SSE status ${resp.status}`);
+      }
       retryMs = RETRY_BASE_MS; // 连接成功，重置退避
 
       const reader = resp.body.getReader();
@@ -72,7 +75,8 @@ export function connectEvents(
             try {
               const event = JSON.parse(dataLine.slice(6)) as DomainEvent;
               if (idLine) lastEventId = idLine.slice(4).trim();
-              else if (event.sequence != null) lastEventId = String(event.sequence);
+              else if (event.sequence != null)
+                lastEventId = String(event.sequence);
               onEvent(event);
             } catch {
               // 忽略无法解析的事件
@@ -80,8 +84,11 @@ export function connectEvents(
           }
         }
       }
-    } catch {
+    } catch (err: unknown) {
       // 网络错误 / 主动 abort：走重连
+      if (!stopped && err instanceof Error && err.name !== "AbortError") {
+        onError?.(err);
+      }
     }
     if (!stopped) {
       retryTimer = window.setTimeout(connect, retryMs);
