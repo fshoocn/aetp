@@ -40,12 +40,12 @@ class RunResultRepositoryImpl(RunResultRepository):
     def add(self, result: RunResult) -> RunResult:
         run_pk = self._s.execute(select(TaskRunORM.id).where(TaskRunORM.run_id == result.run_id)).scalar_one_or_none()
         if run_pk is None:
-            raise ValueError(f"Run 不存在: {result.run_id}")
+            raise ValueError(f"Run not found: {result.run_id}")
         project_pk = self._s.execute(
             select(ProjectORM.id).where(ProjectORM.project_id == result.project_id)
         ).scalar_one_or_none()
         if project_pk is None:
-            raise ValueError(f"项目不存在: {result.project_id}")
+            raise ValueError(f"Project not found: {result.project_id}")
         task_pk = self._s.execute(
             select(TestTaskORM.id).where(TestTaskORM.task_id == result.task_id)
         ).scalar_one_or_none()

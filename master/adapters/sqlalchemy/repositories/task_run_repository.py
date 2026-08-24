@@ -42,21 +42,29 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         self._s = session
 
     def add(self, run: TaskRun) -> TaskRun:
+        # Resolve project_pk
         project_pk = self._s.execute(
             select(ProjectORM.id).where(ProjectORM.project_id == run.project_id)
         ).scalar_one_or_none()
         if project_pk is None:
-            raise ValueError(f"项目不存在: {run.project_id}")
-        task_pk = self._s.execute(select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)).scalar_one_or_none()
+            raise ValueError(f"Project not found: {run.project_id}")
+
+        # Resolve task_pk
+        task_pk = self._s.execute(
+            select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)
+        ).scalar_one_or_none()
         if task_pk is None:
-            raise ValueError(f"任务定义不存在: {run.task_id}")
+            raise ValueError(f"Task not found: {run.task_id}")
+
+        # Resolve triggered_by_user_pk if needed
         triggered_by_user_pk = None
         if run.triggered_by_user_id is not None:
             triggered_by_user_pk = self._s.execute(
                 select(UserORM.id).where(UserORM.id == run.triggered_by_user_id)
             ).scalar_one_or_none()
             if triggered_by_user_pk is None:
-                raise ValueError(f"触发用户不存在: {run.triggered_by_user_id}")
+                raise ValueError(f"User not found: {run.triggered_by_user_id}")
+
         orm = TaskRunORM(
             run_id=run.run_id,
             project_pk=project_pk,
