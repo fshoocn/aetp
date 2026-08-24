@@ -44,4 +44,5 @@ class ProjectNodeBindingView:
     updated_at: datetime
     capabilities: NodeCapabilities = field(default_factory=NodeCapabilities)
     plugin_versions: dict[str, str] = field(default_factory=dict)
+    resource_occupancy: dict[str, str] = field(default_factory=dict)
     devices: list[Device] = field(default_factory=list)

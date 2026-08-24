@@ -39,6 +39,10 @@ class Node:
     plugin_supported_versions: dict[str, list[str]] = field(default_factory=dict)
     last_seen_at: datetime | None = None
     load: dict = field(default_factory=dict)
+    # sym:resource_occupancy 资源占用映射（device_id -> 占用它的 run_id，§9.8）。
+    # 由 Agent 心跳汇总活跃 Run 的 device_allocations 上报，用于资产页展示
+    # 「谁占了哪个口」；调度仍以 Device.status=BUSY 为权威。
+    resource_occupancy: dict = field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
     devices: list = field(default_factory=list)

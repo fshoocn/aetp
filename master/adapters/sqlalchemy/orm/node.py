@@ -39,6 +39,7 @@ class Node(Base, TimestampMixin):
     plugin_supported_versions: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     load: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    resource_occupancy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
 
     devices: Mapped[list[Device]] = relationship(
         back_populates="node",

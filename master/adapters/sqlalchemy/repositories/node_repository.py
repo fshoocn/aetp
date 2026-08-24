@@ -44,6 +44,7 @@ def _to_domain(orm: NodeORM) -> Node:
         plugin_supported_versions={key: list(value) for key, value in (orm.plugin_supported_versions or {}).items()},
         last_seen_at=orm.last_seen_at,
         load=dict(orm.load or {}),
+        resource_occupancy=dict(orm.resource_occupancy or {}),
         created_at=orm.created_at,
         updated_at=orm.updated_at,
         devices=[_device_to_domain(d) for d in (orm.devices or [])],
@@ -86,6 +87,7 @@ class NodeRepositoryImpl(NodeRepository):
         orm.plugin_supported_versions = node.plugin_supported_versions
         orm.last_seen_at = node.last_seen_at
         orm.load = node.load
+        orm.resource_occupancy = node.resource_occupancy
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)

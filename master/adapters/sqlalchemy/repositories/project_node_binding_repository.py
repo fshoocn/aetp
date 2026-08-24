@@ -138,5 +138,6 @@ class ProjectNodeBindingRepositoryImpl(ProjectNodeBindingRepository):
             updated_at=binding.updated_at,
             capabilities=NodeCapabilities.model_validate(node.capabilities or {}),
             plugin_versions=dict(node.plugin_versions or {}),
+            resource_occupancy=dict(node.resource_occupancy or {}),
             devices=[_device_to_domain(d) for d in (node.devices or [])],
         )
