@@ -36,6 +36,9 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy import (
+    text as sqlalchemy_text,
+)
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult, Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -70,6 +73,7 @@ class AgentRunORM(_Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     cancelled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     result_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    device_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     claimed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 
@@ -153,16 +157,37 @@ class SQLiteLedger:
         # 转换为领域对象而不触发 DetachedInstanceError
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         self._max_spool_bytes = max_spool_bytes
+        self._migrate_columns()
+
+    def _migrate_columns(self) -> None:
+        """轻量列迁移：create_all 只建新表，不给已存在的表加列。
+
+        Agent 本地账本无 Alembic；升级代码后旧库缺新列会导致查询报错
+        （如心跳 list_active_runs 查不到 device_ids 列）。这里对已知新增
+        列做幂等补齐（SQLite ALTER TABLE ADD COLUMN）。
+        """
+        additions: tuple[tuple[str, str, str], ...] = (
+            # (表名, 列名, 列定义)
+            ("agent_runs", "device_ids", "JSON NOT NULL DEFAULT '[]'"),
+        )
+        with self._engine.begin() as conn:
+            for table, column, ddl in additions:
+                cols = conn.execute(sqlalchemy_text(f"PRAGMA table_info({table})")).fetchall()
+                if any(row[1] == column for row in cols):
+                    continue
+                conn.execute(sqlalchemy_text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+                logger.info("本地账本列迁移完成: %s.%s", table, column)
 
     # ---- agent_runs：原子 claim ----
 
-    def claim_run(self, run_id: str, attempt_no: int) -> bool:
+    def claim_run(self, run_id: str, attempt_no: int, device_ids: list[str] | None = None) -> bool:
         """原子 claim：新 run 或新 attempt 返回 True；重复派发返回 False。
 
         用 ``ON CONFLICT DO NOTHING`` 保证“先插入者胜”：插入成功即首次
         claim；冲突时读出现有 attempt_no，相同视为重复派发，不同则按
-        D-20 更新为新的 attempt。
+        D-20 更新为新的 attempt。``device_ids`` 记录本次占用的设备集合。
         """
+        device_ids = list(device_ids or [])
         now = _utcnow()
         with self._session_factory.begin() as session:
             inserted = cast(
@@ -175,6 +200,7 @@ class SQLiteLedger:
                         status=AgentRunStatus.CLAIMED.value,
                         cancelled=False,
                         result_summary={},
+                        device_ids=device_ids,
                         claimed_at=now,
                         updated_at=now,
                     )
@@ -204,6 +230,7 @@ class SQLiteLedger:
                     attempt_no=attempt_no,
                     status=AgentRunStatus.CLAIMED.value,
                     cancelled=False,
+                    device_ids=device_ids,
                     updated_at=now,
                 )
             )
@@ -216,7 +243,7 @@ class SQLiteLedger:
         return _to_run(row) if row is not None else None
 
     def update_run(self, run: AgentRun) -> None:
-        """更新 Run 状态/取消标志/结果摘要。"""
+        """更新 Run 状态/取消标志/结果摘要/占用设备。"""
         with self._session_factory.begin() as session:
             session.execute(
                 update(AgentRunORM)
@@ -226,6 +253,7 @@ class SQLiteLedger:
                     status=run.status.value,
                     cancelled=run.cancelled,
                     result_summary=run.result_summary,
+                    device_ids=run.device_ids,
                     updated_at=_utcnow(),
                 )
             )
@@ -532,6 +560,7 @@ def _to_run(row: AgentRunORM) -> AgentRun:
         status=AgentRunStatus(row.status),
         cancelled=row.cancelled,
         result_summary=dict(row.result_summary or {}),
+        device_ids=list(row.device_ids or []),
         claimed_at=row.claimed_at,
         updated_at=row.updated_at,
     )

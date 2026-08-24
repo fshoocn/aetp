@@ -29,6 +29,9 @@ class AgentRun:
     status: AgentRunStatus = AgentRunStatus.CLAIMED
     cancelled: bool = False
     result_summary: dict = field(default_factory=dict)
+    # sym:device_ids 本次 Run 占用的物理设备集合（来自 run.assign.device_allocations）
+    # 用于心跳汇总「谁占了哪个口」并上报给 Master（§9.8 占用状态）。
+    device_ids: list[str] = field(default_factory=list)
     claimed_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -82,8 +85,12 @@ class ScriptCacheEntry:
 class Ledger(Protocol):
     """Agent 本地账本端口（鸭子类型）。"""
 
-    def claim_run(self, run_id: str, attempt_no: int) -> bool:
-        """原子 claim：首次（或新 attempt）返回 True；重复派发返回 False。"""
+    def claim_run(self, run_id: str, attempt_no: int, device_ids: list[str] | None = None) -> bool:
+        """原子 claim：首次（或新 attempt）返回 True；重复派发返回 False。
+
+        ``device_ids`` 记录本次 Run 占用的物理设备集合（随 run.assign 下发），
+        供心跳汇总占用状态上报 Master。
+        """
         ...
 
     def get_run(self, run_id: str) -> AgentRun | None:
