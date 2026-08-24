@@ -21,7 +21,7 @@
       <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="运行总数" :value="stats.totalRuns"><template #prefix><el-icon class="stat-icon blue"><List /></el-icon></template></el-statistic><span class="stat-caption">当前项目 Run 记录</span></el-card></el-col>
       <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="执行中" :value="stats.runningRuns"><template #prefix><el-icon class="stat-icon amber"><Timer /></el-icon></template></el-statistic><span class="stat-caption">等待、派发或正在运行</span></el-card></el-col>
       <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="在线节点" :value="stats.onlineNodes"><template #prefix><el-icon class="stat-icon green"><Connection /></el-icon></template></el-statistic><span class="stat-caption">Master 已注册节点</span></el-card></el-col>
-      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="设备在线率" :value="stats.deviceRate" suffix="%"><template #prefix><el-icon class="stat-icon cyan"><DataLine /></el-icon></template></el-statistic><el-progress :percentage="stats.deviceRate" :show-text="false" :stroke-width="5" color="#17a2a4" /></el-card></el-col>
+      <el-col :xs="24" :sm="12" :lg="6"><el-card class="stat-card" shadow="never"><el-statistic title="设备在线率" :value="stats.deviceRate !== null ? stats.deviceRate : '--'" :suffix="stats.deviceRate !== null ? '%' : ''"><template #prefix><el-icon class="stat-icon cyan"><DataLine /></el-icon></template></el-statistic><el-progress :percentage="stats.deviceRate" :show-text="false" :stroke-width="5" color="#17a2a4" /></el-card></el-col>
     </el-row>
 
     <el-row :gutter="14" class="content-row">
@@ -75,7 +75,7 @@ const allRuns = computed(() => runsQuery.data.value ?? []);
 const allNodes = computed(() => nodesQuery.data.value ?? []);
 const allDevices = computed(() => devicesQuery.data.value ?? []);
 const recentRuns = computed(() => allRuns.value.slice(0, 8));
-const stats = computed(() => { const total = allDevices.value.length; const online = allDevices.value.filter((device) => device.online).length; return { totalRuns: allRuns.value.length, runningRuns: allRuns.value.filter((run) => ["created", "dispatched", "acked", "running"].includes(run.status)).length, onlineNodes: allNodes.value.filter((node) => node.online).length, onlineDevices: online, deviceRate: total ? Math.round((online / total) * 100) : 0 }; });
+const stats = computed(() => { const total = allDevices.value.length; const online = allDevices.value.filter((device) => device.online).length; return { totalRuns: allRuns.value.length, runningRuns: allRuns.value.filter((run) => ["created", "dispatched", "acked", "running"].includes(run.status)).length, onlineNodes: allNodes.value.filter((node) => node.online).length, onlineDevices: online, deviceRate: total ? Math.round((online / total) * 100) : null }; });
 function refresh() { queryClient.invalidateQueries({ queryKey: ["runs"] }); queryClient.invalidateQueries({ queryKey: ["assets", "nodes"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
 function gotoRun(row: Run) { router.push(`/runs/${row.run_id}`); }
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
