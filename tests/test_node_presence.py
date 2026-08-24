@@ -244,6 +244,26 @@ def test_heartbeat_refreshes_projection(client):
         assert node.last_seen_at is not None
 
 
+def test_heartbeat_persists_resource_occupancy(client):
+    """心跳投影持久化资源占用映射（device_id -> run_id，§9.8）。"""
+    container = client.app.state.container
+    svc = _service(container)
+    svc.handle_register(
+        envelope=_envelope("bench-001", "sess-1", MessageType.NODE_REGISTER.value),
+        payload=_register(),
+    )
+
+    svc.handle_heartbeat(
+        envelope=_envelope("bench-001", "sess-1", MessageType.NODE_HEARTBEAT.value),
+        payload=_heartbeat(resource_occupancy={"can1": "run-1", "COM30": "run-2"}),
+    )
+
+    with _uow(container) as uow:
+        node = uow.nodes.get_by_id("bench-001")
+        assert node is not None
+        assert node.resource_occupancy == {"can1": "run-1", "COM30": "run-2"}
+
+
 def test_heartbeat_old_session_rejected(client):
     """验收：旧 session 的心跳被拒绝（NodePresenceError）。"""
     container = client.app.state.container

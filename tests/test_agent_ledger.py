@@ -37,6 +37,23 @@ def test_claim_run_is_atomic(tmp_path) -> None:
     assert ledger.claim_run("run-1", 1) is False
 
 
+def test_claim_run_persists_device_ids(tmp_path) -> None:
+    """claim 时记录占用的物理设备集合，供心跳汇总占用状态（§9.8）。"""
+    ledger = _ledger(tmp_path)
+    assert ledger.claim_run("run-1", 1, ["can1", "relay-board-2"]) is True
+    run = ledger.get_run("run-1")
+    assert run is not None
+    assert run.device_ids == ["can1", "relay-board-2"]
+
+    # failover 新 attempt 更新 device_ids
+    run.status = AgentRunStatus.FAILED
+    ledger.update_run(run)
+    assert ledger.claim_run("run-1", 2, ["can2"]) is True
+    updated = ledger.get_run("run-1")
+    assert updated is not None
+    assert updated.device_ids == ["can2"]
+
+
 def test_get_and_update_run(tmp_path) -> None:
     ledger = _ledger(tmp_path)
     ledger.claim_run("run-1", 1)

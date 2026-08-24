@@ -25,9 +25,13 @@ class FakeTransport:
         self.connected = True
         self.published: list[tuple[str, bytes, int]] = []
         self.handler = None
+        self.connection_handler = None
 
     def on_message(self, handler) -> None:
         self.handler = handler
+
+    def on_connection_change(self, handler) -> None:
+        self.connection_handler = handler
 
     async def connect(self) -> None:
         self.connected = True
@@ -228,3 +232,29 @@ def test_heartbeat_load_reflects_ledger_active_runs(tmp_path) -> None:
     payload = service.build_heartbeat_payload()
     assert payload.load == {"running_shards": 1, "queued_shards": 0}
     assert payload.active_run_ids == ["run-1"]
+
+
+def test_heartbeat_reports_resource_occupancy(tmp_path) -> None:
+    """心跳汇总活跃 Run 占用的设备映射（device_id -> run_id，§9.8）。"""
+    from agent.domain.enums import AgentRunStatus
+
+    service, _transport, ledger = _make_service(tmp_path)
+
+    assert service.build_heartbeat_payload().resource_occupancy == {}
+
+    ledger.claim_run("run-1", 1, ["can1", "relay-board-2"])
+    ledger.claim_run("run-2", 1, ["can2"])
+    payload = service.build_heartbeat_payload()
+    assert payload.resource_occupancy == {
+        "can1": "run-1",
+        "relay-board-2": "run-1",
+        "can2": "run-2",
+    }
+
+    # run-1 终态后，其占用不再上报
+    done = ledger.get_run("run-1")
+    assert done is not None
+    done.status = AgentRunStatus.SUCCEEDED
+    ledger.update_run(done)
+    payload = service.build_heartbeat_payload()
+    assert payload.resource_occupancy == {"can2": "run-2"}
