@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from master.api.v1.dependencies import (
@@ -351,8 +351,7 @@ def cancel_run(
             detail=str(exc),
         ) from exc
 
-    with cancel_service._uow_factory() as uow:
-        run = uow.task_runs.get_by_run_id(run_id, project_id)
+    run = cancel_service.get_run(run_id, project_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run 不存在")
     return RunOut(

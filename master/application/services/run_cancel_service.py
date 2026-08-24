@@ -52,6 +52,11 @@ class CancelResult:
 class RunCancelService:
     """向活跃 Shard 节点发送 run.cancel 命令。"""
 
+    def get_run(self, run_id: str, project_id: str):
+        """查询 Run（供路由层获取取消后的状态）。"""
+        with self._uow_factory() as uow:
+            return uow.task_runs.get_by_run_id(run_id, project_id)
+
     def __init__(
         self,
         uow_factory: Callable[[], UnitOfWork],
