@@ -12,9 +12,10 @@ import logging
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
@@ -243,6 +244,45 @@ def health(db: DbDep) -> dict[str, str]:
         logger.exception("健康检查失败：数据库不可用")
         return {"status": "degraded", "database": "unreachable"}
     return {"status": "ok", "database": "ok"}
+
+
+@app.get("/api/v1/health/system", tags=["system"])
+def system_health(request: Request) -> dict[str, object]:
+    """返回面向运维与前端的全局组件状态。"""
+    container: Container | None = getattr(request.app.state, "container", None)
+    if container is None:
+        return {"status": "degraded", "components": {"database": "unavailable"}}
+
+    components = {"database": "ok"}
+    try:
+        with container.database().session_scope() as session:
+            session.execute(sa_text("SELECT 1"))
+    except Exception:
+        logger.exception("系统健康检查数据库不可用")
+        components["database"] = "unavailable"
+
+    mqtt_runtime = getattr(request.app.state, "mqtt_runtime", None)
+    settings = get_settings()
+    if not settings.mqtt_host:
+        components["mqtt"] = "disabled"
+    else:
+        transport = getattr(mqtt_runtime, "_transport", None)
+        components["mqtt"] = "ok" if getattr(transport, "connected", False) else "disconnected"
+
+    maintenance_worker = getattr(request.app.state, "maintenance_worker", None)
+    worker_task = getattr(maintenance_worker, "_task", None)
+    components["maintenance"] = "ok" if worker_task is not None and not worker_task.done() else "stopped"
+
+    status_value = (
+        "degraded"
+        if any(value != "ok" for key, value in components.items() if key in {"database", "mqtt", "maintenance"})
+        else "ok"
+    )
+    return {
+        "status": status_value,
+        "components": components,
+        "checked_at": datetime.now(UTC).isoformat(),
+    }
 
 
 # 如果 web/dist 存在，在 API 路由之后挂载前端静态文件

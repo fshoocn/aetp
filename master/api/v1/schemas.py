@@ -299,6 +299,7 @@ class NodeOut(BaseModel):
     capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
     plugin_versions: dict[str, str] = Field(default_factory=dict)
     load: dict = Field(default_factory=dict)
+    resource_occupancy: dict[str, str] = Field(default_factory=dict)
     protocol_version: str
     last_seen_at: datetime | None
     devices: list[NodeDeviceOut]
@@ -323,6 +324,7 @@ class ProjectNodeBindingOut(BaseModel):
     updated_at: datetime
     capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
     plugin_versions: dict[str, str] = Field(default_factory=dict)
+    resource_occupancy: dict[str, str] = Field(default_factory=dict)
     devices: list[NodeDeviceOut]
 
 

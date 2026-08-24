@@ -92,6 +92,9 @@ class NodePresenceService:
                 node.plugin_versions = dict(payload.plugin_versions)
                 node.plugin_supported_versions = {key: list(value) for key, value in payload.supported_versions.items()}
                 node.last_seen_at = now
+            # 新会话注册：占用状态随新 session 重置为空，由后续心跳重新上报
+            # （旧 session 的活跃 Run 由 RecoveryService 经 LWT 处理）。
+            node.resource_occupancy = {}
             node = uow.nodes.save(node)
             assert node.id is not None  # save 后必有代理主键（后续会话查询用）
 
@@ -165,8 +168,14 @@ class NodePresenceService:
             node.status = NodeStatus.ONLINE if node.enabled else NodeStatus.DISABLED
             node.last_seen_at = now
             node.load = payload.load
+            node.resource_occupancy = payload.resource_occupancy
             uow.nodes.save(node)
-            logger.debug("节点心跳: node=%s load=%s", payload.node_id, payload.load)
+            logger.debug(
+                "节点心跳: node=%s load=%s occupancy=%d",
+                payload.node_id,
+                payload.load,
+                len(payload.resource_occupancy),
+            )
 
     # -- LWT（非正常离线） ----------------------------------------------------
 
