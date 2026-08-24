@@ -15,7 +15,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+from collections.abc import Callable
+from typing import Any
 
 from aetp_protocol.plugin import CaseInfo, ShardSpec
 
@@ -27,7 +28,7 @@ class SplitPolicyError(ValueError):
 def _split_into_bins(
     cases: list[CaseInfo],
     *,
-    bin_size: Callable[[CaseInfo], float],
+    bin_size: Callable[[CaseInfo], float | None],
     capacity: float,
     default_duration_s: float,
 ) -> list[list[CaseInfo]]:

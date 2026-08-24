@@ -474,7 +474,7 @@ class CapabilityCache:
         if self._usb_monitor is not None:
             return True
         try:
-            from usbmonitor import USBMonitor
+            from usbmonitor import USBMonitor  # type: ignore[reportMissingImports]
         except Exception:  # noqa: BLE001 - usb-monitor 未安装则降级为纯指纹
             logger.warning("usb-monitor 未安装，USB 插拔事件监听不可用（仅指纹兜底）")
             return False

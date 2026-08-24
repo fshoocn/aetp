@@ -241,9 +241,9 @@ class RunResult:
 
 
 # 防止 pytest 将 Run 执行域类误识别为测试类（测试文件中会导入本模块）。
-TaskRun.__test__ = False
-RunShard.__test__ = False
-ShardAttempt.__test__ = False
-RunCaseResult.__test__ = False
-RunArtifact.__test__ = False
-RunResult.__test__ = False
+TaskRun.__test__ = False  # type: ignore[reportAttributeAccessIssue]
+RunShard.__test__ = False  # type: ignore[reportAttributeAccessIssue]
+ShardAttempt.__test__ = False  # type: ignore[reportAttributeAccessIssue]
+RunCaseResult.__test__ = False  # type: ignore[reportAttributeAccessIssue]
+RunArtifact.__test__ = False  # type: ignore[reportAttributeAccessIssue]
+RunResult.__test__ = False  # type: ignore[reportAttributeAccessIssue]
