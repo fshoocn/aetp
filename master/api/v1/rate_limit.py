@@ -34,7 +34,19 @@ class SlidingWindowRateLimiter:
             if len(hits) >= self._max_attempts:
                 return False
             hits.append(now)
+            # Periodic eviction of stale keys to prevent memory leak
+            if len(self._hits) > 1000:
+                self._evict_stale_keys(now)
             return True
+
+    def _evict_stale_keys(self, now: float) -> None:
+        """Remove keys with no recent hits."""
+        stale_keys = [
+            key for key, hits in self._hits.items()
+            if not hits or now - hits[-1] > self._window_seconds
+        ]
+        for key in stale_keys:
+            self._hits.pop(key, None)
 
     def reset(self, key: str) -> None:
         """清空某个 key 的计数（如登录成功后）。"""

@@ -87,9 +87,15 @@ class RunTriggerService:
             cases = uow.script_cases.list_by_script(script.script_id)
             task_id = task.task_id
             project_id = task.project_id
+            task_type = task.task_type
+            task_split_policy = task.split_policy
+            task_default_case_selection = task.default_case_selection
+            script_id = script.script_id
+            script_version = script.version
+            script_sha256 = script.sha256
 
         # 2. 构建 CaseInfo（case_selection 覆盖默认，D-15）
-        selected = case_filter if case_filter is not None else task.default_case_selection
+        selected = case_filter if case_filter is not None else task_default_case_selection
         # P7.4 兼容语义：空默认用例集合表示该脚本的全部用例。
         selected_set = set(selected) if selected else None
         case_infos: list[CaseInfo] = []
@@ -110,8 +116,8 @@ class RunTriggerService:
             )
 
         # 3. 插件分割（split_shards 为 async 契约）
-        package = self._plugin_registry.require(task.task_type)
-        split_policy = dict(task.split_policy or {})
+        package = self._plugin_registry.require(task_type)
+        split_policy = dict(task_split_policy)
         if split_policy.get("type") == "by_time":
             split_policy.setdefault("default_duration_s", self._duration_stats.default_duration_s)
         shard_specs = await package.master.split_shards(
@@ -123,9 +129,9 @@ class RunTriggerService:
         # 4. 创建 Run + Shards（同一事务）
         run_id = new_id()
         script_ref = {
-            "script_id": script.script_id,
-            "version": script.version,
-            "sha256": script.sha256,
+            "script_id": script_id,
+            "version": script_version,
+            "sha256": script_sha256,
         }
         with self._uow_factory() as uow:
             uow.task_runs.add(

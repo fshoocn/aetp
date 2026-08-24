@@ -48,36 +48,39 @@ class NotificationDispatcher:
             if sub.event_types and event.event_type not in sub.event_types:
                 continue
 
-            # 幂等检查
+
+            # Idempotency check + delivery record in single UoW
             with self._uow_factory() as uow:
                 existing = uow.event_deliveries.get_by_event_subscription(event.event_id, sub.subscription_id)
                 if existing is not None:
                     continue
 
-            try:
-                result = await self._deliver(event, sub.endpoint_id)
-                status = result.status
-                error_message = None if status == "succeeded" else result.detail
-            except Exception as exc:
-                logger.exception("通知投递异常: subscription=%s event=%s", sub.subscription_id, event.event_type)
-                status = "failed"
-                error_message = str(exc)[:500]
+                try:
+                    result = await self._deliver(event, sub.endpoint_id)
+                    status = result.status
+                    error_message = None if status == 'succeeded' else result.detail
+                except Exception as exc:
+                    logger.exception(
+                        'Notification dispatch error: subscription=%s event=%s',
+                        sub.subscription_id,
+                        event.event_type,
+                    )
+                    status = 'failed'
+                    error_message = str(exc)[:500]
 
-            with self._uow_factory() as uow:
                 uow.event_deliveries.add(
                     EventDelivery(
                         delivery_id=new_id(),
-                        project_id=event.project_id or "",
+                        project_id=event.project_id or '',
                         event_id=event.event_id,
                         subscription_id=sub.subscription_id,
                         endpoint_id=sub.endpoint_id,
                         status=status,
                         attempts=1,
-                        sent_at=utcnow() if status == "succeeded" else None,
+                        sent_at=utcnow() if status == 'succeeded' else None,
                         error_message=error_message,
                     )
                 )
-
             if status == "succeeded":
                 delivered += 1
 
