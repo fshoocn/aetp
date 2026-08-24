@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from aetp_protocol.capabilities import HardwareRequirements
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
@@ -80,6 +80,17 @@ class TestScriptRepositoryImpl(TestScriptRepository):
             .one_or_none()
         )
         return _to_domain(orm) if orm is not None else None
+
+    def max_version_for_name(self, project_id: str, name: str) -> int:
+        result = self._s.execute(
+            select(func.max(TestScriptORM.version))
+            .where(
+                TestScriptORM.project_pk
+                == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery(),
+                TestScriptORM.name == name,
+            )
+        ).scalar()
+        return result or 0
 
     def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[TestScript]:
         stmt = (

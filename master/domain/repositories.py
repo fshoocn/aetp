@@ -101,6 +101,9 @@ class TestScriptRepository(ABC):
     def find_by_name_version(self, project_id: str, name: str, version: int) -> TestScript | None: ...
 
     @abstractmethod
+    def max_version_for_name(self, project_id: str, name: str) -> int: ...
+
+    @abstractmethod
     def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[TestScript]: ...
 
     @abstractmethod

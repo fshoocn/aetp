@@ -7,7 +7,8 @@ Master 面负责把脚本和配置生成可执行任务定义、验证脚本、�
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Protocol
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 from aetp_protocol.capabilities import HardwareRequirements
 from aetp_protocol.plugin import CaseInfo, ShardSpec, TaskDefinitionSpec

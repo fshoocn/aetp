@@ -14,16 +14,15 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import logging
 import tempfile
-import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
 from aetp_protocol.ids import new_id
 from aetp_protocol.plugin import CaseInfo
 
+from common.zip_utils import safe_extract_zip
 from master.application.errors import ScriptNotFoundError
 from master.application.services.script_storage_service import ScriptStorageService
 from master.domain.enums import (
@@ -284,20 +283,7 @@ class ScriptService:
     def _unpack(data: bytes, filename: str, target: Path) -> None:
         """把上传内容解包到临时目录（zip 解压；单文件直接放置）。"""
         if filename.lower().endswith(".zip"):
-            with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                # 防 zip 路径穿越：仅解压安全路径下的成员
-                for member in zf.infolist():
-                    name = member.filename.replace("\\", "/")
-                    if name.startswith("/") or ".." in name.split("/"):
-                        continue
-                    out = (target / name).resolve()
-                    if not str(out).startswith(str(target.resolve())):
-                        continue
-                    if member.is_dir():
-                        out.mkdir(parents=True, exist_ok=True)
-                        continue
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_bytes(zf.read(member))
+            safe_extract_zip(data, target)
         else:
             target.mkdir(parents=True, exist_ok=True)
             (target / filename).write_bytes(data)
@@ -313,9 +299,5 @@ class ScriptService:
 
     @staticmethod
     def _next_version(uow: UnitOfWork, project_id: str, name: str) -> int:
-        """计算同名脚本的下一个版本号（(project, name, version) 唯一）。"""
-        version = 1
-        while True:
-            if uow.test_scripts.find_by_name_version(project_id, name, version) is None:
-                return version
-            version += 1
+        max_ver = uow.test_scripts.max_version_for_name(project_id, name)
+        return max_ver + 1
