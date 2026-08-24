@@ -129,6 +129,7 @@ export interface Node {
   capabilities: NodeCapabilities;
   plugin_versions: Record<string, string>;
   load: Record<string, unknown>;
+  resource_occupancy: Record<string, string>;
   protocol_version: string;
   last_seen_at: string | null;
   devices: Device[];
@@ -186,6 +187,7 @@ export interface ProjectNodeBinding {
   updated_at: string;
   capabilities: NodeCapabilities;
   plugin_versions: Record<string, string>;
+  resource_occupancy: Record<string, string>;
   devices: Device[];
 }
 
