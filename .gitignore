@@ -51,3 +51,6 @@ web/.vite/
 .DS_Store
 Thumbs.db
 *.crt
+
+# 代码审查临时目录
+.review-tmp/
