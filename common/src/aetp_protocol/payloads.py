@@ -62,6 +62,11 @@ class NodeHeartbeatPayload(_Strict):
     load: dict[str, int] = Field(default_factory=dict)
     # sym:active_run_ids 当前活动 run_id 列表（离线恢复现场）
     active_run_ids: list[str] = Field(default_factory=list)
+    # sym:resource_occupancy 资源占用映射：device_id -> 占用它的 run_id（§9.8）。
+    # 事实源在 Agent：由活跃 Run 的 device_allocations 汇总，随心跳上报，
+    # Master 据此在资产页展示「谁占了哪个口」。调度仍以 Master 的 Device.busy
+    # 为权威，本字段是补充可见性与离线恢复的辅助事实。
+    resource_occupancy: dict[str, str] = Field(default_factory=dict)
 
 
 class RegisterAckPayload(_Strict):

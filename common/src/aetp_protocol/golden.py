@@ -75,6 +75,7 @@ GOLDEN_NODE_HEARTBEAT["payload"] = {
     "status": "online",
     "load": {"running_shards": 1, "queued_shards": 0},
     "active_run_ids": ["R-1"],
+    "resource_occupancy": {"can1": "R-1"},
 }
 
 # Master -> Agent：Shard 派发（topic: aetp/v1/master/agents/bench-001/commands/assign）
