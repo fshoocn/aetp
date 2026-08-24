@@ -15,13 +15,10 @@ import pytest
 from common.backoff import ExponentialBackoff
 from common.transport import MqttMessage, Transport
 from master.adapters.mqtt.transport import MqttTransport
-from master.config import MasterSettings
+from master.config import MasterSettings, MqttConfig
 
 _SETTINGS = MasterSettings(
-    mqtt_host="broker.test",
-    mqtt_port=1883,
-    mqtt_client_id="test-master",
-    mqtt_use_tls=False,
+    mqtt=MqttConfig(host="broker.test", port=1883, client_id="test-master", use_tls=False),
 )
 
 
