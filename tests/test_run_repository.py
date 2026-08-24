@@ -262,7 +262,7 @@ def test_run_list_filters(client):
 def test_run_missing_task_raises(client):
     container = client.app.state.container
     user_id, _task_id = _seed(container)
-    with _uow(container) as uow, pytest.raises(ValueError, match="任务定义不存在"):
+    with _uow(container) as uow, pytest.raises(ValueError, match="Task not found"):
         uow.task_runs.add(_make_run(user_id, "T-missing"))
 
 
@@ -471,5 +471,5 @@ def test_run_result_unique_per_run(client):
 def test_run_result_missing_run_raises(client):
     container = client.app.state.container
     _user_id, task_id = _seed(container)
-    with _uow(container) as uow, pytest.raises(ValueError, match="Run 不存在"):
+    with _uow(container) as uow, pytest.raises(ValueError, match="Run not found"):
         uow.run_results.add(_make_result("R-x", task_id))

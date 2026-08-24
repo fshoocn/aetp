@@ -10,10 +10,10 @@ from typing import cast
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import text as sa_text
 
 import master.main as main_mod
 from master import config
+from master.domain.enums import AccountStatus
 
 
 @pytest.fixture(autouse=True)
@@ -55,8 +55,12 @@ def auth_token(client: TestClient) -> str:
     container = cast(FastAPI, client.app).state.container
     svc = container.auth_service()
     svc.create_user("tester", "**********", "Tester")
-    with container.database().session_scope() as s:
-        s.execute(sa_text("UPDATE users SET account_status='active' WHERE username='tester'"))
+    # Activate user via repository instead of raw SQL
+    with container.uow_factory()() as uow:
+        user = uow.users.get_by_username("tester")
+        if user:
+            user.account_status = AccountStatus.ACTIVE
+            uow.users.update(user)
     resp = client.post(
         "/api/v1/auth/login",
         json={"username": "tester", "password": "**********"},

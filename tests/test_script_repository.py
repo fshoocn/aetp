@@ -149,6 +149,19 @@ def test_same_name_different_version_allowed(client):
         assert found is not None and found.script_id == v2.script_id
 
 
+def test_max_version_for_name(client):
+    container = client.app.state.container
+    user_id = _seed_user_and_project(container)
+    with _uow(container) as uow:
+        uow.test_scripts.add(_make_script(user_id, name='reg', version=1))
+        uow.test_scripts.add(_make_script(user_id, name='reg', version=3))
+        uow.test_scripts.add(_make_script(user_id, name='other', version=5))
+    with _uow(container) as uow:
+        assert uow.test_scripts.max_version_for_name('p1', 'reg') == 3
+        assert uow.test_scripts.max_version_for_name('p1', 'other') == 5
+        assert uow.test_scripts.max_version_for_name('p1', 'nonexistent') == 0
+
+
 def test_list_by_project_pagination(client):
     container = client.app.state.container
     user_id = _seed_user_and_project(container)
