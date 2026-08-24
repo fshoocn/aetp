@@ -248,12 +248,18 @@ class RegistrationService:
         """构造心跳载荷：从本地账本取真实活动 Run 状态（§8.4 load）。
 
         ``running_shards`` = 执行中的 Run 数；``queued_shards`` = 已 claim
-        待执行；``active_run_ids`` = 活动 run_id 列表（离线恢复现场，§8.6）。
+        待执行；``active_run_ids`` = 活动 run_id 列表（离线恢复现场，§8.6）；
+        ``resource_occupancy`` = 活跃 Run 占用设备映射（device_id -> run_id，
+        §9.8 占用状态上报）。
         """
 
         active = self._ledger.list_active_runs()
         running_ids = [run.run_id for run in active if run.status is AgentRunStatus.RUNNING]
         queued_ids = [run.run_id for run in active if run.status is AgentRunStatus.CLAIMED]
+        occupancy: dict[str, str] = {}
+        for run in active:
+            for device_id in run.device_ids:
+                occupancy.setdefault(device_id, run.run_id)
         return NodeHeartbeatPayload(
             node_id=self._settings.node_id,
             status="online",
@@ -262,6 +268,7 @@ class RegistrationService:
                 "queued_shards": len(queued_ids),
             },
             active_run_ids=[run.run_id for run in active],
+            resource_occupancy=occupancy,
         )
 
     async def publish_heartbeat(self) -> None:
@@ -296,7 +303,7 @@ class RegistrationService:
                 try:
                     await self.publish_heartbeat()
                 except Exception:  # noqa: BLE001 - 心跳失败不退出循环
-                    logger.warning("心跳发布失败，稍后重试")
+                    logger.warning("心跳发布失败，稍后重试", exc_info=True)
                 await asyncio.sleep(interval)
 
         self._heartbeat_task = asyncio.create_task(_loop())

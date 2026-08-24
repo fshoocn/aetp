@@ -2,6 +2,11 @@
 
 驱动是品牌/协议差异的唯一所在地：每个硬件类型实现一个 Driver，负责
 探测、占用、配置与释放。Master 只按资源类型与标签选择，不感知具体品牌。
+
+本端口是**硬件访问抽象层**，供共享插件包 Agent 面在 ``execute`` 内调用
+（P9.2）：插件通过 ``Driver.acquire`` 打开物理口、``configure`` 配置、
+``release`` 释放。Agent 框架本身**不预占用**物理口——占用/释放的时机由插件
+决定，占用状态的事实源是 Master（派发时设备标 ``busy``，终态释放）。
 """
 
 from __future__ import annotations

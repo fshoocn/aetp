@@ -199,8 +199,10 @@ class CommandDispatcher:
             self._ack_run_assign(envelope, accepted=True, reason="ok (duplicate)")
             return True
 
-        # 原子 claim（先 claim 后 ACK）
-        claimed = self._ledger.claim_run(payload.run_id, payload.attempt_no)
+        # 原子 claim（先 claim 后 ACK）；device_ids 随 run.assign 下发，
+        # 记录本次占用的物理设备集合，供心跳汇总占用状态上报 Master（§9.8）。
+        device_ids = [allocation.device_id for allocation in payload.device_allocations]
+        claimed = self._ledger.claim_run(payload.run_id, payload.attempt_no, device_ids)
         if not claimed:
             # 重复派发或 attempt 冲突：仍以当前状态回 ACK
             logger.debug(
