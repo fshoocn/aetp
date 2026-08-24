@@ -14,11 +14,14 @@ import re
 import shutil
 import sys
 import zipfile
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from aetp_protocol.plugin import AgentPackageSpec, PluginPackage
+
+from common.zip_utils import safe_extract_zip, validate_zip_names
 
 
 @dataclass
@@ -86,7 +89,7 @@ class PluginManager:
             shutil.rmtree(destination)
         destination.mkdir(parents=True)
         with zipfile.ZipFile(archive) as package:
-            self._extract_safe(package, destination)
+            safe_extract_zip(package, destination)
         loaded = self._load_main(destination, plugin_id)
         if not isinstance(loaded, PluginPackage):
             raise ValueError("main.py 必须导出 PluginPackage 类型的 package")
@@ -205,7 +208,7 @@ class PluginManager:
 
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             names = archive.namelist()
-            self._validate_names(names)
+            validate_zip_names(names)
             if "main.py" not in names or "plugin.json" not in names:
                 raise ValueError("ZIP 必须包含根目录 main.py 和 plugin.json")
             try:
@@ -227,28 +230,19 @@ class PluginManager:
             if path.is_absolute() or ".." in path.parts:
                 raise ValueError("ZIP 包含不安全的路径")
 
-    def _extract_safe(self, archive: zipfile.ZipFile, destination: Path) -> None:
-        names = archive.namelist()
-        self._validate_names(names)
-        for name in names:
-            target = destination / name
-            if name.endswith("/"):
-                target.mkdir(parents=True, exist_ok=True)
-            else:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(name) as source, target.open("wb") as target_file:
-                    shutil.copyfileobj(source, target_file)
+
 
     @staticmethod
     def _load_main(destination: Path, plugin_id: str) -> Any:
         main_path = destination / "main.py"
         module_name = f"aetp_zip_plugin_{re.sub(r'[^A-Za-z0-9_]', '_', plugin_id)}"
-        if str(destination) not in sys.path:
-            sys.path.insert(0, str(destination))
-        spec = importlib.util.spec_from_file_location(module_name, main_path)
+        spec = importlib.util.spec_from_file_location(
+            module_name, main_path, submodule_search_locations=[str(destination)]
+        )
         if spec is None or spec.loader is None:
             raise ValueError(f"无法加载插件入口: {plugin_id}")
         module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
         spec.loader.exec_module(module)
         return getattr(module, "package", None)
 
@@ -263,7 +257,7 @@ class PluginManager:
         return {key: ManagedPlugin(**value) for key, value in data.items()}
 
     def _save(self, records: dict[str, ManagedPlugin]) -> None:
-        self.manifest_path.write_text(json.dumps({key: asdict(value) for key, value in records.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.manifest_path.write_text(json.dumps({key: asdict(value) for key, value in records.items()}, ensure_ascii=False, indent=2), encoding="utf-8")  # noqa: E501
 
     def _get(self, plugin_id: str) -> ManagedPlugin:
         record = self._load().get(plugin_id)

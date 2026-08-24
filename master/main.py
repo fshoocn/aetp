@@ -17,6 +17,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
 
 from master.config import get_settings
@@ -236,8 +237,6 @@ app.include_router(v1_router)
 def health(db: DbDep) -> dict[str, str]:
     """健康检查：探活数据库连接。"""
     try:
-        from sqlalchemy import text as sa_text
-
         with db.session_scope() as session:
             session.execute(sa_text("SELECT 1"))
     except Exception:
