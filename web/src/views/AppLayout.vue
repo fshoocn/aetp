@@ -50,7 +50,7 @@
           <el-icon><UserFilled /></el-icon>
           <template #title>成员与权限</template>
         </el-menu-item>
-        <el-menu-item v-if="canManageProject" index="/notifications">
+        <el-menu-item v-if="canOperateProject" index="/notifications">
           <el-icon><Bell /></el-icon>
           <template #title>通知与订阅</template>
         </el-menu-item>
@@ -171,6 +171,7 @@ const pageTitle = computed(() => ({
 }[String(route.name)] || "工作区"));
 const roleLabel = computed(() => auth.user?.platform_role === "admin" ? "平台管理员" : "项目成员");
 const canManageProject = computed(() => auth.user?.platform_role === "admin" || ["maintainer", "owner"].includes(projectStore.currentRole || ""));
+const canOperateProject = computed(() => auth.user?.platform_role === "admin" || ["operator", "maintainer", "owner"].includes(projectStore.currentRole || ""));
 
 function onProjectChange(projectId: string) {
   projectStore.select(projectId);
