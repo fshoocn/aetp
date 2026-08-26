@@ -172,7 +172,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AETP Master API",
+    title="AETP 自动化设备测试平台 Master API",
     version="0.1.0",
     lifespan=lifespan,
 )

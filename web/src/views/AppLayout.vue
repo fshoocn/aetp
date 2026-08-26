@@ -5,7 +5,7 @@
         <div class="brand-mark">A</div>
         <div v-if="!collapsed" class="brand-copy">
           <strong>AETP</strong>
-          <span>测试控制台</span>
+          <span>自动化测试控制台</span>
         </div>
       </div>
 

@@ -1,12 +1,12 @@
 <template>
   <div class="auth-page">
     <main class="auth-main">
-      <div class="auth-brand"><span class="brand-mark">A</span><div><strong>AETP</strong><small>汽车电子测试平台</small></div></div>
+      <div class="auth-brand"><span class="brand-mark">A</span><div><strong>AETP</strong><small>自动化设备测试平台</small></div></div>
       <div class="auth-topline"><el-tag effect="plain" type="success"><span class="status-dot"></span> 服务在线</el-tag><span>v0.1 workspace</span></div>
       <el-card class="auth-card" shadow="never">
         <div class="auth-heading">
           <span class="eyebrow">{{ isRegister ? "CREATE ACCESS" : "SECURE ACCESS" }}</span>
-          <h2>{{ isRegister ? "申请工作区账户" : "进入测试控制台" }}</h2>
+          <h2>{{ isRegister ? "申请工作区账户" : "进入自动化测试控制台" }}</h2>
           <p>{{ isRegister ? "提交后由平台管理员审核，激活后即可加入项目。" : "使用平台账户进入项目运行工作区。" }}</p>
         </div>
 

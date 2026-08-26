@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aetp-master"
 version = "0.1.0"
-description = "汽车电子测试平台（AETP）Master 主节点"
+description = "自动化设备测试平台（AETP）Master 主节点"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
