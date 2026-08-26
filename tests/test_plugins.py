@@ -306,18 +306,34 @@ def test_plugin_manager_restores_installed_plugin_after_restart(tmp_path):
     assert [package.metadata.task_type for package in packages] == ["zip_test"]
 
 
-def _build_test_plugin_zip() -> bytes:
+def test_plugin_manager_keeps_task_type_enabled_when_only_old_version_disabled(tmp_path):
+    """停用旧版本不应屏蔽同 task_type 的已启用新版本。"""
+    from master.plugins.manager import PluginManager
+
+    manager = PluginManager(tmp_path)
+    first = manager.upload("test_plugin.zip", _build_test_plugin_zip())
+    manager.install(first.plugin_id)
+    manager.set_enabled(first.plugin_id, False)
+
+    second_bytes = _build_test_plugin_zip("1.1.0")
+    second = manager.upload("test_plugin.zip", second_bytes)
+    manager.install(second.plugin_id)
+
+    assert manager.disabled_task_types() == set()
+
+
+def _build_test_plugin_zip(version: str = "1.0.0") -> bytes:
     """构造最小 ZIP 插件包：plugin.json + main.py（导出 package）。"""
     import io
     import zipfile
 
-    plugin_json = '{"task_type": "zip_test", "plugin_version": "1.0.0", "display_name": "Zip Test"}'
+    plugin_json = f'{{"task_type": "zip_test", "plugin_version": "{version}", "display_name": "Zip Test"}}'
     main_py = (
         "from aetp_protocol.plugin import PluginMetadata, PluginPackage\n"
         "from aetp_protocol.capabilities import HardwareRequirements\n"
         "class M:\n"
         "    task_type='zip_test'; display_name='Zip Test'\n"
-        "    plugin_version='1.0.0'; supported_versions=frozenset({'1.0.0'})\n"
+        f"    plugin_version='{version}'; supported_versions=frozenset({{'{version}'}})\n"
         "    config_schema={}; upload_spec={}\n"
         "    def verify_script(self, d, c): return []\n"
         "    async def parse_cases(self, d, c): return []\n"
@@ -326,8 +342,8 @@ def _build_test_plugin_zip() -> bytes:
         "    def result_schema(self, c): return {}\n"
         "    def hardware_requirements(self, c, cs): return HardwareRequirements()\n"
         "package = PluginPackage(\n"
-        "  metadata=PluginMetadata(task_type='zip_test', plugin_version='1.0.0',\n"
-        "    supported_versions=frozenset({'1.0.0'})),\n"
+        f"  metadata=PluginMetadata(task_type='zip_test', plugin_version='{version}',\n"
+        f"    supported_versions=frozenset({{'{version}'}})),\n"
         "  master=M(), agent=object())\n"
     )
     buffer = io.BytesIO()

@@ -201,7 +201,13 @@ class PluginManager:
         )
 
     def disabled_task_types(self) -> set[str]:
-        return {item.task_type for item in self.list() if not item.enabled}
+        records = self.list()
+        enabled_types = {item.task_type for item in records if item.enabled and item.installed}
+        return {
+            item.task_type
+            for item in records
+            if item.task_type not in enabled_types and not item.enabled
+        }
 
     def _inspect_zip(self, content: bytes) -> dict[str, str]:
         import io
