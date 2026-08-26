@@ -253,6 +253,51 @@ class TestSenderRegistry:
 
 
 class TestNotificationDispatcher:
+    def test_dispatcher_matches_bound_task_and_formats_progress(self):
+        """任务订阅只接收目标任务的进度事件。"""
+        mock_uow = MagicMock()
+        mock_uow.__enter__ = MagicMock(return_value=mock_uow)
+        mock_uow.__exit__ = MagicMock(return_value=False)
+        sub_match = EventSubscription(
+            subscription_id="SUB-TASK",
+            project_id="PRJ-1",
+            endpoint_id="EP-TEST",
+            task_id="TASK-1",
+            event_types=["run.progress"],
+            enabled=True,
+        )
+        sub_other = EventSubscription(
+            subscription_id="SUB-OTHER",
+            project_id="PRJ-1",
+            endpoint_id="EP-OTHER",
+            task_id="TASK-2",
+            event_types=["run.progress"],
+            enabled=True,
+        )
+        mock_uow.event_subscriptions.list_by_project.return_value = [sub_match, sub_other]
+        mock_uow.notification_endpoints.get_by_endpoint_id.return_value = _model_endpoint(
+            "console_test", endpoint_id="EP-TEST"
+        )
+        mock_uow.event_deliveries.get_by_event_subscription.return_value = None
+
+        dispatcher = NotificationDispatcher(
+            uow_factory=lambda: mock_uow,
+            registry=build_default_registry(),
+        )
+        event = DomainEvent(
+            event_id="EVT-PROGRESS",
+            project_id="PRJ-1",
+            event_type="run.progress",
+            aggregate_id="RUN-1",
+            payload={"task_id": "TASK-1", "percent": 42, "stage": "pytest", "message": "执行中"},
+            occurred_at=utcnow(),
+        )
+
+        assert asyncio.run(dispatcher.dispatch(event)) == 1
+        delivery = mock_uow.event_deliveries.add.call_args.args[0]
+        assert delivery.subscription_id == "SUB-TASK"
+        assert delivery.content["task_id"] == "TASK-1"
+
     def test_dispatcher_matches_event_type(self):
         """Dispatcher 只投递事件类型匹配的订阅。"""
         mock_uow = MagicMock()

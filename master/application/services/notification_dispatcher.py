@@ -47,6 +47,10 @@ class NotificationDispatcher:
                 continue
             if sub.event_types and event.event_type not in sub.event_types:
                 continue
+            if sub.task_id and event.payload.get("task_id") != sub.task_id:
+                continue
+            if not self._matches_filter(event, sub.filter_json):
+                continue
 
 
             # Idempotency check + delivery record in single UoW
@@ -78,6 +82,7 @@ class NotificationDispatcher:
                         content={
                             "event_type": event.event_type,
                             "event_id": event.event_id,
+                            "task_id": event.payload.get("task_id"),
                             "aggregate_id": event.aggregate_id,
                             "project_id": event.project_id,
                             "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
@@ -95,6 +100,11 @@ class NotificationDispatcher:
         if delivered:
             logger.info("通知投递完成: event=%s type=%s delivered=%d", event.event_id, event.event_type, delivered)
         return delivered
+
+    @staticmethod
+    def _matches_filter(event: DomainEvent, filters: dict) -> bool:
+        """兼容旧订阅的 payload 顶层字段筛选。"""
+        return all(event.payload.get(key) == expected for key, expected in (filters or {}).items())
 
     async def _deliver(self, event: DomainEvent, endpoint_id: str):
         with self._uow_factory() as uow:
@@ -116,10 +126,24 @@ class NotificationDispatcher:
         if sender is None:
             raise ValueError(f"未注册的 sender: {channel_type}")
 
+        payload = event.payload
+        task_id = payload.get("task_id") or "未绑定任务"
+        if event.event_type == "run.progress":
+            body = (
+                f"任务 {task_id} 执行进度 {payload.get('percent', 0)}%"
+                f" · {payload.get('stage', '')} · {payload.get('message', '')}"
+            )
+            severity = "info"
+        elif event.event_type == "run.result":
+            body = f"任务 {task_id} 执行完成：{'通过' if payload.get('passed') else '失败'}"
+            severity = "info" if payload.get("passed") else "error"
+        else:
+            body = f"任务 {task_id}：事件 {event.event_type} 发生于 {event.occurred_at}"
+            severity = "info"
         message = NotificationMessage(
             subject=f"[AETP] {event.event_type}",
-            body=f"事件 {event.event_type} 发生于 {event.occurred_at}",
-            severity="info",
+            body=body,
+            severity=severity,
             event=event,
         )
 

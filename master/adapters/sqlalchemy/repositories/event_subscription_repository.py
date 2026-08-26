@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from master.adapters.sqlalchemy.orm import EventSubscription as SubORM
 from master.adapters.sqlalchemy.orm import NotificationEndpoint as EndpointORM
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
+from master.adapters.sqlalchemy.orm import TestTask as TestTaskORM
 from master.domain.models.notification import EventSubscription
 from master.domain.repositories import EventSubscriptionRepository
 
@@ -18,6 +19,7 @@ def _to_domain(orm: SubORM) -> EventSubscription:
         subscription_id=orm.subscription_id,
         project_id=orm.project.project_id if orm.project is not None else "",
         endpoint_id=orm.endpoint.endpoint_id if orm.endpoint is not None else "",
+        task_id=orm.task.task_id if orm.task is not None else None,
         event_types=list(orm.event_types or []),
         filter_json=dict(orm.filter_json or {}),
         throttle_policy=dict(orm.throttle_policy or {}),
@@ -68,10 +70,21 @@ class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
         ).scalar_one_or_none()
         if endpoint_pk is None:
             raise ValueError(f"通知端点不存在: {subscription.endpoint_id}")
+        task_pk = None
+        if subscription.task_id:
+            task_pk = self._s.execute(
+                select(TestTaskORM.id).where(
+                    TestTaskORM.task_id == subscription.task_id,
+                    TestTaskORM.project_pk == project_pk,
+                )
+            ).scalar_one_or_none()
+            if task_pk is None:
+                raise ValueError(f"测试任务不存在或不属于当前项目: {subscription.task_id}")
         orm = SubORM(
             subscription_id=subscription.subscription_id,
             project_pk=project_pk,
             endpoint_pk=endpoint_pk,
+            task_pk=task_pk,
             event_types=subscription.event_types,
             filter_json=subscription.filter_json,
             throttle_policy=subscription.throttle_policy,
@@ -87,6 +100,17 @@ class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
         orm = self._s.get(SubORM, subscription.id)
         if orm is None:
             raise ValueError(f"事件订阅不存在: id={subscription.id}")
+        task_pk = None
+        if subscription.task_id:
+            task_pk = self._s.execute(
+                select(TestTaskORM.id).where(
+                    TestTaskORM.task_id == subscription.task_id,
+                    TestTaskORM.project_pk == orm.project_pk,
+                )
+            ).scalar_one_or_none()
+            if task_pk is None:
+                raise ValueError(f"测试任务不存在或不属于当前项目: {subscription.task_id}")
+        orm.task_pk = task_pk
         orm.event_types = subscription.event_types
         orm.filter_json = subscription.filter_json
         orm.throttle_policy = subscription.throttle_policy

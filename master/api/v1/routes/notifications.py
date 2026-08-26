@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from master.api.v1.dependencies import NotificationServiceDep
 from master.api.v1.permissions import (
     ProjectAccessDep,
-    ProjectManagerDep,
+    ProjectOperatorDep,
     ProjectOwnerDep,
 )
 from master.api.v1.schemas import (
@@ -130,13 +130,14 @@ def list_subscriptions(
 def create_subscription(
     project_id: str,
     body: SubscriptionCreate,
-    access: ProjectManagerDep,
+    access: ProjectOperatorDep,
     service: NotificationServiceDep,
 ) -> SubscriptionOut:
     try:
         sub = service.create_subscription(
             project_id=project_id,
             endpoint_id=body.endpoint_id,
+            task_id=body.task_id,
             event_types=body.event_types,
             filter_json=body.filter_json,
             throttle_policy=body.throttle_policy,
@@ -152,7 +153,7 @@ def update_subscription(
     project_id: str,
     subscription_id: str,
     body: SubscriptionUpdate,
-    _access: ProjectManagerDep,
+    _access: ProjectOperatorDep,
     service: NotificationServiceDep,
 ) -> SubscriptionOut:
     try:
@@ -160,6 +161,7 @@ def update_subscription(
             subscription_id,
             project_id=project_id,
             event_types=body.event_types,
+            task_id=body.task_id,
             filter_json=body.filter_json,
             throttle_policy=body.throttle_policy,
             enabled=body.enabled,
@@ -173,7 +175,7 @@ def update_subscription(
 def delete_subscription(
     project_id: str,
     subscription_id: str,
-    _access: ProjectManagerDep,
+    _access: ProjectOperatorDep,
     service: NotificationServiceDep,
 ) -> None:
     try:

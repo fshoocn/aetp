@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
+from master.domain.models import DomainEvent
+from master.domain.models.notification import EventDelivery
+
 
 def _create_admin(client) -> dict[str, str]:
     service = client.app.state.container.auth_service()
@@ -190,6 +193,7 @@ def test_subscription_crud(client):
     sub = resp.json()
     assert sub["endpoint_id"] == endpoint_id
     assert sub["event_types"] == ["run.succeeded", "run.failed"]
+    assert sub["task_id"] is None
     subscription_id = sub["subscription_id"]
 
     # 列表
@@ -215,6 +219,39 @@ def test_subscription_crud(client):
         headers=headers,
     )
     assert resp.status_code == 204
+
+
+def test_operator_can_manage_subscriptions_but_not_endpoints(client):
+    """operator 可以绑定通知规则，但不能管理通知端点。"""
+    admin_headers = _create_admin(client)
+    project_id = _create_project(client, admin_headers, "NOTIF_OPERATOR")
+    endpoint = client.post(
+        f"/api/v1/projects/{project_id}/notification-endpoints",
+        headers=admin_headers,
+        json={"channel_type": "console_test", "name": "operator endpoint"},
+    ).json()
+    operator_headers = _add_member(client, admin_headers, project_id, "operator-user", "pass123", "operator")
+
+    denied = client.post(
+        f"/api/v1/projects/{project_id}/notification-endpoints",
+        headers=operator_headers,
+        json={"channel_type": "console_test", "name": "denied"},
+    )
+    assert denied.status_code == 403
+
+    created = client.post(
+        f"/api/v1/projects/{project_id}/event-subscriptions",
+        headers=operator_headers,
+        json={"endpoint_id": endpoint["endpoint_id"], "event_types": ["run.progress"]},
+    )
+    assert created.status_code == 201, created.text
+
+    updated = client.patch(
+        f"/api/v1/projects/{project_id}/event-subscriptions/{created.json()['subscription_id']}",
+        headers=operator_headers,
+        json={"event_types": ["run.result"]},
+    )
+    assert updated.status_code == 200
 
 
 def test_subscription_rejects_unknown_endpoint(client):
@@ -310,6 +347,43 @@ def test_delivery_list_and_retry(client):
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "pending"
+
+
+def test_delivery_list_restores_empty_content_from_domain_event(client):
+    """历史投递 content 为空时，查询应回填对应领域事件的实际载荷。"""
+    headers = _create_admin(client)
+    project_id = _create_project(client, headers, "NOTIF_DL_RESTORE")
+    container = client.app.state.container
+    with container.uow_factory()() as uow:
+        uow.domain_events.add(
+            DomainEvent(
+                event_id="EVT-RESTORE",
+                project_id=project_id,
+                event_type="run.result",
+                aggregate_id="RUN-RESTORE",
+                payload={"task_id": "TASK-RESTORE", "passed": True},
+            )
+        )
+        uow.event_deliveries.add(
+            EventDelivery(
+                delivery_id="DL-RESTORE",
+                project_id=project_id,
+                event_id="EVT-RESTORE",
+                subscription_id="ES-RESTORE",
+                endpoint_id="NE-RESTORE",
+                content={},
+                status="succeeded",
+            )
+        )
+
+    response = client.get(
+        f"/api/v1/projects/{project_id}/event-deliveries",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    content = response.json()[0]["content"]
+    assert content["event_type"] == "run.result"
+    assert content["payload"] == {"task_id": "TASK-RESTORE", "passed": True}
 
 
 def test_delivery_requires_owner_for_retry(client):

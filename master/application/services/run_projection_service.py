@@ -147,6 +147,7 @@ class RunProjectionService:
                     project_id=run.project_id,
                     payload={
                         "run_id": run.run_id,
+                        "task_id": run.task_id,
                         "shard_id": attempt.shard_id,
                         "attempt_no": attempt.attempt_no,
                         "node_id": node_id,
@@ -169,6 +170,7 @@ class RunProjectionService:
                     event_type="run.ack",
                     run_id=run.run_id,
                     project_id=run.project_id,
+                    payload={"run_id": run.run_id, "task_id": run.task_id},
                 )
 
             # 已 acked/running/终态：幂等忽略
@@ -189,6 +191,7 @@ class RunProjectionService:
             project_id=run.project_id,
             payload={
                 "run_id": payload.run_id,
+                "task_id": run.task_id,
                 "sequence": payload.sequence,
                 "percent": payload.percent,
                 "stage": payload.stage,
@@ -207,7 +210,7 @@ class RunProjectionService:
             event_type="run.case-status",
             run_id=payload.run_id,
             project_id=run.project_id,
-            payload=payload.model_dump(mode="json"),
+            payload={**payload.model_dump(mode="json"), "task_id": run.task_id},
         )
 
     # -- log ----------------------------------------------------------------
@@ -290,6 +293,7 @@ class RunProjectionService:
                 project_id=run.project_id,
                 payload={
                     "run_id": payload.run_id,
+                    "task_id": run.task_id,
                     "last_sequence": payload.last_sequence,
                     "entry_count": payload.entry_count,
                     "artifact_refs": payload.artifact_refs,
@@ -348,7 +352,7 @@ class RunProjectionService:
                 event_type="run.result",
                 run_id=run.run_id,
                 project_id=run.project_id,
-                payload=payload.model_dump(mode="json"),
+                payload={**payload.model_dump(mode="json"), "task_id": run.task_id},
                 anomaly_events=anomaly_events or None,
             )
 

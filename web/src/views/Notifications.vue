@@ -4,11 +4,11 @@
       <div>
         <span class="eyebrow">NOTIFICATIONS / PROJECT SETTINGS</span>
         <h1>通知与订阅</h1>
-        <p>管理通知端点、事件订阅规则和投递状态。密钥永不回显。</p>
+        <p>先配置通知端点，再把指定测试任务的进度或结果绑定到通知通道。密钥永不回显。</p>
       </div>
       <div class="heading-actions">
         <el-button v-if="isOwner" type="primary" :icon="Plus" @click="openEndpointCreate">新建端点</el-button>
-        <el-button v-if="canManage" :icon="Connection" @click="openSubscriptionCreate">新建订阅</el-button>
+        <el-button v-if="canManageSubscription" :icon="Connection" :disabled="endpoints.length === 0" @click="openSubscriptionCreate">新建任务订阅</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
       </div>
     </div>
@@ -58,11 +58,19 @@
     <el-card v-if="projectId" class="section-card" shadow="never">
       <template #header>
         <div class="card-heading">
-          <div><span class="section-kicker">SUBSCRIPTIONS</span><strong>事件订阅</strong></div>
+          <div><span class="section-kicker">TASK SUBSCRIPTIONS</span><strong>测试任务通知</strong></div>
           <el-tag effect="light">{{ subscriptions.length }} 个</el-tag>
         </div>
       </template>
       <el-table :data="subscriptions" row-key="subscription_id" v-loading="loading">
+        <el-table-column label="订阅范围" min-width="190">
+          <template #default="{ row }">
+            <div class="subscription-scope">
+              <strong>{{ row.task_id ? taskName(row.task_id) : '全部测试任务' }}</strong>
+              <small>{{ row.task_id || '项目级事件' }}</small>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="端点" min-width="160">
           <template #default="{ row }">{{ endpointName(row.endpoint_id) }}</template>
         </el-table-column>
@@ -78,9 +86,9 @@
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canManage" link type="warning" @click.stop="openSubscriptionEdit(row)">编辑</el-button>
-            <el-button v-if="canManage" link :type="row.enabled ? 'info' : 'success'" @click.stop="toggleSubscription(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
-            <el-button v-if="canManage" link type="danger" @click.stop="deleteSubscription(row)">删除</el-button>
+            <el-button v-if="canManageSubscription" link type="warning" @click.stop="openSubscriptionEdit(row)">编辑</el-button>
+            <el-button v-if="canManageSubscription" link :type="row.enabled ? 'info' : 'success'" @click.stop="toggleSubscription(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
+            <el-button v-if="canManageSubscription" link type="danger" @click.stop="deleteSubscription(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -167,26 +175,31 @@
     </el-dialog>
 
     <!-- 订阅编辑弹窗 -->
-    <el-dialog v-model="subscriptionDialogVisible" :title="editingSubscription ? '编辑事件订阅' : '新建事件订阅'" width="640px" destroy-on-close>
+    <el-dialog v-model="subscriptionDialogVisible" :title="editingSubscription ? '编辑任务通知' : '新建任务通知'" width="640px" destroy-on-close>
       <el-form :model="subscriptionForm" label-position="top">
+        <el-alert title="把指定测试任务的运行进度、用例状态或最终结果推送到已配置的通知端点。" type="info" show-icon :closable="false" class="subscription-help" />
         <el-form-item label="通知端点" required>
           <el-select v-model="subscriptionForm.endpoint_id" style="width: 100%" placeholder="选择端点">
             <el-option v-for="ep in endpoints" :key="ep.endpoint_id" :label="`${ep.name} (${ep.channel_type})`" :value="ep.endpoint_id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="测试任务">
+          <el-select v-model="subscriptionForm.task_id" style="width: 100%" placeholder="全部测试任务（项目级）" clearable>
+            <el-option label="全部测试任务（项目级）" value="" />
+            <el-option v-for="task in testTasks" :key="task.task_id" :label="`${task.name} · ${task.task_type}`" :value="task.task_id" />
+          </el-select>
+          <div class="form-hint">选择具体任务后，只有该任务产生的事件会触发通知。</div>
+        </el-form-item>
         <el-form-item label="事件类型" required>
           <el-select v-model="subscriptionForm.event_types" multiple filterable allow-create style="width: 100%" placeholder="选择或输入事件类型">
-            <el-option label="run.succeeded" value="run.succeeded" />
-            <el-option label="run.failed" value="run.failed" />
-            <el-option label="run.cancelled" value="run.cancelled" />
-            <el-option label="run.timed_out" value="run.timed_out" />
-            <el-option label="run.attempt_failed" value="run.attempt_failed" />
-            <el-option label="run.log_complete" value="run.log_complete" />
-            <el-option label="node.online" value="node.online" />
-            <el-option label="node.offline" value="node.offline" />
-            <el-option label="script.parsed" value="script.parsed" />
-            <el-option label="script.parse_failed" value="script.parse_failed" />
+            <el-option label="运行进度" value="run.progress" />
+            <el-option label="用例状态" value="run.case-status" />
+            <el-option label="运行结果" value="run.result" />
+            <el-option label="日志完成" value="run.log_complete" />
+            <el-option label="开始派发" value="run.dispatched" />
+            <el-option label="派发失败" value="run.failed" />
           </el-select>
+          <div class="form-hint">推荐选择“运行进度 + 运行结果”，分别获得实时进度和最终结果。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -204,6 +217,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Connection, Plus, Refresh } from "@element-plus/icons-vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { aetpApi, type NotificationEndpointOut, type EventSubscriptionOut, type EventDeliveryOut } from "@/api/endpoints";
+import type { TestTask } from "@/api/types";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -212,7 +226,7 @@ const projectStore = useProjectStore();
 const qc = useQueryClient();
 
 const projectId = computed(() => projectStore.currentProjectId ?? "");
-const canManage = computed(() => auth.user?.platform_role === "admin" || ["maintainer", "owner"].includes(projectStore.currentRole || ""));
+const canManageSubscription = computed(() => auth.user?.platform_role === "admin" || ["operator", "maintainer", "owner"].includes(projectStore.currentRole || ""));
 const isOwner = computed(() => auth.user?.platform_role === "admin" || projectStore.currentRole === "owner");
 
 // ---- 数据 ----
@@ -226,6 +240,11 @@ const subscriptionsQuery = useQuery({
   queryFn: () => aetpApi.notifications.listSubscriptions(projectId.value),
   enabled: computed(() => !!projectId.value),
 });
+const testTasksQuery = useQuery({
+  queryKey: ["testTasks", "notifications", projectId],
+  queryFn: () => aetpApi.testTasks.list(projectId.value),
+  enabled: computed(() => !!projectId.value),
+});
 const deliveryFilter = ref<string | undefined>(undefined);
 const deliveriesQuery = useQuery({
   queryKey: ["eventDeliveries", projectId, deliveryFilter],
@@ -234,6 +253,7 @@ const deliveriesQuery = useQuery({
 });
 const endpoints = computed(() => endpointsQuery.data.value ?? []);
 const subscriptions = computed(() => subscriptionsQuery.data.value ?? []);
+const testTasks = computed<TestTask[]>(() => testTasksQuery.data.value ?? []);
 const deliveries = computed(() => deliveriesQuery.data.value ?? []);
 const loading = computed(() => endpointsQuery.isLoading.value || subscriptionsQuery.isLoading.value);
 const deliveryLoading = computed(() => deliveriesQuery.isLoading.value);
@@ -249,6 +269,9 @@ function refreshDeliveries() {
 
 function endpointName(id: string) {
   return endpoints.value.find((ep) => ep.endpoint_id === id)?.name || id;
+}
+function taskName(id: string) {
+  return testTasks.value.find((task) => task.task_id === id)?.name || id;
 }
 
 // ---- 端点 ----
@@ -313,16 +336,16 @@ async function deleteEndpoint(ep: NotificationEndpointOut) {
 const subscriptionDialogVisible = ref(false);
 const editingSubscription = ref<EventSubscriptionOut | null>(null);
 const subscriptionSaving = ref(false);
-const subscriptionForm = reactive({ endpoint_id: "", event_types: [] as string[] });
+const subscriptionForm = reactive({ endpoint_id: "", task_id: "", event_types: [] as string[] });
 
 function openSubscriptionCreate() {
   editingSubscription.value = null;
-  subscriptionForm.endpoint_id = ""; subscriptionForm.event_types = [];
+  subscriptionForm.endpoint_id = ""; subscriptionForm.task_id = ""; subscriptionForm.event_types = [];
   subscriptionDialogVisible.value = true;
 }
 function openSubscriptionEdit(sub: EventSubscriptionOut) {
   editingSubscription.value = sub;
-  subscriptionForm.endpoint_id = sub.endpoint_id; subscriptionForm.event_types = [...sub.event_types];
+  subscriptionForm.endpoint_id = sub.endpoint_id; subscriptionForm.task_id = sub.task_id || ""; subscriptionForm.event_types = [...sub.event_types];
   subscriptionDialogVisible.value = true;
 }
 async function saveSubscription() {
@@ -332,12 +355,14 @@ async function saveSubscription() {
   try {
     if (editingSubscription.value) {
       await aetpApi.notifications.updateSubscription(projectId.value, editingSubscription.value.subscription_id, {
+        task_id: subscriptionForm.task_id,
         event_types: subscriptionForm.event_types,
       });
       ElMessage.success("订阅已更新");
     } else {
       await aetpApi.notifications.createSubscription(projectId.value, {
         endpoint_id: subscriptionForm.endpoint_id,
+        ...(subscriptionForm.task_id ? { task_id: subscriptionForm.task_id } : {}),
         event_types: subscriptionForm.event_types,
       });
       ElMessage.success("订阅已创建");
@@ -401,6 +426,10 @@ function prettyContent(value: Record<string, unknown>) { return JSON.stringify(v
 .section-kicker { color: var(--aetp-cyan); font-size: 10px; font-weight: 800; letter-spacing: .16em; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 .event-tag { margin-right: 4px; }
+.subscription-scope { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.subscription-scope strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subscription-scope small, .form-hint { color: var(--aetp-muted); font-size: 11px; }
+.subscription-help { margin-bottom: 18px; }
 .delivery-content { margin: -4px 0; padding: 14px 24px 14px 48px; background: #f7fafb; }
 .delivery-content-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; color: var(--aetp-ink); font-size: 12px; }
 .delivery-content pre { max-height: 240px; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--aetp-line); border-radius: 6px; background: #172b35; color: #c8e6e5; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap; }

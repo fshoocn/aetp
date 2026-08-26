@@ -140,6 +140,7 @@ class NotificationService:
         *,
         project_id: str,
         endpoint_id: str,
+        task_id: str | None = None,
         event_types: list[str],
         filter_json: dict | None = None,
         throttle_policy: dict | None = None,
@@ -151,10 +152,14 @@ class NotificationService:
             ep = uow.notification_endpoints.get_by_endpoint_id(endpoint_id)
             if ep is None or ep.project_id != project_id:
                 raise ValueError(f"通知端点不存在: {endpoint_id}")
+            normalized_task_id = task_id.strip() if task_id and task_id.strip() else None
+            if normalized_task_id and uow.test_tasks.get_by_task_id(normalized_task_id, project_id) is None:
+                raise ValueError(f"测试任务不存在或不属于当前项目: {normalized_task_id}")
             sub = EventSubscription(
                 subscription_id=new_id(),
                 project_id=project_id,
                 endpoint_id=endpoint_id,
+                task_id=normalized_task_id,
                 event_types=event_types,
                 filter_json=filter_json or {},
                 throttle_policy=throttle_policy or {},
@@ -180,6 +185,7 @@ class NotificationService:
         *,
         project_id: str,
         event_types: list[str] | None = None,
+        task_id: str | None = None,
         filter_json: dict | None = None,
         throttle_policy: dict | None = None,
         enabled: bool | None = None,
@@ -190,6 +196,11 @@ class NotificationService:
                 raise ValueError(f"事件订阅不存在: {subscription_id}")
             if event_types is not None:
                 sub.event_types = event_types
+            if task_id is not None:
+                normalized_task_id = task_id.strip() if task_id.strip() else None
+                if normalized_task_id and uow.test_tasks.get_by_task_id(normalized_task_id, project_id) is None:
+                    raise ValueError(f"测试任务不存在或不属于当前项目: {normalized_task_id}")
+                sub.task_id = normalized_task_id
             if filter_json is not None:
                 sub.filter_json = filter_json
             if throttle_policy is not None:
@@ -217,14 +228,34 @@ class NotificationService:
         offset: int = 0,
     ) -> list[EventDelivery]:
         with self._uow_factory() as uow:
-            return uow.event_deliveries.list_by_project(project_id, status=status, limit=limit, offset=offset)
+            deliveries = uow.event_deliveries.list_by_project(project_id, status=status, limit=limit, offset=offset)
+            return [self._restore_delivery_content(uow, delivery) for delivery in deliveries]
 
     def get_delivery(self, delivery_id: str, project_id: str) -> EventDelivery | None:
         with self._uow_factory() as uow:
             d = uow.event_deliveries.get_by_delivery_id(delivery_id)
             if d is None or d.project_id != project_id:
                 return None
-            return d
+            return self._restore_delivery_content(uow, d)
+
+    @staticmethod
+    def _restore_delivery_content(uow, delivery: EventDelivery) -> EventDelivery:
+        """兼容旧记录：投递正文为空时从不可变领域事件恢复实际载荷。"""
+        if delivery.content:
+            return delivery
+        event = uow.domain_events.get_by_event_id(delivery.event_id)
+        if event is None:
+            return delivery
+        delivery.content = {
+            "event_type": event.event_type,
+            "event_id": event.event_id,
+            "task_id": event.payload.get("task_id"),
+            "aggregate_id": event.aggregate_id,
+            "project_id": event.project_id,
+            "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+            "payload": event.payload,
+        }
+        return delivery
 
     def retry_delivery(self, delivery_id: str, project_id: str) -> EventDelivery:
         with self._uow_factory() as uow:

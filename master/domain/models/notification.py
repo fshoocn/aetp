@@ -31,6 +31,7 @@ class EventSubscription:
     subscription_id: str = ""
     project_id: str = ""
     endpoint_id: str = ""
+    task_id: str | None = None
     event_types: list[str] = field(default_factory=list)
     filter_json: dict = field(default_factory=dict)
     throttle_policy: dict = field(default_factory=dict)
