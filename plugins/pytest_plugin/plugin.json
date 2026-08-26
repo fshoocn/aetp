@@ -1,7 +1,13 @@
 {
   "task_type": "pytest",
-  "plugin_version": "1.1.0",
+  "plugin_version": "1.3.0",
   "display_name": "pytest 自动化测试",
   "description": "上传、解析并按 Shard 执行 Python pytest 工程，采集 JUnit XML、日志和附件",
-  "entry": "main.py:package"
+  "entry": "main.py:package",
+  "ui": {
+    "config_page": "pytest",
+    "entry": "index.html",
+    "task_config_entry": "task-config.html",
+    "protocol_version": 1
+  }
 }

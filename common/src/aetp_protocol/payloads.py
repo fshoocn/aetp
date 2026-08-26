@@ -216,6 +216,8 @@ class RunAssignPayload(_Strict):
     artifact_upload_url: str | None = None
     # sym:case_keys 该 Shard 负责的 case 集合
     case_keys: list[str] = Field(default_factory=list)
+    # sym:task_config 任务定义级插件配置（所有 Shard 共享）
+    task_config: dict[str, Any] = Field(default_factory=dict)
     # sym:execution_params 每 Shard 专属执行参数（插件 execute 使用）
     execution_params: dict[str, Any] = Field(default_factory=dict)
     # sym:timeout_s 任务超时（秒；0=不限制）

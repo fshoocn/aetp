@@ -25,6 +25,7 @@ def _to_domain(orm: TestTaskORM) -> TestTask:
         node_ids=list(orm.node_ids or []),
         split_policy=dict(orm.split_policy or {}),
         retry_policy=dict(orm.retry_policy or {}),
+        config=dict(orm.config or {}),
         timeout_s=orm.timeout_s,
         enabled=orm.enabled,
         priority=orm.priority,
@@ -183,6 +184,7 @@ class TestTaskRepositoryImpl(TestTaskRepository):
             node_ids=task.node_ids,
             split_policy=task.split_policy,
             retry_policy=task.retry_policy,
+            config=task.config,
             timeout_s=task.timeout_s,
             enabled=task.enabled,
             priority=task.priority,
@@ -203,6 +205,7 @@ class TestTaskRepositoryImpl(TestTaskRepository):
         orm.node_ids = task.node_ids
         orm.split_policy = task.split_policy
         orm.retry_policy = task.retry_policy
+        orm.config = task.config
         orm.timeout_s = task.timeout_s
         orm.enabled = task.enabled
         orm.priority = task.priority

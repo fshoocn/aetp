@@ -57,6 +57,9 @@ def _ui_metadata(task_type: str, metadata: dict) -> dict:
     entry = ui.get("entry")
     if isinstance(entry, str) and entry:
         ui["url"] = f"/api/v1/task-types/{quote(task_type, safe='')}/ui/{quote(entry, safe='/')}"
+    task_config_entry = ui.get("task_config_entry")
+    if isinstance(task_config_entry, str) and task_config_entry:
+        ui["task_config_url"] = f"/api/v1/task-types/{quote(task_type, safe='')}/ui/{quote(task_config_entry, safe='/')}"
     return ui
 
 
@@ -87,6 +90,18 @@ async def upload_plugin(_admin: PlatformAdminDep, manager: PluginManagerDep, fil
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _managed(record)
+
+
+@router.get("/managed/{plugin_id}/download")
+def download_plugin(plugin_id: str, _admin: PlatformAdminDep, manager: PluginManagerDep) -> FileResponse:
+    """平台管理员下载已安装的插件 ZIP 包。"""
+    record = next((item for item in manager.list() if item.plugin_id == plugin_id), None)
+    if record is None or not record.installed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="插件不存在或未安装")
+    archive = manager.archives / f"{record.sha256}.zip"
+    if not archive.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="插件包文件缺失")
+    return FileResponse(archive, media_type="application/zip", filename=record.filename)
 
 
 @router.post("/managed/{plugin_id}/install")

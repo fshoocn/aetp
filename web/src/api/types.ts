@@ -216,6 +216,8 @@ export interface Run {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  scheduled?: number;
+  pending_shard_ids?: string[];
 }
 
 export interface RunShard {
@@ -275,6 +277,8 @@ export interface TaskTypePlugin {
     config_page?: string;
     entry?: string;
     url?: string;
+    task_config_entry?: string;
+    task_config_url?: string;
     min_frontend_version?: string;
     protocol_version?: number;
   };
@@ -363,6 +367,7 @@ export interface TestTask {
   node_ids: string[];
   split_policy: Record<string, unknown>;
   retry_policy: Record<string, unknown>;
+  config: Record<string, unknown>;
   timeout_s: number;
   enabled: boolean;
   priority: number;
@@ -379,6 +384,7 @@ export interface TestTaskCreateRequest {
   node_ids?: string[];
   split_policy?: Record<string, unknown>;
   retry_policy?: Record<string, unknown>;
+  config?: Record<string, unknown>;
   timeout_s?: number;
   priority?: number;
 }
@@ -413,6 +419,7 @@ export interface EventSubscriptionOut {
   subscription_id: string;
   project_id: string;
   endpoint_id: string;
+  task_id: string | null;
   event_types: string[];
   filter_json: Record<string, unknown>;
   throttle_policy: Record<string, unknown>;
@@ -455,12 +462,14 @@ export interface EndpointUpdateRequest {
 
 export interface SubscriptionCreateRequest {
   endpoint_id: string;
+  task_id?: string;
   event_types: string[];
   filter_json?: Record<string, unknown>;
   throttle_policy?: Record<string, unknown>;
 }
 
 export interface SubscriptionUpdateRequest {
+  task_id?: string;
   event_types?: string[];
   filter_json?: Record<string, unknown>;
   throttle_policy?: Record<string, unknown>;

@@ -46,6 +46,8 @@ class TestTask:
     split_policy: dict = field(default_factory=dict)
     # sym:retry_policy 重试策略 JSON：{max_attempts, failover_nodes, case_retry}（D-20）
     retry_policy: dict = field(default_factory=dict)
+    # sym:config 插件执行配置 JSON（在任务定义中保存，脚本只负责资产与用例）
+    config: dict = field(default_factory=dict)
     # sym:timeout_s 任务超时秒数；0 = 不限制
     timeout_s: int = 0
     # sym:enabled 启用标记：false 时禁止触发新 Run

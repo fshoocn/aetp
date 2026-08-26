@@ -140,6 +140,14 @@ class MasterMessageRouter:
         try:
             payload = payload_cls.model_validate(envelope.payload)
             result = handler(envelope, payload)
+            if msg_type is MessageType.NODE_REGISTER and self._scheduler is not None:
+                try:
+                    self._scheduler.reschedule_pending_runs(node_id=envelope.sender.id)
+                except Exception:
+                    logger.exception(
+                        "节点上线后的补偿调度失败（不阻塞注册）: node=%s",
+                        envelope.sender.id,
+                    )
             # Run 事件需要 publish SSE（结果类型为 ProjectionResult）
             if isinstance(result, ProjectionResult) and result.handled:
                 await self._publish(result)
@@ -211,7 +219,7 @@ class MasterMessageRouter:
                 project_id = run.project_id
             await self._event_publisher.publish(
                 "run.failed",
-                {"run_id": run_id, "reason": "派发耗尽（无可用节点或 failover 不允许）"},
+                {"run_id": run_id, "task_id": run.task_id, "reason": "派发耗尽（无可用节点或 failover 不允许）"},
                 project_id=project_id,
                 aggregate_id=run_id,
             )

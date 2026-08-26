@@ -90,6 +90,7 @@ class RunTriggerService:
             task_type = task.task_type
             task_split_policy = task.split_policy
             task_default_case_selection = task.default_case_selection
+            task_config = task.config
             script_id = script.script_id
             script_version = script.version
             script_sha256 = script.sha256
@@ -123,7 +124,7 @@ class RunTriggerService:
         shard_specs = await package.master.split_shards(
             case_infos,
             split_policy,
-            dict(script.config or {}),
+            dict(task_config or {}),
         )
 
         # 4. 创建 Run + Shards（同一事务）
@@ -169,6 +170,7 @@ class RunTriggerService:
             run_id,
             project_id,
             {
+                "task_id": task_id,
                 "shard_count": len(shard_specs),
                 "case_count": len(case_infos),
                 "split_policy": split_policy,
@@ -185,6 +187,7 @@ class RunTriggerService:
                 run_id,
                 project_id,
                 {
+                    "task_id": task_id,
                     "shard_id": dispatched.shard_id,
                     "attempt_no": dispatched.attempt_no,
                     "node_id": dispatched.node_id,

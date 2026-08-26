@@ -67,6 +67,8 @@ async def trigger_run(
         status="created",
         trigger_type="manual_web",
         created_at=_now(),
+        scheduled=result.scheduled,
+        pending_shard_ids=list(result.pending_shard_ids),
     )
 
 

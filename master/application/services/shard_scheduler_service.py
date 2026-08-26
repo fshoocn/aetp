@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -56,6 +57,8 @@ from master.domain.resources import (
 from master.domain.scheduler import ShardScheduler
 from master.domain.state_machine import assert_transition, next_attempt_no
 from master.domain.time import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -186,6 +189,22 @@ class ShardSchedulerService:
                 scheduled=tuple(scheduled),
                 pending_shard_ids=tuple(pending),
             )
+
+    def reschedule_pending_runs(self, *, node_id: str | None = None) -> int:
+        """节点上线后重新轮询非终态 Run，派发可用的 pending Shard。"""
+        with self._uow_factory() as uow:
+            run_ids = [run.run_id for run in uow.task_runs.list_non_terminal(limit=1000)]
+        scheduled_count = 0
+        for run_id in run_ids:
+            result = self.schedule_run(run_id)
+            scheduled_count += len(result.scheduled)
+        if scheduled_count:
+            logger.info(
+                "节点上线触发补偿调度: node=%s scheduled=%d",
+                node_id or "*",
+                scheduled_count,
+            )
+        return scheduled_count
 
     def _load_context(self, uow: UnitOfWork, run_id: str) -> tuple[TaskRun, TestTask, TestScript]:
         run = uow.task_runs.get_by_run_id(run_id)
@@ -435,6 +454,7 @@ class ShardSchedulerService:
             script_ref=script_ref,
             artifact_upload_url=artifact_upload_url,
             case_keys=list(shard.case_keys),
+            task_config=dict(task.config or {}),
             execution_params=dict(shard.execution_params),
             timeout_s=task.timeout_s,
         )

@@ -185,7 +185,7 @@ class RunOrchestrator:
             shard_id=payload.shard_id,
             run_id=run_id,
             node_id=self._settings.node_id,
-            params=dict(payload.execution_params or {}),
+            params={**dict(payload.task_config or {}), **dict(payload.execution_params or {})},
             script_ref=script_ref,
             case_keys=list(payload.case_keys),
             is_cancelled=lambda: self._execution_service.is_cancelled(run_id),

@@ -46,9 +46,6 @@
                   <template #tip><div class="el-upload__tip">{{ uploadTip }}</div></template>
                 </el-upload>
               </el-form-item>
-              <el-form-item label="测试路径（可选）">
-                <el-input v-model="testPath" placeholder="例如 tests 或 test_smoke.py" clearable />
-              </el-form-item>
               <el-button type="primary" :disabled="!canUpload" :loading="state.uploading" @click="doUpload">
                 {{ state.uploading ? "正在上传..." : "上传并解析" }}
               </el-button>
@@ -57,37 +54,6 @@
           </el-card>
         </el-col>
         <el-col :xs="24" :md="11">
-          <el-card shadow="never">
-            <template #header><strong>执行参数</strong></template>
-            <el-form label-position="top" size="large">
-              <el-form-item label="pytest 参数">
-                <div v-for="(_, index) in pytestArgs" :key="index" style="display:flex; gap:8px; margin-bottom:8px;">
-                  <el-input v-model="pytestArgs[index]" placeholder="例如 -q" />
-                  <el-button type="danger" plain @click="removeAt('pytest_args', index)">删除</el-button>
-                </div>
-                <el-button plain @click="addArg">添加参数</el-button>
-              </el-form-item>
-              <el-form-item label="Python 解释器">
-                <el-input v-model="pythonExecutable" placeholder="留空使用 Agent 当前 Python" clearable />
-              </el-form-item>
-              <el-row :gutter="10">
-                <el-col :span="12">
-                  <el-form-item label="执行超时（秒）"><el-input-number v-model="timeoutS" :min="1" :max="86400" controls-position="right" style="width:100%" /></el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="每 Shard 用例数"><el-input-number v-model="casesPerShard" :min="1" :max="1000" controls-position="right" style="width:100%" /></el-form-item>
-                </el-col>
-              </el-row>
-              <el-form-item label="执行后上传的附件">
-                <div v-for="(_, index) in artifactPaths" :key="index" style="display:flex; gap:8px; margin-bottom:8px;">
-                  <el-input v-model="artifactPaths[index]" placeholder="例如 reports/*.html" />
-                  <el-button type="danger" plain @click="removeAt('artifact_paths', index)">删除</el-button>
-                </div>
-                <el-button plain @click="addArtifact">添加附件路径</el-button>
-              </el-form-item>
-              <el-checkbox v-model="failFast">首个失败后停止当前 Shard</el-checkbox>
-            </el-form>
-          </el-card>
           <el-card shadow="never" style="margin-top:14px;">
             <template #header><strong>Agent 验证</strong></template>
             <el-select v-model="state.nodeId" placeholder="不执行台架验证" clearable style="width:100%">
@@ -109,17 +75,27 @@
   <script src="vendor/icons.js"></script>
   <script>
     (() => {
-      const { createApp, reactive, ref, computed, watch } = Vue;
+      const { createApp, reactive, ref, computed, watch, toRaw, markRaw } = Vue;
       const app = createApp({
         setup() {
           const state = reactive({ context: null, config: {}, name: "", file: null, scriptId: "", nodeId: "", uploading: false });
           const status = reactive({ text: "", kind: "info" });
-          const testPath = ref(""); const pythonExecutable = ref(""); const timeoutS = ref(undefined); const casesPerShard = ref(undefined);
-          const failFast = ref(false); const pytestArgs = ref([]); const artifactPaths = ref([]); const verifying = ref(false);
+          const verifying = ref(false);
 
-          function send(type, payload) { window.parent.postMessage({ type, payload }, window.location.origin); }
+          function cloneConfig(value) {
+            return JSON.parse(JSON.stringify(toRaw(value)));
+          }
+          function toBase64(buffer) {
+            const bytes = new Uint8Array(buffer); let binary = "";
+            for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+            return btoa(binary);
+          }
+          function send(type, payload) {
+            const safePayload = { ...payload };
+            if ("config" in safePayload) safePayload.config = cloneConfig(safePayload.config);
+            window.parent.postMessage(JSON.stringify({ type, payload: safePayload }), window.location.origin);
+          }
           function setStatus(text, kind) { status.text = text; status.kind = kind || "info"; }
-          function listValue(key) { return Array.isArray(state.config[key]) ? state.config[key].map(String) : []; }
 
           const uploadTip = computed(() => { const spec = state.context?.upload_spec || {}; const ext = Array.isArray(spec.extensions) ? spec.extensions.join(" / ") : ".py / .zip"; return `${ext}${spec.max_size_mb ? ` · 最大 ${spec.max_size_mb} MB` : ""}`; });
           const canUpload = computed(() => !!state.name.trim() && !!state.file && !state.uploading);
@@ -129,40 +105,30 @@
           const verifyHint = computed(() => verifySupported.value ? (state.scriptId ? "已上传脚本并选择节点，可以下发验证。" : "上传脚本后可以下发验证。") : "该插件由 Master 完成验证，无需下发 Agent 命令。");
           const capabilityText = computed(() => { const selected = nodes.value.find((n) => n.node_id === state.nodeId); return selected ? JSON.stringify(selected.capabilities || {}, null, 2) : "请选择验证节点查看能力"; });
 
-          function syncConfigFromRefs() {
-            state.config.pytest_args = pytestArgs.value.filter((v) => String(v).trim());
-            state.config.artifact_paths = artifactPaths.value.filter((v) => String(v).trim());
-            if (testPath.value.trim()) state.config.test_path = testPath.value.trim(); else delete state.config.test_path;
-            if (pythonExecutable.value.trim()) state.config.python_executable = pythonExecutable.value.trim(); else delete state.config.python_executable;
-            if (timeoutS.value != null) state.config.timeout_s = timeoutS.value; else delete state.config.timeout_s;
-            if (casesPerShard.value != null) state.config.cases_per_shard = casesPerShard.value; else delete state.config.cases_per_shard;
-            if (failFast.value) state.config.fail_fast = true; else delete state.config.fail_fast;
-            sendConfig();
-          }
           function sendConfig() { send("aetp.plugin.config", { config: state.config, node_id: state.nodeId }); }
           function applyContext(context) {
             state.context = context || {}; state.config = { ...(context?.config || {}) }; state.scriptId = context?.script_id || "";
-            pytestArgs.value = listValue("pytest_args"); artifactPaths.value = listValue("artifact_paths");
-            testPath.value = typeof state.config.test_path === "string" ? state.config.test_path : "";
-            pythonExecutable.value = typeof state.config.python_executable === "string" ? state.config.python_executable : "";
-            timeoutS.value = typeof state.config.timeout_s === "number" ? state.config.timeout_s : undefined;
-            casesPerShard.value = typeof state.config.cases_per_shard === "number" ? state.config.cases_per_shard : undefined;
-            failFast.value = state.config.fail_fast === true;
           }
           function onFileChange(file) {
             const max = Number(state.context?.upload_spec?.max_size_mb || 0);
             if (file.raw && max && file.raw.size > max * 1024 * 1024) { state.file = null; setStatus(`文件超过 ${max} MB 限制`, "error"); return; }
-            state.file = file.raw || null;
+            state.file = file.raw ? markRaw(file.raw) : null;
           }
-          function resetForm() { state.name = ""; state.file = null; state.scriptId = ""; state.config = {}; pytestArgs.value = []; artifactPaths.value = []; testPath.value = ""; pythonExecutable.value = ""; timeoutS.value = undefined; casesPerShard.value = undefined; failFast.value = false; setStatus("已重置上传表单", "info"); sendConfig(); }
-          function doUpload() { if (!canUpload.value) return; state.uploading = true; setStatus("正在上传、校验并解析用例...", "warning"); send("aetp.plugin.upload", { name: state.name.trim(), filename: state.file.name, file: state.file, config: state.config }); }
+          function resetForm() { state.name = ""; state.file = null; state.scriptId = ""; state.config = {}; setStatus("已重置上传表单", "info"); sendConfig(); }
+          async function doUpload() {
+            if (!canUpload.value) return;
+            state.uploading = true;
+            setStatus("正在上传、校验并解析用例...", "warning");
+            try {
+              const rawFile = toRaw(state.file);
+              const file = { __aetp_file: true, name: rawFile.name, type: rawFile.type, lastModified: rawFile.lastModified, data: toBase64(await rawFile.arrayBuffer()) };
+              send("aetp.plugin.upload", { name: state.name.trim(), filename: state.file.name, file, config: state.config });
+            } catch (error) {
+              state.uploading = false;
+              setStatus(`读取脚本文件失败: ${error.message || error}`, "error");
+            }
+          }
           function doVerify() { verifying.value = true; setStatus("验证请求已发送，等待 Agent 回执...", "warning"); send("aetp.plugin.verify", { request_id: `verify-${Date.now()}`, script_id: state.scriptId, node_id: state.nodeId, config: state.config }); setTimeout(() => verifying.value = false, 3000); }
-          function addArg() { pytestArgs.value.push("-q"); syncConfigFromRefs(); }
-          function addArtifact() { artifactPaths.value.push(""); syncConfigFromRefs(); }
-          function removeAt(key, index) { if (key === "pytest_args") pytestArgs.value.splice(index, 1); else artifactPaths.value.splice(index, 1); syncConfigFromRefs(); }
-
-          watch([pytestArgs, artifactPaths], syncConfigFromRefs, { deep: true });
-          watch([testPath, pythonExecutable, timeoutS, casesPerShard, failFast], syncConfigFromRefs);
           watch(() => state.nodeId, sendConfig);
 
           window.addEventListener("message", (event) => {
@@ -180,7 +146,7 @@
             if (message.type === "aetp.plugin.verify-result") setStatus(message.payload?.errors?.length ? message.payload.errors.join("；") : "Agent 验证通过", message.payload?.errors?.length ? "error" : "success");
           });
           send("aetp.plugin.ready", { protocol_version: 1 });
-          return { state, status, testPath, pythonExecutable, timeoutS, casesPerShard, failFast, pytestArgs, artifactPaths, verifying, uploadTip, canUpload, nodes, canVerify, verifyHint, capabilityText, onFileChange, resetForm, doUpload, doVerify, addArg, addArtifact, removeAt };
+          return { state, status, verifying, uploadTip, canUpload, nodes, canVerify, verifyHint, capabilityText, onFileChange, resetForm, doUpload, doVerify };
         },
       });
       app.use(ElementPlus, { locale: ElementPlusLocaleZhCn });

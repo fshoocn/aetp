@@ -138,6 +138,7 @@ class TestTaskService:
         node_ids: list[str] | None = None,
         split_policy: dict | None = None,
         retry_policy: dict | None = None,
+        config: dict | None = None,
         timeout_s: int = 0,
         priority: int = 0,
         created_by: int,
@@ -172,6 +173,7 @@ class TestTaskService:
                     node_ids=selected_nodes,
                     split_policy=normalized_split,
                     retry_policy=normalized_retry,
+                    config=dict(config or {}),
                     timeout_s=timeout_s,
                     priority=priority,
                     enabled=True,
@@ -192,6 +194,7 @@ class TestTaskService:
         node_ids: list[str] | None = None,
         split_policy: dict | None = None,
         retry_policy: dict | None = None,
+        config: dict | None = None,
         timeout_s: int | None = None,
         enabled: bool | None = None,
         priority: int | None = None,
@@ -244,6 +247,8 @@ class TestTaskService:
             task.node_ids = target_nodes
             task.split_policy = normalized_split
             task.retry_policy = normalized_retry
+            if config is not None:
+                task.config = dict(config)
             if timeout_s is not None:
                 task.timeout_s = timeout_s
             if enabled is not None:

@@ -7,7 +7,7 @@
         <p>引用脚本版本 + 勾选用例 + 绑定节点，创建可重复执行的任务模板。</p>
       </div>
       <div class="heading-actions">
-        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建任务定义</el-button>
+        <el-button v-if="canDispatch" type="primary" :icon="Plus" @click="openCreate">新建任务定义</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
       </div>
     </div>
@@ -109,6 +109,12 @@
             <el-alert title="按 case 平均耗时切分；全部用例无耗时数据时禁用（D-21）" type="info" show-icon :closable="false" />
           </el-col>
         </el-row>
+        <el-form-item v-if="form.scriptId" label="任务类型插件配置">
+          <div v-if="pluginConfigUrl" v-loading="pluginConfigLoading" class="plugin-config-shell">
+            <iframe ref="pluginConfigFrame" :src="pluginConfigObjectUrl" title="任务类型插件配置页面" class="plugin-config-frame" @load="postPluginConfigContext" />
+          </div>
+          <el-alert v-else title="该任务类型未提供配置页面" description="任务定义将使用该插件的默认配置。" type="info" show-icon :closable="false" />
+        </el-form-item>
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="超时（秒，0=不限）">
@@ -236,7 +242,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRaw, watch } from "vue";
 import { useRouter } from "vue-router";
 import type { FormInstance, FormRules } from "element-plus";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -266,6 +272,10 @@ const scriptsQuery = useQuery({
   queryKey: ["scripts", projectId],
   queryFn: () => aetpApi.scripts.list(projectId.value),
   enabled: computed(() => !!projectId.value),
+});
+const taskTypesQuery = useQuery({
+  queryKey: ["taskTypes"],
+  queryFn: () => aetpApi.plugins.list(),
 });
 const bindingsQuery = useQuery({
   queryKey: ["projectNodes", projectId],
@@ -301,7 +311,19 @@ const form = reactive({
   caseRetry: 0,
   priority: 0,
   caseKeys: [] as string[],
+  pluginConfig: {} as Record<string, unknown>,
 });
+const selectedScript = computed(() => scripts.value.find((script) => script.script_id === form.scriptId));
+const selectedPlugin = computed(() => taskTypesQuery.data.value?.find((plugin) => plugin.task_type === selectedScript.value?.task_type) ?? null);
+const pluginConfigUrl = computed(() => {
+  const url = selectedPlugin.value?.ui?.task_config_url || "";
+  if (!url) return "";
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(selectedPlugin.value?.plugin_version || "")}`;
+});
+const pluginConfigObjectUrl = ref("");
+const pluginConfigLoading = ref(false);
+const pluginConfigFrame = ref<HTMLIFrameElement>();
 const formRules: FormRules = {
   name: [{ required: true, message: "请输入定义名称", trigger: "blur" }],
   scriptId: [{ required: true, message: "请选择引用脚本", trigger: "change" }],
@@ -328,9 +350,66 @@ const filteredCases = computed(() => {
   return allCases.value.filter((c) => c.stable_key.toLowerCase().includes(kw) || (c.name || "").toLowerCase().includes(kw));
 });
 
+async function loadPluginConfigUi() {
+  closePluginConfigUi();
+  if (!pluginConfigUrl.value || !editorVisible.value) return;
+  pluginConfigLoading.value = true;
+  try {
+    const html = await (await aetpApi.plugins.uiAsset(pluginConfigUrl.value)).text();
+    const inlineHtml = await inlinePluginAssets(html, pluginConfigUrl.value);
+    pluginConfigObjectUrl.value = URL.createObjectURL(new Blob([inlineHtml], { type: "text/html" }));
+  } catch (error) {
+    ElMessage.error(`插件任务配置页面加载失败: ${(error as Error).message}`);
+  } finally {
+    pluginConfigLoading.value = false;
+  }
+}
+async function inlinePluginAssets(html: string, entryUrl: string): Promise<string> {
+  const paths = [...html.matchAll(/(?:src|href)=["'](vendor\/[^"]+)["']/g)].map((match) => match[1]);
+  const replacements = await Promise.all([...new Set(paths)].map(async (assetPath) => {
+    const assetUrl = new URL(assetPath, `${window.location.origin}${entryUrl}`).pathname;
+    const asset = await aetpApi.plugins.uiAsset(assetUrl);
+    const bytes = new Uint8Array(await asset.arrayBuffer());
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+    return [assetPath, `data:${asset.type || "application/octet-stream"};base64,${btoa(binary)}`] as const;
+  }));
+  return replacements.reduce((result, [path, dataUrl]) => result.split(path).join(dataUrl), html);
+}
+function closePluginConfigUi() {
+  if (pluginConfigObjectUrl.value) URL.revokeObjectURL(pluginConfigObjectUrl.value);
+  pluginConfigObjectUrl.value = "";
+}
+function postPluginConfigContext() {
+  if (!pluginConfigFrame.value?.contentWindow || !selectedScript.value) return;
+  pluginConfigFrame.value.contentWindow.postMessage(
+    JSON.stringify({
+      type: "aetp.task-config.context",
+      payload: { context: { project_id: projectId.value, task_type: selectedScript.value.task_type, plugin_version: selectedPlugin.value?.plugin_version || "", config_schema: selectedPlugin.value?.config_schema || {}, config: toRaw(form.pluginConfig) } },
+    }),
+    window.location.origin,
+  );
+}
+function onPluginConfigMessage(event: MessageEvent) {
+  if (event.source !== pluginConfigFrame.value?.contentWindow || event.origin !== window.location.origin) return;
+  let message = event.data as { type?: string; payload?: Record<string, unknown> | string } | string;
+  if (typeof message === "string") {
+    try { message = JSON.parse(message) as { type?: string; payload?: Record<string, unknown> | string }; } catch { return; }
+  }
+  let payload = message.payload;
+  if (typeof payload === "string") {
+    try { payload = JSON.parse(payload) as Record<string, unknown>; } catch { return; }
+  }
+  if (message.type === "aetp.task-config.ready") postPluginConfigContext();
+  if (message.type === "aetp.task-config.config" && payload && typeof payload.config === "object") {
+    form.pluginConfig = { ...(payload.config as Record<string, unknown>) };
+  }
+}
+
 function onScriptChange() {
   form.caseKeys = [];
   caseKeyword.value = "";
+  form.pluginConfig = {};
   selectAllWhenLoaded.value = true;
 }
 function onCaseSelection(rows: ScriptCase[]) {
@@ -367,6 +446,7 @@ function openCreate() {
   editing.value = null;
   form.name = ""; form.scriptId = ""; form.nodeIds = []; form.splitType = "none";
   form.timeoutS = 0; form.retryPolicy = "none"; form.caseRetry = 0; form.priority = 0; form.caseKeys = []; caseKeyword.value = "";
+  form.pluginConfig = {};
   selectAllWhenLoaded.value = false;
   casesPerShard.value = 20; targetDurationS.value = 300;
   editorVisible.value = true;
@@ -386,6 +466,7 @@ function openEdit(task: TestTask) {
   form.retryPolicy = maxAttempts >= 3 ? "failover2" : maxAttempts > 1 ? "failover" : "none";
   form.caseRetry = typeof task.retry_policy?.case_retry === "number" ? task.retry_policy.case_retry : 0;
   form.priority = task.priority;
+  form.pluginConfig = { ...(task.config || {}) };
   selectAllWhenLoaded.value = false;
   caseKeyword.value = "";
   editorVisible.value = true;
@@ -402,6 +483,7 @@ const saveMutation = useMutation({
       node_ids: form.nodeIds,
       split_policy: splitPolicy,
       retry_policy: retryPolicy,
+      config: toRaw(form.pluginConfig),
       timeout_s: form.timeoutS,
       priority: form.priority,
     };
@@ -449,7 +531,11 @@ const triggeringId = ref<string | null>(null);
 const triggerMutation = useMutation({
   mutationFn: (taskId: string) => aetpApi.runs.trigger(projectId.value, taskId),
   onSuccess: (run) => {
-    ElMessage.success("Run 已创建并进入调度");
+    if ((run.scheduled ?? 0) === 0 && (run.pending_shard_ids?.length ?? 0) > 0) {
+      ElMessage.warning("Run 已创建，但当前没有在线节点，任务已排队等待节点上线");
+    } else {
+      ElMessage.success(`Run 已创建，已派发 ${run.scheduled ?? 0} 个 Shard`);
+    }
     router.push(`/runs/${run.run_id}`);
   },
   onError: (e: Error) => ElMessage.error(e.message),
@@ -501,6 +587,15 @@ watch(allCases, (cases) => {
 watch(filteredCases, syncCaseSelection);
 watch(editorVisible, (visible) => { if (visible) syncCaseSelection(); });
 watch(() => projectId.value, () => { refresh(); });
+watch([pluginConfigUrl, editorVisible], ([url, visible]) => {
+  if (visible && url) void loadPluginConfigUi();
+  else closePluginConfigUi();
+});
+onMounted(() => window.addEventListener("message", onPluginConfigMessage));
+onUnmounted(() => {
+  window.removeEventListener("message", onPluginConfigMessage);
+  closePluginConfigUi();
+});
 
 // ---- 调度计划 ----
 const scheduleVisible = ref(false);
@@ -578,6 +673,8 @@ async function removeSchedule(row: { schedule_id: string }) {
 .node-tag { margin-right: 4px; }
 .case-selector { width: 100%; border: 1px solid var(--el-border-color); border-radius: 6px; padding: 10px; }
 .case-selector-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.plugin-config-shell { width: 100%; height: 560px; overflow: hidden; border: 1px solid var(--el-border-color); border-radius: 6px; background: #f4f7f8; }
+.plugin-config-frame { display: block; width: 100%; height: 100%; border: 0; background: #f4f7f8; }
 .case-cell { display: flex; flex-direction: column; gap: 2px; }
 .case-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .schedule-section { min-height: 200px; }

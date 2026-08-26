@@ -54,16 +54,18 @@ class _PluginContext:
 def test_package_contract() -> None:
     assert isinstance(package, PluginPackage)
     assert package.metadata.task_type == "pytest"
-    assert package.metadata.plugin_version == "1.1.0"
+    assert package.metadata.plugin_version == "1.3.0"
     assert package.master.task_type == package.agent.task_type
     assert package.master.plugin_version == package.agent.plugin_version
     assert package.metadata.ui == {
         "config_page": "pytest",
         "entry": "index.html",
+        "task_config_entry": "task-config.html",
         "min_frontend_version": "0.1.0",
         "protocol_version": 1,
     }
     assert (Path(__file__).parents[1] / "ui" / "index.html").is_file()
+    assert (Path(__file__).parents[1] / "ui" / "task-config.html").is_file()
 
 
 def test_verify_script_requires_pytest_file(tmp_path: Path) -> None:
@@ -71,6 +73,16 @@ def test_verify_script_requires_pytest_file(tmp_path: Path) -> None:
     assert plugin.verify_script(str(tmp_path), {})
     (tmp_path / "test_sample.py").write_text("def test_ok(): pass\n", encoding="utf-8")
     assert plugin.verify_script(str(tmp_path), {}) == []
+
+
+def test_single_python_file_is_materialized_with_pytest_name(tmp_path: Path) -> None:
+    from master.application.services.script_service import ScriptService
+
+    ScriptService._unpack(b"def test_ok(): pass\n", "demo.py", tmp_path)
+
+    assert (tmp_path / "test_script.py").is_file()
+    assert not (tmp_path / "demo.py").exists()
+    assert PytestMasterPlugin().verify_script(str(tmp_path), {}) == []
 
 
 def test_split_shards_by_case_count() -> None:

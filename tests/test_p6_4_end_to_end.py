@@ -76,6 +76,7 @@ class _SplitPlugin:
     supported_versions = frozenset({"1.0.0"})
     config_schema = {"type": "object"}  # noqa: RUF012 - 测试桩类级共享配置
     upload_spec = {"extensions": [".py"]}  # noqa: RUF012
+    last_config = {}
 
     def verify_script(self, script_dir, config):
         return []
@@ -84,11 +85,12 @@ class _SplitPlugin:
         return [CaseInfo(stable_key=f"c{i}", name=f"C{i}") for i in range(4)]
 
     async def split_shards(self, cases, policy, config):
+        self.last_config = dict(config)
         per = int(policy.get("cases_per_shard", 2))
         return [
             ShardSpec(
                 case_keys=tuple(c.stable_key for c in cases[i : i + per]),
-                execution_params={"shard": i // per},
+                execution_params={"shard": i // per, **config},
             )
             for i in range(0, len(cases), per)
         ]
@@ -120,7 +122,7 @@ def _register_plugin(container) -> None:
     )
 
 
-def _seed(container, *, node_id: str = "node-a") -> tuple[int, str]:
+def _seed(container, *, node_id: str = "node-a", node_online: bool = True) -> tuple[int, str]:
     """创建用户+项目+节点+脚本+用例+任务定义+绑定。"""
     _register_plugin(container)
     with _uow(container) as uow:
@@ -186,8 +188,8 @@ def _seed(container, *, node_id: str = "node-a") -> tuple[int, str]:
                 node_id=node_id,
                 name=node_id,
                 hostname=node_id,
-                status=NodeStatus.ONLINE,
-                online=True,
+                status=NodeStatus.ONLINE if node_online else NodeStatus.OFFLINE,
+                online=node_online,
                 enabled=True,
                 last_seen_at=datetime(2026, 1, 1, tzinfo=UTC),
             )
@@ -225,6 +227,7 @@ def _seed(container, *, node_id: str = "node-a") -> tuple[int, str]:
                 node_ids=[node_id],
                 split_policy={"type": "by_case_count", "cases_per_shard": 2},
                 retry_policy={},
+                config={"pytest_args": ["-q"], "fail_fast": True},
                 timeout_s=120,
                 enabled=True,
                 created_by=user.id,
@@ -266,6 +269,10 @@ def test_trigger_creates_run_shards_and_schedules(client) -> None:
             attempts = uow.shard_attempts.list_by_shard(shard.shard_id)
             assert len(attempts) == 1
             assert attempts[0].status is ShardAttemptStatus.DISPATCHED
+        assert container.plugin_registry().require("e2e_test").master.last_config == {
+            "pytest_args": ["-q"],
+            "fail_fast": True,
+        }
 
 
 def test_trigger_raises_task_not_found(client) -> None:
@@ -274,6 +281,44 @@ def test_trigger_raises_task_not_found(client) -> None:
 
     with pytest.raises(TaskNotFoundError):
         asyncio.run(container.run_trigger_service().trigger("missing", project_id="p1", triggered_by_user_id=None))
+
+
+def test_trigger_keeps_shards_pending_when_node_is_offline(client) -> None:
+    """离线节点不能创建 Attempt 或 run.assign，只能进入等待队列。"""
+    container = client.app.state.container
+    user_id, task_id = _seed(container, node_online=False)
+
+    result = asyncio.run(
+        container.run_trigger_service().trigger(task_id, project_id="p1", triggered_by_user_id=user_id)
+    )
+
+    assert result.scheduled == 0
+    assert len(result.pending_shard_ids) == 2
+    with _uow(container) as uow:
+        assert uow.shard_attempts.list_by_run(result.run_id) == []
+        assert all(shard.status is ShardStatus.PENDING for shard in uow.run_shards.list_by_run(result.run_id))
+
+
+def test_node_online_reschedules_pending_run(client) -> None:
+    """节点重新上线后应自动补偿派发此前等待的 Shard。"""
+    container = client.app.state.container
+    user_id, task_id = _seed(container, node_online=False)
+    result = asyncio.run(
+        container.run_trigger_service().trigger(task_id, project_id="p1", triggered_by_user_id=user_id)
+    )
+    assert result.scheduled == 0
+
+    with _uow(container) as uow:
+        node = uow.nodes.get_by_id("node-a")
+        assert node is not None
+        node.online = True
+        node.status = NodeStatus.ONLINE
+        uow.nodes.save(node)
+
+    assert container.shard_scheduler_service().reschedule_pending_runs(node_id="node-a") == 2
+    with _uow(container) as uow:
+        assert len(uow.shard_attempts.list_by_run(result.run_id)) == 2
+        assert all(shard.status is ShardStatus.DISPATCHING for shard in uow.run_shards.list_by_run(result.run_id))
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +356,7 @@ def test_projection_ack_advances_attempt_and_run(client) -> None:
         ),
     )
     assert pr.handled is True
+    assert pr.payload["task_id"] == "T-e2e"
 
     with _uow(container) as uow:
         attempt = uow.shard_attempts.get_by_attempt_id(dispatch_id)
@@ -355,6 +401,7 @@ def test_projection_result_finalizes_run_and_releases_devices(client) -> None:
         ),
     )
     assert pr.handled is True
+    assert pr.payload["task_id"] == "T-e2e"
 
     with _uow(container) as uow:
         attempt = uow.shard_attempts.get_by_attempt_id(dispatch_id)
@@ -485,6 +532,8 @@ def test_http_trigger_run_endpoint(client, auth_header) -> None:
     data = resp.json()
     assert _is_ulid(data["run_id"])
     assert data["status"] == "created"
+    assert data["scheduled"] == 2
+    assert data["pending_shard_ids"] == []
 
     # 查询详情可见 shards
     detail = client.get(

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pytest 任务配置</title>
+  <link rel="stylesheet" href="vendor/element-plus.css">
+  <style>
+    body { margin: 0; min-width: 320px; background: #f4f7f8; font-family: "Aptos", "Microsoft YaHei UI", sans-serif; color: #182b36; }
+    .config-page { padding: 18px; }
+    .config-page h2 { margin: 0 0 6px; font-size: 18px; }
+    .config-page p { margin: 0 0 16px; color: #71818a; font-size: 12px; line-height: 1.6; }
+    .config-card { max-width: 900px; margin: 0 auto; }
+    .list-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .list-row .el-input { flex: 1; }
+    .actions { display: flex; justify-content: flex-end; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="config-page">
+      <el-card class="config-card" shadow="never">
+        <h2>pytest 任务执行配置</h2>
+        <p>这些参数属于任务定义，会随每次任务下发传递给 Agent；脚本上传只负责脚本文件和用例解析。</p>
+        <el-form label-position="top">
+          <el-form-item label="pytest 参数">
+            <div v-for="(_, index) in form.pytest_args" :key="index" class="list-row">
+              <el-input v-model="form.pytest_args[index]" placeholder="例如 -q" />
+              <el-button type="danger" plain @click="form.pytest_args.splice(index, 1)">删除</el-button>
+            </div>
+            <el-button plain @click="form.pytest_args.push('-q')">添加参数</el-button>
+          </el-form-item>
+          <el-row :gutter="14">
+            <el-col :xs="24" :md="12">
+              <el-form-item label="Python 解释器"><el-input v-model="form.python_executable" placeholder="留空使用 Agent 当前 Python" clearable /></el-form-item>
+            </el-col>
+            <el-col :xs="24" :md="12">
+              <el-form-item label="测试路径"><el-input v-model="form.test_path" placeholder="例如 tests 或 test_smoke.py" clearable /></el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="14">
+            <el-col :xs="24" :md="12">
+              <el-form-item label="收集超时（秒）"><el-input-number v-model="form.collect_timeout_s" :min="1" :max="3600" controls-position="right" style="width:100%" /></el-form-item>
+            </el-col>
+            <el-col :xs="24" :md="12">
+              <el-form-item label="pytest 执行超时（秒）"><el-input-number v-model="form.timeout_s" :min="1" :max="86400" controls-position="right" style="width:100%" /></el-form-item>
+            </el-col>
+          </el-row>
+          <el-form-item label="执行后上传的附件">
+            <div v-for="(_, index) in form.artifact_paths" :key="index" class="list-row">
+              <el-input v-model="form.artifact_paths[index]" placeholder="例如 reports/*.html" />
+              <el-button type="danger" plain @click="form.artifact_paths.splice(index, 1)">删除</el-button>
+            </div>
+            <el-button plain @click="form.artifact_paths.push('')">添加附件路径</el-button>
+          </el-form-item>
+          <el-checkbox v-model="form.fail_fast">首个失败后停止当前 Shard</el-checkbox>
+          <div class="actions"><el-button type="primary" @click="apply">应用到任务定义</el-button></div>
+        </el-form>
+      </el-card>
+    </div>
+  </div>
+  <script src="vendor/vue.global.prod.js"></script>
+  <script src="vendor/element-plus.js"></script>
+  <script src="vendor/zh-cn.js"></script>
+  <script>
+    (() => {
+      const { createApp, reactive } = Vue;
+      const defaults = () => ({ pytest_args: [], python_executable: "", collect_timeout_s: 60, timeout_s: 3600, test_path: "", artifact_paths: [], fail_fast: false });
+      const app = createApp({
+        setup() {
+          const form = reactive(defaults());
+          function send(type, payload) { window.parent.postMessage(JSON.stringify({ type, payload }), window.location.origin); }
+          function applyContext(context) {
+            const config = context && context.config && typeof context.config === "object" ? context.config : {};
+            Object.assign(form, defaults(), config);
+            form.pytest_args = Array.isArray(config.pytest_args) ? config.pytest_args.map(String) : [];
+            form.artifact_paths = Array.isArray(config.artifact_paths) ? config.artifact_paths.map(String) : [];
+          }
+          function apply() {
+            send("aetp.task-config.config", {
+              config: {
+                pytest_args: form.pytest_args.filter((value) => String(value).trim()),
+                python_executable: String(form.python_executable || "").trim(),
+                collect_timeout_s: form.collect_timeout_s,
+                timeout_s: form.timeout_s,
+                test_path: String(form.test_path || "").trim(),
+                artifact_paths: form.artifact_paths.filter((value) => String(value).trim()),
+                fail_fast: form.fail_fast === true,
+              },
+            });
+          }
+          window.addEventListener("message", (event) => {
+            if (event.source !== window.parent || event.origin !== window.location.origin) return;
+            let message = event.data;
+            if (typeof message === "string") { try { message = JSON.parse(message); } catch { return; } }
+            if (message.type === "aetp.task-config.context") applyContext(message.payload?.context);
+          });
+          send("aetp.task-config.ready", { protocol_version: 1 });
+          return { form, apply };
+        },
+      });
+      app.use(ElementPlus, { locale: ElementPlusLocaleZhCn });
+      app.mount("#app");
+    })();
+  </script>
+</body>
+</html>

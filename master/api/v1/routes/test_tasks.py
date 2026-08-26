@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, status
 from master.api.v1.dependencies import (
     TestTaskServiceDep,
 )
-from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep
+from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep, ProjectOperatorDep
 from master.api.v1.schemas import (
     TestTaskCreateRequest,
     TestTaskOut,
@@ -55,7 +55,7 @@ def list_test_tasks(
 def create_test_task(
     project_id: str,
     body: TestTaskCreateRequest,
-    access: ProjectManagerDep,
+    access: ProjectOperatorDep,
     service: TestTaskServiceDep,
 ) -> TestTaskOut:
     """创建任务定义（§18.4：脚本已解析、case 存在、节点 ⊆ 项目绑定）。"""
@@ -68,6 +68,7 @@ def create_test_task(
             node_ids=body.node_ids,
             split_policy=body.split_policy,
             retry_policy=body.retry_policy,
+            config=body.config,
             timeout_s=body.timeout_s,
             priority=body.priority,
             created_by=access.user.persisted_id,
@@ -113,6 +114,7 @@ def update_test_task(
             node_ids=body.node_ids,
             split_policy=body.split_policy,
             retry_policy=body.retry_policy,
+            config=body.config,
             timeout_s=body.timeout_s,
             enabled=body.enabled,
             priority=body.priority,

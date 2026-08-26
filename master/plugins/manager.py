@@ -98,6 +98,10 @@ class PluginManager:
         self._validate_ui_assets(destination, loaded)
         record.installed = True
         records = self._load()
+        if record.enabled:
+            for other in records.values():
+                if other.plugin_id != plugin_id and other.task_type == record.task_type:
+                    other.enabled = False
         records[plugin_id] = record
         self._save(records)
         return record
@@ -163,12 +167,14 @@ class PluginManager:
     def _validate_ui_assets(destination: Path, package: PluginPackage) -> None:
         """若插件声明 UI 入口，安装时确保入口存在且位于 ui/ 内。"""
         entry = package.metadata.ui.get("entry")
-        if not entry:
-            return
         ui_root = (destination / "ui").resolve()
-        candidate = (ui_root / str(entry)).resolve()
-        if ui_root not in candidate.parents or not candidate.is_file():
-            raise ValueError(f"插件 UI 入口不存在或越界: {entry}")
+        for key in ("entry", "task_config_entry"):
+            entry = package.metadata.ui.get(key)
+            if not entry:
+                continue
+            candidate = (ui_root / str(entry)).resolve()
+            if ui_root not in candidate.parents or not candidate.is_file():
+                raise ValueError(f"插件 UI 入口不存在或越界: {entry}")
 
     def _with_agent_package(
         self, package: PluginPackage, record: ManagedPlugin

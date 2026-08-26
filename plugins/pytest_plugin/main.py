@@ -27,8 +27,8 @@ from aetp_protocol.plugin import (
 class PytestMasterPlugin:
     task_type = "pytest"
     display_name = "pytest 自动化测试"
-    plugin_version = "1.1.0"
-    supported_versions = frozenset({"1.1.0"})
+    plugin_version = "1.3.0"
+    supported_versions = frozenset({"1.3.0"})
     config_schema: Mapping[str, Any] = {
         "type": "object",
         "properties": {
@@ -151,8 +151,8 @@ class PytestMasterPlugin:
 class PytestAgentPlugin:
     task_type = "pytest"
     display_name = "pytest 自动化测试"
-    plugin_version = "1.1.0"
-    supported_versions = frozenset({"1.1.0"})
+    plugin_version = "1.3.0"
+    supported_versions = frozenset({"1.3.0"})
     verify_location = "master"
     parse_location = "master"
 
@@ -352,8 +352,8 @@ class PytestAgentPlugin:
 package = PluginPackage(
     metadata=PluginMetadata(
         task_type="pytest",
-        plugin_version="1.1.0",
-        supported_versions=frozenset({"1.1.0"}),
+        plugin_version="1.3.0",
+        supported_versions=frozenset({"1.3.0"}),
         display_name="pytest 自动化测试",
         config_schema=dict(PytestMasterPlugin.config_schema),
         upload_spec=dict(PytestMasterPlugin.upload_spec),
@@ -362,6 +362,7 @@ package = PluginPackage(
             "entry": "index.html",
             "min_frontend_version": "0.1.0",
             "protocol_version": 1,
+            "task_config_entry": "task-config.html",
         },
     ),
     master=PytestMasterPlugin(),

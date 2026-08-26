@@ -6,6 +6,7 @@ import json
 
 from aetp_protocol.capabilities import HardwareRequirements
 from aetp_protocol.plugin import CaseInfo, PluginMetadata, PluginPackage, ShardSpec
+from sqlalchemy import text
 
 from master.adapters.sqlalchemy.orm import Node as NodeORM
 from master.domain.enums import (
@@ -110,6 +111,25 @@ def _bind_node(client, headers, project_id, node_id="bench-001"):
         json={"node_id": node_id},
     )
     assert resp.status_code == 201, resp.text
+
+
+def _add_member(client, admin_headers, project_id, username, role):
+    service = client.app.state.container.auth_service()
+    user = service.create_user(username, "member-pass-123", username)
+    with client.app.state.container.database().session_scope() as session:
+        session.execute(
+            text("UPDATE users SET account_status='active' WHERE username=:username"),
+            {"username": username},
+        )
+    login = client.post("/api/v1/auth/login", json={"username": username, "password": "member-pass-123"})
+    member_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    response = client.post(
+        f"/api/v1/projects/{project_id}/members",
+        headers=admin_headers,
+        json={"user_id": user.id, "project_role": role},
+    )
+    assert response.status_code == 201, response.text
+    return member_headers
 
 
 def test_script_upload_parse_and_case_list(client):
@@ -359,6 +379,57 @@ def test_task_deletable_with_run_history(client):
         assert run.task_id == ""
 
 
+def test_operator_can_create_test_task_definition(client):
+    """operator 可以创建任务定义，但不能上传脚本。"""
+    container = client.app.state.container
+    _register_plugin(container)
+    admin_headers = _create_admin(client)
+    project_id = _create_project(client, admin_headers, key="TASK_OPERATOR")
+    _create_node(client)
+    _bind_node(client, admin_headers, project_id)
+    script = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=admin_headers,
+        data={"task_type": "upload_test", "name": "operator-source", "config": "{}"},
+        files={"file": ("test_sample.py", b"def test_a():\n    pass\n", "text/x-python")},
+    )
+    assert script.status_code == 201, script.text
+    operator_headers = _add_member(client, admin_headers, project_id, "task-operator", "operator")
+
+    denied_upload = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=operator_headers,
+        data={"task_type": "upload_test", "name": "denied", "config": "{}"},
+        files={"file": ("test_sample.py", b"def test_a():\n    pass\n", "text/x-python")},
+    )
+    assert denied_upload.status_code == 403
+
+    created = client.post(
+        f"/api/v1/projects/{project_id}/test-tasks",
+        headers=operator_headers,
+        json={"name": "operator-task", "script_id": script.json()["script_id"]},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["name"] == "operator-task"
+    endpoint = client.post(
+        f"/api/v1/projects/{project_id}/notification-endpoints",
+        headers=admin_headers,
+        json={"channel_type": "console_test", "name": "task-progress"},
+    )
+    assert endpoint.status_code == 201, endpoint.text
+    subscription = client.post(
+        f"/api/v1/projects/{project_id}/event-subscriptions",
+        headers=operator_headers,
+        json={
+            "endpoint_id": endpoint.json()["endpoint_id"],
+            "task_id": created.json()["task_id"],
+            "event_types": ["run.progress", "run.result"],
+        },
+    )
+    assert subscription.status_code == 201, subscription.text
+    assert subscription.json()["task_id"] == created.json()["task_id"]
+
+
 def test_task_definition_crud_and_case_selection(client):
     """任务定义 CRUD：创建（case 勾选校验）→ 查询 → 更新 → 删除。"""
     container = client.app.state.container
@@ -389,6 +460,7 @@ def test_task_definition_crud_and_case_selection(client):
             "node_ids": ["bench-001"],
             "split_policy": {"type": "by_case_count", "cases_per_shard": 2},
             "retry_policy": {"max_attempts": 2},
+            "config": {"pytest_args": ["-q"], "fail_fast": True},
             "timeout_s": 3600,
         },
     )
@@ -398,6 +470,7 @@ def test_task_definition_crud_and_case_selection(client):
     assert task["script_id"] == script_id
     assert task["default_case_selection"] == ["case-a", "case-b"]
     assert task["node_ids"] == ["bench-001"]
+    assert task["config"] == {"pytest_args": ["-q"], "fail_fast": True}
     assert task["enabled"] is True
     task_id = task["task_id"]
 
@@ -421,6 +494,14 @@ def test_task_definition_crud_and_case_selection(client):
     assert resp.status_code == 200
     assert resp.json()["default_case_selection"] == ["case-c"]
     assert resp.json()["split_policy"]["type"] == "by_time"
+
+    resp = client.patch(
+        f"/api/v1/projects/{project_id}/test-tasks/{task_id}",
+        headers=headers,
+        json={"config": {"pytest_args": ["-x"]}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["config"] == {"pytest_args": ["-x"]}
 
     # 编辑时同样校验用例和分割参数
     resp = client.patch(

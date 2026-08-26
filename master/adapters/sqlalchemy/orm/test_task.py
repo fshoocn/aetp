@@ -61,6 +61,8 @@ class TestTask(Base, TimestampMixin):
     split_policy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # sym:retry_policy 重试策略 JSON：{max_attempts, failover_nodes, case_retry}（D-20）
     retry_policy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    # sym:config 插件执行配置 JSON（任务定义级，不随脚本上传保存）
+    config: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     # sym:timeout_s 任务超时秒数；0 = 不限制
     timeout_s: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # sym:enabled 启用标记：false 时禁止触发新 Run

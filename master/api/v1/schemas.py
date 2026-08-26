@@ -135,6 +135,8 @@ class RunOut(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    scheduled: int = 0
+    pending_shard_ids: list[str] = Field(default_factory=list)
 
 
 class RunDetailOut(RunOut):
@@ -460,6 +462,7 @@ class TestTaskCreateRequest(BaseModel):
     node_ids: list[str] = Field(default_factory=list)
     split_policy: dict = Field(default_factory=dict)
     retry_policy: dict = Field(default_factory=dict)
+    config: dict = Field(default_factory=dict)
     timeout_s: int = Field(default=0, ge=0)
     priority: int = Field(default=0, ge=0)
 
@@ -473,6 +476,7 @@ class TestTaskUpdateRequest(BaseModel):
     node_ids: list[str] | None = None
     split_policy: dict | None = None
     retry_policy: dict | None = None
+    config: dict | None = None
     timeout_s: int | None = Field(default=None, ge=0)
     enabled: bool | None = None
     priority: int | None = Field(default=None, ge=0)
@@ -493,6 +497,7 @@ class TestTaskOut(BaseModel):
     node_ids: list[str] = Field(default_factory=list)
     split_policy: dict = Field(default_factory=dict)
     retry_policy: dict = Field(default_factory=dict)
+    config: dict = Field(default_factory=dict)
     timeout_s: int = 0
     enabled: bool = True
     priority: int = 0
@@ -555,6 +560,7 @@ class SubscriptionCreate(BaseModel):
     """创建事件订阅请求。"""
 
     endpoint_id: str = Field(min_length=1, max_length=64)
+    task_id: str | None = Field(default=None, max_length=64)
     event_types: list[str] = Field(min_length=1)
     filter_json: dict = Field(default_factory=dict)
     throttle_policy: dict = Field(default_factory=dict)
@@ -564,6 +570,7 @@ class SubscriptionUpdate(BaseModel):
     """更新事件订阅请求。"""
 
     event_types: list[str] | None = None
+    task_id: str | None = Field(default=None, max_length=64)
     filter_json: dict | None = None
     throttle_policy: dict | None = None
     enabled: bool | None = None
@@ -577,6 +584,7 @@ class SubscriptionOut(BaseModel):
     subscription_id: str
     project_id: str
     endpoint_id: str
+    task_id: str | None = None
     event_types: list[str] = Field(default_factory=list)
     filter_json: dict = Field(default_factory=dict)
     throttle_policy: dict = Field(default_factory=dict)
