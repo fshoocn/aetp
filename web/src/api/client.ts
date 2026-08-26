@@ -8,7 +8,7 @@ function getToken(): string | null {
   return localStorage.getItem(ACCESS_KEY);
 }
 
-function clearSession(): void {
+export function clearSession(): void {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
@@ -52,6 +52,8 @@ async function tryRefresh(): Promise<boolean> {
   }
   return refreshPromise;
 }
+
+export const refreshAccessToken = tryRefresh;
 
 export class ApiError extends Error {
   status: number;
@@ -123,11 +125,19 @@ async function request<T>(
   return resp.json();
 }
 
-async function requestBlob(path: string): Promise<Blob> {
+async function requestBlob(path: string, retried = false): Promise<Blob> {
   const token = getToken();
   const resp = await fetch(`${BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
+  if (resp.status === 401 && !retried && await tryRefresh()) {
+    return requestBlob(path, true);
+  }
+  if (resp.status === 401) {
+    clearSession();
+    window.location.hash = "#/login";
+    throw new ApiError(401, "登录已过期，请重新登录");
+  }
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
     throw new ApiError(resp.status, extractDetail(body, `HTTP ${resp.status}`));
@@ -158,7 +168,7 @@ export const api = {
     return requestBlob(path);
   },
   /** 上传：可传单个 File（自动包成 FormData）或直接传 FormData（多字段）。 */
-  async upload<T>(path: string, fileOrForm: File | FormData): Promise<T> {
+  async upload<T>(path: string, fileOrForm: File | FormData, retried = false): Promise<T> {
     const token = getToken();
     const form = fileOrForm instanceof FormData ? fileOrForm : (() => {
       const f = new FormData();
@@ -166,6 +176,14 @@ export const api = {
       return f;
     })();
     const resp = await fetch(`${BASE}${path}`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: form });
+    if (resp.status === 401 && !retried && await tryRefresh()) {
+      return api.upload<T>(path, form, true);
+    }
+    if (resp.status === 401) {
+      clearSession();
+      window.location.hash = "#/login";
+      throw new ApiError(401, "登录已过期，请重新登录");
+    }
     if (!resp.ok) { const body = await resp.json().catch(() => ({})); throw new ApiError(resp.status, extractDetail(body, `HTTP ${resp.status}`)); }
     return resp.json() as Promise<T>;
   },

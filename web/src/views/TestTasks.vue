@@ -48,7 +48,7 @@
         </el-table-column>
         <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click.stop="trigger(row)">运行</el-button>
+            <el-button v-if="canDispatch" link type="primary" @click.stop="trigger(row)">运行</el-button>
             <el-button link type="success" @click.stop="openSchedules(row)">调度计划</el-button>
             <el-button v-if="canManage" link type="warning" @click.stop="openEdit(row)">编辑</el-button>
             <el-button v-if="canManage" link type="info" @click.stop="toggleEnabled(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
@@ -255,6 +255,7 @@ useTaskEvents(qc);
 
 const projectId = computed(() => projectStore.currentProjectId ?? "");
 const canManage = computed(() => auth.user?.platform_role === "admin" || ["maintainer", "owner"].includes(projectStore.currentRole || ""));
+const canDispatch = computed(() => auth.user?.platform_role === "admin" || ["operator", "maintainer", "owner"].includes(projectStore.currentRole || ""));
 
 const tasksQuery = useQuery({
   queryKey: ["testTasks", projectId],

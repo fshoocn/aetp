@@ -1,4 +1,5 @@
-﻿/**
+﻿import { clearSession, refreshAccessToken } from "@/api/client";
+/**
  * SSE 实时事件流客户端。
  *
  * 使用 fetch + ReadableStream（而非 EventSource），以便携带 Authorization
@@ -26,8 +27,7 @@ export function connectEvents(
   onEvent: (ev: DomainEvent) => void,
   onError?: (error: Error) => void
 ): () => void {
-  const token = localStorage.getItem("token");
-  if (!token || !projectId) return () => {};
+  if (!localStorage.getItem("token") || !projectId) return () => {};
 
   let stopped = false;
   let controller: AbortController | null = null;
@@ -39,6 +39,8 @@ export function connectEvents(
     if (stopped) return;
     controller = new AbortController();
     try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
       const headers: Record<string, string> = {
         Authorization: `Bearer ${token}`,
       };
@@ -50,6 +52,12 @@ export function connectEvents(
           signal: controller.signal,
         }
       );
+      if (resp.status === 401) {
+        if (await refreshAccessToken()) return connect();
+        clearSession();
+        window.location.hash = "#/login";
+        return;
+      }
       if (!resp.ok || !resp.body) {
         throw new Error(`SSE status ${resp.status}`);
       }
@@ -90,7 +98,7 @@ export function connectEvents(
         onError?.(err);
       }
     }
-    if (!stopped) {
+    if (!stopped && localStorage.getItem("token")) {
       retryTimer = window.setTimeout(connect, retryMs);
       retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
     }

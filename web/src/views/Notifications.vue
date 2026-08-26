@@ -7,7 +7,7 @@
         <p>管理通知端点、事件订阅规则和投递状态。密钥永不回显。</p>
       </div>
       <div class="heading-actions">
-        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openEndpointCreate">新建端点</el-button>
+        <el-button v-if="isOwner" type="primary" :icon="Plus" @click="openEndpointCreate">新建端点</el-button>
         <el-button v-if="canManage" :icon="Connection" @click="openSubscriptionCreate">新建订阅</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
       </div>
@@ -45,8 +45,8 @@
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canManage" link type="warning" @click.stop="openEndpointEdit(row)">编辑</el-button>
-            <el-button v-if="canManage" link :type="row.enabled ? 'info' : 'success'" @click.stop="toggleEndpoint(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
+            <el-button v-if="isOwner" link type="warning" @click.stop="openEndpointEdit(row)">编辑</el-button>
+            <el-button v-if="isOwner" link :type="row.enabled ? 'info' : 'success'" @click.stop="toggleEndpoint(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
             <el-button v-if="isOwner" link type="danger" @click.stop="deleteEndpoint(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -101,6 +101,14 @@
         </div>
       </template>
       <el-table :data="deliveries" row-key="delivery_id" v-loading="deliveryLoading">
+        <el-table-column type="expand" width="46">
+          <template #default="{ row }">
+            <div class="delivery-content">
+              <div class="delivery-content-head"><strong>实际投递内容</strong><el-tag size="small" effect="plain">{{ row.content?.event_type || '未知事件' }}</el-tag></div>
+              <pre>{{ prettyContent(row.content) }}</pre>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="投递 ID" width="200">
           <template #default="{ row }"><span class="mono">{{ row.delivery_id }}</span></template>
         </el-table-column>
@@ -265,7 +273,9 @@ async function saveEndpoint() {
   if (!endpointForm.name.trim()) { ElMessage.warning("请填写端点名称"); return; }
   endpointSaving.value = true;
   try {
-    const config: Record<string, unknown> = {};
+    const config: Record<string, unknown> = editingEndpoint.value
+      ? { ...(editingEndpoint.value.config as Record<string, unknown>) }
+      : {};
     if (endpointForm.channel_type === "generic_webhook" && endpointForm.webhookUrl) config.url = endpointForm.webhookUrl;
     if (editingEndpoint.value) {
       await aetpApi.notifications.updateEndpoint(projectId.value, editingEndpoint.value.endpoint_id, {
@@ -372,6 +382,7 @@ async function retryDelivery(d: EventDeliveryOut) {
 }
 
 function fmt(v: string) { return new Date(v).toLocaleString("zh-CN", { hour12: false }); }
+function prettyContent(value: Record<string, unknown>) { return JSON.stringify(value || {}, null, 2); }
 </script>
 
 <style scoped>
@@ -390,6 +401,9 @@ function fmt(v: string) { return new Date(v).toLocaleString("zh-CN", { hour12: f
 .section-kicker { color: var(--aetp-cyan); font-size: 10px; font-weight: 800; letter-spacing: .16em; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 .event-tag { margin-right: 4px; }
+.delivery-content { margin: -4px 0; padding: 14px 24px 14px 48px; background: #f7fafb; }
+.delivery-content-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; color: var(--aetp-ink); font-size: 12px; }
+.delivery-content pre { max-height: 240px; margin: 0; overflow: auto; padding: 12px; border: 1px solid var(--aetp-line); border-radius: 6px; background: #172b35; color: #c8e6e5; font: 11px/1.55 ui-monospace, monospace; white-space: pre-wrap; }
 @media (max-width: 760px) {
   .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
   .heading-actions { width: 100%; justify-content: space-between; }

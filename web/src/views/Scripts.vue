@@ -79,94 +79,88 @@
       <el-empty v-if="!loading && scripts.length === 0" description="当前项目尚未上传脚本" />
     </el-card>
 
-    <!-- 插件上传工作台 -->
-    <el-dialog v-model="uploadVisible" class="script-upload-dialog" title="上传测试脚本" width="1180px" destroy-on-close @closed="closePluginUi">
-      <div class="upload-workbench">
-        <aside class="type-rail">
-          <span class="workbench-step">01 / SCRIPT TYPE</span>
-          <h2>先选择脚本类型</h2>
-          <p>类型决定插件配置页、文件格式和验证方式。</p>
-          <el-select v-model="uploadForm.taskType" class="type-select" filterable placeholder="选择任务类型" @change="onTaskTypeChange">
-            <el-option v-for="plugin in taskTypes" :key="plugin.task_type" :label="`${plugin.display_name} (${plugin.task_type})`" :value="plugin.task_type" />
-          </el-select>
-          <div v-if="currentPlugin" class="selected-plugin">
-            <span class="selected-plugin-icon"><el-icon><Document /></el-icon></span>
-            <div>
-              <strong>{{ currentPlugin.display_name }}</strong>
-              <small>{{ currentPlugin.task_type }} · v{{ currentPlugin.plugin_version }}</small>
-            </div>
-          </div>
-          <div class="rail-note">
-            <span class="rail-note-dot"></span>
-            <span>上传、配置和验证均由插件页面完成</span>
-          </div>
-        </aside>
+    <!-- 上传流程：第一步选择任务类型，第二步进入对应插件的 UI 工作台 -->
+    <el-dialog v-model="typeSelectVisible" title="选择任务类型" width="620px">
+      <div v-loading="taskTypesLoading" class="type-grid">
+        <div
+          v-for="plugin in taskTypes"
+          :key="plugin.task_type"
+          class="type-card"
+          role="button"
+          tabindex="0"
+          @click="choosePlugin(plugin)"
+          @keydown.enter="choosePlugin(plugin)"
+        >
+          <span class="type-mark"><el-icon :size="20"><Grid /></el-icon></span>
+          <span class="type-copy">
+            <strong>{{ plugin.display_name }}</strong>
+            <small>{{ plugin.task_type }} · v{{ plugin.plugin_version }}</small>
+          </span>
+          <span class="type-tags">
+            <el-tag v-if="plugin.agent_available" type="success" effect="light" size="small">Agent 可用</el-tag>
+            <el-tag type="info" effect="plain" size="small">UI 工作台</el-tag>
+          </span>
+          <el-icon class="type-arrow"><ArrowRight /></el-icon>
+        </div>
+        <el-empty v-if="!taskTypesLoading && taskTypes.length === 0" description="Master 未加载任何任务类型插件" :image-size="60" />
+      </div>
+      <template #footer>
+        <el-button @click="typeSelectVisible = false">取消</el-button>
+      </template>
+    </el-dialog>
 
-        <section class="plugin-stage">
-          <div class="stage-heading">
-            <div>
-              <span class="workbench-step">02 / PLUGIN WORKSPACE</span>
-              <h2>{{ currentPlugin?.display_name || '等待选择脚本类型' }}</h2>
-            </div>
-            <el-tag v-if="currentPlugin" effect="plain" round>{{ currentPlugin.task_type }}</el-tag>
-          </div>
-          <div v-if="pluginUiObjectUrl" class="plugin-ui-shell">
-            <div class="plugin-ui-toolbar">
-              <span><i></i>PLUGIN UI</span>
-              <span v-if="contextLoading">同步项目能力中...</span>
-              <span v-else>配置页由插件包提供</span>
-            </div>
-            <div v-loading="pluginUiLoading || contextLoading" class="plugin-ui-frame-wrap">
-              <iframe
-                ref="pluginFrame"
-                :src="pluginUiObjectUrl"
-                title="任务类型插件配置页面"
-                class="plugin-ui-frame"
-                @load="postPluginContext"
-              />
-            </div>
-          </div>
-          <div v-else-if="uploadForm.taskType && pluginUiLoading" class="plugin-state plugin-state-loading">
-            <span class="state-pulse"></span>
-            <strong>正在加载插件工作区</strong>
-            <p>正在读取插件包内的配置与上传页面...</p>
-          </div>
-          <div v-else-if="uploadForm.taskType" class="plugin-state plugin-state-warning">
-            <span class="state-mark">!</span>
-            <strong>该插件没有可用的 UI</strong>
-            <p>请安装包含 <code>ui/index.html</code> 的插件包后再上传。</p>
-          </div>
-          <div v-else class="plugin-state plugin-state-empty">
-            <span class="state-mark">02</span>
-            <strong>选择类型后进入插件工作区</strong>
-            <p>脚本名称、文件选择、配置和上传动作都将在这里完成。</p>
-          </div>
-        </section>
+    <el-dialog
+      v-model="uploadVisible"
+      class="script-upload-dialog"
+      :title="`上传测试脚本 · ${currentPlugin?.display_name || ''}`"
+      width="1120px"
+      destroy-on-close
+      @closed="closePluginUi"
+    >
+      <div v-if="pluginUiObjectUrl" class="plugin-ui-shell">
+        <div class="plugin-ui-toolbar">
+          <span><i></i>PLUGIN UI</span>
+          <span v-if="contextLoading">同步项目能力中...</span>
+          <span v-else>配置、上传与验证均由插件页面提供</span>
+        </div>
+        <div v-loading="pluginUiLoading || contextLoading" class="plugin-ui-frame-wrap">
+          <iframe
+            ref="pluginFrame"
+            :src="pluginUiObjectUrl"
+            title="任务类型插件配置页面"
+            class="plugin-ui-frame"
+            @load="postPluginContext"
+          />
+        </div>
+      </div>
+      <div v-else-if="pluginUiLoading" class="plugin-state plugin-state-loading">
+        <span class="state-pulse"></span>
+        <strong>正在加载插件工作区</strong>
+        <p>正在读取插件包内的配置与上传页面...</p>
+      </div>
+      <div v-else class="plugin-state plugin-state-warning">
+        <span class="state-mark">!</span>
+        <strong>该插件没有可用的 UI</strong>
+        <p>请安装包含 <code>ui/index.html</code> 的插件包后再上传。</p>
       </div>
       <template #footer>
         <el-button @click="uploadVisible = false">关闭</el-button>
       </template>
     </el-dialog>
 
-    <!-- 用例抽屉 -->
     <el-drawer v-model="casesVisible" :title="`用例索引 · ${activeScript?.name || ''}`" size="520px">
       <div v-loading="casesLoading">
-        <div class="cases-summary" v-if="cases.length">
+        <div v-if="cases.length" class="cases-summary">
           <el-tag effect="plain" size="small">{{ cases.length }} 个用例</el-tag>
           <span>耗时数据：{{ durationSamples }} 个样本</span>
         </div>
         <el-table :data="cases" size="small" max-height="60vh">
           <el-table-column prop="stable_key" label="稳定键 (stable_key)" min-width="240">
             <template #default="{ row }">
-              <div class="case-cell">
-                <strong>{{ row.name || row.stable_key }}</strong>
-                <small>{{ row.stable_key }}</small>
-              </div>
+              <div class="case-cell"><strong>{{ row.name || row.stable_key }}</strong><small>{{ row.stable_key }}</small></div>
             </template>
           </el-table-column>
-          <el-table-column label="平均耗时" width="100">
-            <template #default="{ row }">{{ row.avg_duration_s != null ? `${row.avg_duration_s}s` : '-' }}</template>
-          </el-table-column>
+          <el-table-column label="平均耗时" width="100"><template #default="{ row }">{{ row.avg_duration_s != null ? `${row.avg_duration_s}s` : '-' }}</template></el-table-column>
           <el-table-column label="标签" width="120">
             <template #default="{ row }">
               <el-tag v-for="tag in (row.tags || [])" :key="tag" size="small" effect="plain" class="case-tag">{{ tag }}</el-tag>
@@ -185,7 +179,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRaw, watch
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Document, Plus, Refresh } from "@element-plus/icons-vue";
+import { Document, Grid, Plus, Refresh, ArrowRight } from "@element-plus/icons-vue";
 import { aetpApi, type TaskTypeConfigContext, type TestScript, type ScriptCase, type TaskTypePlugin } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
@@ -218,10 +212,27 @@ const pendingScripts = computed(() => scripts.value.filter((script) => ["pending
 
 function refresh() { qc.invalidateQueries({ queryKey: ["scripts"] }); }
 
-// ---- 上传 ----
+// ---- 上传流程：第一步选择任务类型，第二步进入对应插件的 UI 工作台 ----
+const typeSelectVisible = ref(false);
 const uploadVisible = ref(false);
 const uploadForm = reactive({ taskType: "", scriptId: "", config: {} as Record<string, unknown> });
 const currentPlugin = computed(() => taskTypes.value.find((plugin) => plugin.task_type === uploadForm.taskType) ?? null);
+const taskTypesLoading = computed(() => taskTypesQuery.isLoading.value || taskTypesQuery.isFetching.value);
+
+function openUpload() {
+  uploadForm.taskType = "";
+  uploadForm.scriptId = "";
+  uploadForm.config = {};
+  typeSelectVisible.value = true;
+}
+
+function choosePlugin(plugin: TaskTypePlugin) {
+  uploadForm.taskType = plugin.task_type;
+  typeSelectVisible.value = false;
+  uploadVisible.value = true;
+}
+
+// ---- 上传 ----
 const pluginUiUrl = computed(() => currentPlugin.value?.ui?.url || "");
 const pluginUiObjectUrl = ref("");
 const pluginUiLoading = ref(false);
@@ -238,22 +249,42 @@ const contextQuery = useQuery({
 });
 const contextLoading = computed(() => contextQuery.isLoading.value || contextQuery.isFetching.value);
 
-function openUpload() { uploadForm.taskType = ""; uploadForm.scriptId = ""; uploadForm.config = {}; uploadVisible.value = true; }
-function onTaskTypeChange() { uploadForm.scriptId = ""; uploadForm.config = {}; verifyNodeId.value = ""; }
-
 async function loadPluginUi() {
   closePluginUi();
   if (!pluginUiUrl.value) return;
   pluginUiLoading.value = true;
   try {
-    const blob = await aetpApi.plugins.uiAsset(pluginUiUrl.value);
-    pluginUiObjectUrl.value = URL.createObjectURL(blob);
+    const htmlBlob = await aetpApi.plugins.uiAsset(pluginUiUrl.value);
+    const html = await htmlBlob.text();
+    const inlineHtml = await inlinePluginAssets(html, pluginUiUrl.value);
+    pluginUiObjectUrl.value = URL.createObjectURL(new Blob([inlineHtml], { type: "text/html" }));
   } catch (error) {
     ElMessage.error(`插件配置页面加载失败: ${(error as Error).message}`);
   } finally {
     pluginUiLoading.value = false;
   }
 }
+
+async function inlinePluginAssets(html: string, entryUrl: string): Promise<string> {
+  const assetPattern = /(?:src|href)=["'](vendor\/[^"']+)["']/g;
+  const assets = [...html.matchAll(assetPattern)].map((match) => match[1]);
+  const replacements = await Promise.all(
+    [...new Set(assets)].map(async (assetPath) => {
+      const assetUrl = new URL(assetPath, `${window.location.origin}${entryUrl}`).pathname;
+      const asset = await aetpApi.plugins.uiAsset(assetUrl);
+      const bytes = new Uint8Array(await asset.arrayBuffer());
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+      }
+      const mime = asset.type || (assetPath.endsWith(".css") ? "text/css" : "text/javascript");
+      return [assetPath, `data:${mime};base64,${btoa(binary)}`] as const;
+    }),
+  );
+  return replacements.reduce((result, [path, dataUrl]) => result.split(path).join(dataUrl), html);
+}
+
 function closePluginUi() {
   if (verifyPollTimer !== null) window.clearTimeout(verifyPollTimer);
   verifyPollTimer = null;
@@ -499,29 +530,11 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
 .case-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .case-tag { margin-right: 4px; }
 
-:deep(.script-upload-dialog.el-dialog) { width: min(1180px, calc(100vw - 40px)); max-width: 1180px; margin-top: 4vh; overflow: hidden; border-radius: 12px; }
+:deep(.script-upload-dialog.el-dialog) { width: min(1120px, calc(100vw - 40px)); max-width: 1120px; margin-top: 4vh; overflow: hidden; border-radius: 12px; }
 :deep(.script-upload-dialog.el-dialog .el-dialog__header) { margin-right: 0; padding: 20px 24px 17px; border-bottom: 1px solid var(--aetp-line); }
 :deep(.script-upload-dialog.el-dialog .el-dialog__title) { color: var(--aetp-ink); font-size: 17px; font-weight: 750; }
-:deep(.script-upload-dialog.el-dialog .el-dialog__body) { max-height: 86vh; padding: 0; overflow: auto; }
+:deep(.script-upload-dialog.el-dialog .el-dialog__body) { max-height: 86vh; padding: 18px; overflow: auto; background: #f4f7f8; }
 :deep(.script-upload-dialog.el-dialog .el-dialog__footer) { padding: 14px 24px; border-top: 1px solid var(--aetp-line); background: #fbfcfd; }
-.upload-workbench { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: clamp(610px, 74vh, 790px); background: #f4f7f8; }
-.type-rail { display: flex; flex-direction: column; padding: 28px 24px; color: #eff8f7; background: linear-gradient(155deg, #17343d 0%, #204b54 100%); }
-.type-rail .workbench-step, .type-rail p { color: #a9d4d1; }
-.type-rail h2 { margin: 15px 0 8px; font-size: 23px; line-height: 1.25; }
-.type-rail p { margin: 0 0 24px; font-size: 12px; line-height: 1.7; }
-.type-select { width: 100%; }
-.type-select :deep(.el-input__wrapper) { min-height: 42px; box-shadow: none; }
-.selected-plugin { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 12px; border: 1px solid rgba(178, 228, 222, .22); border-radius: 8px; background: rgba(0, 0, 0, .13); }
-.selected-plugin-icon { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: #9de0d8; background: rgba(157, 224, 216, .13); }
-.selected-plugin div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-.selected-plugin strong { overflow: hidden; color: #f4fffd; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.selected-plugin small { overflow: hidden; color: #a9d4d1; font-family: ui-monospace, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.rail-note { display: flex; align-items: flex-start; gap: 9px; margin-top: auto; padding-top: 22px; color: #a9d4d1; font-size: 11px; line-height: 1.6; }
-.rail-note-dot { width: 6px; height: 6px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: #f0c36a; }
-.plugin-stage { display: flex; min-width: 0; flex-direction: column; padding: 24px; background: #f4f7f8; }
-.stage-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; min-height: 55px; margin-bottom: 15px; }
-.stage-heading h2 { margin: 7px 0 0; color: var(--aetp-ink); font-size: 20px; }
-.stage-heading .el-tag { margin-top: 2px; }
 .plugin-ui-shell { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border: 1px solid #d5e1e4; border-radius: 9px; background: #fff; box-shadow: 0 8px 24px rgba(34, 66, 76, .08); }
 .plugin-ui-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 0 13px; border-bottom: 1px solid #e3ecee; color: #789096; background: #fbfdfd; font-size: 10px; letter-spacing: .08em; }
 .plugin-ui-toolbar span { display: inline-flex; align-items: center; gap: 7px; }
@@ -545,10 +558,6 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
   .stat-block:nth-child(3) { border-left: 0; }
   :deep(.script-upload-dialog.el-dialog) { width: calc(100vw - 24px); margin-top: 12px; }
   :deep(.script-upload-dialog.el-dialog .el-dialog__body) { max-height: calc(100vh - 120px); }
-  .upload-workbench { display: block; min-height: 0; }
-  .type-rail { padding: 22px 20px; }
-  .rail-note { margin-top: 18px; }
-  .plugin-stage { padding: 20px; }
   .plugin-ui-frame-wrap, .plugin-state { min-height: 500px; height: 64vh; }
 }
 </style>

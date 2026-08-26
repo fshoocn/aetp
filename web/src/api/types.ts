@@ -428,6 +428,7 @@ export interface EventDeliveryOut {
   event_id: string;
   subscription_id: string;
   endpoint_id: string;
+  content: Record<string, unknown>;
   status: string;
   attempts: number;
   next_attempt_at: string | null;

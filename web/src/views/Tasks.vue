@@ -64,14 +64,16 @@ const canDispatch = computed(() => auth.user?.platform_role === "admin" || ["ope
 const page = ref(1);
 const pageSize = 25;
 const filters = reactive({ status: "", deviceId: "" });
+const appliedFilters = reactive({ status: "", deviceId: "" });
 const statusOptions = [{ label: "待处理", value: "pending" }, { label: "派发中", value: "dispatching" }, { label: "运行中", value: "running" }, { label: "取消中", value: "cancelling" }, { label: "成功", value: "succeeded" }, { label: "失败", value: "failed" }, { label: "已取消", value: "cancelled" }, { label: "超时", value: "timed_out" }];
-const taskQuery = useQuery({ queryKey: ["tasks", "list", projectId, page, filters], queryFn: () => aetpApi.tasks.list(projectId.value, { status: filters.status || undefined, deviceId: filters.deviceId || undefined, limit: pageSize, offset: (page.value - 1) * pageSize }), enabled: computed(() => !!projectId.value) });
+const taskQuery = useQuery({ queryKey: ["tasks", "list", projectId, page, appliedFilters], queryFn: () => aetpApi.tasks.list(projectId.value, { status: appliedFilters.status || undefined, deviceId: appliedFilters.deviceId || undefined, limit: pageSize + 1, offset: (page.value - 1) * pageSize }), enabled: computed(() => !!projectId.value) });
 const deviceQuery = useQuery({ queryKey: ["devices", "task-form", projectId], queryFn: () => aetpApi.devices.list(projectId.value), enabled: computed(() => !!projectId.value) });
-const tasks = computed(() => taskQuery.data.value ?? []);
+const rawTasks = computed(() => taskQuery.data.value ?? []);
+const tasks = computed(() => rawTasks.value.slice(0, pageSize));
 const devices = computed(() => deviceQuery.data.value ?? []);
 const loading = computed(() => taskQuery.isLoading.value || deviceQuery.isLoading.value);
 const errorMessage = computed(() => taskQuery.error.value?.message || deviceQuery.error.value?.message || "");
-const total = computed(() => tasks.value.length < pageSize ? (page.value - 1) * pageSize + tasks.value.length : page.value * pageSize);
+const total = computed(() => rawTasks.value.length > pageSize ? page.value * pageSize + 1 : (page.value - 1) * pageSize + rawTasks.value.length);
 const createVisible = ref(false);
 const formRef = ref<FormInstance>();
 const createForm = reactive({ deviceId: "", commandText: "{}" });
@@ -81,8 +83,8 @@ const creating = computed(() => mutation.isPending.value);
 const triggeringTaskId = ref<string | null>(null);
 function openCreate() { createForm.deviceId = ""; createForm.commandText = "{}"; createVisible.value = true; }
 async function createTask() { if (!formRef.value) return; const valid = await formRef.value.validate().catch(() => false); if (!valid) return; try { JSON.parse(createForm.commandText); } catch { ElMessage.error("命令参数必须是合法 JSON"); return; } mutation.mutate(); }
-function applyFilters() { page.value = 1; queryClient.invalidateQueries({ queryKey: ["tasks", "list"] }); }
-function resetFilters() { filters.status = ""; filters.deviceId = ""; page.value = 1; }
+function applyFilters() { appliedFilters.status = filters.status; appliedFilters.deviceId = filters.deviceId; page.value = 1; queryClient.invalidateQueries({ queryKey: ["tasks", "list"] }); }
+function resetFilters() { filters.status = ""; filters.deviceId = ""; appliedFilters.status = ""; appliedFilters.deviceId = ""; page.value = 1; }
 function changePage(value: number) { page.value = value; }
 function refresh() { queryClient.invalidateQueries({ queryKey: ["tasks"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
 function gotoTask(row: Task) { router.push(`/tasks/${row.task_id}`); }

@@ -25,7 +25,7 @@ const projectStore = useProjectStore();
 const queryClient = useQueryClient();
 const projectId = computed(() => projectStore.currentProjectId ?? "");
 const canManage = computed(() => auth.user?.platform_role === "admin" || ["maintainer", "owner"].includes(projectStore.currentRole || ""));
-const query = useQuery({ queryKey: ["project", "members", projectId], queryFn: () => aetpApi.projects.members(projectId.value), enabled: computed(() => !!projectId.value && canManage.value) });
+const query = useQuery({ queryKey: ["project", "members", projectId], queryFn: () => aetpApi.projects.members(projectId.value), enabled: computed(() => !!projectId.value) });
 const adminUsersQuery = useQuery({ queryKey: ["admin", "users", "member-candidates"], queryFn: () => aetpApi.admin.users(), enabled: computed(() => auth.user?.platform_role === "admin") });
 const members = computed(() => query.data.value ?? []);
 const adminUsers = computed(() => adminUsersQuery.data.value ?? []);

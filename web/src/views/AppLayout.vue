@@ -128,9 +128,9 @@
           <el-result icon="info" title="还没有可用项目" sub-title="请联系平台管理员将你的账户加入项目后再开始工作" />
         </div>
         <router-view v-else v-slot="{ Component }">
-          <transition name="fade-slide" mode="out-in">
+          <div :key="route.fullPath" class="route-view">
             <component :is="Component" />
-          </transition>
+          </div>
         </router-view>
       </el-main>
     </el-container>
@@ -138,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowDown, Bell, Collection, Connection, Cpu, Document, Expand, Fold, Grid, List, Odometer, Tickets, TrendCharts, UserFilled } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/auth";
@@ -149,6 +149,7 @@ const route = useRoute();
 const auth = useAuthStore();
 const projectStore = useProjectStore();
 const collapsed = ref(false);
+const mobileQuery = typeof window !== "undefined" ? window.matchMedia("(max-width: 760px)") : null;
 const projectLoading = ref(false);
 const currentProjectId = ref<string | null>(projectStore.currentProjectId);
 
@@ -179,6 +180,16 @@ function onUserCommand(command: string) {
   if (command === "logout") auth.logout();
 }
 watch(() => projectStore.currentProjectId, (value) => { currentProjectId.value = value; });
+
+function syncResponsiveLayout() {
+  if (mobileQuery?.matches) collapsed.value = true;
+}
+
+onMounted(() => {
+  syncResponsiveLayout();
+  mobileQuery?.addEventListener("change", syncResponsiveLayout);
+});
+onUnmounted(() => mobileQuery?.removeEventListener("change", syncResponsiveLayout));
 
 if (projectStore.projects.length === 0) {
   projectLoading.value = true;
@@ -220,13 +231,26 @@ if (projectStore.projects.length === 0) {
 .account-text strong { color: var(--aetp-ink); font-size: 13px; }
 .account-text small { color: var(--aetp-muted); font-size: 11px; }
 .workspace { padding: 30px; background: var(--aetp-bg); }
+.route-view { animation: route-enter 0.2s ease both; }
+@keyframes route-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-view { animation: none; }
+}
 .no-project { min-height: 56vh; display: grid; place-items: center; }
 @media (max-width: 760px) {
   .shell-aside { width: 72px !important; }
   .brand { justify-content: center; padding: 18px 10px; }
   .topbar { min-height: 82px; height: auto; padding: 16px; }
-  .project-picker { width: 150px; }
-  .account-text, .topbar-start .collapse-btn { display: none; }
-  .workspace { padding: 16px; }
+  .topbar-start { min-width: 0; }
+  .breadcrumb-wrap { min-width: 0; }
+  .breadcrumb-wrap strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-end { min-width: 0; gap: 8px; }
+  .project-picker { width: min(150px, 42vw); }
+  .account-button { padding: 0; }
+  .account-text, .account-button > .el-icon, .topbar-start .collapse-btn { display: none; }
+  .workspace { min-width: 0; padding: 16px; overflow-x: hidden; }
 }
 </style>

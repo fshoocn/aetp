@@ -26,13 +26,13 @@
       <el-empty v-if="!loading && projects.length === 0" description="暂无可访问项目" />
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑项目' : '新建项目'" width="520px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="editing ? '编辑项目' : '新建项目'" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-form-item label="项目标识" prop="project_key"><el-input v-model="form.project_key" :disabled="editing" placeholder="例如 ADAS_HIL" /></el-form-item>
         <el-form-item label="项目名称" prop="name"><el-input v-model="form.name" placeholder="输入项目名称" /></el-form-item>
         <el-form-item label="项目说明"><el-input v-model="form.description" type="textarea" :rows="4" placeholder="描述项目用途、范围或负责人" /></el-form-item>
         <el-form-item v-if="!editing && isAdmin" label="首个负责人"><el-input-number v-model="form.owner_id" :min="1" controls-position="right" style="width: 100%" placeholder="留空则由当前管理员负责" /></el-form-item>
-        <el-form-item v-if="editing" label="项目状态"><el-radio-group v-model="form.status"><el-radio-button label="active">运行中</el-radio-button><el-radio-button label="archived">已归档</el-radio-button></el-radio-group></el-form-item>
+        <el-form-item v-if="editing" label="项目状态"><el-radio-group v-model="form.status"><el-radio-button value="active">运行中</el-radio-button><el-radio-button value="archived">已归档</el-radio-button></el-radio-group></el-form-item>
       </el-form>
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存</el-button></template>
     </el-dialog>

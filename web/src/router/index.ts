@@ -84,6 +84,7 @@ const routes = [
       {
         path: "users",
         name: "Users",
+        meta: { requiresAdmin: true },
         component: () => import("@/views/Users.vue"),
       },
     ],
@@ -95,11 +96,21 @@ const router = createRouter({
   routes,
 });
 
+function isAdminUser(): boolean {
+  try {
+    return JSON.parse(localStorage.getItem("user") || "null")?.platform_role === "admin";
+  } catch {
+    return false;
+  }
+}
+
 // 路由守卫：未登录跳转登录页
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem("token");
   if (to.name !== "Login" && !token) {
     next({ name: "Login" });
+  } else if (to.meta.requiresAdmin && !isAdminUser()) {
+    next({ name: "Dashboard" });
   } else if (to.name === "Login" && token) {
     next({ name: "Dashboard" });
   } else {

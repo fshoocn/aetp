@@ -28,9 +28,13 @@ export function clearStoredTokens(): void {
 }
 
 export const useAuthStore = defineStore("auth", () => {
-  const user = ref<UserInfo | null>(
-    JSON.parse(localStorage.getItem(USER_KEY) || "null")
-  );
+  let storedUser: UserInfo | null = null;
+  try {
+    storedUser = JSON.parse(localStorage.getItem(USER_KEY) || "null") as UserInfo | null;
+  } catch {
+    localStorage.removeItem(USER_KEY);
+  }
+  const user = ref<UserInfo | null>(storedUser);
   const token = ref<string | null>(localStorage.getItem(ACCESS_KEY));
   const refreshToken = ref<string | null>(localStorage.getItem(REFRESH_KEY));
 
