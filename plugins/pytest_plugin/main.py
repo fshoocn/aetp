@@ -27,14 +27,22 @@ from aetp_protocol.plugin import (
 class PytestMasterPlugin:
     task_type = "pytest"
     display_name = "pytest 自动化测试"
-    plugin_version = "1.0.0"
-    supported_versions = frozenset({"1.0.0"})
+    plugin_version = "1.1.0"
+    supported_versions = frozenset({"1.1.0"})
     config_schema: Mapping[str, Any] = {
         "type": "object",
         "properties": {
-            "pytest_args": {"type": "array", "items": {"type": "string"}},
-            "python_executable": {"type": "string"},
-            "timeout_s": {"type": "integer", "minimum": 1},
+            "pytest_args": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "附加 pytest 参数，不要重复填写测试路径或 JUnit 参数",
+            },
+            "python_executable": {"type": "string", "description": "留空使用 Agent 当前 Python"},
+            "collect_timeout_s": {"type": "integer", "minimum": 1, "maximum": 3600, "default": 60},
+            "timeout_s": {"type": "integer", "minimum": 1, "maximum": 86400, "default": 3600},
+            "cases_per_shard": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 20},
+            "test_path": {"type": "string", "description": "可选，脚本目录内的测试子目录或文件"},
+            "fail_fast": {"type": "boolean", "default": False},
             "artifact_paths": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -45,13 +53,44 @@ class PytestMasterPlugin:
     upload_spec: Mapping[str, Any] = {
         "extensions": [".py", ".zip"],
         "max_size_mb": 100,
+        "required_files": ["test_*.py 或 *_test.py"],
     }
+
+    @staticmethod
+    def _validate_config(config: Mapping[str, Any]) -> None:
+        raw_args = config.get("pytest_args", [])
+        if not isinstance(raw_args, list) or not all(isinstance(item, str) and item.strip() for item in raw_args):
+            raise ValueError("pytest_args 必须是非空字符串数组")
+        if any(item.split("=", 1)[0] in {"--junitxml", "--rootdir"} for item in raw_args):
+            raise ValueError("pytest_args 不得覆盖平台管理的 --junitxml 或 --rootdir 参数")
+        executable = str(config.get("python_executable") or "").strip()
+        if "\x00" in executable or len(executable) > 512:
+            raise ValueError("python_executable 不合法")
+        for key, maximum in (("collect_timeout_s", 3600), ("timeout_s", 86400), ("cases_per_shard", 1000)):
+            if key in config and (isinstance(config[key], bool) or not isinstance(config[key], int) or not 1 <= config[key] <= maximum):
+                raise ValueError(f"{key} 必须是 1-{maximum} 的整数")
 
     def verify_script(self, script_dir: str, config: Mapping[str, Any]) -> list[str]:
         root = Path(script_dir)
         if not root.exists():
             return [f"脚本目录不存在: {root}"]
+        errors: list[str] = []
+        test_path = str(config.get("test_path") or "").strip()
+        if test_path:
+            candidate = (root / test_path).resolve()
+            if root.resolve() not in candidate.parents and candidate != root.resolve():
+                errors.append("test_path 只能位于脚本目录内")
+            elif not candidate.exists():
+                errors.append(f"test_path 不存在: {test_path}")
         if not list(root.rglob("test_*.py")) and not list(root.rglob("*_test.py")):
+            errors.append("未找到 pytest 测试文件（test_*.py 或 *_test.py）")
+        try:
+            self._validate_config(config)
+        except ValueError as exc:
+            errors.append(str(exc))
+        if errors:
+            return errors
+        if not list(root.rglob("*.py")):
             return ["未找到 pytest 测试文件（test_*.py 或 *_test.py）"]
         return []
 
@@ -112,8 +151,8 @@ class PytestMasterPlugin:
 class PytestAgentPlugin:
     task_type = "pytest"
     display_name = "pytest 自动化测试"
-    plugin_version = "1.0.0"
-    supported_versions = frozenset({"1.0.0"})
+    plugin_version = "1.1.0"
+    supported_versions = frozenset({"1.1.0"})
     verify_location = "master"
     parse_location = "master"
 
@@ -122,6 +161,7 @@ class PytestAgentPlugin:
         if not script_dir.exists():
             raise FileNotFoundError(f"本地脚本缓存不存在: {script_dir}")
         config = dict(context.params)
+        self._validate_config(config)
         executable = str(config.get("python_executable") or sys.executable)
         report = script_dir / f".aetp-pytest-{context.run_id}.xml"
         command = [
@@ -134,6 +174,8 @@ class PytestAgentPlugin:
             "-o",
             "junit_logging=all",
             *self._pytest_args(config),
+            *( ["--maxfail=1"] if config.get("fail_fast") is True else [] ),
+            *self._case_args(context, script_dir, config),
             "--junitxml",
             str(report),
         ]
@@ -172,6 +214,33 @@ class PytestAgentPlugin:
             "output_tail": lines[-100:],
             "artifact_paths": self._artifact_paths(script_dir, config),
         }
+
+    @staticmethod
+    def _validate_config(config: Mapping[str, Any]) -> None:
+        executable = str(config.get("python_executable") or "").strip()
+        if executable and ("\x00" in executable or len(executable) > 512):
+            raise ValueError("python_executable 不合法")
+        for key, maximum in (("collect_timeout_s", 3600), ("timeout_s", 86400), ("cases_per_shard", 1000)):
+            if key in config:
+                value = config[key]
+                if isinstance(value, bool) or not isinstance(value, int) or value < 1 or value > maximum:
+                    raise ValueError(f"{key} 必须是 1-{maximum} 的整数")
+        raw_args = config.get("pytest_args", [])
+        if not isinstance(raw_args, list) or not all(isinstance(item, str) and item.strip() for item in raw_args):
+            raise ValueError("pytest_args 必须是非空字符串数组")
+        forbidden = {"--junitxml", "--rootdir"}
+        if any(item.split("=", 1)[0] in forbidden for item in raw_args):
+            raise ValueError("pytest_args 不得覆盖平台管理的 --junitxml 或 --rootdir 参数")
+
+    @staticmethod
+    def _case_args(context: AgentTaskContext, script_dir: Path, config: Mapping[str, Any]) -> list[str]:
+        test_path = str(config.get("test_path") or "").strip()
+        base = (script_dir / test_path).resolve() if test_path else script_dir.resolve()
+        root = script_dir.resolve()
+        if root not in base.parents and base != root:
+            raise ValueError("test_path 只能位于脚本目录内")
+        case_keys = [str(key).strip() for key in getattr(context, "case_keys", ()) if str(key).strip()]
+        return case_keys or ([str(base)] if test_path else [])
 
     async def cancel(self) -> None:
         # ExecutionService 负责取消插件任务；这里保留接口供资源清理扩展。
@@ -275,7 +344,7 @@ class PytestAgentPlugin:
     @staticmethod
     def _pytest_args(config: Mapping[str, Any]) -> list[str]:
         raw = config.get("pytest_args", [])
-        if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        if not isinstance(raw, list) or not all(isinstance(item, str) and item.strip() for item in raw):
             raise ValueError("pytest_args 必须是字符串数组")
         return list(raw)
 
@@ -283,8 +352,8 @@ class PytestAgentPlugin:
 package = PluginPackage(
     metadata=PluginMetadata(
         task_type="pytest",
-        plugin_version="1.0.0",
-        supported_versions=frozenset({"1.0.0"}),
+        plugin_version="1.1.0",
+        supported_versions=frozenset({"1.1.0"}),
         display_name="pytest 自动化测试",
         config_schema=dict(PytestMasterPlugin.config_schema),
         upload_spec=dict(PytestMasterPlugin.upload_spec),

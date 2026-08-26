@@ -3,225 +3,189 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>pytest 配置</title>
+  <title>pytest 脚本上传</title>
+  <link rel="stylesheet" href="vendor/element-plus.css">
   <style>
-    :root { color-scheme: light; font-family: "Segoe UI", sans-serif; color: #24313a; background: #f7fafc; }
-    * { box-sizing: border-box; }
-    body { margin: 0; padding: 16px; }
-    h2 { margin: 0 0 6px; font-size: 18px; }
-    p { margin: 0 0 14px; color: #667783; font-size: 12px; line-height: 1.5; }
-    label { display: block; margin: 14px 0 6px; font-size: 12px; font-weight: 700; }
-    input, select { width: 100%; min-height: 34px; border: 1px solid #cbd7df; border-radius: 5px; padding: 7px 9px; background: #fff; color: inherit; }
-    input[type="file"] { padding: 5px; }
-    button { min-height: 32px; border: 1px solid #236bbd; border-radius: 5px; padding: 0 12px; background: #236bbd; color: #fff; cursor: pointer; }
-    button.secondary { border-color: #cbd7df; background: #fff; color: #236bbd; }
-    button:disabled { cursor: not-allowed; opacity: .5; }
-    .row { display: flex; gap: 8px; align-items: center; }
-    .row input { flex: 1; }
-    .hint { margin-top: 5px; color: #85939d; font-size: 11px; }
-    .node { margin-top: 16px; border-top: 1px solid #dfe7ec; padding-top: 12px; }
-    .capabilities { max-height: 112px; overflow: auto; margin-top: 8px; padding: 8px; border-radius: 5px; background: #edf3f7; white-space: pre-wrap; font: 11px/1.4 ui-monospace, monospace; }
-    .status { margin-top: 12px; padding: 8px 10px; border-radius: 5px; background: #eaf3ff; color: #236bbd; font-size: 12px; }
-    .status.error { background: #fff0f0; color: #c45656; }
-    .status.ok { background: #edf9f3; color: #2b8a5a; }
-    .upload { margin: 16px 0 18px; padding-bottom: 16px; border-bottom: 1px solid #dfe7ec; }
-    .upload button { margin-top: 10px; }
-    .hidden { display: none; }
+    body { margin: 0; min-width: 320px; background: #f4f7f8; font-family: "Aptos", "Microsoft YaHei UI", sans-serif; color: #182b36; }
+    .workspace { max-width: 980px; margin: 0 auto; padding: 20px; }
+    .intro { margin-bottom: 16px; }
+    .kicker { color: #188c91; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+    .intro h1 { margin: 6px 0; font-size: 22px; letter-spacing: -.02em; }
+    .intro p { margin: 0; color: #71818a; font-size: 12px; line-height: 1.65; }
+    .mb0 { margin-bottom: 0 !important; }
+    .cap-box textarea { font-family: ui-monospace, monospace; font-size: 11px; }
   </style>
 </head>
 <body>
-  <section>
-    <h2>pytest 配置</h2>
-    <p>配置由 pytest 插件包提供。脚本 print、logging、JUnit 报告和声明的附件由 Agent 统一采集。</p>
-    <div class="upload">
-      <label for="script-name">脚本名称</label>
-      <input id="script-name" placeholder="如冒烟测试或 CAN 回归">
-      <label for="script-file">脚本文件</label>
-      <input id="script-file" type="file" accept=".py,.zip">
-      <div class="hint" id="upload-hint">请选择 .py 或 .zip 脚本文件。</div>
-      <button id="upload" type="button" disabled>上传脚本</button>
+  <div id="app">
+    <div class="workspace">
+      <header class="intro">
+        <div class="kicker">PYTEST / SCRIPT WORKSPACE</div>
+        <h1>上传 pytest 测试脚本</h1>
+        <p>脚本先在 Master 校验并解析用例，再按 Shard 分发到 Agent 执行。支持单个 Python 文件或 ZIP 工程包。</p>
+      </header>
+      <el-row :gutter="14">
+        <el-col :xs="24" :md="13">
+          <el-card shadow="never">
+            <template #header><strong>脚本信息</strong></template>
+            <el-form label-position="top" size="large">
+              <el-form-item label="脚本名称" required>
+                <el-input v-model="state.name" placeholder="例如：ADAS 冒烟回归" clearable />
+              </el-form-item>
+              <el-form-item label="脚本文件" required>
+                <el-upload
+                  drag
+                  :auto-upload="false"
+                  :limit="1"
+                  :on-change="onFileChange"
+                  :on-remove="() => state.file = null"
+                  accept=".py,.zip"
+                >
+                  <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+                  <div class="el-upload__text">拖拽文件到这里，或 <em>点击选择</em></div>
+                  <template #tip><div class="el-upload__tip">{{ uploadTip }}</div></template>
+                </el-upload>
+              </el-form-item>
+              <el-form-item label="测试路径（可选）">
+                <el-input v-model="testPath" placeholder="例如 tests 或 test_smoke.py" clearable />
+              </el-form-item>
+              <el-button type="primary" :disabled="!canUpload" :loading="state.uploading" @click="doUpload">
+                {{ state.uploading ? "正在上传..." : "上传并解析" }}
+              </el-button>
+              <el-button @click="resetForm">重置</el-button>
+            </el-form>
+          </el-card>
+        </el-col>
+        <el-col :xs="24" :md="11">
+          <el-card shadow="never">
+            <template #header><strong>执行参数</strong></template>
+            <el-form label-position="top" size="large">
+              <el-form-item label="pytest 参数">
+                <div v-for="(_, index) in pytestArgs" :key="index" style="display:flex; gap:8px; margin-bottom:8px;">
+                  <el-input v-model="pytestArgs[index]" placeholder="例如 -q" />
+                  <el-button type="danger" plain @click="removeAt('pytest_args', index)">删除</el-button>
+                </div>
+                <el-button plain @click="addArg">添加参数</el-button>
+              </el-form-item>
+              <el-form-item label="Python 解释器">
+                <el-input v-model="pythonExecutable" placeholder="留空使用 Agent 当前 Python" clearable />
+              </el-form-item>
+              <el-row :gutter="10">
+                <el-col :span="12">
+                  <el-form-item label="执行超时（秒）"><el-input-number v-model="timeoutS" :min="1" :max="86400" controls-position="right" style="width:100%" /></el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="每 Shard 用例数"><el-input-number v-model="casesPerShard" :min="1" :max="1000" controls-position="right" style="width:100%" /></el-form-item>
+                </el-col>
+              </el-row>
+              <el-form-item label="执行后上传的附件">
+                <div v-for="(_, index) in artifactPaths" :key="index" style="display:flex; gap:8px; margin-bottom:8px;">
+                  <el-input v-model="artifactPaths[index]" placeholder="例如 reports/*.html" />
+                  <el-button type="danger" plain @click="removeAt('artifact_paths', index)">删除</el-button>
+                </div>
+                <el-button plain @click="addArtifact">添加附件路径</el-button>
+              </el-form-item>
+              <el-checkbox v-model="failFast">首个失败后停止当前 Shard</el-checkbox>
+            </el-form>
+          </el-card>
+          <el-card shadow="never" style="margin-top:14px;">
+            <template #header><strong>Agent 验证</strong></template>
+            <el-select v-model="state.nodeId" placeholder="不执行台架验证" clearable style="width:100%">
+              <el-option v-for="item in nodes" :key="item.node_id" :label="`${item.name || item.node_id} · ${item.node_id}`" :value="item.node_id" :disabled="!item.enabled || !item.online" />
+            </el-select>
+            <div style="margin-top:6px; color:#8b9aa1; font-size:11px;">{{ verifyHint }}</div>
+            <el-input type="textarea" :rows="5" readonly :model-value="capabilityText" style="margin-top:10px;" class="cap-box" />
+            <el-button type="primary" style="margin-top:10px; width:100%" :disabled="!canVerify" :loading="verifying" @click="doVerify">下发 Agent 验证</el-button>
+          </el-card>
+        </el-col>
+      </el-row>
+      <el-alert v-if="status.text" :title="status.text" :type="status.kind || 'info'" show-icon :closable="false" style="margin-top:14px;" />
     </div>
-    <label for="pytest-args">pytest 参数</label>
-    <div id="pytest-args"></div>
-    <button class="secondary" id="add-arg" type="button">添加参数</button>
+  </div>
 
-    <label for="python-executable">Python 解释器</label>
-    <input id="python-executable" placeholder="留空使用 Agent 当前 Python">
-
-    <label for="timeout">执行超时（秒）</label>
-    <input id="timeout" type="number" min="1" step="1">
-
-    <label for="artifacts">附件路径或 Glob</label>
-    <div id="artifacts"></div>
-    <button class="secondary" id="add-artifact" type="button">添加附件路径</button>
-
-    <div class="node">
-      <label for="node">验证节点</label>
-      <select id="node"><option value="">不执行台架验证</option></select>
-      <div class="hint" id="verification-hint">上传脚本后可向插件声明的 Agent 验证节点下发验证。</div>
-      <pre class="capabilities" id="capabilities">等待 Master 配置上下文...</pre>
-      <button id="verify" type="button" disabled>下发 Agent 验证</button>
-    </div>
-    <div id="status" class="status hidden"></div>
-  </section>
-
+  <script src="vendor/vue.global.prod.js"></script>
+  <script src="vendor/element-plus.js"></script>
+  <script src="vendor/zh-cn.js"></script>
+  <script src="vendor/icons.js"></script>
   <script>
     (() => {
-      const state = { context: null, config: {}, nodeId: "", scriptId: "", name: "", file: null, uploading: false };
-      const args = document.getElementById("pytest-args");
-      const artifacts = document.getElementById("artifacts");
-      const scriptName = document.getElementById("script-name");
-      const scriptFile = document.getElementById("script-file");
-      const uploadHint = document.getElementById("upload-hint");
-      const upload = document.getElementById("upload");
-      const python = document.getElementById("python-executable");
-      const timeout = document.getElementById("timeout");
-      const node = document.getElementById("node");
-      const capabilities = document.getElementById("capabilities");
-      const verify = document.getElementById("verify");
-      const status = document.getElementById("status");
+      const { createApp, reactive, ref, computed, watch } = Vue;
+      const app = createApp({
+        setup() {
+          const state = reactive({ context: null, config: {}, name: "", file: null, scriptId: "", nodeId: "", uploading: false });
+          const status = reactive({ text: "", kind: "info" });
+          const testPath = ref(""); const pythonExecutable = ref(""); const timeoutS = ref(undefined); const casesPerShard = ref(undefined);
+          const failFast = ref(false); const pytestArgs = ref([]); const artifactPaths = ref([]); const verifying = ref(false);
 
-      function send(type, payload) {
-        window.parent.postMessage({ type, payload }, window.location.origin);
-      }
-      function setStatus(message, kind) {
-        status.textContent = message;
-        status.className = `status ${kind || ""}`;
-      }
-      function listValue(key) {
-        return Array.isArray(state.config[key]) ? state.config[key].map(String) : [];
-      }
-      function renderUpload() {
-        scriptName.value = state.name;
-        const spec = state.context?.upload_spec || {};
-        const extensions = Array.isArray(spec.extensions) ? spec.extensions.map(String) : [];
-        const maxSizeMb = Number(spec.max_size_mb || 0);
-        scriptFile.accept = extensions.join(",");
-        uploadHint.textContent = `${extensions.join(", ") || "任意文件"}${maxSizeMb ? ` · 最大 ${maxSizeMb} MB` : ""}`;
-        upload.disabled = state.uploading || !state.name.trim() || !state.file;
-        upload.textContent = state.uploading ? "正在上传..." : "上传脚本";
-      }
-      function renderList(container, key, placeholder) {
-        container.replaceChildren();
-        listValue(key).forEach((value, index) => {
-          const row = document.createElement("div");
-          row.className = "row";
-          const input = document.createElement("input");
-          input.value = value;
-          input.placeholder = placeholder;
-          input.addEventListener("input", () => {
-            const values = listValue(key);
-            values[index] = input.value;
-            state.config[key] = values;
+          function send(type, payload) { window.parent.postMessage({ type, payload }, window.location.origin); }
+          function setStatus(text, kind) { status.text = text; status.kind = kind || "info"; }
+          function listValue(key) { return Array.isArray(state.config[key]) ? state.config[key].map(String) : []; }
+
+          const uploadTip = computed(() => { const spec = state.context?.upload_spec || {}; const ext = Array.isArray(spec.extensions) ? spec.extensions.join(" / ") : ".py / .zip"; return `${ext}${spec.max_size_mb ? ` · 最大 ${spec.max_size_mb} MB` : ""}`; });
+          const canUpload = computed(() => !!state.name.trim() && !!state.file && !state.uploading);
+          const nodes = computed(() => state.context?.nodes || []);
+          const verifySupported = computed(() => !!state.context?.verification?.supported);
+          const canVerify = computed(() => !!state.scriptId && verifySupported.value && !!state.nodeId && !state.uploading && !verifying.value);
+          const verifyHint = computed(() => verifySupported.value ? (state.scriptId ? "已上传脚本并选择节点，可以下发验证。" : "上传脚本后可以下发验证。") : "该插件由 Master 完成验证，无需下发 Agent 命令。");
+          const capabilityText = computed(() => { const selected = nodes.value.find((n) => n.node_id === state.nodeId); return selected ? JSON.stringify(selected.capabilities || {}, null, 2) : "请选择验证节点查看能力"; });
+
+          function syncConfigFromRefs() {
+            state.config.pytest_args = pytestArgs.value.filter((v) => String(v).trim());
+            state.config.artifact_paths = artifactPaths.value.filter((v) => String(v).trim());
+            if (testPath.value.trim()) state.config.test_path = testPath.value.trim(); else delete state.config.test_path;
+            if (pythonExecutable.value.trim()) state.config.python_executable = pythonExecutable.value.trim(); else delete state.config.python_executable;
+            if (timeoutS.value != null) state.config.timeout_s = timeoutS.value; else delete state.config.timeout_s;
+            if (casesPerShard.value != null) state.config.cases_per_shard = casesPerShard.value; else delete state.config.cases_per_shard;
+            if (failFast.value) state.config.fail_fast = true; else delete state.config.fail_fast;
             sendConfig();
-          });
-          const remove = document.createElement("button");
-          remove.className = "secondary";
-          remove.type = "button";
-          remove.textContent = "删除";
-          remove.addEventListener("click", () => {
-            state.config[key] = listValue(key).filter((_, itemIndex) => itemIndex !== index);
-            render();
-            sendConfig();
-          });
-          row.append(input, remove);
-          container.append(row);
-        });
-      }
-      function renderNodes() {
-        node.replaceChildren(new Option("不执行台架验证", ""));
-        const nodes = state.context?.nodes || [];
-        nodes.forEach((item) => {
-          const option = new Option(`${item.name || item.node_id} · ${item.node_id}`, item.node_id);
-          option.disabled = !item.enabled || !item.online;
-          node.append(option);
-        });
-        node.value = state.nodeId;
-        const verification = state.context?.verification || {};
-        verify.disabled = !state.scriptId || !verification.supported || !state.nodeId;
-        document.getElementById("verification-hint").textContent = verification.supported
-          ? (state.scriptId ? "已选择脚本和节点，可以下发 Agent 验证。" : "上传脚本后可以下发 Agent 验证。")
-          : "该插件在 Master 完成脚本验证，无需下发 Agent 命令。";
-        const selected = nodes.find((item) => item.node_id === state.nodeId);
-        capabilities.textContent = selected ? JSON.stringify(selected.capabilities || {}, null, 2) : "请选择验证节点查看能力";
-      }
-      function render() {
-        renderUpload();
-        renderList(args, "pytest_args", "例如 -q");
-        renderList(artifacts, "artifact_paths", "例如 reports/*.html");
-        python.value = typeof state.config.python_executable === "string" ? state.config.python_executable : "";
-        timeout.value = state.config.timeout_s == null ? "" : String(state.config.timeout_s);
-        renderNodes();
-      }
-      function sendConfig() {
-        send("aetp.plugin.config", { config: state.config, node_id: state.nodeId });
-      }
-      function applyContext(context) {
-        state.context = context || {};
-        state.config = { ...(context?.config || {}) };
-        state.scriptId = context?.script_id || "";
-        render();
-      }
-      scriptName.addEventListener("input", () => { state.name = scriptName.value; renderUpload(); });
-      scriptFile.addEventListener("change", () => {
-        const file = scriptFile.files?.[0] || null;
-        const maxSizeMb = Number(state.context?.upload_spec?.max_size_mb || 0);
-        if (file && maxSizeMb && file.size > maxSizeMb * 1024 * 1024) {
-          state.file = null;
-          scriptFile.value = "";
-          setStatus(`文件超过 ${maxSizeMb} MB 限制`, "error");
-        } else {
-          state.file = file;
-        }
-        renderUpload();
-      });
-      upload.addEventListener("click", () => {
-        if (!state.file || !state.name.trim() || state.uploading) return;
-        state.uploading = true;
-        renderUpload();
-        setStatus("正在上传并解析脚本...", "");
-        send("aetp.plugin.upload", {
-          name: state.name.trim(),
-          filename: state.file.name,
-          file: state.file,
-          config: state.config,
-        });
-      });
-      python.addEventListener("input", () => { state.config.python_executable = python.value; sendConfig(); });
-      timeout.addEventListener("input", () => { state.config.timeout_s = timeout.value ? Number(timeout.value) : undefined; sendConfig(); });
-      node.addEventListener("change", () => { state.nodeId = node.value; renderNodes(); sendConfig(); });
-      document.getElementById("add-arg").addEventListener("click", () => { state.config.pytest_args = [...listValue("pytest_args"), ""]; render(); sendConfig(); });
-      document.getElementById("add-artifact").addEventListener("click", () => { state.config.artifact_paths = [...listValue("artifact_paths"), ""]; render(); sendConfig(); });
-      verify.addEventListener("click", () => {
-        const requestId = `verify-${Date.now()}`;
-        setStatus("验证请求已发送，等待 Master/Agent 回执...", "");
-        send("aetp.plugin.verify", { request_id: requestId, script_id: state.scriptId, node_id: state.nodeId, config: state.config });
-      });
-      window.addEventListener("message", (event) => {
-        if (event.source !== window.parent || event.origin !== window.location.origin) return;
-        const message = event.data || {};
-        if (message.type === "aetp.plugin.context") applyContext(message.payload?.context);
-        if (message.type === "aetp.plugin.upload-result") {
-          state.uploading = false;
-          if (message.payload?.status === "success") {
-            state.scriptId = message.payload?.script?.script_id || state.scriptId;
-            const verification = state.context?.verification || {};
-            setStatus(
-              verification.supported
-                ? "脚本已上传并解析成功。现在可以选择节点执行 Agent 验证。"
-                : "脚本已上传并完成 Master 验证。",
-              "ok",
-            );
-          } else {
-            const errors = Array.isArray(message.payload?.errors) ? message.payload.errors.join("；") : "脚本上传失败";
-            setStatus(errors, "error");
           }
-          render();
-        }
-        if (message.type === "aetp.plugin.verify-dispatch") setStatus(message.payload?.message || "验证已下发", "");
-        if (message.type === "aetp.plugin.verify-result") setStatus(message.payload?.errors?.length ? message.payload.errors.join("；") : "Agent 验证通过", message.payload?.errors?.length ? "error" : "ok");
+          function sendConfig() { send("aetp.plugin.config", { config: state.config, node_id: state.nodeId }); }
+          function applyContext(context) {
+            state.context = context || {}; state.config = { ...(context?.config || {}) }; state.scriptId = context?.script_id || "";
+            pytestArgs.value = listValue("pytest_args"); artifactPaths.value = listValue("artifact_paths");
+            testPath.value = typeof state.config.test_path === "string" ? state.config.test_path : "";
+            pythonExecutable.value = typeof state.config.python_executable === "string" ? state.config.python_executable : "";
+            timeoutS.value = typeof state.config.timeout_s === "number" ? state.config.timeout_s : undefined;
+            casesPerShard.value = typeof state.config.cases_per_shard === "number" ? state.config.cases_per_shard : undefined;
+            failFast.value = state.config.fail_fast === true;
+          }
+          function onFileChange(file) {
+            const max = Number(state.context?.upload_spec?.max_size_mb || 0);
+            if (file.raw && max && file.raw.size > max * 1024 * 1024) { state.file = null; setStatus(`文件超过 ${max} MB 限制`, "error"); return; }
+            state.file = file.raw || null;
+          }
+          function resetForm() { state.name = ""; state.file = null; state.scriptId = ""; state.config = {}; pytestArgs.value = []; artifactPaths.value = []; testPath.value = ""; pythonExecutable.value = ""; timeoutS.value = undefined; casesPerShard.value = undefined; failFast.value = false; setStatus("已重置上传表单", "info"); sendConfig(); }
+          function doUpload() { if (!canUpload.value) return; state.uploading = true; setStatus("正在上传、校验并解析用例...", "warning"); send("aetp.plugin.upload", { name: state.name.trim(), filename: state.file.name, file: state.file, config: state.config }); }
+          function doVerify() { verifying.value = true; setStatus("验证请求已发送，等待 Agent 回执...", "warning"); send("aetp.plugin.verify", { request_id: `verify-${Date.now()}`, script_id: state.scriptId, node_id: state.nodeId, config: state.config }); setTimeout(() => verifying.value = false, 3000); }
+          function addArg() { pytestArgs.value.push("-q"); syncConfigFromRefs(); }
+          function addArtifact() { artifactPaths.value.push(""); syncConfigFromRefs(); }
+          function removeAt(key, index) { if (key === "pytest_args") pytestArgs.value.splice(index, 1); else artifactPaths.value.splice(index, 1); syncConfigFromRefs(); }
+
+          watch([pytestArgs, artifactPaths], syncConfigFromRefs, { deep: true });
+          watch([testPath, pythonExecutable, timeoutS, casesPerShard, failFast], syncConfigFromRefs);
+          watch(() => state.nodeId, sendConfig);
+
+          window.addEventListener("message", (event) => {
+            if (event.source !== window.parent || event.origin !== window.location.origin) return;
+            const message = event.data || {};
+            if (message.type === "aetp.plugin.context") applyContext(message.payload?.context);
+            if (message.type === "aetp.plugin.upload-result") {
+              state.uploading = false;
+              if (message.payload?.status === "success") {
+                state.scriptId = message.payload?.script?.script_id || state.scriptId;
+                setStatus(verifySupported.value ? "脚本已上传并解析成功，可以选择节点验证。" : "脚本已上传并完成 Master 验证。", "success");
+              } else setStatus(Array.isArray(message.payload?.errors) ? message.payload.errors.join("；") : "脚本上传失败", "error");
+            }
+            if (message.type === "aetp.plugin.verify-dispatch") setStatus(message.payload?.message || "验证已下发", "warning");
+            if (message.type === "aetp.plugin.verify-result") setStatus(message.payload?.errors?.length ? message.payload.errors.join("；") : "Agent 验证通过", message.payload?.errors?.length ? "error" : "success");
+          });
+          send("aetp.plugin.ready", { protocol_version: 1 });
+          return { state, status, testPath, pythonExecutable, timeoutS, casesPerShard, failFast, pytestArgs, artifactPaths, verifying, uploadTip, canUpload, nodes, canVerify, verifyHint, capabilityText, onFileChange, resetForm, doUpload, doVerify, addArg, addArtifact, removeAt };
+        },
       });
-      send("aetp.plugin.ready", { protocol_version: 1 });
+      app.use(ElementPlus, { locale: ElementPlusLocaleZhCn });
+      for (const [name, component] of Object.entries(ElementPlusIconsVue)) app.component(name, component);
+      app.mount("#app");
     })();
   </script>
 </body>

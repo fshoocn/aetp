@@ -54,7 +54,7 @@ class _PluginContext:
 def test_package_contract() -> None:
     assert isinstance(package, PluginPackage)
     assert package.metadata.task_type == "pytest"
-    assert package.metadata.plugin_version == "1.0.0"
+    assert package.metadata.plugin_version == "1.1.0"
     assert package.master.task_type == package.agent.task_type
     assert package.master.plugin_version == package.agent.plugin_version
     assert package.metadata.ui == {
@@ -97,6 +97,19 @@ def test_agent_requires_cached_script(tmp_path: Path) -> None:
     assert plugin._pytest_args({"pytest_args": ["-q"]}) == ["-q"]
     with pytest.raises(ValueError):
         plugin._pytest_args({"pytest_args": "-q"})
+
+
+def test_agent_shard_executes_only_selected_cases(tmp_path: Path) -> None:
+    context = _PluginContext(tmp_path, ["test_probe.py::test_one", "test_probe.py::test_two"])
+    assert PytestAgentPlugin()._case_args(context, tmp_path, {}) == [
+        "test_probe.py::test_one",
+        "test_probe.py::test_two",
+    ]
+
+
+def test_config_rejects_platform_owned_pytest_arguments() -> None:
+    with pytest.raises(ValueError, match="junitxml"):
+        PytestMasterPlugin._validate_config({"pytest_args": ["--junitxml=custom.xml"]})
 
 
 def test_agent_execute_works_with_selector_loop(tmp_path: Path) -> None:

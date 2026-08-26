@@ -1,6 +1,6 @@
 # AETP pytest 插件
 
-该目录是项目根目录下的 pytest 任务类型插件，采用 ZIP 插件规范：
+该目录是项目根目录下的 pytest 任务类型插件，采用 ZIP 插件规范。当前版本提供独立的脚本工作台：上传前校验工程、Master 解析用例、按 Shard 只执行选中的 pytest nodeid，并统一采集日志、JUnit XML 与附件。
 
 ```text
 pytest_plugin.zip
@@ -26,13 +26,14 @@ Compress-Archive -Path plugin.json,main.py,ui -DestinationPath ..\pytest_plugin.
 
 - Master：检查 pytest 脚本、`pytest --collect-only -q` 解析用例、按用例数量分片。
 - Agent：执行 pytest，实时采集 stdout/stderr 和 logging，生成 JUnit XML，分析 case 级结果。
-- 配置：`pytest_args`、`python_executable`、`timeout_s`、`cases_per_shard`、`artifact_paths`。
+- 配置：`pytest_args`、`python_executable`、`test_path`、`timeout_s`、`collect_timeout_s`、`cases_per_shard`、`fail_fast`、`artifact_paths`。
+- Shard 执行只传递当前 Shard 的 pytest nodeid，不会重复执行整套脚本；`--junitxml` 和 `--rootdir` 由平台托管，不能通过附加参数覆盖。
 - `artifact_paths` 使用相对脚本目录的路径或 glob；JUnit XML 自动上传，声明的附件也会上传到 Master。
 - Web Run 详情页的 case 行可展开查看 stdout/stderr，结束产物区域可下载报告和附件。
 - 配置页面位于插件包 `ui/index.html`，由 Web iframe 宿主加载；页面通过 `postMessage`
 	接收节点能力与验证上下文，不依赖平台 Web 源码。
 - 任务类型：`pytest`。
-- 版本：`1.0.0`。
+- 版本：`1.1.0`（UI 工作台重写，协议版本保持 1 以兼容既有宿主）。
 
 ## 使用限制
 
