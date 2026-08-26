@@ -82,14 +82,12 @@
     <!-- 上传流程：第一步选择任务类型，第二步进入对应插件的 UI 工作台 -->
     <el-dialog v-model="typeSelectVisible" title="选择任务类型" width="620px">
       <div v-loading="taskTypesLoading" class="type-grid">
-        <div
+        <button
           v-for="plugin in taskTypes"
           :key="plugin.task_type"
           class="type-card"
-          role="button"
-          tabindex="0"
+          type="button"
           @click="choosePlugin(plugin)"
-          @keydown.enter="choosePlugin(plugin)"
         >
           <span class="type-mark"><el-icon :size="20"><Grid /></el-icon></span>
           <span class="type-copy">
@@ -101,7 +99,7 @@
             <el-tag type="info" effect="plain" size="small">UI 工作台</el-tag>
           </span>
           <el-icon class="type-arrow"><ArrowRight /></el-icon>
-        </div>
+        </button>
         <el-empty v-if="!taskTypesLoading && taskTypes.length === 0" description="Master 未加载任何任务类型插件" :image-size="60" />
       </div>
       <template #footer>
@@ -143,9 +141,6 @@
         <strong>该插件没有可用的 UI</strong>
         <p>请安装包含 <code>ui/index.html</code> 的插件包后再上传。</p>
       </div>
-      <template #footer>
-        <el-button @click="uploadVisible = false">关闭</el-button>
-      </template>
     </el-dialog>
 
     <el-drawer v-model="casesVisible" :title="`用例索引 · ${activeScript?.name || ''}`" size="520px">
@@ -490,7 +485,7 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
 </script>
 
 <style scoped>
-.scripts-page { max-width: 1480px; margin: 0 auto; }
+.scripts-page { width: 100%; max-width: 1480px; margin: 0 auto; }
 .scripts-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 18px; padding: 30px 32px 28px; border: 1px solid #d9e6e9; border-radius: 12px; background: linear-gradient(118deg, #f9fcfc 0%, #eef7f7 58%, #f4f8fb 100%); }
 .hero-copy { min-width: 0; }
 .eyebrow, .section-kicker, .workbench-step { color: var(--aetp-cyan); font-size: 10px; font-weight: 800; letter-spacing: .16em; }
@@ -529,19 +524,30 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
 .case-cell { display: flex; flex-direction: column; gap: 2px; }
 .case-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .case-tag { margin-right: 4px; }
+.type-grid { display: grid; gap: 12px; padding: 2px; }
+.type-card { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto 18px; align-items: center; gap: 14px; width: 100%; padding: 15px 16px; border: 1px solid #dce7eb; border-radius: 10px; color: var(--aetp-ink); background: linear-gradient(135deg, #fbfefe 0%, #f3f8f9 100%); cursor: pointer; text-align: left; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+.type-card:hover { border-color: #8ac8c6; background: #fff; box-shadow: 0 8px 20px rgba(25, 93, 98, .1); transform: translateY(-1px); }
+.type-card:focus-visible { outline: 3px solid rgba(30, 111, 217, .2); outline-offset: 2px; border-color: var(--aetp-blue); }
+.type-mark { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid #c6e5e2; border-radius: 11px; color: var(--aetp-cyan); background: #eaf8f7; }
+.type-copy { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.type-copy strong { overflow: hidden; color: var(--aetp-ink); font-size: 15px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.type-copy small { overflow: hidden; color: var(--aetp-muted); font: 11px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.type-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.type-arrow { color: #91a5aa; transition: color .18s ease, transform .18s ease; }
+.type-card:hover .type-arrow { color: var(--aetp-cyan); transform: translateX(2px); }
 
-:deep(.script-upload-dialog.el-dialog) { width: min(1120px, calc(100vw - 40px)); max-width: 1120px; margin-top: 4vh; overflow: hidden; border-radius: 12px; }
+:deep(.script-upload-dialog.el-dialog) { width: min(1120px, calc(100vw - 40px)); max-width: 1120px; max-height: calc(100dvh - 32px); margin: 16px auto; overflow: hidden; border-radius: 12px; }
 :deep(.script-upload-dialog.el-dialog .el-dialog__header) { margin-right: 0; padding: 20px 24px 17px; border-bottom: 1px solid var(--aetp-line); }
 :deep(.script-upload-dialog.el-dialog .el-dialog__title) { color: var(--aetp-ink); font-size: 17px; font-weight: 750; }
-:deep(.script-upload-dialog.el-dialog .el-dialog__body) { max-height: 86vh; padding: 18px; overflow: auto; background: #f4f7f8; }
+:deep(.script-upload-dialog.el-dialog .el-dialog__body) { display: flex; height: calc(100dvh - 110px); min-height: 0; max-height: calc(100dvh - 110px); flex-direction: column; padding: 0; overflow: hidden; background: #f4f7f8; }
 :deep(.script-upload-dialog.el-dialog .el-dialog__footer) { padding: 14px 24px; border-top: 1px solid var(--aetp-line); background: #fbfcfd; }
-.plugin-ui-shell { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border: 1px solid #d5e1e4; border-radius: 9px; background: #fff; box-shadow: 0 8px 24px rgba(34, 66, 76, .08); }
+.plugin-ui-shell { display: flex; min-height: 0; height: 100%; flex: 1; flex-direction: column; overflow: hidden; border: 1px solid #d5e1e4; border-radius: 9px; background: #fff; box-shadow: 0 8px 24px rgba(34, 66, 76, .08); }
 .plugin-ui-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 0 13px; border-bottom: 1px solid #e3ecee; color: #789096; background: #fbfdfd; font-size: 10px; letter-spacing: .08em; }
 .plugin-ui-toolbar span { display: inline-flex; align-items: center; gap: 7px; }
 .plugin-ui-toolbar span:last-child { letter-spacing: 0; }
-.plugin-ui-frame-wrap { min-height: 540px; height: clamp(540px, 66vh, 730px); background: #fff; }
+.plugin-ui-frame-wrap { min-height: 0; height: auto; flex: 1; background: #fff; }
 .plugin-ui-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
-.plugin-state { display: flex; min-height: clamp(540px, 66vh, 730px); flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; border: 1px dashed #cbdadd; border-radius: 9px; background: rgba(255, 255, 255, .6); }
+.plugin-state { display: flex; min-height: 300px; height: 100%; flex: 1; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; border: 1px dashed #cbdadd; border-radius: 9px; background: rgba(255, 255, 255, .6); }
 .plugin-state strong { margin-top: 15px; color: var(--aetp-ink); font-size: 15px; }
 .plugin-state p { max-width: 360px; margin: 8px 0 0; color: var(--aetp-muted); font-size: 12px; line-height: 1.6; }
 .plugin-state code { padding: 2px 5px; border-radius: 4px; color: var(--aetp-blue-deep); background: #eaf3ff; font-family: ui-monospace, monospace; }
@@ -556,8 +562,12 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
   .library-stats { grid-template-columns: 1fr 1fr; }
   .stats-intro { grid-column: 1 / -1; }
   .stat-block:nth-child(3) { border-left: 0; }
-  :deep(.script-upload-dialog.el-dialog) { width: calc(100vw - 24px); margin-top: 12px; }
-  :deep(.script-upload-dialog.el-dialog .el-dialog__body) { max-height: calc(100vh - 120px); }
-  .plugin-ui-frame-wrap, .plugin-state { min-height: 500px; height: 64vh; }
+  .type-card { grid-template-columns: 40px minmax(0, 1fr) 18px; gap: 11px; padding: 13px; }
+  .type-mark { width: 40px; height: 40px; }
+  .type-tags { grid-column: 2 / -1; justify-content: flex-start; }
+  :deep(.script-upload-dialog.el-dialog) { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); margin: 8px auto; }
+  :deep(.script-upload-dialog.el-dialog .el-dialog__body) { height: calc(100dvh - 110px); max-height: calc(100dvh - 110px); padding: 0; }
+  .plugin-ui-frame-wrap { height: auto; }
+  .plugin-state { min-height: 260px; height: 100%; padding: 20px; }
 }
 </style>
