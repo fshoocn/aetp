@@ -80,7 +80,7 @@
     </el-card>
 
     <!-- 上传流程：第一步选择任务类型，第二步进入对应插件的 UI 工作台 -->
-    <el-dialog v-model="typeSelectVisible" title="选择任务类型" width="620px">
+    <el-dialog v-if="!uploadVisible" v-model="typeSelectVisible" title="选择任务类型" width="620px">
       <div v-loading="taskTypesLoading" class="type-grid">
         <button
           v-for="plugin in taskTypes"
@@ -108,6 +108,7 @@
     </el-dialog>
 
     <el-dialog
+      v-if="uploadVisible"
       v-model="uploadVisible"
       class="script-upload-dialog"
       :title="`上传测试脚本 · ${currentPlugin?.display_name || ''}`"
@@ -143,13 +144,13 @@
       </div>
     </el-dialog>
 
-    <el-drawer v-model="casesVisible" :title="`用例索引 · ${activeScript?.name || ''}`" size="520px">
-      <div v-loading="casesLoading">
+    <el-drawer v-model="casesVisible" class="cases-drawer" :title="`用例索引 · ${activeScript?.name || ''}`" size="520px">
+      <div v-loading="casesLoading" class="cases-drawer-body">
         <div v-if="cases.length" class="cases-summary">
           <el-tag effect="plain" size="small">{{ cases.length }} 个用例</el-tag>
           <span>耗时数据：{{ durationSamples }} 个样本</span>
         </div>
-        <el-table :data="cases" size="small" max-height="60vh">
+        <el-table :data="cases" size="small">
           <el-table-column prop="stable_key" label="稳定键 (stable_key)" min-width="240">
             <template #default="{ row }">
               <div class="case-cell"><strong>{{ row.name || row.stable_key }}</strong><small>{{ row.stable_key }}</small></div>
@@ -228,7 +229,12 @@ function choosePlugin(plugin: TaskTypePlugin) {
 }
 
 // ---- 上传 ----
-const pluginUiUrl = computed(() => currentPlugin.value?.ui?.url || "");
+const pluginUiUrl = computed(() => {
+  const url = currentPlugin.value?.ui?.url || "";
+  if (!url) return "";
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(currentPlugin.value?.plugin_version || "")}`;
+});
 const pluginUiObjectUrl = ref("");
 const pluginUiLoading = ref(false);
 const pluginUploading = ref(false);
@@ -330,6 +336,14 @@ function asUploadFile(value: unknown, fallbackName: string): File | null {
   if (typeof Blob !== "undefined" && value instanceof Blob) {
     return new File([value], fallbackName, { type: value.type });
   }
+  if (value && typeof value === "object" && "__aetp_file" in value) {
+    const serialized = value as { __aetp_file?: boolean; name?: string; type?: string; lastModified?: number; data?: unknown };
+    if (serialized.__aetp_file && typeof serialized.data === "string") {
+      const binary = atob(serialized.data);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      return new File([bytes], serialized.name || fallbackName, { type: serialized.type || "", lastModified: serialized.lastModified });
+    }
+  }
   return null;
 }
 async function handlePluginUpload(payload: Record<string, unknown>) {
@@ -369,16 +383,42 @@ async function handlePluginUpload(payload: Record<string, unknown>) {
 }
 async function onPluginMessage(event: MessageEvent) {
   if (event.source !== pluginFrame.value?.contentWindow || event.origin !== window.location.origin) return;
-  const message = event.data as { type?: string; payload?: Record<string, unknown> };
+  let message = event.data as { type?: string; payload?: Record<string, unknown> | string } | string;
+  if (typeof message === "string") {
+    try {
+      message = JSON.parse(message) as { type?: string; payload?: Record<string, unknown> | string };
+    } catch {
+      return;
+    }
+  }
+  let payload = message.payload;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+  }
+  const messagePayload = payload ?? {};
   if (message.type === "aetp.plugin.ready") postPluginContext();
   if (message.type === "aetp.plugin.config") {
-    uploadForm.config = asConfig(message.payload?.config);
-    verifyNodeId.value = typeof message.payload?.node_id === "string" ? message.payload.node_id : "";
+    uploadForm.config = asConfig(messagePayload.config);
+    verifyNodeId.value = typeof messagePayload.node_id === "string" ? messagePayload.node_id : "";
   }
-  if (message.type === "aetp.plugin.upload") await handlePluginUpload(message.payload || {});
+  if (message.type === "aetp.plugin.upload") await handlePluginUpload(messagePayload);
+  if (message.type === "aetp.plugin.save") {
+    if (!uploadForm.scriptId) {
+      sendPluginMessage("aetp.plugin.save-result", { status: "error", errors: ["请先上传并解析脚本"] });
+      return;
+    }
+    uploadForm.config = asConfig(messagePayload.config);
+    uploadVisible.value = false;
+    typeSelectVisible.value = false;
+    ElMessage.success("脚本配置已保存");
+  }
   if (message.type === "aetp.plugin.verify") {
-    const scriptId = typeof message.payload?.script_id === "string" ? message.payload.script_id : uploadForm.scriptId;
-    const nodeId = typeof message.payload?.node_id === "string" ? message.payload.node_id : verifyNodeId.value;
+    const scriptId = typeof messagePayload.script_id === "string" ? messagePayload.script_id : uploadForm.scriptId;
+    const nodeId = typeof messagePayload.node_id === "string" ? messagePayload.node_id : verifyNodeId.value;
     if (!scriptId || !nodeId) {
       sendPluginMessage("aetp.plugin.verify-result", { errors: ["请先上传脚本并选择验证节点"] });
       return;
@@ -521,6 +561,9 @@ function parseTag(v: string) { return ({ parsed: "success", parsing: "warning", 
 .script-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 .cases-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; color: var(--aetp-muted); font-size: 12px; }
+.cases-drawer :deep(.el-drawer__body) { display: flex; min-height: 0; flex-direction: column; padding: 18px 20px; }
+.cases-drawer-body { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.cases-drawer-body :deep(.el-table) { min-height: 0; height: min(560px, calc(100dvh - 270px)) !important; max-height: min(560px, calc(100dvh - 270px)); overflow: hidden; }
 .case-cell { display: flex; flex-direction: column; gap: 2px; }
 .case-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
 .case-tag { margin-right: 4px; }

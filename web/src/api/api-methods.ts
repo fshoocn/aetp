@@ -241,6 +241,9 @@ export const aetpApi = {
     uiAsset(url: string) { return api.blob(url); },
     managed() { return api.get<ManagedPlugin[]>(`${API_V1}/task-types/managed`); },
     upload(file: File) { return api.upload<ManagedPlugin>(`${API_V1}/task-types/managed`, file); },
+    download(pluginId: string) {
+      return api.blob(`${API_V1}/task-types/managed/${encodeURIComponent(pluginId)}/download`);
+    },
     install(pluginId: string) {
       return api.post<ManagedPlugin>(`${API_V1}/task-types/managed/${encodeURIComponent(pluginId)}/install`);
     },

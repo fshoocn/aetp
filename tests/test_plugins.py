@@ -322,6 +322,52 @@ def test_plugin_manager_keeps_task_type_enabled_when_only_old_version_disabled(t
     assert manager.disabled_task_types() == set()
 
 
+def test_plugin_manager_disables_previous_version_when_new_version_is_installed(tmp_path):
+    """安装启用的新版本后，同 task_type 的旧版本应自动停用。"""
+    from master.plugins.manager import PluginManager
+
+    manager = PluginManager(tmp_path)
+    first = manager.upload("test_plugin.zip", _build_test_plugin_zip())
+    manager.install(first.plugin_id)
+
+    second = manager.upload("test_plugin.zip", _build_test_plugin_zip("1.1.0"))
+    manager.install(second.plugin_id)
+
+    records = {item.plugin_id: item for item in manager.list()}
+    assert records[first.plugin_id].enabled is False
+    assert records[second.plugin_id].enabled is True
+    assert [package.metadata.plugin_version for package in manager.load_packages()] == ["1.1.0"]
+
+
+def test_managed_plugin_download_endpoint_returns_installed_zip(client):
+    """平台管理员可下载已安装插件包，未认证请求不可下载。"""
+
+    manager = client.app.state.container.plugin_manager()
+    record = manager.upload("test_plugin.zip", _build_test_plugin_zip())
+    manager.install(record.plugin_id)
+
+    denied = client.get(f"/api/v1/task-types/managed/{record.plugin_id}/download")
+    assert denied.status_code == 401
+
+    auth_service = client.app.state.container.auth_service()
+    assert auth_service.bootstrap_admin("plugin-download-admin", "admin-pass-123", "Plugin Admin")
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "plugin-download-admin", "password": "admin-pass-123"},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    response = client.get(
+        f"/api/v1/task-types/managed/{record.plugin_id}/download",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    assert record.filename in response.headers["content-disposition"]
+    assert response.content.startswith(b"PK")
+
+
 def _build_test_plugin_zip(version: str = "1.0.0") -> bytes:
     """构造最小 ZIP 插件包：plugin.json + main.py（导出 package）。"""
     import io

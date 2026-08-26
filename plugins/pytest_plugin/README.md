@@ -33,7 +33,7 @@ Compress-Archive -Path plugin.json,main.py,ui -DestinationPath ..\pytest_plugin.
 - 配置页面位于插件包 `ui/index.html`，由 Web iframe 宿主加载；页面通过 `postMessage`
 	接收节点能力与验证上下文，不依赖平台 Web 源码。
 - 任务类型：`pytest`。
-- 版本：`1.1.0`（UI 工作台重写，协议版本保持 1 以兼容既有宿主）。
+- 版本：`1.1.1`（修复单文件解析并增加保存关闭操作，协议版本保持 1 以兼容既有宿主）。
 
 ## 使用限制
 

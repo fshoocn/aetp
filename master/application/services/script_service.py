@@ -286,7 +286,8 @@ class ScriptService:
             safe_extract_zip(data, target)
         else:
             target.mkdir(parents=True, exist_ok=True)
-            (target / filename).write_bytes(data)
+            # 单文件统一物化为 pytest 默认可发现的名称，兼容用户上传 demo.py 等文件。
+            (target / "test_script.py").write_bytes(data)
 
     @staticmethod
     async def _parse_cases(master, script_dir: str | Path, config: dict) -> list[CaseInfo]:
