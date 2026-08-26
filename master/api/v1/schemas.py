@@ -596,6 +596,7 @@ class DeliveryOut(BaseModel):
     event_id: str
     subscription_id: str
     endpoint_id: str
+    content: dict = Field(default_factory=dict)
     status: str
     attempts: int = 0
     next_attempt_at: datetime | None = None

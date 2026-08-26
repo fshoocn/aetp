@@ -269,6 +269,7 @@ def _seed_delivery(client, headers, project_id):
                 event_id="evt-001",
                 subscription_id="ES-TEST",
                 endpoint_id="NE-TEST",
+                content={"event_type": "run.failed", "payload": {"reason": "timeout"}},
                 status="exhausted",
                 attempts=5,
                 error_message="连接超时",
@@ -291,6 +292,8 @@ def test_delivery_list_and_retry(client):
     assert resp.status_code == 200
     assert len(resp.json()) == 1
     assert resp.json()[0]["status"] == "exhausted"
+    assert resp.json()[0]["content"]["event_type"] == "run.failed"
+    assert resp.json()[0]["content"]["payload"]["reason"] == "timeout"
 
     # 按状态过滤
     resp = client.get(

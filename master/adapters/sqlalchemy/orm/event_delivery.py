@@ -10,7 +10,7 @@ from datetime import datetime
 from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, TimestampMixin, UTCDateTime
+from .base import Base, JSONType, TimestampMixin, UTCDateTime
 
 
 class EventDelivery(Base, TimestampMixin):
@@ -31,6 +31,7 @@ class EventDelivery(Base, TimestampMixin):
     event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     subscription_id: Mapped[str] = mapped_column(String(64), nullable=False)
     endpoint_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
