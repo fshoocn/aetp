@@ -25,12 +25,19 @@ class ExponentialBackoff:
     # sym:_attempts 已尝试次数（内部计数）
     _attempts: int = field(default=0, repr=False)
 
-    def next(self) -> float:
-        """返回下一次等待秒数（递增）并推进计数。"""
-        raw = min(self.base_delay_s * (self.factor**self._attempts), self.max_delay_s)
-        self._attempts += 1
+    def delay_for(self, attempt: int) -> float:
+        """按给定的 0-based attempt 计算一次退避，不改变内部计数。"""
+        if attempt < 0:
+            raise ValueError("attempt must be non-negative")
+        raw = min(self.base_delay_s * (self.factor**attempt), self.max_delay_s)
         jitter = random.uniform(-self.jitter_ratio, self.jitter_ratio)
         return max(0.0, raw * (1.0 + jitter))
+
+    def next(self) -> float:
+        """返回下一次等待秒数（递增）并推进计数。"""
+        delay = self.delay_for(self._attempts)
+        self._attempts += 1
+        return delay
 
     def reset(self) -> None:
         """连接成功后重置计数。"""

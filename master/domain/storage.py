@@ -34,3 +34,10 @@ class Storage(Protocol):
     def delete(self, key: str) -> None:
         """删除对象；不存在时静默忽略。"""
         ...
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        """列出存储中给定前缀下的所有对象键（相对键，'/' 分隔）。
+
+        用于孤儿文件扫描：对比数据库中引用的 file_ref 集合，删除无引用的对象。
+        """
+        ...

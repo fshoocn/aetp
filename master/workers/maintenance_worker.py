@@ -18,22 +18,25 @@ from contextlib import suppress
 
 from master.application.services.recovery_service import RecoveryService
 from master.application.services.schedule_service import ScheduleService
+from master.application.services.storage_cleanup_service import StorageCleanupService
 
 logger = logging.getLogger("master.workers.maintenance")
 
 
 class MaintenanceWorker:
-    """周期执行 Schedule 推进与 Stale Run 检测的后台 worker。"""
+    """周期执行 Schedule 推进、Stale Run 检测与存储孤儿清理的后台 worker。"""
 
     def __init__(
         self,
         schedule_service: ScheduleService,
         recovery_service: RecoveryService,
         *,
+        storage_cleanup_service: StorageCleanupService | None = None,
         interval_s: float = 30.0,
     ) -> None:
         self._schedule = schedule_service
         self._recovery = recovery_service
+        self._storage_cleanup = storage_cleanup_service
         self._interval_s = interval_s
         self._running = False
         self._task: asyncio.Task[None] | None = None
@@ -65,8 +68,8 @@ class MaintenanceWorker:
             await asyncio.sleep(self._interval_s)
 
     async def run_once(self) -> dict[str, int]:
-        """执行一轮维护（触发到期调度 + 检测超时 Run）。"""
-        stats: dict[str, int] = {"schedules_triggered": 0, "stale_runs": 0}
+        """执行一轮维护（触发到期调度 + 检测超时 Run + 清理孤儿文件）。"""
+        stats: dict[str, int] = {"schedules_triggered": 0, "stale_runs": 0, "orphans_removed": 0}
         try:
             stats["schedules_triggered"] = await self._schedule.tick()
         except Exception:
@@ -75,4 +78,9 @@ class MaintenanceWorker:
             stats["stale_runs"] = self._recovery.detect_stale_runs()
         except Exception:
             logger.exception("Stale Run 检测失败")
+        if self._storage_cleanup is not None:
+            try:
+                stats["orphans_removed"] = self._storage_cleanup.cleanup_orphans()["removed"]
+            except Exception:
+                logger.exception("存储孤儿清理失败")
         return stats

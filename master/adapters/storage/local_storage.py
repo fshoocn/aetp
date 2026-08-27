@@ -38,6 +38,17 @@ class LocalStorage:
         # 向上递归清理空父目录，避免删除后留下孤儿目录
         self._prune_empty_parents(path.parent)
 
+    def list_keys(self, prefix: str = "") -> list[str]:
+        """列出存储中给定前缀下的所有文件键（相对键，'/' 分隔）。"""
+        base = self._root / prefix
+        if not base.is_dir():
+            return []
+        result: list[str] = []
+        for path in base.rglob("*"):
+            if path.is_file():
+                result.append(path.relative_to(self._root).as_posix())
+        return result
+
     def _prune_empty_parents(self, directory: Path) -> None:
         """自底向上删除空的父目录，遇到非空目录或 root 即停。"""
         root = self._root.resolve()

@@ -53,11 +53,17 @@ class TestScriptRepositoryImpl(TestScriptRepository):
         )
         return _to_domain(orm) if orm is not None else None
 
-    def get_by_hash(self, sha256: str) -> TestScript | None:
-        """按内容哈希查找（同 hash 重复上传幂等复用）。"""
+    def get_by_hash(self, sha256: str, *, project_id: str) -> TestScript | None:
+        """在项目边界内按内容哈希查找（同 hash 重复上传幂等复用）。"""
         orm = (
             self._s.execute(
-                select(TestScriptORM).options(joinedload(TestScriptORM.project)).where(TestScriptORM.sha256 == sha256)
+                select(TestScriptORM)
+                .options(joinedload(TestScriptORM.project))
+                .where(
+                    TestScriptORM.sha256 == sha256,
+                    TestScriptORM.project_pk
+                    == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery(),
+                )
             )
             .scalars()
             .one_or_none()
@@ -160,3 +166,7 @@ class TestScriptRepositoryImpl(TestScriptRepository):
             raise ValueError(f"测试脚本不存在: script_id={script_id}")
         self._s.delete(orm)
         self._s.flush()
+
+    def list_all_file_refs(self) -> list[str]:
+        refs = self._s.execute(select(TestScriptORM.file_ref)).scalars().all()
+        return [r for r in refs if r]

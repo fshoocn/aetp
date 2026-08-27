@@ -128,8 +128,9 @@ class OutboxWorker:
             logger.error("Outbox 重试耗尽: outbox_id=%s topic=%s（%s）", message.outbox_id, message.topic, exc)
         else:
             message.status = OutboxStatus.RETRYING
-            self._backoff.reset()
-            delay = self._backoff.next()
+            # claim_due 已将 attempts 加一；按当前消息的历史尝试次数计算退避，
+            # 避免不同消息共享一个可变计数器导致退避被重置。
+            delay = self._backoff.delay_for(message.attempts - 1)
             message.next_attempt_at = now + timedelta(seconds=delay)
             logger.warning(
                 "Outbox 发送失败，%.1fs 后重试: outbox_id=%s topic=%s（%s）",

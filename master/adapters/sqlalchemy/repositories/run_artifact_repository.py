@@ -86,3 +86,7 @@ class RunArtifactRepositoryImpl(RunArtifactRepository):
             .order_by(RunArtifactORM.uploaded_at, RunArtifactORM.id)
         )
         return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+
+    def list_all_file_refs(self) -> list[str]:
+        refs = self._s.execute(select(RunArtifactORM.file_ref)).scalars().all()
+        return [r for r in refs if r]
