@@ -89,6 +89,7 @@ def update_integration(
         integration = service.update_integration(
             integration_id,
             project_id=project_id,
+            actor_id=_access.user.persisted_id,
             name=body.name,
             secret_value=body.secret_value,
             config_json=body.config_json,
@@ -107,7 +108,7 @@ def delete_integration(
     service: CiIntegrationServiceDep,
 ) -> None:
     try:
-        service.delete_integration(integration_id, project_id)
+        service.delete_integration(integration_id, project_id, actor_id=_access.user.persisted_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -122,7 +123,10 @@ def list_bindings(
     _access: ProjectAccessDep,
     service: CiIntegrationServiceDep,
 ) -> list[BindingOut]:
-    bindings = service.list_bindings(integration_id)
+    try:
+        bindings = service.list_bindings(integration_id, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return [BindingOut.model_validate(b) for b in bindings]
 
 
@@ -140,12 +144,14 @@ def create_binding(
 ) -> BindingOut:
     try:
         binding = service.create_binding(
+            project_id=project_id,
+            actor_id=_access.user.persisted_id,
             integration_id=integration_id,
             task_id=body.task_id,
             event_filter_json=body.event_filter_json,
             parameter_mapping_json=body.parameter_mapping_json,
         )
-    except (ValueError, Exception) as exc:
+    except Exception as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return BindingOut.model_validate(binding)
 
@@ -165,6 +171,9 @@ def update_binding(
     try:
         binding = service.update_binding(
             binding_id,
+            project_id=project_id,
+            integration_id=integration_id,
+            actor_id=_access.user.persisted_id,
             event_filter_json=body.event_filter_json,
             parameter_mapping_json=body.parameter_mapping_json,
             enabled=body.enabled,
@@ -186,6 +195,11 @@ def delete_binding(
     service: CiIntegrationServiceDep,
 ) -> None:
     try:
-        service.delete_binding(binding_id)
+        service.delete_binding(
+            binding_id,
+            project_id=project_id,
+            integration_id=integration_id,
+            actor_id=_access.user.persisted_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -40,6 +40,11 @@ class HookRegistry:
     admission_hooks: list[AdmissionHook] = field(default_factory=list)
     event_hooks: list[EventHook] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        names = [hook.name for hook in (*self.admission_hooks, *self.event_hooks)]
+        if len(names) != len(set(names)):
+            raise ValueError("Hook 名称必须全局唯一")
+
     def sorted_admission(self, stage: str) -> list[AdmissionHook]:
         return sorted(
             [h for h in self.admission_hooks if h.stage == stage],
@@ -87,9 +92,20 @@ class HookRunner:
         for hook in hooks:
             decision = await self._run_single_admission(hook, context, timeout)
             if not decision.allowed and not decision.advisory:
-                self._audit(hook.name, stage, "denied", context.project_id, error=decision.reason)
+                audited = self._audit(hook.name, stage, "denied", context.project_id, error=decision.reason)
+                if not audited:
+                    return HookDecision(
+                        allowed=False,
+                        reason="准入 Hook 审计失败",
+                        code="HOOK_EXECUTION_FAILED",
+                    )
                 return decision
-            self._audit(hook.name, stage, "passed", context.project_id)
+            if not self._audit(hook.name, stage, "passed", context.project_id):
+                return HookDecision(
+                    allowed=False,
+                    reason="准入 Hook 审计失败",
+                    code="HOOK_EXECUTION_FAILED",
+                )
 
         return HookDecision(allowed=True)
 
@@ -153,21 +169,31 @@ class HookRunner:
         event_id: str | None = None,
         duration_ms: float | None = None,
         error: str | None = None,
-    ) -> None:
-        with self._uow_factory() as uow:
-            uow.hook_executions.add(
-                HookExecution(
-                    execution_id=new_id(),
-                    event_id=event_id,
-                    project_id=project_id,
-                    hook_name=hook_name,
-                    stage=stage,
-                    status=status,
-                    duration_ms=duration_ms,
-                    error_message=error,
-                    occurred_at=utcnow(),
+    ) -> bool:
+        try:
+            with self._uow_factory() as uow:
+                uow.hook_executions.add(
+                    HookExecution(
+                        execution_id=new_id(),
+                        event_id=event_id,
+                        project_id=project_id,
+                        hook_name=hook_name,
+                        stage=stage,
+                        status=status,
+                        duration_ms=duration_ms,
+                        error_message=error,
+                        occurred_at=utcnow(),
+                    )
                 )
+            return True
+        except Exception:
+            logger.exception(
+                "Hook 执行审计写入失败: hook=%s stage=%s event=%s",
+                hook_name,
+                stage,
+                event_id,
             )
+            return False
 
     def list_executions(
         self,

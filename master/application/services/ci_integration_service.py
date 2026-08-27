@@ -127,6 +127,7 @@ class CiIntegrationService:
         integration_id: str,
         *,
         project_id: str,
+        actor_id: int,
         name: str | None = None,
         secret_value: str | None = None,
         config_json: dict | None = None,
@@ -152,7 +153,7 @@ class CiIntegrationService:
                 AuditLog(
                     audit_id=new_id(),
                     project_id=project_id,
-                    actor_id=integration.created_by,
+                    actor_id=actor_id,
                     action=("integration.key_rotate" if secret_value is not None else "integration.update"),
                     resource_type="integration",
                     resource_id=integration.integration_id,
@@ -160,7 +161,7 @@ class CiIntegrationService:
             )
             return result
 
-    def delete_integration(self, integration_id: str, project_id: str) -> None:
+    def delete_integration(self, integration_id: str, project_id: str, *, actor_id: int) -> None:
         with self._uow_factory() as uow:
             integration = uow.project_integrations.get_by_integration_id(integration_id)
             if integration is None or integration.project_id != project_id:
@@ -173,7 +174,7 @@ class CiIntegrationService:
                 AuditLog(
                     audit_id=new_id(),
                     project_id=project_id,
-                    actor_id=integration.created_by,
+                    actor_id=actor_id,
                     action="integration.delete",
                     resource_type="integration",
                     resource_id=integration_id,
@@ -186,6 +187,8 @@ class CiIntegrationService:
     def create_binding(
         self,
         *,
+        project_id: str,
+        actor_id: int,
         integration_id: str,
         task_id: str,
         event_filter_json: dict | None = None,
@@ -193,7 +196,7 @@ class CiIntegrationService:
     ) -> CiTriggerBinding:
         with self._uow_factory() as uow:
             integration = uow.project_integrations.get_by_integration_id(integration_id)
-            if integration is None:
+            if integration is None or integration.project_id != project_id:
                 raise ValueError(f"集成不存在: {integration_id}")
             task = uow.test_tasks.get_by_task_id(task_id, integration.project_id)
             if task is None:
@@ -207,38 +210,83 @@ class CiIntegrationService:
                 parameter_mapping_json=parameter_mapping_json or {},
                 enabled=True,
             )
-            return uow.ci_trigger_bindings.add(binding)
+            result = uow.ci_trigger_bindings.add(binding)
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=actor_id,
+                    action="integration.binding_create",
+                    resource_type="ci_trigger_binding",
+                    resource_id=result.binding_id,
+                    detail={"integration_id": integration_id, "task_id": task_id},
+                )
+            )
+            return result
 
-    def list_bindings(self, integration_id: str) -> list[CiTriggerBinding]:
+    def list_bindings(self, integration_id: str, project_id: str) -> list[CiTriggerBinding]:
         with self._uow_factory() as uow:
+            integration = uow.project_integrations.get_by_integration_id(integration_id)
+            if integration is None or integration.project_id != project_id:
+                raise ValueError(f"集成不存在: {integration_id}")
             return uow.ci_trigger_bindings.list_by_integration(integration_id)
 
     def update_binding(
         self,
         binding_id: str,
         *,
+        project_id: str,
+        integration_id: str,
+        actor_id: int,
         event_filter_json: dict | None = None,
         parameter_mapping_json: dict | None = None,
         enabled: bool | None = None,
     ) -> CiTriggerBinding:
         with self._uow_factory() as uow:
             binding = uow.ci_trigger_bindings.get_by_binding_id(binding_id)
-            if binding is None:
+            if binding is None or binding.integration_id != integration_id:
                 raise ValueError(f"触发绑定不存在: {binding_id}")
+            integration = uow.project_integrations.get_by_integration_id(integration_id)
+            if integration is None or integration.project_id != project_id:
+                raise ValueError(f"集成不存在: {integration_id}")
             if event_filter_json is not None:
                 binding.event_filter_json = event_filter_json
             if parameter_mapping_json is not None:
                 binding.parameter_mapping_json = parameter_mapping_json
             if enabled is not None:
                 binding.enabled = enabled
-            return uow.ci_trigger_bindings.update(binding)
+            result = uow.ci_trigger_bindings.update(binding)
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=actor_id,
+                    action="integration.binding_update",
+                    resource_type="ci_trigger_binding",
+                    resource_id=binding_id,
+                )
+            )
+            return result
 
-    def delete_binding(self, binding_id: str) -> None:
+    def delete_binding(self, binding_id: str, *, project_id: str, integration_id: str, actor_id: int) -> None:
         with self._uow_factory() as uow:
             binding = uow.ci_trigger_bindings.get_by_binding_id(binding_id)
-            if binding is None:
+            if binding is None or binding.integration_id != integration_id:
                 raise ValueError(f"触发绑定不存在: {binding_id}")
+            integration = uow.project_integrations.get_by_integration_id(integration_id)
+            if integration is None or integration.project_id != project_id:
+                raise ValueError(f"集成不存在: {integration_id}")
             uow.ci_trigger_bindings.delete(binding_id)
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=actor_id,
+                    action="integration.binding_delete",
+                    resource_type="ci_trigger_binding",
+                    resource_id=binding_id,
+                )
+            )
 
     # -- Webhook 处理 --------------------------------------------------------
 
@@ -271,7 +319,11 @@ class CiIntegrationService:
 
             project_id = integration.project_id
 
-            # 3. 去重
+            # 2. 先验证签名，避免未认证请求探测或污染 delivery 状态。
+            if not self._verify_signature(integration.secret_ref, signature, payload_body, headers):
+                raise ValueError("签名验证失败")
+
+            # 3. 去重（仅对已认证 delivery 生效）
             existing = uow.ci_webhook_deliveries.get_by_integration_delivery(integration_id, delivery_id)
             if existing is not None:
                 logger.info(
@@ -285,20 +337,6 @@ class CiIntegrationService:
                     triggered_run_ids=tuple(existing.triggered_run_ids),
                     error=existing.error_message,
                 )
-
-            # 2. 验证签名
-            if not self._verify_signature(integration.secret_ref, signature, payload_body, headers):
-                uow.ci_webhook_deliveries.add(
-                    CiWebhookDelivery(
-                        integration_id=integration_id,
-                        delivery_id=delivery_id,
-                        received_at=utcnow(),
-                        payload_hash=payload_hash,
-                        status="rejected",
-                        error_message="签名验证失败",
-                    )
-                )
-                raise ValueError("签名验证失败")
 
             # 4. 查找匹配的触发绑定
             bindings = uow.ci_trigger_bindings.list_by_integration(integration_id)
@@ -340,6 +378,21 @@ class CiIntegrationService:
                     error_message=error_message,
                 )
             )
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    project_id=project_id,
+                    actor_id=None,
+                    action="integration.webhook",
+                    resource_type="integration",
+                    resource_id=integration_id,
+                    detail={
+                        "delivery_id": delivery_id,
+                        "status": status,
+                        "triggered_run_count": len(triggered_run_ids),
+                    },
+                )
+            )
 
         logger.info(
             "Webhook 处理完成: integration=%s delivery=%s runs=%d status=%s",
@@ -373,7 +426,7 @@ class CiIntegrationService:
         与 GitHub/GitLab 等 provider 的签名算法一致；无 secret 时跳过验证。
         """
         if not secret_ref:
-            return True  # 未配置密钥则跳过验证
+            return False
         if not signature:
             return False
 

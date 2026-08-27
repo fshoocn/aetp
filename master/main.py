@@ -129,13 +129,19 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("启动恢复：无需恢复")
 
-    # 后台维护 worker：Schedule tick（定时触发）+ Stale Run 超时检测。
+    # 后台维护 worker：Schedule tick（定时触发）+ Stale Run 超时检测 + 孤儿清理。
     # 仅在有 MQTT broker 或需要定时调度的完整部署下才启动；纯 HTTP/单测
     # 模式仍可关闭（由 MQTT runtime 一起控制，保持一致的生命周期边界）。
     maintenance_worker = container.maintenance_worker()
     await maintenance_worker.start()
     app.state.maintenance_worker = maintenance_worker
     logger.info("后台维护 worker 已启动")
+
+    # 事件 Hook 后台消费 worker：异步执行 Event Hook，不阻塞 SSE/通知。
+    event_hook_worker = container.event_hook_worker()
+    await event_hook_worker.start()
+    app.state.event_hook_worker = event_hook_worker
+    logger.info("事件 Hook worker 已启动")
 
     logger.info("应用启动准备完成")
 
@@ -165,6 +171,15 @@ async def lifespan(app: FastAPI):
             logger.error("后台维护 worker 关闭超时，继续释放数据库资源")
         except Exception:
             logger.exception("后台维护 worker 关闭失败，继续释放数据库资源")
+
+    event_hook_worker = getattr(app.state, "event_hook_worker", None)
+    if event_hook_worker is not None:
+        try:
+            await asyncio.wait_for(event_hook_worker.stop(), timeout=5.0)
+        except TimeoutError:
+            logger.error("事件 Hook worker 关闭超时，继续释放数据库资源")
+        except Exception:
+            logger.exception("事件 Hook worker 关闭失败，继续释放数据库资源")
 
     logger.info("应用生命周期关闭，释放数据库连接")
     container.database().close()

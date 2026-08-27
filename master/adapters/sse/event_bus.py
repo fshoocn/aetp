@@ -15,6 +15,9 @@ from typing import Any
 
 from master.adapters.sse.event import DomainEvent
 
+_QUEUE_MAXSIZE = 256
+_DROPPABLE_EVENT_TYPES = frozenset({"run.progress", "run.log"})
+
 
 class EventBus:
     """轻量级异步事件总线。"""
@@ -45,11 +48,17 @@ class EventBus:
         async with self._lock:
             for queue, subscriber_project_id in list(self._subscribers.items()):
                 if project_id is not None and project_id == subscriber_project_id:
+                    if queue.full():
+                        if event_type in _DROPPABLE_EVENT_TYPES:
+                            continue
+                        # Preserve the newest stateful event while keeping the
+                        # queue bounded; reconnecting clients replay persisted events.
+                        queue.get_nowait()
                     queue.put_nowait(event)
 
     async def subscribe(self, project_id: str) -> asyncio.Queue:
         """注册一个项目范围订阅者队列。"""
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
         async with self._lock:
             self._subscribers[queue] = project_id
         return queue

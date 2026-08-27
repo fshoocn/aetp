@@ -25,7 +25,8 @@ export interface DomainEvent {
 export function connectEvents(
   projectId: string,
   onEvent: (ev: DomainEvent) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
+  onOpen?: () => void
 ): () => void {
   if (!localStorage.getItem("token") || !projectId) return () => {};
 
@@ -62,29 +63,35 @@ export function connectEvents(
         throw new Error(`SSE status ${resp.status}`);
       }
       retryMs = RETRY_BASE_MS; // 连接成功，重置退避
+      onOpen?.();
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let streamClosed = false;
       // 定时重连检查：fetch 流可能因代理空闲超时静默断开
       while (!stopped) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          streamClosed = true;
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
+        buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
         let idx: number;
         while ((idx = buffer.indexOf("\n\n")) >= 0) {
           const chunk = buffer.slice(0, idx);
           buffer = buffer.slice(idx + 2);
-          const idLine = chunk.split("\n").find((l) => l.startsWith("id: "));
-          const dataLine = chunk
-            .split("\n")
-            .find((l) => l.startsWith("data: "));
-          if (dataLine) {
+          const lines = chunk.split("\n");
+          const idLine = lines.find((line) => line.startsWith("id:"));
+          const dataLines = lines
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).replace(/^ /, ""));
+          if (idLine) lastEventId = idLine.slice(3).trim();
+          if (dataLines.length) {
             try {
-              const event = JSON.parse(dataLine.slice(6)) as DomainEvent;
-              if (idLine) lastEventId = idLine.slice(4).trim();
-              else if (event.sequence != null)
-                lastEventId = String(event.sequence);
+              const event = JSON.parse(dataLines.join("\n")) as DomainEvent;
+              if (!idLine && event.sequence != null) lastEventId = String(event.sequence);
               onEvent(event);
             } catch {
               // 忽略无法解析的事件
@@ -92,6 +99,7 @@ export function connectEvents(
           }
         }
       }
+      if (streamClosed && !stopped) onError?.(new Error("SSE stream closed"));
     } catch (err: unknown) {
       // 网络错误 / 主动 abort：走重连
       if (!stopped && err instanceof Error && err.name !== "AbortError") {

@@ -13,6 +13,7 @@ from master.adapters.sse.event_bus import EventBus
 from master.application.services.notification_dispatcher import NotificationDispatcher
 from master.domain.models import DomainEvent
 from master.domain.repositories import UnitOfWork
+from master.workers.event_hook_worker import EventHookWorker
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +31,12 @@ class EventPublisher:
         event_bus: EventBus,
         *,
         notification_dispatcher: NotificationDispatcher | None = None,
+        event_hook_worker: EventHookWorker | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._event_bus = event_bus
         self._dispatcher: NotificationDispatcher | None = notification_dispatcher
+        self._event_hook_worker = event_hook_worker
 
     async def publish(
         self,
@@ -65,6 +68,7 @@ class EventPublisher:
             persisted = uow.domain_events.add(event)
 
         await self.broadcast(persisted)
+        self._enqueue_event_hook(persisted)
         await self._dispatch_to_notifications(persisted)
         return persisted
 
@@ -87,6 +91,15 @@ class EventPublisher:
             await self._dispatcher.dispatch(event)
         except Exception:
             logger.exception("通知分发失败: event=%s", event.event_type)
+
+    def _enqueue_event_hook(self, event: DomainEvent) -> None:
+        """将事件非阻塞入队到事件 Hook worker（旁路增强，失败不影响主流程）。"""
+        if self._event_hook_worker is None:
+            return
+        try:
+            self._event_hook_worker.enqueue(event)
+        except Exception:
+            logger.exception("事件 Hook 入队失败: event=%s", event.event_type)
 
 
 def _string_value(payload: Mapping[str, Any], key: str) -> str | None:

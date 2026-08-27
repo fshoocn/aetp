@@ -64,16 +64,22 @@ export class ApiError extends Error {
 }
 
 function extractDetail(body: unknown, fallback: string): string {
-  if (body && typeof body === "object" && "detail" in body) {
-    const detail = (body as { detail: unknown }).detail;
-    if (typeof detail === "string") return detail;
-    // FastAPI 422 校验错误：detail 为数组，取第一条
-    if (Array.isArray(detail) && detail.length > 0) {
-      const first = detail[0] as { msg?: string; loc?: unknown[] };
-      const loc = Array.isArray(first?.loc)
-        ? first.loc.filter((x) => typeof x === "string").join(".")
-        : "";
-      return `${loc ? `${loc}: ` : ""}${first?.msg ?? "参数错误"}`;
+  if (body && typeof body === "object") {
+    // 三段式错误响应：{"code","message","data"}
+    const msg = (body as { message?: unknown }).message;
+    if (typeof msg === "string" && "code" in body) return msg;
+    // 旧式 detail 响应与 FastAPI 422 校验错误
+    if ("detail" in body) {
+      const detail = (body as { detail: unknown }).detail;
+      if (typeof detail === "string") return detail;
+      // FastAPI 422 校验错误：detail 为数组，取第一条
+      if (Array.isArray(detail) && detail.length > 0) {
+        const first = detail[0] as { msg?: string; loc?: unknown[] };
+        const loc = Array.isArray(first?.loc)
+          ? first.loc.filter((x) => typeof x === "string").join(".")
+          : "";
+        return `${loc ? `${loc}: ` : ""}${first?.msg ?? "参数错误"}`;
+      }
     }
   }
   return fallback;
