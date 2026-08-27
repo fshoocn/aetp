@@ -32,6 +32,7 @@ class TestScript(Base, TimestampMixin):
     __tablename__ = "test_scripts"
     __table_args__ = (
         UniqueConstraint("project_pk", "name", "version", name="uq_test_scripts_project_name_version"),
+        UniqueConstraint("project_pk", "sha256", name="uq_test_scripts_project_sha256"),
         Index("ix_test_scripts_project_created", "project_pk", "created_at"),
         CheckConstraint(
             "parse_status IN ('pending','parsing','parsed','failed')",

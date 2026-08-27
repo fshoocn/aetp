@@ -47,8 +47,14 @@ def _issue_token_response(auth: AuthService, user: User) -> TokenResponse:
     raw_refresh = generate_refresh_token()
     expires_at = utcnow() + timedelta(days=settings.refresh_token_expire_days)
     auth.issue_refresh_token(user.id, hash_refresh_token(raw_refresh), expires_at)
+    return _token_response(user.id, raw_refresh)
+
+
+def _token_response(user_id: int, raw_refresh: str) -> TokenResponse:
+    """构造令牌响应体（登录与刷新共用）。"""
+    settings = get_settings()
     return TokenResponse(
-        access_token=create_access_token(str(user.id)),
+        access_token=create_access_token(str(user_id)),
         refresh_token=raw_refresh,
         expires_in=settings.jwt_expire_minutes * 60,
     )
@@ -108,9 +114,8 @@ def refresh(body: RefreshRequest, auth: AuthDep, request: Request) -> TokenRespo
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="刷新过于频繁，请稍后再试",
         )
-    settings = get_settings()
     raw_new = generate_refresh_token()
-    expires_at = utcnow() + timedelta(days=settings.refresh_token_expire_days)
+    expires_at = utcnow() + timedelta(days=get_settings().refresh_token_expire_days)
     user = auth.rotate_refresh_token(
         hash_refresh_token(body.refresh_token),
         hash_refresh_token(raw_new),
@@ -121,12 +126,13 @@ def refresh(body: RefreshRequest, auth: AuthDep, request: Request) -> TokenRespo
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="刷新令牌无效、已过期或已撤销",
         )
+    if user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="用户主键缺失",
+        )
     refresh_limiter.reset(ip)
-    return TokenResponse(
-        access_token=create_access_token(str(user.id)),
-        refresh_token=raw_new,
-        expires_in=settings.jwt_expire_minutes * 60,
-    )
+    return _token_response(user.id, raw_new)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

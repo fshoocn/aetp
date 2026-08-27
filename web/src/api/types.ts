@@ -28,38 +28,6 @@ export interface Device {
   last_seen_at: string | null;
 }
 
-export interface Task {
-  id: number;
-  project_id: string;
-  task_id: string;
-  device_id: string;
-  status:
-    | "pending"
-    | "dispatching"
-    | "running"
-    | "cancelling"
-    | "succeeded"
-    | "failed"
-    | "cancelled"
-    | "timed_out";
-  command: Record<string, unknown>;
-  result: Record<string, unknown> | null;
-  error: string | null;
-  created_by: number | null;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-}
-
-export interface TaskLog {
-  id: number;
-  task_id: string;
-  sequence: number;
-  level: string;
-  message: string;
-  ts: string;
-}
-
 export interface HardwareChannel {
   name: string;
   hardware_model?: string | null;
@@ -198,13 +166,6 @@ export interface AdminUser {
   account_status: "pending" | "active" | "disabled";
   platform_role: "user" | "admin";
   created_at: string;
-}
-
-export interface TaskQuery {
-  deviceId?: string;
-  status?: string;
-  limit?: number;
-  offset?: number;
 }
 
 export interface Run {

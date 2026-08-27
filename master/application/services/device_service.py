@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from master.application.errors import DeviceNotFoundError
 from master.domain.models import Device
 from master.domain.repositories import UnitOfWork
 
@@ -57,8 +58,6 @@ class DeviceService:
         with self._uow_factory() as uow:
             device = uow.devices.get_for_project(project_id, device_id)
             if device is None:
-                from master.application.errors import DeviceNotFoundError
-
                 raise DeviceNotFoundError("设备不存在或不属于当前项目")
             logger.debug(
                 "项目设备访问通过: project_id=%s, device_id=%s",

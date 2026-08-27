@@ -280,27 +280,31 @@ class AuthService:
                     user_id,
                     revoked,
                 )
-            # 审计：账户审批/禁用/角色变更（§7.6 规则 5）
-            action = (
-                "account.disable"
-                if updated.account_status == AccountStatus.DISABLED
-                else "account.approve"
-                if account_status is not None
-                else "role.change"
-            )
-            uow.audit_logs.add(
-                AuditLog(
-                    audit_id=new_id(),
-                    actor_id=actor_id,
-                    action=action,
-                    resource_type="user",
-                    resource_id=str(user_id),
-                    detail={
-                        "account_status": updated.account_status.value,
-                        "platform_role": updated.platform_role.value,
-                    },
+            # 审计：账户审批/禁用/角色变更（§7.6 规则 5）。
+            # 按实际发生的字段变更分别记录，避免多字段同时修改时分类丢失。
+            actions: list[str] = []
+            if account_status is not None:
+                actions.append(
+                    "account.disable"
+                    if updated.account_status == AccountStatus.DISABLED
+                    else "account.approve"
                 )
-            )
+            if platform_role is not None:
+                actions.append("role.change")
+            for action in actions or ["account.update"]:
+                uow.audit_logs.add(
+                    AuditLog(
+                        audit_id=new_id(),
+                        actor_id=actor_id,
+                        action=action,
+                        resource_type="user",
+                        resource_id=str(user_id),
+                        detail={
+                            "account_status": updated.account_status.value,
+                            "platform_role": updated.platform_role.value,
+                        },
+                    )
+                )
             logger.info(
                 "用户权限已更新: user_id=%s, account_status=%s, platform_role=%s",
                 user_id,

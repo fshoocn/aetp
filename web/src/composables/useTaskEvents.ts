@@ -67,7 +67,12 @@ export function useTaskEvents(queryClient: QueryClient) {
             `[useTaskEvents] SSE error (retry #${retryCount.value}):`,
             error.message
           );
-        }
+        },
+        () => {
+          connected.value = true;
+          lastError.value = null;
+          retryCount.value = 0;
+        },
       );
     },
     { immediate: true }

@@ -9,11 +9,12 @@ from fastapi.responses import FileResponse
 
 from master.api.v1.dependencies import CurrentUser, PluginManagerDep, PluginRegistryDep
 from master.api.v1.permissions import PlatformAdminDep
+from master.plugins.manager import ManagedPlugin
 
 router = APIRouter(prefix="/task-types", tags=["v1-task-types"])
 
 
-def _managed(item):
+def _managed(item: ManagedPlugin) -> dict:
     return {
         "plugin_id": item.plugin_id,
         "filename": item.filename,
@@ -59,7 +60,9 @@ def _ui_metadata(task_type: str, metadata: dict) -> dict:
         ui["url"] = f"/api/v1/task-types/{quote(task_type, safe='')}/ui/{quote(entry, safe='/')}"
     task_config_entry = ui.get("task_config_entry")
     if isinstance(task_config_entry, str) and task_config_entry:
-        ui["task_config_url"] = f"/api/v1/task-types/{quote(task_type, safe='')}/ui/{quote(task_config_entry, safe='/')}"
+        ui["task_config_url"] = (
+            f"/api/v1/task-types/{quote(task_type, safe='')}/ui/{quote(task_config_entry, safe='/')}"
+        )
     return ui
 
 

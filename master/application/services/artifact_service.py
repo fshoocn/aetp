@@ -52,6 +52,7 @@ class ArtifactService:
         shard_id: str | None = None,
     ) -> RunArtifact:
         """上传并登记一个产物（写文件 + 写引用，同一业务操作）。"""
+        artifact_kind = ArtifactKind(kind)
         with self._uow_factory() as uow:
             run = uow.task_runs.get_by_run_id(run_id, project_id)
             if run is None:
@@ -64,13 +65,21 @@ class ArtifactService:
                 run_id=run_id,
                 shard_id=shard_id,
                 node_id=node_id,
-                kind=ArtifactKind(kind),
+                kind=artifact_kind,
                 file_ref=file_ref,
                 size=len(data),
                 sha256=digest,
                 uploaded_at=utcnow(),
             )
-            created = uow.run_artifacts.add(artifact)
+            try:
+                created = uow.run_artifacts.add(artifact)
+            except Exception:
+                logger.exception("产物引用登记失败，清理已写入文件: run=%s file_ref=%s", run_id, file_ref)
+                try:
+                    self._storage.delete(file_ref)
+                except Exception:
+                    logger.exception("产物孤儿文件清理失败: file_ref=%s", file_ref)
+                raise
             logger.info(
                 "产物登记成功: artifact=%s run=%s kind=%s size=%d",
                 created.artifact_id,

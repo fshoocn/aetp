@@ -25,9 +25,6 @@ import type {
   ScriptCase,
   SubscriptionCreateRequest,
   SubscriptionUpdateRequest,
-  Task,
-  TaskLog,
-  TaskQuery,
   TaskScheduleOut,
   TaskTypeConfigContext,
   TaskTypePlugin,
@@ -69,27 +66,6 @@ export const aetpApi = {
     listGlobal(online?: boolean) {
       const query = online === undefined ? "" : `?online=${online}`;
       return api.get<Device[]>(`${API_V1}/devices${query}`);
-    },
-  },
-
-  tasks: {
-    list(projectId: string, query: TaskQuery = {}) {
-      const params = new URLSearchParams();
-      if (query.deviceId) params.set("device_id", query.deviceId);
-      if (query.status) params.set("status_filter", query.status);
-      if (query.limit !== undefined) params.set("limit", String(query.limit));
-      if (query.offset !== undefined) params.set("offset", String(query.offset));
-      const qs = params.toString();
-      return api.get<Task[]>(`${API_V1}/projects/${projectId}/tasks${qs ? `?${qs}` : ""}`);
-    },
-    create(projectId: string, deviceId: string, command: Record<string, unknown>) {
-      return api.post<Task>(`${API_V1}/projects/${projectId}/tasks`, { device_id: deviceId, command });
-    },
-    get(projectId: string, taskId: string) {
-      return api.get<Task>(`${API_V1}/projects/${projectId}/tasks/${taskId}`);
-    },
-    logs(projectId: string, taskId: string) {
-      return api.get<TaskLog[]>(`${API_V1}/projects/${projectId}/tasks/${taskId}/logs`);
     },
   },
 

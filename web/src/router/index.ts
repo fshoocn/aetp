@@ -30,12 +30,6 @@ const routes = [
         component: () => import("@/views/Tasks.vue"),
       },
       {
-        path: "tasks/:taskId",
-        name: "TaskDetail",
-        component: () => import("@/views/TaskDetail.vue"),
-        props: true,
-      },
-      {
         path: "runs",
         name: "Runs",
         component: () => import("@/views/Runs.vue"),

@@ -31,8 +31,10 @@ from master.api.v1.schemas import (
 from master.application.errors import ScriptNotFoundError
 from master.application.services.script_service import (
     ScriptDeleteError,
+    ScriptParseError,
     ScriptUploadError,
 )
+from master.plugins.errors import PluginError
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,13 @@ router = APIRouter(
     prefix="/projects/{project_id}/scripts",
     tags=["v1-project-scripts"],
 )
+
+
+def _http_error(status_code: int, code: str, message: str, data: object = None) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message, "data": data},
+    )
 
 
 def _to_script_out(script, storage_service) -> ScriptOut:
@@ -69,17 +78,13 @@ async def upload_script(
     try:
         config_dict = json.loads(config) if config else {}
     except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"config 必须是合法 JSON: {exc}",
-        ) from exc
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", f"config 必须是合法 JSON: {exc}") from exc  # noqa: E501
+    if not isinstance(config_dict, dict):
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "config 必须是 JSON 对象")
 
     file_data = await file.read()
     if not file_data:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="上传文件为空",
-        )
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "上传文件为空")
 
     try:
         script = await script_service.upload_script(
@@ -91,17 +96,15 @@ async def upload_script(
             filename=file.filename or "script",
             created_by=access.user.persisted_id,
         )
+    except ScriptParseError as exc:
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "SCRIPT_PARSE_FAILED", str(exc)) from exc
     except ScriptUploadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", str(exc)) from exc
+    except PluginError as exc:
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.code, str(exc)) from exc
     except Exception as exc:
         logger.exception("脚本上传失败: project=%s name=%s", project_id, name)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"脚本上传失败: {exc}",
-        ) from exc
+        raise _http_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "脚本上传失败") from exc
     return ScriptOut.model_validate(script)
 
 
@@ -132,7 +135,7 @@ def get_script(
     with uow_factory() as uow:
         script = uow.test_scripts.get_by_script_id(script_id)
         if script is None or script.project_id != project_id:
-            raise HTTPException(status_code=404, detail="脚本不存在")
+            raise _http_error(status.HTTP_404_NOT_FOUND, "SCRIPT_NOT_FOUND", "脚本不存在")
     return _to_script_out(script, storage_service)
 
 
@@ -147,7 +150,7 @@ def list_script_cases(
     with uow_factory() as uow:
         script = uow.test_scripts.get_by_script_id(script_id)
         if script is None or script.project_id != project_id:
-            raise HTTPException(status_code=404, detail="脚本不存在")
+            raise _http_error(status.HTTP_404_NOT_FOUND, "SCRIPT_NOT_FOUND", "脚本不存在")
         cases = uow.script_cases.list_by_script(script_id)
     return [ScriptCaseOut.model_validate(c) for c in cases]
 
@@ -162,17 +165,17 @@ async def reparse_script(
     """重新执行脚本验证 + 用例解析（插件升级后显式触发，§18.3 步骤 6）。"""
     try:
         script = await script_service.reparse_script(script_id, project_id=project_id)
+    except ScriptNotFoundError as exc:
+        raise _http_error(status.HTTP_404_NOT_FOUND, "SCRIPT_NOT_FOUND", str(exc)) from exc
+    except ScriptParseError as exc:
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "SCRIPT_PARSE_FAILED", str(exc)) from exc
     except ScriptUploadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", str(exc)) from exc
+    except PluginError as exc:
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, exc.code, str(exc)) from exc
     except Exception as exc:
         logger.exception("脚本重解析失败: script_id=%s", script_id)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"脚本重解析失败: {exc}",
-        ) from exc
+        raise _http_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "脚本重解析失败") from exc
     return ScriptOut.model_validate(script)
 
 
@@ -187,9 +190,9 @@ def delete_script(
     try:
         script_service.delete_script(script_id, project_id=project_id)
     except ScriptNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise _http_error(status.HTTP_404_NOT_FOUND, "SCRIPT_NOT_FOUND", str(exc)) from exc
     except ScriptDeleteError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _http_error(status.HTTP_409_CONFLICT, "CONFLICT", str(exc)) from exc
 
 
 @router.post("/{script_id}/verify", response_model=ScriptVerifyDispatchOut)
@@ -209,10 +212,7 @@ def verify_script_on_agent(
             config=body.config,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", str(exc)) from exc
     return ScriptVerifyDispatchOut.model_validate(result)
 
 
@@ -227,7 +227,7 @@ def get_verify_result(
     """查询 Agent 验证结果；结果由 script.verify-result MQTT 事件写入。"""
     result = verification.get_result(project_id, verify_id)
     if result is None or result.get("script_id") != script_id:
-        raise HTTPException(status_code=404, detail="验证结果不存在")
+        raise _http_error(status.HTTP_404_NOT_FOUND, "SCRIPT_NOT_FOUND", "验证结果不存在")
     return ScriptVerifyResultOut.model_validate(result)
 
 
@@ -243,9 +243,9 @@ def download_script(
     with uow_factory() as uow:
         script = uow.test_scripts.get_by_script_id(script_id)
         if script is None or script.project_id != project_id:
-            raise HTTPException(status_code=404, detail="脚本不存在")
+            raise _http_error(status.HTTP_404_NOT_FOUND, "SCRIPT_NOT_FOUND", "脚本不存在")
     if not storage_service.script_exists(script.file_ref):
-        raise HTTPException(status_code=404, detail="脚本文件缺失")
+        raise _http_error(status.HTTP_404_NOT_FOUND, "SCRIPT_NOT_FOUND", "脚本文件缺失")
     filename = f"{script.name}-v{script.version}"
     return StreamingResponse(
         storage_service.open_script(script.file_ref),

@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from aetp_protocol.ids import new_id
@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 class ScriptUploadError(ValueError):
     """脚本上传/验证失败（错误消息直接面向用户）。"""
+
+
+class ScriptParseError(ScriptUploadError):
+    """脚本验证或用例解析失败。"""
 
 
 class ScriptDeleteError(ValueError):
@@ -79,13 +83,24 @@ class ScriptService:
         master = package.master
 
         # 1. 上传规格校验（插件 upload_spec：扩展名/大小）
-        self._validate_upload_spec(master.upload_spec, filename, file_data)
+        try:
+            self._storage.validate_filename(filename)
+        except ValueError as exc:
+            raise ScriptUploadError(str(exc)) from exc
+        validate_upload_spec(master.upload_spec, filename, file_data)
 
         # 2. 内容哈希：同 hash 幂等复用（§6.2/§18.3 步骤 6）
         sha256 = hashlib.sha256(file_data).hexdigest()
         with self._uow_factory() as uow:
-            existing = uow.test_scripts.get_by_hash(sha256)
+            existing = uow.test_scripts.get_by_hash(sha256, project_id=project_id)
             if existing is not None:
+                if not self._storage.script_exists(existing.file_ref):
+                    filename = existing.file_ref.replace("\\", "/").rsplit("/", 1)[-1]
+                    try:
+                        self._storage.store_script(existing.script_id, existing.version, filename, file_data)
+                    except Exception as exc:
+                        raise ScriptUploadError(f"脚本文件恢复失败: {exc}") from exc
+                    logger.warning("脚本同 hash 复用时恢复缺失文件: script_id=%s", existing.script_id)
                 logger.info("脚本同 hash 复用: sha256=%s… existing=%s", sha256[:12], existing.script_id)
                 return existing
 
@@ -97,56 +112,65 @@ class ScriptService:
             # 4. Master 面 verify_script 快速失败（§18.3 步骤 2）
             errors = master.verify_script(str(tmp_dir), config)
             if errors:
-                raise ScriptUploadError("；".join(errors))
+                raise ScriptParseError("；".join(errors))
 
             # 5. Master 面 parse_cases 生成用例索引（§18.3 步骤 3）
             cases = await self._parse_cases(master, tmp_dir, config)
             if not cases:
-                raise ScriptUploadError("脚本未解析出任何用例")
+                raise ScriptParseError("脚本未解析出任何用例")
 
         # 6. 持久化：同事务写脚本 + 用例（sha256 幂等 + (project,name,version) 唯一）
         script_id = new_id()
-        with self._uow_factory() as uow:
-            version = self._next_version(uow, project_id, name)
-            script = uow.test_scripts.add(
-                TestScript(
-                    project_id=project_id,
-                    script_id=script_id,
-                    task_type=task_type,
-                    name=name,
-                    version=version,
-                    file_ref="",
-                    size=len(file_data),
-                    sha256=sha256,
-                    config=config,
-                    hardware_requirements=package.master.hardware_requirements(config, cases),
-                    parse_status=ScriptParseStatus.PARSED,
-                    parse_location=ScriptParseLocation.MASTER,
-                    result_parse_location=ScriptParseLocation.MASTER,
-                    plugin_version=package.metadata.plugin_version,
-                    created_by=created_by,
-                    last_parsed_at=utcnow(),
-                )
-            )
-            uow.script_cases.add_many(
-                [
-                    ScriptCase(
+        stored_file_ref = ""
+        try:
+            with self._uow_factory() as uow:
+                version = self._next_version(uow, project_id, name)
+                script = uow.test_scripts.add(
+                    TestScript(
+                        project_id=project_id,
                         script_id=script_id,
-                        case_id=new_id(),
-                        stable_key=case.stable_key,
-                        name=case.name,
-                        parent_path=case.parent_path,
-                        tags=list(case.tags),
-                        params=dict(case.params),
-                        avg_duration_s=case.estimated_duration_s,
-                        order_index=index,
+                        task_type=task_type,
+                        name=name,
+                        version=version,
+                        file_ref="",
+                        size=len(file_data),
+                        sha256=sha256,
+                        config=config,
+                        hardware_requirements=package.master.hardware_requirements(config, cases),
+                        parse_status=ScriptParseStatus.PARSED,
+                        parse_location=ScriptParseLocation.MASTER,
+                        result_parse_location=ScriptParseLocation.MASTER,
+                        plugin_version=package.metadata.plugin_version,
+                        created_by=created_by,
+                        last_parsed_at=utcnow(),
                     )
-                    for index, case in enumerate(cases)
-                ]
-            )
-            # 文件写入存储（DB 只存引用，§6.2）；写入失败回滚事务
-            script.file_ref = self._storage.store_script(script_id, version, filename, file_data)
-            uow.test_scripts.update(script)
+                )
+                uow.script_cases.add_many(
+                    [
+                        ScriptCase(
+                            script_id=script_id,
+                            case_id=new_id(),
+                            stable_key=case.stable_key,
+                            name=case.name,
+                            parent_path=case.parent_path,
+                            tags=list(case.tags),
+                            params=dict(case.params),
+                            avg_duration_s=case.estimated_duration_s,
+                            order_index=index,
+                        )
+                        for index, case in enumerate(cases)
+                    ]
+                )
+                stored_file_ref = self._storage.script_key(script_id, version, filename)
+                script.file_ref = self._storage.store_script(script_id, version, filename, file_data)
+                uow.test_scripts.update(script)
+        except Exception:
+            if stored_file_ref:
+                try:
+                    self._storage.delete_script(stored_file_ref)
+                except Exception:
+                    logger.exception("脚本上传回滚时清理存储对象失败: file_ref=%s", stored_file_ref)
+            raise
 
         logger.info(
             "脚本上传成功: script_id=%s name=%s v%d cases=%d",
@@ -177,10 +201,10 @@ class ScriptService:
             self._unpack(file_data, filename, tmp_dir)
             errors = master.verify_script(str(tmp_dir), script.config)
             if errors:
-                raise ScriptUploadError("；".join(errors))
+                raise ScriptParseError("；".join(errors))
             cases = await self._parse_cases(master, tmp_dir, script.config)
             if not cases:
-                raise ScriptUploadError("脚本未解析出任何用例")
+                raise ScriptParseError("脚本未解析出任何用例")
 
         # 重解析：替换用例索引（软删除旧用例，写入新用例；保持 stable_key 稳定）
         with self._uow_factory() as uow:
@@ -267,17 +291,9 @@ class ScriptService:
     # -- 内部 ---------------------------------------------------------------
 
     @staticmethod
-    def _validate_upload_spec(spec: dict, filename: str, data: bytes) -> None:
-        """按插件 upload_spec 校验扩展名与大小（§18.3 步骤 1）。"""
-        suffix = Path(filename).suffix.lower()
-        extensions = [str(e).lower() for e in spec.get("extensions", [])]
-        if extensions and suffix not in extensions:
-            raise ScriptUploadError(
-                f"不支持的文件类型 {suffix or '(无扩展名)'}；该任务类型仅接受: {', '.join(extensions)}"
-            )
-        max_mb = int(spec.get("max_size_mb", 100))
-        if len(data) > max_mb * 1024 * 1024:
-            raise ScriptUploadError(f"文件超过大小上限 {max_mb}MB")
+    def _validate_upload_spec(spec: Mapping[str, object], filename: str, data: bytes) -> None:
+        """保留服务内部调用入口，实际规则由模块函数统一实现。"""
+        validate_upload_spec(spec, filename, data)
 
     @staticmethod
     def _unpack(data: bytes, filename: str, target: Path) -> None:
@@ -296,9 +312,34 @@ class ScriptService:
             return list(await master.parse_cases(script_dir, config))
         except Exception as exc:
             logger.warning("脚本用例解析失败: %s", exc)
-            raise ScriptUploadError(f"用例解析失败: {exc}") from exc
+            raise ScriptParseError(f"用例解析失败: {exc}") from exc
 
     @staticmethod
     def _next_version(uow: UnitOfWork, project_id: str, name: str) -> int:
         max_ver = uow.test_scripts.max_version_for_name(project_id, name)
         return max_ver + 1
+
+
+def validate_upload_spec(spec: Mapping[str, object], filename: str, data: bytes) -> None:
+    """按插件 upload_spec 校验扩展名与大小（§18.3 步骤 1）。"""
+    if not isinstance(spec, Mapping):
+        raise ScriptUploadError("upload_spec 必须是对象")
+    raw_extensions = spec.get("extensions", [])
+    if isinstance(raw_extensions, (str, bytes)) or not isinstance(raw_extensions, Sequence):
+        raise ScriptUploadError("upload_spec.extensions 必须是数组")
+    extensions = []
+    for extension in raw_extensions:
+        if not isinstance(extension, str) or not extension.startswith(".") or len(extension) == 1:
+            raise ScriptUploadError("upload_spec.extensions 必须是以 . 开头的非空扩展名数组")
+        extensions.append(extension.lower())
+    suffix = Path(filename).suffix.lower()
+    if extensions and suffix not in extensions:
+        raise ScriptUploadError(
+            f"不支持的文件类型 {suffix or '(无扩展名)'}；该任务类型仅接受: {', '.join(extensions)}"
+        )
+
+    raw_max_mb = spec.get("max_size_mb", 100)
+    if isinstance(raw_max_mb, bool) or not isinstance(raw_max_mb, int) or raw_max_mb <= 0:
+        raise ScriptUploadError("upload_spec.max_size_mb 必须是正整数")
+    if len(data) > raw_max_mb * 1024 * 1024:
+        raise ScriptUploadError(f"文件超过大小上限 {raw_max_mb}MB")

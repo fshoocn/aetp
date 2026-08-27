@@ -35,7 +35,7 @@
       <el-empty v-if="!loading && bindings.length === 0" description="当前项目未绑定任何节点" />
     </el-card>
 
-    <el-card v-if="projectId && canManage" class="section" shadow="never">
+    <el-card v-if="projectId && canManage" class="section bindable-section" shadow="never">
       <template #header><strong>可绑定的平台节点</strong></template>
       <el-table :data="unboundNodes" row-key="node_id">
         <el-table-column label="节点" min-width="230">
@@ -104,10 +104,13 @@ const removeMutation = useMutation({
   onError: (e: Error) => ElMessage.error(e.message),
 });
 
-function openBind() { /* 嵌入式界面，无需弹窗 */ }
 function bind(row: Node) { bindMutation.mutate(row.node_id); }
 function toggle(row: ProjectNodeBinding, enabled: boolean) { toggleMutation.mutate({ nodeId: row.node_id, enabled }); }
 async function remove(row: ProjectNodeBinding) { try { await ElMessageBox.confirm(`确认解绑节点 ${row.node_id}？`, "解绑节点", { type: "warning" }); removeMutation.mutate(row.node_id); } catch { /* cancelled */ } }
+
+function openBind() {
+  document.querySelector<HTMLElement>(".bindable-section")?.scrollIntoView({ behavior: "smooth" });
+}
 </script>
 
 <style scoped>

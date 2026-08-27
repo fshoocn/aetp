@@ -33,7 +33,7 @@ def list_schedules(
     service: ScheduleServiceDep,
 ) -> list[ScheduleOut]:
     """查询任务定义的调度计划。"""
-    schedules = service.list_schedules(task_id)
+    schedules = service.list_schedules(task_id, project_id=project_id)
     return [ScheduleOut.model_validate(s) for s in schedules]
 
 
@@ -75,6 +75,7 @@ def update_schedule(
         schedule = service.update_schedule(
             schedule_id,
             project_id=project_id,
+            task_id=task_id,
             cron_expression=body.cron_expression,
             interval_seconds=body.interval_seconds,
             timezone=body.timezone,
@@ -95,6 +96,6 @@ def delete_schedule(
 ) -> None:
     """删除调度计划。"""
     try:
-        service.delete_schedule(schedule_id, project_id)
+        service.delete_schedule(schedule_id, project_id, task_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

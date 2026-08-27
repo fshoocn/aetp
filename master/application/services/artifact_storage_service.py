@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import BinaryIO
 
 from master.domain.storage import Storage
@@ -21,6 +22,9 @@ class ArtifactStorageService:
     @staticmethod
     def artifact_key(run_id: str, filename: str) -> str:
         """生成产物存储键（上传时写入 file_ref）。"""
+        path = Path(filename)
+        if not filename or filename in {".", ".."} or path.is_absolute() or path.name != filename:
+            raise ValueError("产物文件名必须是存储根目录下的单个文件名")
         return f"artifacts/{run_id}/{filename}"
 
     def store(self, run_id: str, filename: str, data: bytes) -> str:
@@ -36,3 +40,7 @@ class ArtifactStorageService:
     def exists(self, file_ref: str) -> bool:
         """判断产物文件是否存在。"""
         return self._storage.exists(file_ref)
+
+    def delete(self, file_ref: str) -> None:
+        """删除已写入的产物文件，用于引用登记失败时补偿。"""
+        self._storage.delete(file_ref)

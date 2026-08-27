@@ -67,6 +67,7 @@ def upgrade() -> None:
             "version",
             name="uq_test_scripts_project_name_version",
         ),
+        sa.UniqueConstraint("project_pk", "sha256", name="uq_test_scripts_project_sha256"),
     )
     op.create_index("ix_test_scripts_project_pk", "test_scripts", ["project_pk"])
     op.create_index("ix_test_scripts_project_created", "test_scripts", ["project_pk", "created_at"])

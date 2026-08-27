@@ -49,21 +49,10 @@ class ScheduleService:
         enabled: bool = True,
         created_by: int,
     ) -> TaskSchedule:
-        if not cron_expression and not interval_seconds:
-            raise ValueError("必须提供 cron_expression 或 interval_seconds")
-        if cron_expression and interval_seconds:
-            raise ValueError("cron_expression 与 interval_seconds 互斥")
-        if cron_expression and len(cron_expression) > MAX_CRON_LENGTH:
-            raise ValueError("cron_expression 过长")
-        if interval_seconds is not None and not 1 <= interval_seconds <= MAX_INTERVAL_SECONDS:
-            raise ValueError("interval_seconds 必须在 1 到 31536000 之间")
-
-        # 校验 cron 语法
-        if cron_expression:
-            try:
-                croniter.croniter(cron_expression)
-            except (ValueError, KeyError) as exc:
-                raise ValueError(f"无效的 cron 表达式: {exc}") from exc
+        cron_expression, interval_seconds = self._validate_schedule_values(
+            cron_expression,
+            interval_seconds,
+        )
 
         with self._uow_factory() as uow:
             task = uow.test_tasks.get_by_task_id(task_id, project_id)
@@ -97,8 +86,9 @@ class ScheduleService:
         )
         return schedule
 
-    def list_schedules(self, task_id: str) -> list[TaskSchedule]:
+    def list_schedules(self, task_id: str, *, project_id: str) -> list[TaskSchedule]:
         with self._uow_factory() as uow:
+            self._require_task(uow, task_id, project_id)
             return uow.task_schedules.list_by_task(task_id)
 
     def update_schedule(
@@ -106,28 +96,22 @@ class ScheduleService:
         schedule_id: str,
         *,
         project_id: str,
+        task_id: str,
         cron_expression: str | None = None,
         interval_seconds: int | None = None,
         timezone: str | None = None,
         enabled: bool | None = None,
     ) -> TaskSchedule:
         with self._uow_factory() as uow:
+            self._require_task(uow, task_id, project_id)
             schedule = uow.task_schedules.get_by_schedule_id(schedule_id)
-            if schedule is None or schedule.project_id != project_id:
-                raise ValueError(f"调度计划不存在: {schedule_id}")
+            if schedule is None or schedule.project_id != project_id or schedule.task_id != task_id:
+                raise TaskNotFoundError(f"调度计划不存在: {schedule_id}")
 
             if cron_expression is not None or interval_seconds is not None:
                 new_cron = cron_expression if cron_expression is not None else schedule.cron_expression
                 new_interval = interval_seconds if interval_seconds is not None else schedule.interval_seconds
-                if not new_cron and not new_interval:
-                    raise ValueError("必须提供 cron_expression 或 interval_seconds")
-                if new_cron and new_interval:
-                    raise ValueError("cron_expression 与 interval_seconds 互斥")
-                if new_cron:
-                    try:
-                        croniter.croniter(new_cron)
-                    except (ValueError, KeyError) as exc:
-                        raise ValueError(f"无效的 cron 表达式: {exc}") from exc
+                new_cron, new_interval = self._validate_schedule_values(new_cron, new_interval)
                 schedule.cron_expression = new_cron
                 schedule.interval_seconds = new_interval
                 schedule.next_run_at = self._compute_next_run(
@@ -143,11 +127,12 @@ class ScheduleService:
 
             return uow.task_schedules.update(schedule)
 
-    def delete_schedule(self, schedule_id: str, project_id: str) -> None:
+    def delete_schedule(self, schedule_id: str, project_id: str, task_id: str) -> None:
         with self._uow_factory() as uow:
+            self._require_task(uow, task_id, project_id)
             schedule = uow.task_schedules.get_by_schedule_id(schedule_id)
-            if schedule is None or schedule.project_id != project_id:
-                raise ValueError(f"调度计划不存在: {schedule_id}")
+            if schedule is None or schedule.project_id != project_id or schedule.task_id != task_id:
+                raise TaskNotFoundError(f"调度计划不存在: {schedule_id}")
             uow.task_schedules.delete(schedule_id)
         logger.info("调度计划已删除: schedule_id=%s", schedule_id)
 
@@ -200,6 +185,40 @@ class ScheduleService:
             after=now,
         )
         uow.task_schedules.update(schedule)
+
+    @staticmethod
+    def _require_task(uow: UnitOfWork, task_id: str, project_id: str) -> None:
+        if uow.test_tasks.get_by_task_id(task_id, project_id) is None:
+            raise TaskNotFoundError(f"任务定义不存在: {task_id}")
+
+    @staticmethod
+    def _validate_schedule_values(
+        cron_expression: str | None,
+        interval_seconds: int | None,
+    ) -> tuple[str | None, int | None]:
+        if cron_expression is not None and not isinstance(cron_expression, str):
+            raise ValueError("cron_expression 必须是字符串")
+        cron_expression = cron_expression.strip() if cron_expression is not None else None
+        if cron_expression == "":
+            cron_expression = None
+        if cron_expression is None and interval_seconds is None:
+            raise ValueError("必须提供 cron_expression 或 interval_seconds")
+        if cron_expression is not None and interval_seconds is not None:
+            raise ValueError("cron_expression 与 interval_seconds 互斥")
+        if cron_expression is not None:
+            if len(cron_expression) > MAX_CRON_LENGTH:
+                raise ValueError("cron_expression 过长")
+            try:
+                croniter.croniter(cron_expression)
+            except (ValueError, KeyError) as exc:
+                raise ValueError(f"无效的 cron 表达式: {exc}") from exc
+        if interval_seconds is not None and (
+            isinstance(interval_seconds, bool)
+            or not isinstance(interval_seconds, int)
+            or not 1 <= interval_seconds <= MAX_INTERVAL_SECONDS
+        ):
+            raise ValueError(f"interval_seconds 必须在 1 到 {MAX_INTERVAL_SECONDS} 之间")
+        return cron_expression, interval_seconds
 
     @staticmethod
     def _compute_next_run(

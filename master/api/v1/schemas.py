@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from aetp_protocol.capabilities import NodeCapabilities
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from master.domain.enums import (
     AccountStatus,
@@ -76,45 +76,6 @@ class DeviceOut(BaseModel):
     status: str
     online: bool
     last_seen_at: datetime | None = None
-
-
-class TaskCreate(BaseModel):
-    """任务创建请求。"""
-
-    device_id: str
-    command: dict = Field(default_factory=dict)
-
-
-class TaskOut(BaseModel):
-    """任务响应。command/result 为结构化 JSON 对象。"""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    project_id: str | None = None
-    task_id: str
-    device_id: str
-    status: str
-    command: dict = Field(default_factory=dict)
-    result: dict | None = None
-    error: str | None = None
-    created_by: int | None = None
-    created_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-
-
-class TaskLogOut(BaseModel):
-    """任务日志响应。"""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    task_id: str
-    sequence: int
-    level: str
-    message: str
-    ts: datetime
 
 
 class RunTriggerRequest(BaseModel):
@@ -624,7 +585,7 @@ class ScheduleCreateRequest(BaseModel):
     """创建调度计划请求（cron 与 interval 互斥）。"""
 
     cron_expression: str | None = Field(default=None, max_length=128)
-    interval_seconds: int | None = Field(default=None, ge=1)
+    interval_seconds: StrictInt | None = Field(default=None, ge=1, le=365 * 24 * 3600)
     timezone: str = Field(default="UTC", max_length=64)
     enabled: bool = True
 
@@ -632,8 +593,8 @@ class ScheduleCreateRequest(BaseModel):
 class ScheduleUpdateRequest(BaseModel):
     """更新调度计划请求。"""
 
-    cron_expression: str | None = None
-    interval_seconds: int | None = Field(default=None, ge=1)
+    cron_expression: str | None = Field(default=None, max_length=128)
+    interval_seconds: StrictInt | None = Field(default=None, ge=1, le=365 * 24 * 3600)
     timezone: str | None = Field(default=None, max_length=64)
     enabled: bool | None = None
 

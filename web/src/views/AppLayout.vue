@@ -159,7 +159,6 @@ const pageTitle = computed(() => ({
   Scripts: "脚本库",
   TestTasks: "任务定义",
   Tasks: "任务队列",
-  TaskDetail: "任务详情",
   Runs: "运行记录",
   RunDetail: "运行详情",
   Plugins: "插件中心",

@@ -43,19 +43,19 @@ def download_script(
     if not download_service.verify(script_id, expires, signature):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="签名无效或已过期",
+            detail={"code": "AUTH_FORBIDDEN", "message": "签名无效或已过期", "data": None},
         )
     with uow_factory() as uow:
         script = uow.test_scripts.get_by_script_id(script_id)
     if script is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="脚本不存在",
+            detail={"code": "SCRIPT_NOT_FOUND", "message": "脚本不存在", "data": None},
         )
     if not storage_service.script_exists(script.file_ref):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="脚本文件缺失",
+            detail={"code": "SCRIPT_NOT_FOUND", "message": "脚本文件缺失", "data": None},
         )
     filename = f"{script.name}-v{script.version}"
     # RFC 5987 编码：文件名可能含中文，用 UTF-8 编码避免 latin-1 header 报错
