@@ -46,6 +46,7 @@ from master.domain.enums import (
     ShardStatus,
 )
 from master.domain.models import RunCaseResult, RunLog, RunResult
+from master.domain.occupancy import release_occupancy
 from master.domain.repositories import UnitOfWork
 from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
@@ -139,6 +140,12 @@ class RunProjectionService:
                         if device is not None:
                             device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
                             uow.devices.update(device)
+                    self._release_node_occupancy(
+                        uow,
+                        node_id=attempt.node_id,
+                        run_id=run.run_id,
+                        device_ids=attempt.device_ids,
+                    )
 
                 return ProjectionResult(
                     True,
@@ -337,7 +344,14 @@ class RunProjectionService:
                 return ProjectionResult(False)
 
             self._finalize_attempt(uow, attempt, attempt_status, payload)
-            self._finalize_shard_and_release_devices(uow, payload.shard_id, node_id, payload.status, attempt.device_ids)
+            self._finalize_shard_and_release_devices(
+                uow,
+                run.run_id,
+                payload.shard_id,
+                node_id,
+                payload.status,
+                attempt.device_ids,
+            )
             anomaly_events = self._persist_case_results(
                 uow,
                 run,
@@ -371,6 +385,7 @@ class RunProjectionService:
     def _finalize_shard_and_release_devices(
         self,
         uow,
+        run_id: str,
         shard_id: str,
         node_id: str,
         status_str: str,
@@ -400,6 +415,32 @@ class RunProjectionService:
             if device is not None:
                 device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
                 uow.devices.update(device)
+        self._release_node_occupancy(
+            uow,
+            node_id=node_id,
+            run_id=run_id,
+            device_ids=device_ids,
+        )
+
+    @staticmethod
+    def _release_node_occupancy(
+        uow,
+        *,
+        node_id: str,
+        run_id: str,
+        device_ids: list[str],
+    ) -> None:
+        """只清理当前 Run 的占用，保留节点上其他 Run 的投影。"""
+
+        if not device_ids:
+            return
+        node = uow.nodes.get_by_id(node_id)
+        if node is None:
+            return
+        updated = release_occupancy(node.resource_occupancy, run_id=run_id, device_ids=device_ids)
+        if updated != node.resource_occupancy:
+            node.resource_occupancy = updated
+            uow.nodes.save(node)
 
     # -- 内部 ---------------------------------------------------------------
 
@@ -478,6 +519,11 @@ class RunProjectionService:
             for shard in shards
         )
 
+        if not all_terminal:
+            return
+
+        run_status = self._aggregate_run_status(shards)
+
         if (
             run_status is not None
             and all_terminal
@@ -509,8 +555,8 @@ class RunProjectionService:
                 project_id=run.project_id,
                 task_id=run.task_id,
                 node_id=node_id,
-                passed=payload.passed,
-                status=run_status or RunStatus.FAILED,
+                passed=run_status is RunStatus.SUCCEEDED,
+                status=run_status,
                 metrics=dict(payload.metrics or {}),
                 data=dict(payload.data or {}),
                 started_at=run.started_at,
@@ -519,11 +565,23 @@ class RunProjectionService:
             uow.run_results.add(result)
         else:
             result.node_id = node_id
-            result.passed = payload.passed
-            if run_status is not None:
-                result.status = run_status
+            result.passed = run_status is RunStatus.SUCCEEDED
+            result.status = run_status
             result.metrics = dict(payload.metrics or {})
             result.data = dict(payload.data or {})
             result.started_at = run.started_at
             result.finished_at = run.finished_at
             uow.run_results.update(result)
+
+    @staticmethod
+    def _aggregate_run_status(shards) -> RunStatus:
+        """按全部 Shard 终态聚合 Run 终态，避免使用最后一个 payload 覆盖结果。"""
+
+        statuses = {shard.status for shard in shards}
+        if ShardStatus.FAILED in statuses:
+            return RunStatus.FAILED
+        if ShardStatus.TIMED_OUT in statuses:
+            return RunStatus.TIMED_OUT
+        if ShardStatus.CANCELLED in statuses:
+            return RunStatus.CANCELLED
+        return RunStatus.SUCCEEDED

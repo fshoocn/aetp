@@ -18,6 +18,7 @@ from master.domain.enums import (
     ShardAttemptStatus,
     ShardStatus,
 )
+from master.domain.occupancy import release_occupancy
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 
@@ -43,7 +44,7 @@ class RecoveryService:
 
     def handle_node_offline(self, node_id: str) -> int:
         """节点离线时，将其上所有活跃 Attempt 标记为 failed，
-        对应 Shard 转为 waiting_recovery 并释放设备。
+        对应 Shard 转为 waiting_recovery 并释放设备与占用投影。
 
         Returns:
             处理的 Attempt 数量
@@ -55,6 +56,9 @@ class RecoveryService:
             active_attempts = uow.shard_attempts.list_active_by_node(node_id)
             if not active_attempts:
                 return 0
+
+            # 收集本节点上需要释放占用投影的 (run_id, device_ids)，按 run 聚合后统一清理
+            release_by_run: dict[str, set[str]] = {}
 
             for attempt in active_attempts:
                 attempt.status = ShardAttemptStatus.FAILED
@@ -71,16 +75,65 @@ class RecoveryService:
                     shard.status = ShardStatus.WAITING_RECOVERY
                     uow.run_shards.update(shard)
 
+                # 释放该 Attempt 曾真正占用的设备（list_active_by_node 只返回
+                # dispatching/acked/running，均已派发置 BUSY）
                 for device_id in attempt.device_ids:
                     device = uow.devices.get_by_id(device_id)
                     if device is not None:
                         device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
                         uow.devices.update(device)
+                if attempt.device_ids:
+                    run_id = shard.run_id if shard is not None else ""
+                    if run_id:
+                        release_by_run.setdefault(run_id, set()).update(attempt.device_ids)
 
                 handled += 1
 
+            self._release_occupancy_for_runs(uow, release_by_run)
+
         logger.info("节点离线恢复完成: node=%s attempts_failed=%d", node_id, handled)
         return handled
+
+    @staticmethod
+    def _release_occupancy_for_runs(uow: UnitOfWork, release_by_run: dict[str, set[str]]) -> None:
+        """按 (run_id -> device_ids) 聚合，统一清理各节点占用投影。"""
+        if not release_by_run:
+            return
+        nodes = uow.nodes.list_all()
+        for node in nodes:
+            updated = dict(node.resource_occupancy)
+            for run_id, device_ids in release_by_run.items():
+                updated = release_occupancy(updated, run_id=run_id, device_ids=device_ids)
+            if updated != node.resource_occupancy:
+                node.resource_occupancy = updated
+                uow.nodes.save(node)
+
+    @staticmethod
+    def _release_run_devices_and_occupancy(uow: UnitOfWork, run_id: str) -> None:
+        """把某 Run 占用的设备置回空闲并清理占用投影（超时收口用）。
+
+        与 run_projection_service 的终态释放对称：设备按 ``device_ids`` 释放，
+        占用投影按 run_id 从节点映射中删除。
+        """
+        attempts = uow.shard_attempts.list_by_run(run_id)
+        device_ids: set[str] = set()
+        active_attempts = [
+            a for a in attempts if a.status in {
+                ShardAttemptStatus.CREATED,
+                ShardAttemptStatus.DISPATCHED,
+                ShardAttemptStatus.ACKED,
+                ShardAttemptStatus.RUNNING,
+            }
+        ]
+        for attempt in active_attempts:
+            device_ids.update(attempt.device_ids)
+        for device_id in device_ids:
+            device = uow.devices.get_by_id(device_id)
+            if device is not None:
+                device.status = DeviceStatus.ONLINE if device.online else DeviceStatus.OFFLINE
+                uow.devices.update(device)
+        if device_ids:
+            RecoveryService._release_occupancy_for_runs(uow, {run_id: device_ids})
 
     # ── 2. Master 启动恢复 ────────────────────────────────────────────
 
@@ -117,6 +170,7 @@ class RecoveryService:
                     run.status = RunStatus.TIMED_OUT
                     run.finished_at = now
                     uow.task_runs.update(run)
+                    self._release_run_devices_and_occupancy(uow, run.run_id)
                     stats["stale_runs"] += 1
                     continue
 
@@ -156,6 +210,7 @@ class RecoveryService:
                     run.status = RunStatus.TIMED_OUT
                     run.finished_at = now
                     uow.task_runs.update(run)
+                    self._release_run_devices_and_occupancy(uow, run.run_id)
                     timed_out += 1
 
                     shards = uow.run_shards.list_by_run(run.run_id)

@@ -10,6 +10,7 @@ import logging
 from collections.abc import Callable
 
 from aetp_protocol.ids import new_id
+from sqlalchemy.exc import IntegrityError
 
 from master.adapters.notifications.senders import SenderRegistry
 from master.domain.models import DomainEvent
@@ -52,48 +53,61 @@ class NotificationDispatcher:
             if not self._matches_filter(event, sub.filter_json):
                 continue
 
-
-            # Idempotency check + delivery record in single UoW
-            with self._uow_factory() as uow:
-                existing = uow.event_deliveries.get_by_event_subscription(event.event_id, sub.subscription_id)
-                if existing is not None:
-                    continue
-
-                try:
-                    result = await self._deliver(event, sub.endpoint_id)
-                    status = result.status
-                    error_message = None if status == 'succeeded' else result.detail
-                except Exception as exc:
-                    logger.exception(
-                        'Notification dispatch error: subscription=%s event=%s',
-                        sub.subscription_id,
-                        event.event_type,
-                    )
-                    status = 'failed'
-                    error_message = str(exc)[:500]
-
-                uow.event_deliveries.add(
-                    EventDelivery(
-                        delivery_id=new_id(),
-                        project_id=event.project_id or '',
-                        event_id=event.event_id,
-                        subscription_id=sub.subscription_id,
-                        endpoint_id=sub.endpoint_id,
-                        content={
-                            "event_type": event.event_type,
-                            "event_id": event.event_id,
-                            "task_id": event.payload.get("task_id"),
-                            "aggregate_id": event.aggregate_id,
-                            "project_id": event.project_id,
-                            "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-                            "payload": event.payload,
-                        },
-                        status=status,
-                        attempts=1,
-                        sent_at=utcnow() if status == 'succeeded' else None,
-                        error_message=error_message,
-                    )
+            delivery = EventDelivery(
+                delivery_id=new_id(),
+                project_id=event.project_id or "",
+                event_id=event.event_id,
+                subscription_id=sub.subscription_id,
+                endpoint_id=sub.endpoint_id,
+                content={
+                    "event_type": event.event_type,
+                    "event_id": event.event_id,
+                    "task_id": event.payload.get("task_id"),
+                    "aggregate_id": event.aggregate_id,
+                    "project_id": event.project_id,
+                    "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                    "payload": event.payload,
+                },
+                status="pending",
+            )
+            try:
+                with self._uow_factory() as uow:
+                    existing = uow.event_deliveries.get_by_event_subscription(event.event_id, sub.subscription_id)
+                    if existing is not None:
+                        # 已存在记录：终态（succeeded/failed/exhausted）视为已处理跳过；
+                        # pending 视为上次投递未完成（进程崩溃遗留），接管重投。
+                        if existing.status not in ("pending",):
+                            continue
+                        delivery = existing
+                    else:
+                        delivery = uow.event_deliveries.add(delivery)
+            except IntegrityError:
+                logger.info(
+                    "通知投递已被并发分发器占用: subscription=%s event=%s",
+                    sub.subscription_id,
+                    event.event_id,
                 )
+                continue
+
+            try:
+                result = await self._deliver(event, sub.endpoint_id)
+                status = result.status
+                error_message = None if status == "succeeded" else result.detail
+            except Exception as exc:
+                logger.exception(
+                    "Notification dispatch error: subscription=%s event=%s",
+                    sub.subscription_id,
+                    event.event_type,
+                )
+                status = "failed"
+                error_message = str(exc)[:500]
+
+            delivery.status = status
+            delivery.attempts += 1
+            delivery.sent_at = utcnow() if status == "succeeded" else None
+            delivery.error_message = error_message
+            with self._uow_factory() as uow:
+                uow.event_deliveries.update(delivery)
             if status == "succeeded":
                 delivered += 1
 

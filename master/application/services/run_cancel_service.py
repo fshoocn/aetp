@@ -20,7 +20,7 @@ from aetp_protocol.payloads import RunCancelPayload
 from aetp_protocol.topics import command_topic
 
 from master.application.errors import RunNotFoundError
-from master.domain.enums import OutboxStatus, RunStatus, ShardStatus
+from master.domain.enums import OutboxStatus, RunStatus, ShardAttemptStatus, ShardStatus
 from master.domain.models import OutboxMessage
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
@@ -100,6 +100,9 @@ class RunCancelService:
                     already_terminal=True,
                 )
 
+            if run.status not in _CANCELABLE_RUN_STATUSES:
+                raise ValueError(f"Run 当前状态 {run.status.value} 不允许取消")
+
             # 找所有活跃 Shard
             shards = uow.run_shards.list_by_run(run_id)
             active_shards = [s for s in shards if s.status in _ACTIVE_SHARD_STATUSES]
@@ -107,7 +110,7 @@ class RunCancelService:
             # 按 final_node 去重发送
             sent_nodes: set[str] = set()
             for shard in active_shards:
-                node_id = shard.final_node
+                node_id = self._current_attempt_node(uow, shard.shard_id) or shard.final_node
                 if not node_id or node_id in sent_nodes:
                     continue
                 sent_nodes.add(node_id)
@@ -129,6 +132,8 @@ class RunCancelService:
                     payload=cancel_payload.model_dump(mode="json"),
                 )
                 outbox_id = f"run-cancel:{run_id}:{node_id}"
+                if uow.outbox_messages.get_by_outbox_id(outbox_id) is not None:
+                    continue
                 uow.outbox_messages.enqueue(
                     OutboxMessage(
                         outbox_id=outbox_id,
@@ -154,3 +159,23 @@ class RunCancelService:
             cancelled_shards=len(active_shards),
             already_terminal=False,
         )
+
+    @staticmethod
+    def _current_attempt_node(uow: UnitOfWork, shard_id: str) -> str | None:
+        """返回 Shard 当前活动 Attempt 的节点，而非仅在终态写入的 final_node。"""
+
+        active_statuses = {
+            ShardAttemptStatus.CREATED,
+            ShardAttemptStatus.DISPATCHED,
+            ShardAttemptStatus.ACKED,
+            ShardAttemptStatus.RUNNING,
+        }
+        attempts = uow.shard_attempts.list_by_shard(shard_id)
+        active_attempts = [
+            attempt
+            for attempt in attempts
+            if attempt.status in active_statuses
+        ]
+        if not active_attempts:
+            return None
+        return max(active_attempts, key=lambda attempt: attempt.attempt_no).node_id

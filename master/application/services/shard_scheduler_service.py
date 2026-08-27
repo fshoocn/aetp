@@ -48,6 +48,7 @@ from master.domain.models import (
     TestScript,
     TestTask,
 )
+from master.domain.occupancy import claim_occupancy
 from master.domain.repositories import UnitOfWork
 from master.domain.resources import (
     NodeSchedulingState,
@@ -411,6 +412,12 @@ class ShardSchedulerService:
         for device in assignment.devices:
             device.status = DeviceStatus.BUSY
             uow.devices.update(device)
+        self._claim_node_occupancy(
+            uow,
+            node_id=assignment.node.node_id,
+            run_id=run.run_id,
+            device_ids=assignment.device_ids,
+        )
         outbox_id = new_id()
         script_ref = dict(run.script_ref)
         if self._download_url_builder is not None:
@@ -488,6 +495,25 @@ class ShardSchedulerService:
             device_ids=assignment.device_ids,
             outbox_id=outbox_id,
         )
+
+    @staticmethod
+    def _claim_node_occupancy(
+        uow: UnitOfWork,
+        *,
+        node_id: str,
+        run_id: str,
+        device_ids: Iterable[str],
+    ) -> None:
+        """在派发事务内更新节点的资源占用展示投影。"""
+
+        if not device_ids:
+            return
+        node = uow.nodes.get_by_id(node_id)
+        if node is None:
+            return
+        updated = claim_occupancy(node.resource_occupancy, run_id=run_id, device_ids=device_ids)
+        node.resource_occupancy = updated
+        uow.nodes.save(node)
 
     def release_devices(self, device_ids: Iterable[str]) -> None:
         """释放已完成/失败 Attempt 占用的全部设备。
