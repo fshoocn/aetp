@@ -10,6 +10,22 @@ from __future__ import annotations
 class ApplicationError(Exception):
     """应用层业务错误基类。"""
 
+    # 三段式错误响应的 code（子类可覆盖；缺省由类名转 snake_case）
+    error_code: str | None = None
+
+    @property
+    def code(self) -> str:
+        """三段式错误码：显式声明优先，否则类名转 snake_case。"""
+        if self.error_code is not None:
+            return self.error_code
+        name = type(self).__name__.removesuffix("Error")
+        out: list[str] = []
+        for ch in name:
+            if ch.isupper() and out:
+                out.append("_")
+            out.append(ch.lower())
+        return "".join(out)
+
 
 class ProjectMemberError(ApplicationError):
     """项目成员操作失败。"""
@@ -58,8 +74,8 @@ class NodeCapabilityMismatchError(ApplicationError):
     便于排查"需求引用了错误能力键/节点缺该能力"的错位。
     """
 
-    # sym:code 机器可读错误码（§5.5）
-    code = "NODE_CAPABILITY_MISMATCH"
+    # sym:error_code 机器可读错误码（§5.5）
+    error_code = "NODE_CAPABILITY_MISMATCH"
 
     def __init__(
         self,
@@ -118,5 +134,5 @@ class ScriptNotFoundError(ApplicationError):
 class ProjectAccessDeniedError(ApplicationError):
     """节点不在项目绑定范围（PROJECT_ACCESS_DENIED，§5.5/§18.5 D-23 两层绑定）。"""
 
-    # sym:code 机器可读错误码（§5.5）
-    code = "PROJECT_ACCESS_DENIED"
+    # sym:error_code 机器可读错误码（§5.5）
+    error_code = "PROJECT_ACCESS_DENIED"

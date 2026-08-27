@@ -10,6 +10,8 @@ import threading
 import time
 from collections import deque
 
+from fastapi import Request
+
 
 class SlidingWindowRateLimiter:
     """按 key（如客户端 IP）统计滑动窗口内请求次数。"""
@@ -62,7 +64,7 @@ register_limiter = SlidingWindowRateLimiter(max_attempts=10, window_seconds=3600
 refresh_limiter = SlidingWindowRateLimiter(max_attempts=60, window_seconds=60)
 
 
-def client_ip(request) -> str:
+def client_ip(request: Request) -> str:
     """提取客户端 IP（透传 X-Forwarded-For 时取最左端真实地址）。"""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:

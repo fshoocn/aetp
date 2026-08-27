@@ -17,6 +17,7 @@ from typing import Any
 
 import jwt
 
+from common.secret_derivation import derive_hex
 from master.config import get_settings
 
 ALGORITHM = "HS256"
@@ -28,6 +29,11 @@ _last_checked_secret: str | None = None
 
 class WeakSecretError(RuntimeError):
     """JWT 密钥过于薄弱或使用了开发默认值。"""
+
+
+def _signing_key() -> str:
+    """访问令牌 HMAC 签名密钥（由主密钥按 ``jwt-signing`` 用途派生）。"""
+    return derive_hex(get_settings().jwt_secret, "jwt-signing")
 
 
 def _assert_secret_strong(secret: str) -> None:
@@ -78,7 +84,7 @@ def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> st
     }
     if extra:
         payload.update(extra)
-    return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+    return jwt.encode(payload, _signing_key(), algorithm=ALGORITHM)
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
@@ -87,7 +93,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
     settings = get_settings()
     return jwt.decode(
         token,
-        settings.jwt_secret,
+        _signing_key(),
         algorithms=[ALGORITHM],
         issuer=settings.jwt_issuer,
         audience=settings.jwt_audience,

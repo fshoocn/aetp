@@ -11,12 +11,12 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
 from collections.abc import Callable
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from common.secret_derivation import derive_key
 from master.domain.notifications import SecretStore, SecretValue
 from master.domain.repositories import UnitOfWork
 
@@ -24,12 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 def derive_fernet_key(secret: str) -> bytes:
-    """由主密钥确定性派生 32 字节 Fernet 密钥（urlsafe base64）。
+    """由主密钥经 HKDF 按 ``secret-store`` 用途派生 32 字节 Fernet 密钥。
 
-    Fernet 要求 32 字节随机密钥的 urlsafe base64 编码；此处用主密钥的
-    SHA-256 摘要派生，保证同一主密钥重启后得到同一加密密钥。
+    Fernet 要求 32 字节密钥的 urlsafe base64 编码；与 JWT 签名、内部签名
+    密钥隔离（分用途派生），同一主密钥重启后得到同一加密密钥。
     """
-    digest = hashlib.sha256(secret.encode("utf-8")).digest()
+    digest = derive_key(secret, "secret-store", length=32)
     return base64.urlsafe_b64encode(digest)
 
 

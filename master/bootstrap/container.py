@@ -21,6 +21,7 @@ from urllib.parse import quote, urlencode
 
 from dependency_injector import containers, providers
 
+from common.secret_derivation import derive_hex
 from master.adapters.mqtt.transport import MqttTransport
 from master.adapters.notifications.senders import build_default_registry
 from master.adapters.secrets.encrypted_store import EncryptedSecretStore
@@ -66,11 +67,12 @@ from master.application.services.shard_scheduler_service import (
     SchedulerConfig,
     ShardSchedulerService,
 )
-from master.application.services.task_service import TaskService
+from master.application.services.storage_cleanup_service import StorageCleanupService
 from master.application.services.test_task_service import TestTaskService
 from master.config import get_settings, runtime_dir
 from master.plugins.manager import PluginManager
 from master.plugins.registry import create_default_registry
+from master.workers.event_hook_worker import EventHookWorker
 from master.workers.maintenance_worker import MaintenanceWorker
 from master.workers.outbox_worker import OutboxWorker
 
@@ -83,9 +85,15 @@ def _init_database(url: str) -> DatabaseInterface:
 
 
 def _internal_signing_secret() -> str:
-    """内部签名下载密钥：独立配置，缺省回退到 JWT 密钥。"""
+    """内部签名下载密钥：由主密钥按 ``internal-signing`` 用途派生。
+
+    独立配置 ``AETP_MASTER_INTERNAL_SIGNING_SECRET`` 优先；缺省时用 HKDF
+    从 JWT 主密钥派生（与 JWT 签名、SecretStore 加密密钥隔离）。
+    """
     settings = get_settings()
-    return settings.internal_signing_secret or settings.jwt_secret
+    if settings.internal_signing_secret:
+        return settings.internal_signing_secret
+    return derive_hex(settings.jwt_secret, "internal-signing")
 
 
 def _data_dir() -> Path:
@@ -158,12 +166,25 @@ class Container(containers.DeclarativeContainer):
         get_secret=notification_service.provided.get_secret,
     )
 
+    # P8.4：生命周期 Hook（准入 fail-closed、事件 fail-open、审计）
+    hook_runner = providers.Factory(
+        HookRunner,
+        uow_factory=uow_factory,
+    )
+
+    # 事件 Hook 后台消费 worker（异步消费，不阻塞 SSE/通知）
+    event_hook_worker = providers.Singleton(
+        EventHookWorker,
+        hook_runner=hook_runner,
+    )
+
     # P7.1：领域事件先持久化，再广播到项目范围 SSE；P8.5：分发通知
     event_publisher = providers.Singleton(
         EventPublisher,
         uow_factory=uow_factory,
         event_bus=event_bus,
         notification_dispatcher=notification_dispatcher,
+        event_hook_worker=event_hook_worker,
     )
 
     # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据
@@ -213,6 +234,13 @@ class Container(containers.DeclarativeContainer):
     # 产物文件存储服务（P6.6：run_artifacts 文件读写统一走 Storage 端口）
     artifact_storage_service = providers.Factory(ArtifactStorageService, storage=storage)
 
+    # 存储孤儿文件清理服务（§6.2 补充：对比 DB file_ref 集合删除无引用对象）
+    storage_cleanup_service = providers.Factory(
+        StorageCleanupService,
+        uow_factory=uow_factory,
+        storage=storage,
+    )
+
     # 产物登记/查询服务（P6.6：写引用 + 项目范围查询）
     artifact_service = providers.Factory(
         ArtifactService,
@@ -222,9 +250,6 @@ class Container(containers.DeclarativeContainer):
 
     # 认证服务
     auth_service = providers.Factory(AuthService, uow_factory=uow_factory)
-
-    # 任务服务
-    task_service = providers.Factory(TaskService, uow_factory=uow_factory)
 
     # 设备服务
     device_service = providers.Factory(DeviceService, uow_factory=uow_factory)
@@ -339,12 +364,6 @@ class Container(containers.DeclarativeContainer):
         secret_store=secret_store,
     )
 
-    # 生命周期 Hook 框架（P8.4：准入 fail-closed、事件 fail-open、审计）
-    hook_runner = providers.Factory(
-        HookRunner,
-        uow_factory=uow_factory,
-    )
-
     # 入站 Agent 事件路由（P6.4：严格 Envelope 校验后投影/在线处理）
     message_router = providers.Factory(
         MasterMessageRouter,
@@ -375,10 +394,11 @@ class Container(containers.DeclarativeContainer):
         outbox_worker=outbox_worker,
     )
 
-    # 后台维护 worker（P8.2/P8.5：Schedule tick + Stale Run 检测）
+    # 后台维护 worker（P8.2/P8.5：Schedule tick + Stale Run 检测 + 孤儿清理）
     maintenance_worker = providers.Singleton(
         MaintenanceWorker,
         schedule_service=schedule_service,
         recovery_service=recovery_service,
+        storage_cleanup_service=storage_cleanup_service,
         interval_s=providers.Callable(lambda: get_settings().maintenance_interval_s),
     )
