@@ -221,7 +221,7 @@ class RunAssignPayload(_Strict):
     # sym:execution_params 每 Shard 专属执行参数（插件 execute 使用）
     execution_params: dict[str, Any] = Field(default_factory=dict)
     # sym:timeout_s 任务超时（秒；0=不限制）
-    timeout_s: int = 0
+    timeout_s: int = Field(default=0, ge=0)
 
 
 class RunAckPayload(_Strict):

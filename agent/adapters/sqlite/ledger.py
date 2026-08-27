@@ -478,19 +478,17 @@ class SQLiteLedger:
                 .on_conflict_do_nothing(index_elements=["run_id", "sequence"])
             )
 
-    def list_pending_task_logs(self, limit: int) -> list[TaskLogSpoolEntry]:
-        """取未上报的任务日志（按 run_id、sequence 排序）。"""
+    def list_pending_task_logs(
+        self, limit: int, *, run_id: str | None = None
+    ) -> list[TaskLogSpoolEntry]:
+        """取未上报的任务日志，可按 Run 过滤（按 run_id、sequence 排序）。"""
         with self._session_factory.begin() as session:
-            rows = (
-                session.execute(
-                    select(TaskLogSpoolORM)
-                    .where(TaskLogSpoolORM.published.is_(False))
-                    .order_by(TaskLogSpoolORM.run_id, TaskLogSpoolORM.sequence)
-                    .limit(limit)
-                )
-                .scalars()
-                .all()
-            )
+            query = select(TaskLogSpoolORM).where(TaskLogSpoolORM.published.is_(False))
+            if run_id is not None:
+                query = query.where(TaskLogSpoolORM.run_id == run_id)
+            rows = session.execute(
+                query.order_by(TaskLogSpoolORM.run_id, TaskLogSpoolORM.sequence).limit(limit)
+            ).scalars().all()
         return [_to_log(row) for row in rows]
 
     def mark_task_logs_published(self, ids: list[int]) -> None:

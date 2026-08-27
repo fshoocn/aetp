@@ -137,8 +137,10 @@ class Ledger(Protocol):
         """追加一条任务日志到 spool。"""
         ...
 
-    def list_pending_task_logs(self, limit: int) -> list[TaskLogSpoolEntry]:
-        """取未上报的任务日志（按 sequence）。"""
+    def list_pending_task_logs(
+        self, limit: int, *, run_id: str | None = None
+    ) -> list[TaskLogSpoolEntry]:
+        """取未上报的任务日志，可按 Run 过滤（按 sequence）。"""
         ...
 
     def mark_task_logs_published(self, ids: list[int]) -> None:

@@ -186,31 +186,29 @@ class CommandDispatcher:
                 self._ack_run_assign(envelope, accepted=False, reason=f"{exc.code}: {exc}")
                 return True
 
-        # Inbox 去重在插件/脚本准备成功后执行，避免准备失败把命令永久吞掉。
-        if not self._ledger.record_inbox(
-            origin_id=envelope.sender.id,
-            message_id=envelope.message_id,
-            message_type=envelope.message_type,
-        ):
-            logger.debug(
-                "run.assign 幂等忽略（inbox 去重）: message_id=%s",
-                envelope.message_id,
-            )
-            self._ack_run_assign(envelope, accepted=True, reason="ok (duplicate)")
-            return True
-
         # 原子 claim（先 claim 后 ACK）；device_ids 随 run.assign 下发，
         # 记录本次占用的物理设备集合，供心跳汇总占用状态上报 Master（§9.8）。
         device_ids = [allocation.device_id for allocation in payload.device_allocations]
         claimed = self._ledger.claim_run(payload.run_id, payload.attempt_no, device_ids)
+
+        # Inbox 在 claim 之后记录：若 Agent 在两步之间崩溃，重试时 claim 的
+        # 幂等结果仍可补写 Inbox 并回 ACK，不会吞掉尚未 claim 的命令。
+        first_delivery = self._ledger.record_inbox(
+            origin_id=envelope.sender.id,
+            message_id=envelope.message_id,
+            message_type=envelope.message_type,
+        )
         if not claimed:
             # 重复派发或 attempt 冲突：仍以当前状态回 ACK
             logger.debug(
-                "run.assign 幂等 ACK（claim 失败）: run_id=%s attempt=%s",
+                "run.assign 幂等 ACK（claim=%s inbox=%s）: run_id=%s attempt=%s",
+                claimed,
+                first_delivery,
                 payload.run_id,
                 payload.attempt_no,
             )
-            self._ack_run_assign(envelope, accepted=True, reason="ok (already claimed)")
+            reason = "ok (duplicate)" if not first_delivery else "ok (already claimed)"
+            self._ack_run_assign(envelope, accepted=True, reason=reason)
             return True
 
         # claim 成功，更新为 CLAIMED 状态
@@ -242,18 +240,6 @@ class CommandDispatcher:
             logger.warning("run.cancel 被拒绝：Agent 未注册")
             return False
 
-        # Inbox 去重
-        if not self._ledger.record_inbox(
-            origin_id=envelope.sender.id,
-            message_id=envelope.message_id,
-            message_type=envelope.message_type,
-        ):
-            logger.debug(
-                "run.cancel 幂等忽略（inbox 去重）: message_id=%s",
-                envelope.message_id,
-            )
-            return True
-
         try:
             payload = RunCancelPayload.model_validate(envelope.payload)
         except Exception:  # noqa: BLE001
@@ -263,9 +249,23 @@ class CommandDispatcher:
             )
             return False
 
+        topic_info = parse_topic(topic)
+        if topic_info.node_id != self._settings.node_id:
+            logger.warning(
+                "run.cancel 目标节点不匹配: expected=%s got=%s",
+                self._settings.node_id,
+                topic_info.node_id,
+            )
+            return False
+
         run = self._ledger.get_run(payload.run_id)
         if run is None:
             logger.debug("run.cancel 目标 run 不存在: run_id=%s", payload.run_id)
+            self._ledger.record_inbox(
+                origin_id=envelope.sender.id,
+                message_id=envelope.message_id,
+                message_type=envelope.message_type,
+            )
             return True  # 不报错，静默忽略
 
         if run.status in {
@@ -279,6 +279,11 @@ class CommandDispatcher:
                 payload.run_id,
                 run.status,
             )
+            self._ledger.record_inbox(
+                origin_id=envelope.sender.id,
+                message_id=envelope.message_id,
+                message_type=envelope.message_type,
+            )
             return True  # 已终结，静默忽略
 
         run.cancelled = True
@@ -286,6 +291,11 @@ class CommandDispatcher:
         # P6.1：触发执行器取消 token，中止排队/执行中的 Run
         if self._execution_service is not None:
             self._execution_service.cancel(payload.run_id)
+        self._ledger.record_inbox(
+            origin_id=envelope.sender.id,
+            message_id=envelope.message_id,
+            message_type=envelope.message_type,
+        )
         logger.info(
             "run.cancel 已标记: run_id=%s reason=%s",
             payload.run_id,
@@ -325,7 +335,7 @@ class CommandDispatcher:
                 session_id=self._session_id(),
             ),
             correlation_id=envelope.message_id,
-            trace_id=self._settings.node_id,
+            trace_id=envelope.trace_id,
             payload=ack.model_dump(mode="json"),
         )
         topic = event_topic(self._settings.node_id, "ack")

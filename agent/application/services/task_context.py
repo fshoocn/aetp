@@ -184,7 +184,7 @@ class TaskContext:
 
     def collect_pending_logs(self, limit: int = 50) -> list[TaskLogSpoolEntry]:
         """取本 Run 未上报的日志条目（按 sequence 升序）。"""
-        return [entry for entry in self._ledger.list_pending_task_logs(limit) if entry.run_id == self.run_id]
+        return self._ledger.list_pending_task_logs(limit, run_id=self.run_id)
 
     def build_log_batch(self, entries: list[TaskLogSpoolEntry]) -> RunLogBatch | None:
         """把 spool 条目组装为 ``RunLogBatch``（严格递增，first_sequence=首条）。

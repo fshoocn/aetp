@@ -119,7 +119,7 @@ class RunOrchestrator:
         self._now = now or (lambda: datetime.now(UTC))
         self._tasks: set[asyncio.Task[None]] = set()
         # 本次 Run 解包出的临时脚本目录，Run 结束后清理
-        self._script_dirs: set[Path] = set()
+        self._script_dirs: dict[str, set[Path]] = {}
 
     # -- 入口 ---------------------------------------------------------------
 
@@ -134,16 +134,20 @@ class RunOrchestrator:
 
     async def _run(self, payload: RunAssignPayload) -> None:
         run_id = payload.run_id
-        plugin = self._resolve_plugin(payload)
-        context = self._build_context(payload)
-
-        # 异步解包脚本（避免阻塞事件循环）
-        if self._script_cache is not None:
-            script_ref = dict(payload.script_ref or {})
-            script_ref = await asyncio.to_thread(self._enrich_script_ref, script_ref)
-            context = self._build_context_with_ref(payload, script_ref)
-
         try:
+            plugin = self._resolve_plugin(payload)
+            context = self._build_context(payload)
+
+            # 异步解包脚本（避免阻塞事件循环）
+            if self._script_cache is not None:
+                script_ref = dict(payload.script_ref or {})
+                script_ref = await asyncio.to_thread(
+                    self._enrich_script_ref,
+                    script_ref,
+                    run_id=run_id,
+                )
+                context = self._build_context_with_ref(payload, script_ref)
+
             result = await self._execution_service.execute(
                 run_id,
                 plugin,
@@ -160,7 +164,7 @@ class RunOrchestrator:
             )
             await self._report_abort(payload)
         finally:
-            self._cleanup_script_dirs()
+            self._cleanup_script_dirs(run_id)
 
     # -- 插件解析 -----------------------------------------------------------
 
@@ -193,7 +197,7 @@ class RunOrchestrator:
             now=self._now,
         )
 
-    def _enrich_script_ref(self, script_ref: dict) -> dict:
+    def _enrich_script_ref(self, script_ref: dict, *, run_id: str | None = None) -> dict:
         """把脚本包解包成目录并注入 script_ref.path，供插件定位脚本（§9.8）。
 
         脚本缓存存的是**单个文件**（zip 或 .py 包），而插件 ``execute`` 期望
@@ -213,7 +217,7 @@ class RunOrchestrator:
             workspace.mkdir(parents=True, exist_ok=True)
             tmp_dir = Path(tempfile.mkdtemp(prefix="aetp-run-script-", dir=str(workspace)))
             self._extract_script_sync(source, tmp_dir)
-            self._script_dirs.add(tmp_dir)
+            self._script_dirs.setdefault(run_id or "", set()).add(tmp_dir)
             script_ref["path"] = str(tmp_dir)
         except Exception as exc:  # noqa: BLE001 - 解包失败不阻塞执行
             logger.warning("脚本解包失败，回退缓存文件路径: %s", exc)
@@ -237,11 +241,15 @@ class RunOrchestrator:
         else:
             shutil.copy2(source, tmp_dir / "test_script.py")
 
-    def _cleanup_script_dirs(self) -> None:
-        """清理本次 Run 解包出的临时脚本目录。"""
-        for path in self._script_dirs:
+    def _cleanup_script_dirs(self, run_id: str | None = None) -> None:
+        """清理指定 Run 的临时脚本目录；无 run_id 时清理全部。"""
+        if run_id is None:
+            paths = [path for directories in self._script_dirs.values() for path in directories]
+            self._script_dirs.clear()
+        else:
+            paths = self._script_dirs.pop(run_id, set())
+        for path in paths:
             shutil.rmtree(path, ignore_errors=True)
-        self._script_dirs.clear()
 
     # -- 收尾：日志 + 结果 ---------------------------------------------------
 

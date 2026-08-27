@@ -133,24 +133,30 @@ class ScriptPreflightService:
             )
             return False
 
-        # 去重：已处理的命令静默忽略（结果已在 outbox，稳定逻辑 ID 幂等重发）。
+        script_id = str(envelope.payload.get("script_id", ""))
+        try:
+            script_id, _version, task_type, plugin_version, script_ref, config = self._parse_command_payload(
+                envelope, expected_type
+            )
+        except ScriptPreflightError as exc:
+            logger.warning("脚本预检失败: %s", exc)
+            self._enqueue_error_result(envelope, script_id, errors=[f"{exc.code}: {exc}"])
+            return True
+
+        # payload 校验成功后再去重，避免非法消息永久吞掉 message_id。
         if not self._ledger.record_inbox(
             origin_id=envelope.sender.id,
             message_id=envelope.message_id,
             message_type=envelope.message_type,
         ):
             logger.debug(
-                "脚本预检幂等忽略（inbox 去重）: message_id=%s",
+                "脚本预检幂等忽略（inbox 去重）：message_id=%s",
                 envelope.message_id,
             )
             return True
 
-        script_id = str(envelope.payload.get("script_id", ""))
         script_dir: Path | None = None
         try:
-            script_id, _version, task_type, plugin_version, script_ref, config = self._parse_command_payload(
-                envelope, expected_type
-            )
             plugin = self._require_agent_plugin(task_type, plugin_version)
             script_dir = self._materialize_script_dir(script_ref)
             result = runner(script_dir, plugin, config)
@@ -344,7 +350,7 @@ class ScriptPreflightService:
                 session_id=self._session_id(),
             ),
             correlation_id=envelope.message_id,
-            trace_id=self._settings.node_id,
+            trace_id=envelope.trace_id,
             payload=payload,
         )
         topic = event_topic(self._settings.node_id, segment)

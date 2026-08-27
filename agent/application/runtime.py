@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING
 
 from aetp_protocol.envelope import Envelope
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.topics import command_topic
+from aetp_protocol.topics import (
+    command_topic,
+    validate_message_type_for_topic,
+    validate_sender_for_topic,
+)
 
 from agent.application.services.artifact_upload_service import ArtifactUploadService
 from agent.application.services.command_dispatcher import CommandDispatcher
@@ -259,6 +263,8 @@ class AgentRuntime:
             return False
         try:
             envelope = Envelope.model_validate(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(message.topic, MessageType(envelope.message_type))
         except Exception:  # noqa: BLE001 - 非预检命令交由 dispatcher 处理
             return False
         msg_type = envelope.message_type

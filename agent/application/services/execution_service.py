@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from dataclasses import dataclass, field
 
 from agent.config import AgentSettings
@@ -121,7 +122,10 @@ class ExecutionService:
         if token is not None:
             token.cancel()
         run = self._ledger.get_run(run_id)
-        if run is not None:
+        if run is not None and run.status in {
+            AgentRunStatus.CLAIMED,
+            AgentRunStatus.RUNNING,
+        }:
             run.cancelled = True
             self._ledger.update_run(run)
         return token is not None
@@ -223,7 +227,15 @@ class ExecutionService:
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if cancel_task in done:
+                cancel = getattr(plugin, "cancel", None)
+                if cancel is not None:
+                    try:
+                        await cancel()
+                    except Exception:  # noqa: BLE001 - 取消钩子失败不阻断终态收口
+                        logger.warning("插件 cancel 钩子失败", exc_info=True)
                 plugin_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await plugin_task
                 raise ExecutionCancelled("run 已取消")
             try:
                 return await plugin_task
