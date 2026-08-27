@@ -77,8 +77,8 @@ def test_active_users_can_view_all_nodes_and_devices(client, auth_header):
     assert response.status_code == 200
 
 
-def test_viewer_can_view_assets_and_tasks_but_cannot_create(client):
-    """viewer 可以查看资产和任务，但不能创建或下发任务。"""
+def test_viewer_can_view_assets_and_test_task_definitions_but_cannot_create(client):
+    """viewer 可以查看资产和任务定义，但不能创建任务定义。"""
     admin_headers = _create_admin(client)
     viewer_id, viewer_headers = _login_user(client, "asset-viewer")
     _create_asset(client)
@@ -105,20 +105,20 @@ def test_viewer_can_view_assets_and_tasks_but_cannot_create(client):
     assert response.status_code == 200
 
     response = client.get(
-        f"/api/v1/projects/{project_id}/tasks",
+        f"/api/v1/projects/{project_id}/test-tasks",
         headers=viewer_headers,
     )
     assert response.status_code == 200
 
     response = client.post(
-        f"/api/v1/projects/{project_id}/tasks",
+        f"/api/v1/projects/{project_id}/test-tasks",
         headers=viewer_headers,
-        json={"device_id": "global-device", "command": {"cmd": "ping"}},
+        json={"name": "viewer-task", "script_id": "missing-script"},
     )
     assert response.status_code == 403
 
     response = client.get(
-        f"/api/v1/projects/{project_id}/tasks",
+        f"/api/v1/projects/{project_id}/test-tasks",
         headers=admin_headers,
     )
     assert response.status_code == 200

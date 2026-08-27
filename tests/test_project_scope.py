@@ -61,31 +61,14 @@ def _project_with_device(client, user_id: int, key: str) -> str:
 
 
 def test_project_resources_are_isolated(client):
-    """两个项目的任务和设备不能跨项目读取。"""
+    """两个项目的设备不能跨项目读取，旧任务入口已移除。"""
     user_a_id, user_a_headers = _active_user(client, "scope-user-a")
     user_b_id, user_b_headers = _active_user(client, "scope-user-b")
     project_a = _project_with_device(client, user_a_id, "SCOPE_A")
     project_b = _project_with_device(client, user_b_id, "SCOPE_B")
 
-    response = client.post(
-        f"/api/v1/projects/{project_a}/tasks",
-        headers=user_a_headers,
-        json={"device_id": "SCOPE_A-device", "command": {"scope": "a"}},
-    )
-    assert response.status_code == 201
-    task_id = response.json()["task_id"]
-
-    response = client.get(
-        f"/api/v1/projects/{project_a}/tasks/{task_id}",
-        headers=user_b_headers,
-    )
-    assert response.status_code == 404
-
-    response = client.get(
-        f"/api/v1/projects/{project_b}/tasks/{task_id}",
-        headers=user_a_headers,
-    )
-    assert response.status_code == 404
+    assert client.get(f"/api/v1/projects/{project_a}/tasks", headers=user_a_headers).status_code == 404
+    assert client.get(f"/api/v1/projects/{project_b}/tasks", headers=user_b_headers).status_code == 404
 
     response = client.get(
         f"/api/v1/projects/{project_a}/devices",

@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 
 def _create_admin(client, username="cancel-admin", password="admin-pass-123", display_name="CA") -> dict[str, str]:
     service = client.app.state.container.auth_service()
@@ -70,3 +72,27 @@ def test_cancel_requires_operator_permission(client):
         headers=viewer_headers,
     )
     assert resp.status_code == 403
+
+
+def test_cancel_targets_current_attempt_and_is_idempotent(client):
+    """取消使用活动 Attempt 节点，并且同一节点只写一个 outbox。"""
+    from tests.test_p6_4_end_to_end import _seed
+
+    container = client.app.state.container
+    user_id, task_id = _seed(container)
+    run_id = asyncio.run(
+        container.run_trigger_service().trigger(
+            task_id,
+            project_id="p1",
+            triggered_by_user_id=user_id,
+        )
+    ).run_id
+
+    first = container.run_cancel_service().cancel(run_id, project_id="p1")
+    second = container.run_cancel_service().cancel(run_id, project_id="p1")
+    assert first.cancelled_shards == 2
+    assert second.cancelled_shards == 2
+
+    with container.uow_factory()() as uow:
+        outbox = uow.outbox_messages.get_by_outbox_id(f"run-cancel:{run_id}:node-a")
+        assert outbox is not None

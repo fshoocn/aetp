@@ -18,7 +18,7 @@ def test_run_once_triggers_schedule_and_stale_detection():
     worker = MaintenanceWorker(schedule, recovery)
     stats = asyncio.run(worker.run_once())
 
-    assert stats == {"schedules_triggered": 2, "stale_runs": 3}
+    assert stats == {"schedules_triggered": 2, "stale_runs": 3, "orphans_removed": 0}
     schedule.tick.assert_awaited_once()
     recovery.detect_stale_runs.assert_called_once()
 
@@ -33,7 +33,7 @@ def test_run_once_isolates_schedule_failure():
     worker = MaintenanceWorker(schedule, recovery)
     stats = asyncio.run(worker.run_once())
 
-    assert stats == {"schedules_triggered": 0, "stale_runs": 1}
+    assert stats == {"schedules_triggered": 0, "stale_runs": 1, "orphans_removed": 0}
     recovery.detect_stale_runs.assert_called_once()
 
 
@@ -47,7 +47,7 @@ def test_run_once_isolates_stale_failure():
     worker = MaintenanceWorker(schedule, recovery)
     stats = asyncio.run(worker.run_once())
 
-    assert stats == {"schedules_triggered": 5, "stale_runs": 0}
+    assert stats == {"schedules_triggered": 5, "stale_runs": 0, "orphans_removed": 0}
     schedule.tick.assert_awaited_once()
 
 

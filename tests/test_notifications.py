@@ -160,7 +160,7 @@ def test_endpoint_rejects_invalid_channel(client):
         json={"channel_type": "unsupported", "name": "bad"},
     )
     assert resp.status_code == 422
-    assert "不支持的通道类型" in resp.json()["detail"]
+    assert "不支持的通道类型" in resp.json()["message"]
 
 
 # ---- 事件订阅 ----
@@ -268,7 +268,7 @@ def test_subscription_rejects_unknown_endpoint(client):
         },
     )
     assert resp.status_code == 422
-    assert "通知端点不存在" in resp.json()["detail"]
+    assert "通知端点不存在" in resp.json()["message"]
 
 
 def test_subscription_rejects_empty_event_types(client):
@@ -426,4 +426,4 @@ def test_delivery_retry_rejects_non_retryable_status(client):
         headers=headers,
     )
     assert resp.status_code == 422
-    assert "不允许重试" in resp.json()["detail"]
+    assert "不允许重试" in resp.json()["message"]

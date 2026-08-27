@@ -112,6 +112,11 @@ class _FakeArtifactUploader:
         return {"artifact_id": "A-1", "kind": kind, "filename": filename}
 
 
+class _MissingPluginRegistry(AgentPluginRegistry):
+    def require(self, task_type):
+        raise RuntimeError(f"missing plugin: {task_type}")
+
+
 def _payload(**kw) -> RunAssignPayload:
     base: dict[str, Any] = {
         "project_id": "p1",
@@ -193,6 +198,30 @@ async def test_orchestrator_does_not_analyze_failed_execution(tmp_path) -> None:
     )
     assert result.status == "failed"
     assert result.data["error"] == "RuntimeError: execute boom"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_reports_when_plugin_resolution_fails(tmp_path) -> None:
+    ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
+    execution = ExecutionService(_SETTINGS, ledger)
+    orchestrator = RunOrchestrator(
+        _SETTINGS,
+        ledger,
+        execution,
+        _MissingPluginRegistry(),
+        session_id=lambda: "sess-1",
+        now=_now,
+    )
+    ledger.claim_run("R-1", 1)
+
+    await orchestrator._run(_payload())
+
+    envelopes = _claim_outbox(ledger)
+    result = RunResultPayload.model_validate(
+        next(e.payload for e in envelopes if e.message_type == MessageType.RUN_RESULT.value)
+    )
+    assert result.status == "failed"
+    assert result.passed is False
 
 
 @pytest.mark.asyncio
@@ -360,3 +389,21 @@ async def test_orchestrator_materializes_single_file_as_python(tmp_path) -> None
     assert (script_dir / "test_script.py").is_file()
     assert not (script_dir / "S-1-v1.bin").exists()
     orchestrator._cleanup_script_dirs()
+
+
+def test_orchestrator_cleans_only_completed_run_script_dirs(tmp_path) -> None:
+    ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
+    execution = ExecutionService(_SETTINGS, ledger)
+    orchestrator = RunOrchestrator(_SETTINGS, ledger, execution)
+    first = tmp_path / "run-1"
+    second = tmp_path / "run-2"
+    first.mkdir()
+    second.mkdir()
+    orchestrator._script_dirs = {"R-1": {first}, "R-2": {second}}
+
+    orchestrator._cleanup_script_dirs("R-1")
+    assert not first.exists()
+    assert second.exists()
+
+    orchestrator._cleanup_script_dirs()
+    assert not second.exists()

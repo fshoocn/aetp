@@ -144,6 +144,7 @@ def test_run_assign_claims_and_enqueues_ack(tmp_path) -> None:
     ack_env = Envelope.model_validate(pending[0].payload)
     assert ack_env.message_type == MessageType.RUN_ACK.value
     assert ack_env.correlation_id == env.message_id
+    assert ack_env.trace_id == env.trace_id
     assert ack_env.payload["run_id"] == "R-1"
     assert ack_env.payload["accepted"] is True
 
@@ -274,6 +275,7 @@ def test_run_cancel_already_succeeded_is_silent(tmp_path) -> None:
 
     # 手动将 Run 设为 succeeded
     run = ledger.get_run("R-1")
+    assert run is not None
     run.status = AgentRunStatus.SUCCEEDED
     ledger.update_run(run)
 
@@ -282,7 +284,40 @@ def test_run_cancel_already_succeeded_is_silent(tmp_path) -> None:
     assert result is True  # 静默忽略
 
     run = ledger.get_run("R-1")
+    assert run is not None
     assert run.cancelled is False  # 已终态不被修改
+
+
+def test_run_cancel_rejects_other_node_topic(tmp_path) -> None:
+    dispatcher, ledger = _make_dispatcher(tmp_path)
+    assign_topic = command_topic("bench-001", "assign")
+    dispatcher.handle_command(_mqtt_message(_run_assign_envelope(), assign_topic))
+
+    cancel_env = _run_cancel_envelope()
+    other_node_topic = command_topic("other-node", "cancel")
+    assert dispatcher.handle_command(_mqtt_message(cancel_env, other_node_topic)) is False
+
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.cancelled is False
+
+
+def test_invalid_cancel_payload_does_not_consume_message_id(tmp_path) -> None:
+    dispatcher, ledger = _make_dispatcher(tmp_path)
+    assign_topic = command_topic("bench-001", "assign")
+    cancel_topic = command_topic("bench-001", "cancel")
+    dispatcher.handle_command(_mqtt_message(_run_assign_envelope(), assign_topic))
+
+    message_id = uuid.uuid4().hex
+    invalid = _run_cancel_envelope(message_id=message_id)
+    invalid = invalid.model_copy(update={"payload": {"unexpected": True}})
+    assert dispatcher.handle_command(_mqtt_message(invalid, cancel_topic)) is False
+
+    valid = _run_cancel_envelope(message_id=message_id)
+    assert dispatcher.handle_command(_mqtt_message(valid, cancel_topic)) is True
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.cancelled is True
 
 
 # -----------------------------------------------------------------------

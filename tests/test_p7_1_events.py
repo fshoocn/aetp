@@ -9,7 +9,7 @@ from starlette.requests import Request
 
 from master.api.v1.permissions import ProjectAccess
 from master.domain.enums import ProjectRole, ProjectStatus
-from master.domain.models import Project, ProjectMember
+from master.domain.models import DomainEvent, Project, ProjectMember
 from master.domain.time import utcnow
 
 
@@ -140,3 +140,46 @@ def test_sse_requires_project_membership(client, auth_header) -> None:
         headers=auth_header,
     )
     assert response.status_code == 404
+    assert response.json()["code"] == "RESOURCE_NOT_FOUND"
+
+
+def test_event_publisher_enqueues_event_hook_after_persisting(client) -> None:
+    """EventPublisher 提交事件后把事件入队到 EventHookWorker，异步执行并审计。"""
+    from master.application.services.event_publisher import EventPublisher
+    from master.application.services.hook_runner import HookRegistry, HookRunner
+    from master.workers.event_hook_worker import EventHookWorker
+
+    class RecordingHook:
+        name = "recording-event-hook"
+        event_types = frozenset({"run.created"})
+
+        def __init__(self) -> None:
+            self.event_ids: list[str] = []
+
+        async def handle(self, event: DomainEvent) -> None:
+            self.event_ids.append(event.event_id)
+
+    hook = RecordingHook()
+    container = client.app.state.container
+    runner = HookRunner(
+        lambda: container.uow_factory()(),
+        registry=HookRegistry(event_hooks=[hook]),
+    )
+    worker = EventHookWorker(runner)
+    publisher = EventPublisher(
+        container.uow_factory(),
+        container.event_bus(),
+        event_hook_worker=worker,
+    )
+
+    event = asyncio.run(publisher.publish("run.created", {"project_id": "p-hook", "run_id": "R-hook"}))
+
+    # 事件已非阻塞入队；驱动一次消费后 hook 被执行并写审计
+    asyncio.run(worker.drain_once())
+
+    assert hook.event_ids == [event.event_id]
+    with _uow(container) as uow:
+        executions = uow.hook_executions.list_by_project("p-hook")
+    assert len(executions) == 1
+    assert executions[0].event_id == event.event_id
+    assert executions[0].status == "succeeded"

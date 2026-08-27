@@ -75,6 +75,15 @@ class _SlowPlugin:
         return {"status": "passed"}
 
 
+class _CancellablePlugin(_Plugin):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_called = False
+
+    async def cancel(self) -> None:
+        self.cancel_called = True
+
+
 class _Context:
     pass
 
@@ -110,7 +119,9 @@ async def test_execute_success_marks_succeeded(tmp_path) -> None:
 
     assert result.status is AgentRunStatus.SUCCEEDED
     assert result.summary == {"ok": True}
-    assert ledger.get_run("R-1").status is AgentRunStatus.SUCCEEDED
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.status is AgentRunStatus.SUCCEEDED
 
 
 @pytest.mark.asyncio
@@ -122,7 +133,9 @@ async def test_execute_exception_maps_to_failed(tmp_path) -> None:
 
     assert result.status is AgentRunStatus.FAILED
     assert "boom" in result.error
-    assert ledger.get_run("R-1").status is AgentRunStatus.FAILED
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.status is AgentRunStatus.FAILED
 
 
 # -----------------------------------------------------------------------
@@ -135,10 +148,12 @@ async def test_execute_timeout_maps_to_timed_out(tmp_path) -> None:
     service, ledger = _service(tmp_path)
     _claim(ledger, "R-1")
 
-    result = await service.execute("R-1", _SlowPlugin(), _Context(), timeout_s=0.05)
+    result = await service.execute("R-1", _SlowPlugin(), _Context(), timeout_s=1)
 
     assert result.status is AgentRunStatus.TIMED_OUT
-    assert ledger.get_run("R-1").status is AgentRunStatus.TIMED_OUT
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.status is AgentRunStatus.TIMED_OUT
 
 
 @pytest.mark.asyncio
@@ -179,7 +194,9 @@ async def test_cancel_queued_run_maps_to_cancelled(tmp_path) -> None:
     blocker.release.set()
     result1 = await task1
     assert result1.status is AgentRunStatus.SUCCEEDED
-    assert ledger.get_run("R-2").status is AgentRunStatus.CANCELLED
+    run = ledger.get_run("R-2")
+    assert run is not None
+    assert run.status is AgentRunStatus.CANCELLED
 
 
 @pytest.mark.asyncio
@@ -194,8 +211,39 @@ async def test_cancel_running_run_maps_to_cancelled(tmp_path) -> None:
     assert service.cancel("R-1") is True
     result = await task
     assert result.status is AgentRunStatus.CANCELLED
-    assert ledger.get_run("R-1").status is AgentRunStatus.CANCELLED
-    assert ledger.get_run("R-1").cancelled is True
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.status is AgentRunStatus.CANCELLED
+    assert run.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_run_calls_plugin_cancel_hook(tmp_path) -> None:
+    service, ledger = _service(tmp_path)
+    _claim(ledger, "R-1")
+
+    plugin = _CancellablePlugin()
+    task = asyncio.create_task(service.execute("R-1", plugin, _Context()))
+    await plugin.started.wait()
+
+    service.cancel("R-1")
+    result = await task
+    assert result.status is AgentRunStatus.CANCELLED
+    assert plugin.cancel_called is True
+
+
+def test_cancel_does_not_mark_terminal_run_cancelled(tmp_path) -> None:
+    service, ledger = _service(tmp_path)
+    _claim(ledger, "R-1")
+    run = ledger.get_run("R-1")
+    assert run is not None
+    run.status = AgentRunStatus.SUCCEEDED
+    ledger.update_run(run)
+
+    assert service.cancel("R-1") is False
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.cancelled is False
 
 
 @pytest.mark.asyncio
@@ -205,7 +253,9 @@ async def test_cancel_unknown_run_returns_false_but_sets_flag(tmp_path) -> None:
 
     # 无活跃 token：返回 False，但账本 cancelled 仍置位（run.cancel 语义）
     assert service.cancel("R-1") is False
-    assert ledger.get_run("R-1").cancelled is True
+    run = ledger.get_run("R-1")
+    assert run is not None
+    assert run.cancelled is True
 
 
 # -----------------------------------------------------------------------

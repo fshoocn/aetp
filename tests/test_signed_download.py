@@ -125,7 +125,9 @@ def test_download_script_with_valid_signature(client, tmp_path) -> None:
 def test_download_requires_valid_signature(client, tmp_path) -> None:
     path, _ = _seed_script(client, tmp_path)
     tampered = path.rsplit("signature=", 1)[0] + "signature=" + "0" * 64
-    assert client.get(tampered).status_code == 403
+    response = client.get(tampered)
+    assert response.status_code == 403
+    assert response.json()["code"] == "AUTH_FORBIDDEN"
 
 
 def test_download_rejects_expired(client, tmp_path) -> None:
@@ -140,3 +142,4 @@ def test_download_script_not_found(client) -> None:
     path = service.build_path("S-noexist")
     resp = client.get(path)
     assert resp.status_code == 404
+    assert resp.json()["code"] == "SCRIPT_NOT_FOUND"

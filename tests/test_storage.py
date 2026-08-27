@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from master.adapters.storage.local_storage import LocalStorage
 from master.application.services.script_storage_service import ScriptStorageService
+from master.application.services.storage_cleanup_service import StorageCleanupService
 
 
 def test_local_storage_put_open_exists_delete(tmp_path) -> None:
@@ -74,3 +77,39 @@ def test_script_storage_service_key_rule(tmp_path) -> None:
 
     svc.delete_script(key)
     assert not svc.script_exists(key)
+
+
+def test_script_storage_service_rejects_path_in_filename(tmp_path) -> None:
+    svc = ScriptStorageService(LocalStorage(root=tmp_path))
+
+    for filename in ("../escape.py", "nested/escape.py", r"nested\escape.py"):
+        try:
+            svc.store_script("S-1", 1, filename, b"payload")
+        except ValueError as exc:
+            assert str(exc) == "脚本文件名不能包含路径"
+        else:
+            raise AssertionError(f"filename should be rejected: {filename}")
+
+    assert not (tmp_path.parent / "escape.py").exists()
+
+
+def test_storage_cleanup_removes_orphans_and_keeps_referenced(tmp_path) -> None:
+    """孤儿清理删除无 DB 引用的对象，保留仍被引用的对象。"""
+    storage = LocalStorage(root=tmp_path)
+    storage.put("scripts/S-KEEP/1/a.py", b"keep")
+    storage.put("scripts/S-ORPHAN/1/b.py", b"orphan")
+    storage.put("artifacts/R-1/report.xml", b"artifact")
+
+    uow = MagicMock()
+    uow.__enter__ = MagicMock(return_value=uow)
+    uow.__exit__ = MagicMock(return_value=False)
+    uow.test_scripts.list_all_file_refs.return_value = ["scripts/S-KEEP/1/a.py"]
+    uow.run_artifacts.list_all_file_refs.return_value = []
+
+    svc = StorageCleanupService(lambda: uow, storage)
+    stats = svc.cleanup_orphans()
+
+    assert stats == {"removed": 2, "errors": 0}
+    assert storage.exists("scripts/S-KEEP/1/a.py")
+    assert not storage.exists("scripts/S-ORPHAN/1/b.py")
+    assert not storage.exists("artifacts/R-1/report.xml")

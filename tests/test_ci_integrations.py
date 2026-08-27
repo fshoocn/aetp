@@ -100,6 +100,13 @@ def test_integration_crud(client):
     )
     assert resp.status_code == 204
 
+    with client.app.state.container.database().session_scope() as session:
+        actions = [row[0] for row in session.execute(
+            text("SELECT action FROM audit_logs WHERE project_id=:p AND resource_type='integration' ORDER BY id"),
+            {"p": project_id},
+        )]
+    assert actions == ["integration.create", "integration.update", "integration.delete"]
+
 
 def test_integration_requires_owner(client):
     """viewer 不能创建集成。"""
@@ -174,6 +181,12 @@ def test_webhook_signature_verification(client):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "accepted"
+    with client.app.state.container.database().session_scope() as session:
+        action = session.execute(
+            text("SELECT action FROM audit_logs WHERE project_id=:p AND resource_id=:i ORDER BY id DESC"),
+            {"p": project_id, "i": integration_id},
+        ).scalars().first()
+    assert action == "integration.webhook"
 
     # 错误签名：403 拒绝
     resp = client.post(
@@ -186,6 +199,11 @@ def test_webhook_signature_verification(client):
         content=body,
     )
     assert resp.status_code == 403
+    assert resp.json() == {
+        "code": "CI_WEBHOOK_SIGNATURE_INVALID",
+        "message": "签名验证失败",
+        "data": None,
+    }
 
     # 无签名：403 拒绝（配置了 secret 时必须签名）
     resp = client.post(
@@ -197,6 +215,47 @@ def test_webhook_signature_verification(client):
         content=body,
     )
     assert resp.status_code == 403
+
+
+def test_webhook_without_secret_is_rejected(client):
+    """公共 webhook 必须配置 secret，不能以空密钥放行。"""
+    headers = _create_admin(client, "ci-admin-no-secret")
+    project_id = _create_project(client, headers, "CI-NO-SECRET")
+    integration = client.post(
+        f"/api/v1/projects/{project_id}/integrations",
+        headers=headers,
+        json={"provider": "generic", "name": "no-secret"},
+    ).json()
+
+    resp = client.post(
+        f"/api/v1/integrations/{integration['integration_id']}/webhook",
+        headers={"X-AETP-Delivery-Id": "delivery-no-secret"},
+        content=b'{"event": "push"}',
+    )
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "CI_WEBHOOK_SIGNATURE_INVALID"
+    assert client.app.state.container.ci_integration_service().list_deliveries(
+        integration["integration_id"]
+    ) == []
+
+
+def test_binding_route_rejects_integration_from_another_project(client):
+    """binding 路径的 project_id 必须与 integration 所属项目一致。"""
+    headers = _create_admin(client, "ci-admin-boundary")
+    first_project_id = _create_project(client, headers, "CI-BOUNDARY-1")
+    second_project_id = _create_project(client, headers, "CI-BOUNDARY-2")
+    integration = client.post(
+        f"/api/v1/projects/{first_project_id}/integrations",
+        headers=headers,
+        json={"provider": "generic", "name": "boundary"},
+    ).json()
+
+    resp = client.get(
+        f"/api/v1/projects/{second_project_id}/integrations/{integration['integration_id']}/bindings",
+        headers=headers,
+    )
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "RESOURCE_NOT_FOUND"
 
 
 def test_webhook_delivery_deduplicates(client):

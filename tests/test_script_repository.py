@@ -123,10 +123,10 @@ def test_get_by_hash_idempotency(client):
     sha = "b" * 64
     with _uow(container) as uow:
         uow.test_scripts.add(_make_script(user_id, name="dup", version=1, sha=sha))
-        hit = uow.test_scripts.get_by_hash(sha)
+        hit = uow.test_scripts.get_by_hash(sha, project_id="p1")
         assert hit is not None
         assert hit.name == "dup"
-        assert uow.test_scripts.get_by_hash("0" * 64) is None
+        assert uow.test_scripts.get_by_hash("0" * 64, project_id="p1") is None
 
 
 def test_duplicate_project_name_version_raises(client):
@@ -137,12 +137,21 @@ def test_duplicate_project_name_version_raises(client):
         uow.test_scripts.add(_make_script(user_id, name="reg", version=1))
 
 
+def test_duplicate_project_hash_raises(client):
+    container = client.app.state.container
+    user_id = _seed_user_and_project(container)
+    sha = "c" * 64
+    with pytest.raises(IntegrityError), _uow(container) as uow:
+        uow.test_scripts.add(_make_script(user_id, name="first", version=1, sha=sha))
+        uow.test_scripts.add(_make_script(user_id, name="second", version=1, sha=sha))
+
+
 def test_same_name_different_version_allowed(client):
     container = client.app.state.container
     user_id = _seed_user_and_project(container)
     with _uow(container) as uow:
-        v1 = uow.test_scripts.add(_make_script(user_id, name="reg", version=1))
-        v2 = uow.test_scripts.add(_make_script(user_id, name="reg", version=2))
+        v1 = uow.test_scripts.add(_make_script(user_id, name="reg", version=1, sha="d" * 64))
+        v2 = uow.test_scripts.add(_make_script(user_id, name="reg", version=2, sha="e" * 64))
         assert v1.version == 1
         assert v2.version == 2
         found = uow.test_scripts.find_by_name_version("p1", "reg", 2)
@@ -153,9 +162,9 @@ def test_max_version_for_name(client):
     container = client.app.state.container
     user_id = _seed_user_and_project(container)
     with _uow(container) as uow:
-        uow.test_scripts.add(_make_script(user_id, name='reg', version=1))
-        uow.test_scripts.add(_make_script(user_id, name='reg', version=3))
-        uow.test_scripts.add(_make_script(user_id, name='other', version=5))
+        uow.test_scripts.add(_make_script(user_id, name='reg', version=1, sha="f" * 64))
+        uow.test_scripts.add(_make_script(user_id, name='reg', version=3, sha="0" * 64))
+        uow.test_scripts.add(_make_script(user_id, name='other', version=5, sha="1" * 64))
     with _uow(container) as uow:
         assert uow.test_scripts.max_version_for_name('p1', 'reg') == 3
         assert uow.test_scripts.max_version_for_name('p1', 'other') == 5
@@ -166,8 +175,10 @@ def test_list_by_project_pagination(client):
     container = client.app.state.container
     user_id = _seed_user_and_project(container)
     with _uow(container) as uow:
-        for i in range(3):
-            uow.test_scripts.add(_make_script(user_id, name=f"script-{i}", version=1))
+        for index in range(3):
+            uow.test_scripts.add(
+                _make_script(user_id, name=f"script-{index}", version=1, sha=f"{index + 2:02d}" * 32)
+            )
     with _uow(container) as uow:
         page1 = uow.test_scripts.list_by_project("p1", limit=2, offset=0)
         page2 = uow.test_scripts.list_by_project("p1", limit=2, offset=2)

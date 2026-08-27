@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from aetp_protocol.capabilities import HardwareRequirements
 from aetp_protocol.plugin import CaseInfo, PluginMetadata, PluginPackage, ShardSpec
 from sqlalchemy import text
 
 from master.adapters.sqlalchemy.orm import Node as NodeORM
+from master.application.services.script_service import ScriptService, ScriptUploadError
 from master.domain.enums import (
     NodeStatus,
 )
@@ -132,6 +134,20 @@ def _add_member(client, admin_headers, project_id, username, role):
     return member_headers
 
 
+def test_upload_spec_rejects_malformed_size_and_extensions() -> None:
+    """upload_spec 形状异常时统一返回脚本上传错误。"""
+    with pytest.raises(ScriptUploadError, match="extensions"):
+        ScriptService._validate_upload_spec({"extensions": ".py"}, "test.py", b"x")
+    with pytest.raises(ScriptUploadError, match="扩展名数组"):
+        ScriptService._validate_upload_spec({"extensions": ["py"]}, "test.py", b"x")
+    with pytest.raises(ScriptUploadError, match="扩展名数组"):
+        ScriptService._validate_upload_spec({"extensions": [".py", 1]}, "test.py", b"x")
+    with pytest.raises(ScriptUploadError, match="max_size_mb"):
+        ScriptService._validate_upload_spec({"max_size_mb": 0}, "test.py", b"x")
+    with pytest.raises(ScriptUploadError, match="max_size_mb"):
+        ScriptService._validate_upload_spec({"max_size_mb": True}, "test.py", b"x")
+
+
 def test_script_upload_parse_and_case_list(client):
     """脚本上传 → 验证 → 解析 → 用例列表全流程。"""
     container = client.app.state.container
@@ -190,7 +206,8 @@ def test_script_upload_verify_failure(client):
         files={"file": ("bad.py", b"x = 1\n", "text/x-python")},
     )
     assert resp.status_code == 422
-    assert "broken" in resp.json()["detail"]
+    assert resp.json()["code"] == "SCRIPT_PARSE_FAILED"
+    assert "broken" in resp.json()["message"]
 
 
 def test_script_upload_rejects_extension(client):
@@ -207,7 +224,22 @@ def test_script_upload_rejects_extension(client):
         files={"file": ("bad.exe", b"not-a-script", "application/octet-stream")},
     )
     assert resp.status_code == 422
-    assert "不支持的文件类型" in resp.json()["detail"]
+    assert resp.json()["code"] == "VALIDATION_ERROR"
+    assert "不支持的文件类型" in resp.json()["message"]
+
+
+def test_script_upload_rejects_unknown_task_type(client):
+    headers = _create_admin(client)
+    project_id = _create_project(client, headers, key="SCRIPT_UNKNOWN_PLUGIN")
+
+    resp = client.post(
+        f"/api/v1/projects/{project_id}/scripts",
+        headers=headers,
+        data={"task_type": "missing_plugin", "name": "bad", "config": "{}"},
+        files={"file": ("bad.py", b"x = 1\n", "text/x-python")},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "PLUGIN_NOT_FOUND"
 
 
 def test_script_upload_same_hash_idempotent(client):
@@ -227,6 +259,31 @@ def test_script_upload_same_hash_idempotent(client):
     assert resp2.status_code == 201
     assert resp1.json()["script_id"] == resp2.json()["script_id"]
     assert resp1.json()["version"] == resp2.json()["version"] == 1
+
+
+def test_script_upload_same_hash_isolated_between_projects(client):
+    """相同内容只在同一项目内幂等，不能跨项目复用脚本记录。"""
+    container = client.app.state.container
+    _register_plugin(container)
+    headers = _create_admin(client)
+    project_a = _create_project(client, headers, key="SCRIPT_HASH_A")
+    project_b = _create_project(client, headers, key="SCRIPT_HASH_B")
+    content = b"def test_shared_content():\n    pass\n"
+
+    def upload(project_id: str, name: str):
+        return client.post(
+            f"/api/v1/projects/{project_id}/scripts",
+            headers=headers,
+            data={"task_type": "upload_test", "name": name, "config": "{}"},
+            files={"file": ("shared.py", content, "text/x-python")},
+        )
+
+    first = upload(project_a, "shared-a")
+    second = upload(project_b, "shared-b")
+    assert first.status_code == second.status_code == 201
+    assert first.json()["script_id"] != second.json()["script_id"]
+    assert first.json()["project_id"] == project_a
+    assert second.json()["project_id"] == project_b
 
 
 def test_script_delete_removes_script_cases_and_file(client):
@@ -253,20 +310,18 @@ def test_script_delete_removes_script_cases_and_file(client):
     )
     assert deleted.status_code == 204, deleted.text
     assert not container.storage().exists(file_ref)
-    assert (
-        client.get(
-            f"/api/v1/projects/{project_id}/scripts/{script['script_id']}",
-            headers=headers,
-        ).status_code
-        == 404
+    missing_script = client.get(
+        f"/api/v1/projects/{project_id}/scripts/{script['script_id']}",
+        headers=headers,
     )
-    assert (
-        client.get(
-            f"/api/v1/projects/{project_id}/scripts/{script['script_id']}/cases",
-            headers=headers,
-        ).status_code
-        == 404
+    assert missing_script.status_code == 404
+    assert missing_script.json()["code"] == "SCRIPT_NOT_FOUND"
+    missing_cases = client.get(
+        f"/api/v1/projects/{project_id}/scripts/{script['script_id']}/cases",
+        headers=headers,
     )
+    assert missing_cases.status_code == 404
+    assert missing_cases.json()["code"] == "SCRIPT_NOT_FOUND"
 
 
 def test_script_delete_rejects_task_definition_reference(client):
@@ -296,7 +351,8 @@ def test_script_delete_rejects_task_definition_reference(client):
         headers=headers,
     )
     assert deleted.status_code == 409
-    assert "任务定义引用" in deleted.json()["detail"]
+    assert deleted.json()["code"] == "CONFLICT"
+    assert "任务定义引用" in deleted.json()["message"]
 
 
 def test_script_deletable_after_task_deleted(client):
@@ -510,14 +566,14 @@ def test_task_definition_crud_and_case_selection(client):
         json={"default_case_selection": ["not-exist"]},
     )
     assert resp.status_code == 422
-    assert "用例不存在" in resp.json()["detail"]
+    assert "用例不存在" in resp.json()["message"]
     resp = client.patch(
         f"/api/v1/projects/{project_id}/test-tasks/{task_id}",
         headers=headers,
         json={"split_policy": {"type": "by_case_count", "cases_per_shard": 0}},
     )
     assert resp.status_code == 422
-    assert "cases_per_shard" in resp.json()["detail"]
+    assert "cases_per_shard" in resp.json()["message"]
 
     # 非法 case 勾选 → 422
     resp = client.post(
@@ -530,7 +586,7 @@ def test_task_definition_crud_and_case_selection(client):
         },
     )
     assert resp.status_code == 422
-    assert "用例不存在" in resp.json()["detail"]
+    assert "用例不存在" in resp.json()["message"]
 
     # 非项目绑定节点 → 403
     resp = client.post(

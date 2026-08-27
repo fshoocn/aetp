@@ -188,6 +188,10 @@ def test_run_assign_payload():
     assert p.script_ref["sha256"] == "a" * 64
     with pytest.raises(ValidationError):
         RunAssignPayload.model_validate({"run_id": "R-1"})  # 缺必填
+    with pytest.raises(ValidationError):
+        data = dict(GOLDEN_RUN_ASSIGN["payload"])
+        data["timeout_s"] = -1
+        RunAssignPayload.model_validate(data)
 
 
 def test_run_cancel_payload():

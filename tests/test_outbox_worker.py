@@ -71,6 +71,7 @@ class FakeTransport:
         self.fail_all = fail_all
         self.published: list[tuple[str, bytes, int]] = []
         self._handler = None
+        self._connection_handler = None
 
     @property
     def connected(self) -> bool:
@@ -78,6 +79,9 @@ class FakeTransport:
 
     def on_message(self, handler) -> None:
         self._handler = handler
+
+    def on_connection_change(self, handler) -> None:
+        self._connection_handler = handler
 
     async def connect(self) -> None:
         return None
@@ -168,6 +172,31 @@ def test_outbox_worker_failure_marks_retrying_with_backoff():
     # base_delay=1.0（jitter=0）→ 约 now + 1s
     assert sent.next_attempt_at >= before + timedelta(seconds=0.99)
     assert sent.next_attempt_at <= before + timedelta(seconds=1.1)
+
+
+def test_outbox_worker_backoff_uses_message_attempt_count():
+    """同一消息连续失败时，退避按该消息 attempts 指数增长。"""
+    repo = FakeOutboxRepo([_msg()])
+    transport = FakeTransport(fail_all=True)
+    backoff = ExponentialBackoff(base_delay_s=1.0, max_delay_s=10.0, jitter_ratio=0.0)
+    worker = _make_worker(repo, transport, retry_backoff=backoff, max_attempts=5)
+
+    async def scenario():
+        await worker.run_once()
+        first = repo.updated[-1].next_attempt_at
+        assert first is not None
+        message = repo.updated[-1]
+        message.status = OutboxStatus.RETRYING
+        message.next_attempt_at = utcnow() - timedelta(seconds=1)
+        repo._messages[message.outbox_id] = message
+        await worker.run_once()
+
+    asyncio.run(scenario())
+
+    second = repo.updated[-1].next_attempt_at
+    assert second is not None
+    assert second >= utcnow() + timedelta(seconds=1.9)
+    assert second <= utcnow() + timedelta(seconds=2.1)
 
 
 def test_outbox_worker_exhausts_after_max_attempts():

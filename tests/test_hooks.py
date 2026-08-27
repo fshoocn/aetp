@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 from master.domain.hooks import HookContext, HookDecision
 from master.domain.models import DomainEvent
@@ -96,6 +97,25 @@ def test_admission_hooks_sorted_by_order(client):
     assert [h.name for h in hooks] == ["test-deny", "test-allow"]
 
 
+def test_hook_names_are_globally_unique():
+    """准入和事件 Hook 不得注册同名实现。"""
+    from master.application.services.hook_runner import HookRegistry
+
+    class EventWithDuplicateName:
+        name = "test-allow"
+        event_types = frozenset()
+
+        async def handle(self, event: DomainEvent) -> None:
+            pass
+
+    try:
+        HookRegistry(admission_hooks=[_AllowHook()], event_hooks=[EventWithDuplicateName()])
+    except ValueError as exc:
+        assert "全局唯一" in str(exc)
+    else:
+        raise AssertionError("重复 Hook 名称应拒绝注册")
+
+
 def test_admission_deny_rejects(client):
     """准入 Hook deny 拒绝操作。"""
     from master.application.services.hook_runner import HookRegistry, HookRunner
@@ -149,3 +169,38 @@ def test_event_hook_fail_open(client):
     )
     # fail open：不抛异常
     asyncio.run(runner.run_event_hooks(event))
+
+
+def test_event_hook_worker_drains_and_drops_on_full():
+    """EventHookWorker 消费事件执行 Hook；队满丢弃不阻塞。"""
+    from master.application.services.hook_runner import HookRegistry, HookRunner
+    from master.workers.event_hook_worker import EventHookWorker
+
+    handled: list[str] = []
+
+    class RecordingHook:
+        name = "worker-event-hook"
+        event_types = frozenset({"run.succeeded"})
+
+        async def handle(self, event: DomainEvent) -> None:
+            handled.append(event.event_id)
+
+    runner = HookRunner(
+        lambda: MagicMock(),
+        registry=HookRegistry(event_hooks=[RecordingHook()]),
+    )
+    worker = EventHookWorker(runner, queue_size=2)
+
+    e1 = DomainEvent(event_id="E-1", project_id="P-1", event_type="run.succeeded", aggregate_id="R-1")
+    e2 = DomainEvent(event_id="E-2", project_id="P-1", event_type="run.succeeded", aggregate_id="R-1")
+    e3 = DomainEvent(event_id="E-3", project_id="P-1", event_type="run.succeeded", aggregate_id="R-1")
+
+    assert worker.enqueue(e1) is True
+    assert worker.enqueue(e2) is True
+    assert worker.enqueue(e3) is False  # 队满丢弃
+
+    assert asyncio.run(worker.drain_once()) is True
+    assert asyncio.run(worker.drain_once()) is True
+    assert asyncio.run(worker.drain_once()) is False  # 队列已空
+
+    assert handled == ["E-1", "E-2"]

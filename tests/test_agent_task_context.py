@@ -76,6 +76,39 @@ async def test_log_writes_spool(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_collect_pending_logs_filters_before_limit(tmp_path) -> None:
+    ctx, ledger = _make_context(tmp_path)
+    ledger.append_task_log(TaskLogSpoolEntry("R-1", 1, "info", "other-1"))
+    ledger.append_task_log(TaskLogSpoolEntry("R-1", 2, "info", "other-2"))
+    ledger.append_task_log(TaskLogSpoolEntry("R-1", 3, "info", "current"))
+
+    # 当前 Run 的查询在数据库层过滤，不能被其他 Run 的日志占满 limit。
+    ctx = TaskContext(
+        _SETTINGS,
+        ledger,
+        project_id="p1",
+        task_id="T-1",
+        shard_id="SH-1",
+        run_id="R-1",
+        now=_now,
+    )
+    pending = ctx.collect_pending_logs(1)
+    assert [entry.message for entry in pending] == ["other-1"]
+
+    other_ctx = TaskContext(
+        _SETTINGS,
+        ledger,
+        project_id="p1",
+        task_id="T-2",
+        shard_id="SH-2",
+        run_id="R-2",
+        now=_now,
+    )
+    ledger.append_task_log(TaskLogSpoolEntry("R-2", 1, "info", "other-run"))
+    assert [entry.message for entry in other_ctx.collect_pending_logs(1)] == ["other-run"]
+
+
+@pytest.mark.asyncio
 async def test_log_sequence_idempotent_by_ledger(tmp_path) -> None:
     """(run_id, sequence) 幂等由账本唯一约束保证，重复 sequence 不重复落库。"""
     ctx, ledger = _make_context(tmp_path)

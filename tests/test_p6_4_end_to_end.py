@@ -17,7 +17,7 @@ import re
 from datetime import UTC, datetime
 
 import pytest
-from aetp_protocol.capabilities import HardwareRequirements
+from aetp_protocol.capabilities import DeviceRequirement, HardwareRequirements
 from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
 from aetp_protocol.payloads import (
     CaseResultEntry,
@@ -122,7 +122,13 @@ def _register_plugin(container) -> None:
     )
 
 
-def _seed(container, *, node_id: str = "node-a", node_online: bool = True) -> tuple[int, str]:
+def _seed(
+    container,
+    *,
+    node_id: str = "node-a",
+    node_online: bool = True,
+    requires_device: bool = False,
+) -> tuple[int, str]:
     """创建用户+项目+节点+脚本+用例+任务定义+绑定。"""
     _register_plugin(container)
     with _uow(container) as uow:
@@ -164,7 +170,11 @@ def _seed(container, *, node_id: str = "node-a", node_online: bool = True) -> tu
                 size=1,
                 sha256="a" * 64,
                 config={},
-                hardware_requirements=HardwareRequirements(),
+                hardware_requirements=(
+                    HardwareRequirements(devices=(DeviceRequirement(resource_type="generic"),))
+                    if requires_device
+                    else HardwareRequirements()
+                ),
                 parse_status=ScriptParseStatus.PARSED,
                 parse_location=ScriptParseLocation.MASTER,
                 result_parse_location=ScriptParseLocation.MASTER,
@@ -274,7 +284,6 @@ def test_trigger_creates_run_shards_and_schedules(client) -> None:
             "fail_fast": True,
         }
 
-
 def test_trigger_raises_task_not_found(client) -> None:
     container = client.app.state.container
     from master.application.errors import TaskNotFoundError
@@ -326,11 +335,16 @@ def test_node_online_reschedules_pending_run(client) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_id_after_trigger(client) -> str:
+def _run_id_after_trigger(client, case_filter: list[str] | None = None) -> str:
     container = client.app.state.container
     user_id, task_id = _seed(container)
     return asyncio.run(
-        container.run_trigger_service().trigger(task_id, project_id="p1", triggered_by_user_id=user_id)
+        container.run_trigger_service().trigger(
+            task_id,
+            project_id="p1",
+            triggered_by_user_id=user_id,
+            case_filter=case_filter,
+        )
     ).run_id
 
 
@@ -420,10 +434,56 @@ def test_projection_result_finalizes_run_and_releases_devices(client) -> None:
         assert c1.duration_samples == 1
 
 
+def test_projection_waits_for_all_shards_and_maintains_resource_occupancy(client) -> None:
+    container = client.app.state.container
+    user_id, task_id = _seed(container, requires_device=True)
+    run_id = asyncio.run(
+        container.run_trigger_service().trigger(task_id, project_id="p1", triggered_by_user_id=user_id)
+    ).run_id
+
+    with _uow(container) as uow:
+        shards = uow.run_shards.list_by_run(run_id)
+        assert len(shards) == 2
+        first_attempt = uow.shard_attempts.list_by_shard(shards[0].shard_id)[0]
+        node = uow.nodes.get_by_id("node-a")
+        assert node is not None
+        assert node.resource_occupancy == {"node-a-device": run_id}
+
+    service = container.run_projection_service()
+    service.handle_ack(
+        "node-a",
+        RunAckPayload(
+            run_id=run_id,
+            attempt_no=first_attempt.attempt_no,
+            dispatch_id=first_attempt.attempt_id,
+            accepted=True,
+        ),
+    )
+    service.handle_result(
+        "node-a",
+        RunResultPayload(
+            run_id=run_id,
+            shard_id=shards[0].shard_id,
+            attempt_no=first_attempt.attempt_no,
+            status="succeeded",
+            passed=True,
+        ),
+    )
+
+    with _uow(container) as uow:
+        run = uow.task_runs.get_by_run_id(run_id)
+        assert run is not None and run.status is RunStatus.ACKED
+        assert uow.run_results.get_by_run_id(run_id) is None
+        node = uow.nodes.get_by_id("node-a")
+        assert node is not None and node.resource_occupancy == {}
+        device = uow.devices.get_by_id("node-a-device")
+        assert device is not None and device.status is DeviceStatus.ONLINE
+
+
 def test_projection_result_idempotent_single_final_result(client) -> None:
     """D-19：一个 attempt 只接收一个最终结果。"""
     container = client.app.state.container
-    run_id = _run_id_after_trigger(client)
+    run_id = _run_id_after_trigger(client, case_filter=["c0", "c1"])
 
     with _uow(container) as uow:
         shard = uow.run_shards.list_by_run(run_id)[0]

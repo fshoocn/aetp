@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy.exc import IntegrityError
+
 from master.adapters.notifications.senders import (
     ConsoleSender,
     DingtalkSender,
@@ -21,6 +23,7 @@ from master.domain.models import DomainEvent
 from master.domain.models.notification import EventDelivery, EventSubscription
 from master.domain.models.notification import NotificationEndpoint as ModelEndpoint
 from master.domain.notifications import (
+    DeliveryReceipt,
     NotificationEndpoint,
     NotificationMessage,
     NotificationSender,
@@ -253,6 +256,77 @@ class TestSenderRegistry:
 
 
 class TestNotificationDispatcher:
+    def test_dispatcher_concurrent_delivery_is_sent_once(self):
+        """并发 Dispatcher 遇到唯一键竞争时，外部 sender 只调用一次。"""
+        mock_uow = MagicMock()
+        mock_uow.__enter__ = MagicMock(return_value=mock_uow)
+        mock_uow.__exit__ = MagicMock(return_value=False)
+        sub = EventSubscription(
+            subscription_id="SUB-CONCURRENT",
+            project_id="PRJ-1",
+            endpoint_id="EP-TEST",
+            event_types=["run.completed"],
+            enabled=True,
+        )
+        mock_uow.event_subscriptions.list_by_project.return_value = [sub]
+        mock_uow.notification_endpoints.get_by_endpoint_id.return_value = _model_endpoint("console_test")
+        mock_uow.event_deliveries.get_by_event_subscription.side_effect = [None, None]
+        reserved = EventDelivery(
+            id=1,
+            delivery_id="DL-CONCURRENT",
+            project_id="PRJ-1",
+            event_id="EVT-CONCURRENT",
+            subscription_id="SUB-CONCURRENT",
+            endpoint_id="EP-TEST",
+        )
+        mock_uow.event_deliveries.add.side_effect = [
+            reserved,
+            IntegrityError("unique delivery", {}, Exception("unique delivery")),
+        ]
+
+        class BlockingSender(NotificationSender):
+            channel_type = "console_test"
+
+            def __init__(self) -> None:
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+                self.calls = 0
+
+            async def send(self, message, endpoint, *, secret_value=None):
+                self.calls += 1
+                self.started.set()
+                await self.release.wait()
+                return DeliveryReceipt(status="succeeded", detail="sent once")
+
+        event = DomainEvent(
+            event_id="EVT-CONCURRENT",
+            project_id="PRJ-1",
+            event_type="run.completed",
+            aggregate_id="RUN-CONCURRENT",
+            payload={"task_id": "TASK-CONCURRENT"},
+            occurred_at=utcnow(),
+        )
+
+        async def dispatch_concurrently() -> tuple[int, int, int]:
+            sender = BlockingSender()
+            registry = SenderRegistry()
+            registry.register(sender)
+            dispatcher = NotificationDispatcher(
+                uow_factory=lambda: mock_uow,
+                registry=registry,
+            )
+            first = asyncio.create_task(dispatcher.dispatch(event))
+            await sender.started.wait()
+            second_result = await dispatcher.dispatch(event)
+            sender.release.set()
+            first_result = await first
+            return first_result, second_result, sender.calls
+
+        first_result, second_result, send_calls = asyncio.run(dispatch_concurrently())
+        assert (first_result, second_result, send_calls) == (1, 0, 1)
+        assert mock_uow.event_deliveries.add.call_count == 2
+        assert mock_uow.event_deliveries.update.call_count == 1
+
     def test_dispatcher_matches_bound_task_and_formats_progress(self):
         """任务订阅只接收目标任务的进度事件。"""
         mock_uow = MagicMock()

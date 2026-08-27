@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 from aetp_protocol.logs import LogLevel, RunLogBatch, RunLogEntry
@@ -174,6 +175,48 @@ def test_register_artifact_rejects_unknown_run(client) -> None:
             filename="r.xml",
             data=b"x",
         )
+
+
+def test_register_artifact_rejects_path_traversal_filename(client) -> None:
+    container = client.app.state.container
+    run_id = _seed_run(container)
+
+    with pytest.raises(ValueError, match="单个文件名"):
+        container.artifact_service().register_artifact(
+            run_id=run_id,
+            project_id="p1",
+            node_id="node-a",
+            kind="report",
+            filename="../escape.xml",
+            data=b"x",
+        )
+
+
+def test_register_artifact_cleans_storage_when_reference_insert_fails() -> None:
+    """引用落库失败时删除已写入对象，避免产生孤儿产物。"""
+    from master.application.services.artifact_service import ArtifactService
+
+    uow = MagicMock()
+    uow.__enter__.return_value = uow
+    uow.__exit__.return_value = False
+    uow.task_runs.get_by_run_id.return_value = object()
+    uow.run_artifacts.add.side_effect = RuntimeError("database unavailable")
+
+    storage = MagicMock()
+    service = ArtifactService(lambda: uow, storage)
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.register_artifact(
+            run_id="RUN-COMPENSATE",
+            project_id="p1",
+            node_id="node-a",
+            kind="report",
+            filename="report.xml",
+            data=b"report",
+        )
+
+    storage.store.assert_called_once_with("RUN-COMPENSATE", "report.xml", b"report")
+    storage.delete.assert_called_once_with(storage.store.return_value)
 
 
 def test_list_and_get_artifact_project_scoped(client) -> None:

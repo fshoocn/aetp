@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
@@ -15,6 +17,7 @@ from aetp_protocol.topics import command_topic
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
 from agent.application.services.registration_service import RegistrationService
+from agent.application.services.script_preflight_service import ScriptPreflightService
 from agent.config import AgentSettings
 from common.transport import MqttMessage
 
@@ -24,8 +27,8 @@ class RuntimeTransport:
 
     def __init__(self) -> None:
         self.connected = False
-        self.message_handler = None
-        self.connection_handler = None
+        self.message_handler: Callable[[MqttMessage], Awaitable[None]] | None = None
+        self.connection_handler: Callable[[bool, str], Awaitable[None]] | None = None
         self.subscriptions: list[str] = []
         self.published: list[tuple[str, bytes, int]] = []
         self.session_id = "session-1"
@@ -38,11 +41,13 @@ class RuntimeTransport:
 
     async def connect(self) -> None:
         self.connected = True
+        assert self.connection_handler is not None
         await self.connection_handler(True, self.session_id)
 
     async def disconnect(self) -> None:
         if self.connected:
             self.connected = False
+            assert self.connection_handler is not None
             await self.connection_handler(False, self.session_id)
 
     async def subscribe(self, topics: list[str]) -> None:
@@ -52,6 +57,7 @@ class RuntimeTransport:
         self.published.append((topic, payload, qos))
 
     async def emit(self, topic: str, payload: bytes) -> None:
+        assert self.message_handler is not None
         await self.message_handler(MqttMessage(topic=topic, payload=payload))
 
 
@@ -66,7 +72,7 @@ _SETTINGS = AgentSettings(
 )
 
 
-def _ack(correlation_id: str, session_id: str) -> bytes:
+def _ack(correlation_id: str | None, session_id: str) -> bytes:
     envelope = Envelope(
         message_id=uuid.uuid4().hex,
         message_type=MessageType.REGISTER_ACK.value,
@@ -140,6 +146,43 @@ async def test_runtime_disconnect_invalidates_registration(tmp_path) -> None:
     await transport.disconnect()
     assert registration.registered is False
     await runtime.stop()
+
+
+def test_runtime_rejects_non_master_script_preflight_sender(tmp_path) -> None:
+    ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
+    transport = RuntimeTransport()
+    registration = RegistrationService(transport, ledger, _SETTINGS)
+    runtime = AgentRuntime(_SETTINGS, transport, ledger, registration)
+
+    class Preflight:
+        called = False
+
+        def handle_verify(self, topic, envelope):
+            self.called = True
+            return True
+
+    preflight = Preflight()
+    runtime._script_preflight_obj = cast(ScriptPreflightService, preflight)
+    envelope = Envelope(
+        message_id=uuid.uuid4().hex,
+        message_type=MessageType.SCRIPT_VERIFY.value,
+        sent_at=datetime.now(UTC),
+        sender=Sender(
+            kind=SenderKind.AGENT,
+            id="bench-001",
+            session_id="agent-session",
+        ),
+        trace_id="trace-1",
+        payload={},
+    )
+
+    assert runtime._route_script_preflight(
+        MqttMessage(
+            topic=command_topic("bench-001", "verify"),
+            payload=json.dumps(envelope.model_dump(mode="json")).encode("utf-8"),
+        )
+    ) is False
+    assert preflight.called is False
 
 
 @pytest.mark.asyncio
