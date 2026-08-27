@@ -1,9 +1,8 @@
 """纯函数状态机（P3.6）。
 
 状态迁移由纯函数校验，实体保持纯数据；API/MQTT/前端不得直接改状态
-（§5.4）。覆盖四个状态机：
+（§5.4）。覆盖三个状态机：
 
-- TaskStatus：任务级（D-22 目标命名，task 执行态）
 - RunStatus：Run 总体（created/dispatched/acked/running/.../lost）
 - ShardStatus：Run 内分片（含 waiting_recovery 离线恢复等待态）
 - ShardAttemptStatus：Shard 向某 Node 的一次派发尝试（D-20）
@@ -25,10 +24,9 @@ from master.domain.enums import (
     RunStatus,
     ShardAttemptStatus,
     ShardStatus,
-    TaskStatus,
 )
 
-_Status = TaskStatus | RunStatus | ShardStatus | ShardAttemptStatus
+_Status = RunStatus | ShardStatus | ShardAttemptStatus
 _StatusT = TypeVar("_StatusT", bound=_Status)
 
 
@@ -39,22 +37,6 @@ class InvalidStateTransitionError(ValueError):
 # ---------------------------------------------------------------------------
 # 迁移表（单一事实来源；frozenset 保证纯函数不可变）
 # ---------------------------------------------------------------------------
-
-_TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
-    # pending → dispatching → running → succeeded/failed/timed_out
-    # pending → cancelled；dispatching → failed（派发耗尽）；running → cancelling → cancelled
-    TaskStatus.PENDING: frozenset({TaskStatus.DISPATCHING, TaskStatus.CANCELLED}),
-    TaskStatus.DISPATCHING: frozenset({TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED}),
-    TaskStatus.RUNNING: frozenset(
-        {
-            TaskStatus.SUCCEEDED,
-            TaskStatus.FAILED,
-            TaskStatus.CANCELLING,
-            TaskStatus.TIMED_OUT,
-        }
-    ),
-    TaskStatus.CANCELLING: frozenset({TaskStatus.CANCELLED}),
-}
 
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     # created → dispatched → acked → running → succeeded/failed/cancelled/timed_out/lost
@@ -134,7 +116,6 @@ _ATTEMPT_TRANSITIONS: dict[ShardAttemptStatus, frozenset[ShardAttemptStatus]] = 
 
 # 终态表（终态不可再迁移）
 _TERMINAL: dict[type, frozenset] = {
-    TaskStatus: frozenset({TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.TIMED_OUT}),
     RunStatus: frozenset(
         {
             RunStatus.SUCCEEDED,
@@ -157,7 +138,6 @@ _TERMINAL: dict[type, frozenset] = {
 
 # 状态枚举 → 迁移表
 _TRANSITIONS: dict[type, dict] = {
-    TaskStatus: _TASK_TRANSITIONS,
     RunStatus: _RUN_TRANSITIONS,
     ShardStatus: _SHARD_TRANSITIONS,
     ShardAttemptStatus: _ATTEMPT_TRANSITIONS,

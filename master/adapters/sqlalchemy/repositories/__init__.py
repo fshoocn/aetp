@@ -30,8 +30,6 @@ from .run_shard_repository import RunShardRepositoryImpl
 from .script_case_repository import ScriptCaseRepositoryImpl
 from .secret_value_repository import SecretValueRepositoryImpl
 from .shard_attempt_repository import ShardAttemptRepositoryImpl
-from .task_log_repository import TaskLogRepositoryImpl
-from .task_repository import TaskRepositoryImpl
 from .task_run_repository import TaskRunRepositoryImpl
 from .task_schedule_repository import TaskScheduleRepositoryImpl
 from .test_script_repository import TestScriptRepositoryImpl
@@ -65,8 +63,6 @@ __all__ = [
     "ScriptCaseRepositoryImpl",
     "SecretValueRepositoryImpl",
     "ShardAttemptRepositoryImpl",
-    "TaskLogRepositoryImpl",
-    "TaskRepositoryImpl",
     "TaskRunRepositoryImpl",
     "TaskScheduleRepositoryImpl",
     "TestScriptRepositoryImpl",

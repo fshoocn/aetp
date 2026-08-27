@@ -42,8 +42,6 @@ from master.adapters.sqlalchemy.repositories import (
     ScriptCaseRepositoryImpl,
     SecretValueRepositoryImpl,
     ShardAttemptRepositoryImpl,
-    TaskLogRepositoryImpl,
-    TaskRepositoryImpl,
     TaskRunRepositoryImpl,
     TaskScheduleRepositoryImpl,
     TestScriptRepositoryImpl,
@@ -84,8 +82,6 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.node_sessions = NodeSessionRepositoryImpl(session)
         self.devices = DeviceRepositoryImpl(session)
         self.bindings = ProjectNodeBindingRepositoryImpl(session)
-        self.tasks = TaskRepositoryImpl(session)
-        self.task_logs = TaskLogRepositoryImpl(session)
         self.notification_endpoints = NotificationEndpointRepositoryImpl(session)
         self.event_subscriptions = EventSubscriptionRepositoryImpl(session)
         self.event_deliveries = EventDeliveryRepositoryImpl(session)

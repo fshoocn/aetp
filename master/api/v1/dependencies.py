@@ -37,7 +37,6 @@ from master.application.services.script_storage_service import ScriptStorageServ
 from master.application.services.script_verification_service import (
     ScriptVerificationService,
 )
-from master.application.services.task_service import TaskService
 from master.application.services.test_task_service import TestTaskService
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
@@ -106,13 +105,6 @@ def get_auth_service(
 ) -> AuthService:
     """从容器解析认证服务。"""
     return container.auth_service()
-
-
-def get_task_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> TaskService:
-    """从容器解析任务服务。"""
-    return container.task_service()
 
 
 def get_run_trigger_service(
@@ -265,7 +257,6 @@ UowFactoryDep = Annotated[SqlAlchemyUnitOfWorkFactory, Depends(get_uow_factory)]
 EventBusDep = Annotated[EventBus, Depends(get_event_bus)]
 EventPublisherDep = Annotated[EventPublisher, Depends(get_event_publisher)]
 AuthDep = Annotated[AuthService, Depends(get_auth_service)]
-TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
 RunTriggerServiceDep = Annotated[RunTriggerService, Depends(get_run_trigger_service)]
 RunProjectionServiceDep = Annotated[RunProjectionService, Depends(get_run_projection_service)]
 PluginRegistryDep = Annotated[PluginRegistry, Depends(get_plugin_registry)]

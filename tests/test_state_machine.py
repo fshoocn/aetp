@@ -13,7 +13,6 @@ from master.domain.enums import (
     RunStatus,
     ShardAttemptStatus,
     ShardStatus,
-    TaskStatus,
 )
 from master.domain.state_machine import (
     InvalidStateTransitionError,
@@ -24,7 +23,7 @@ from master.domain.state_machine import (
     transitions_for,
 )
 
-_ALL_ENUMS = [TaskStatus, RunStatus, ShardStatus, ShardAttemptStatus]
+_ALL_ENUMS = [RunStatus, ShardStatus, ShardAttemptStatus]
 
 
 @pytest.mark.parametrize("enum_type", _ALL_ENUMS)
@@ -59,27 +58,15 @@ def test_initial_not_terminal(enum_type):
 
 def test_cross_type_transition_rejected():
     """跨状态机类型迁移一律拒绝。"""
-    assert can_transition(TaskStatus.RUNNING, RunStatus.RUNNING) is False
     assert can_transition(RunStatus.RUNNING, ShardStatus.RUNNING) is False
     assert can_transition(ShardStatus.RUNNING, ShardAttemptStatus.RUNNING) is False
     with pytest.raises(InvalidStateTransitionError):
-        assert_transition(TaskStatus.PENDING, RunStatus.CREATED)
+        assert_transition(ShardStatus.PENDING, RunStatus.CREATED)
 
 
 # ---------------------------------------------------------------------------
 # 各状态机代表性流程
 # ---------------------------------------------------------------------------
-
-
-def test_task_typical_flow():
-    assert can_transition(TaskStatus.PENDING, TaskStatus.DISPATCHING)
-    assert can_transition(TaskStatus.DISPATCHING, TaskStatus.RUNNING)
-    assert can_transition(TaskStatus.RUNNING, TaskStatus.SUCCEEDED)
-    assert can_transition(TaskStatus.RUNNING, TaskStatus.CANCELLING)
-    assert can_transition(TaskStatus.CANCELLING, TaskStatus.CANCELLED)
-    assert can_transition(TaskStatus.DISPATCHING, TaskStatus.FAILED)  # 派发耗尽
-    assert can_transition(TaskStatus.RUNNING, TaskStatus.TIMED_OUT)
-    assert not can_transition(TaskStatus.SUCCEEDED, TaskStatus.RUNNING)
 
 
 def test_run_typical_flow():

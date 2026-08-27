@@ -39,8 +39,6 @@ from .run_shard import RunShard
 from .script_case import ScriptCase
 from .secret_value import SecretValue
 from .shard_attempt import ShardAttempt
-from .task import Task
-from .task_log import TaskLog
 from .task_run import TaskRun
 from .task_schedule import TaskSchedule
 from .test_script import TestScript
@@ -77,8 +75,6 @@ __all__ = [
     "ScriptCase",
     "SecretValue",
     "ShardAttempt",
-    "Task",
-    "TaskLog",
     "TaskRun",
     "TaskSchedule",
     "TestScript",

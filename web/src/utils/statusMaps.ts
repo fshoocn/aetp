@@ -24,30 +24,6 @@ export const RUN_STATUS_TAG: Record<string, "success" | "danger" | "warning" | "
   lost: "danger",
 };
 
-/** 任务状态 → 中文文本 */
-export const TASK_STATUS_TEXT: Record<string, string> = {
-  pending: "待处理",
-  dispatching: "派发中",
-  running: "运行中",
-  cancelling: "取消中",
-  succeeded: "成功",
-  failed: "失败",
-  cancelled: "已取消",
-  timed_out: "超时",
-};
-
-/** 任务状态 → Element Plus Tag type */
-export const TASK_STATUS_TAG: Record<string, "success" | "danger" | "warning" | "info"> = {
-  succeeded: "success",
-  running: "warning",
-  cancelling: "warning",
-  dispatching: "info",
-  pending: "info",
-  failed: "danger",
-  timed_out: "danger",
-  cancelled: "info",
-};
-
 /** Case 状态 → 中文文本 */
 export const CASE_STATUS_TEXT: Record<string, string> = {
   passed: "通过",
@@ -72,6 +48,8 @@ export const CASE_STATUS_TAG: Record<string, "success" | "danger" | "warning" | 
 export const TRIGGER_TEXT: Record<string, string> = {
   manual_web: "手动",
   api: "API",
+  schedule: "定时",
+  ci_webhook: "CI 回调",
   retry: "重试",
   recovery: "恢复",
 };
@@ -102,20 +80,58 @@ export function runStatusTag(status: string): "success" | "danger" | "warning" |
   return RUN_STATUS_TAG[status] || "info";
 }
 
-export function taskStatusText(status: string): string {
-  return TASK_STATUS_TEXT[status] || status;
-}
-
-export function taskStatusTag(status: string): "success" | "danger" | "warning" | "info" {
-  return TASK_STATUS_TAG[status] || "info";
-}
-
 export function caseStatusText(status: string): string {
   return CASE_STATUS_TEXT[status] || status;
 }
 
 export function caseStatusTag(status: string): "success" | "danger" | "warning" | "info" {
   return CASE_STATUS_TAG[status] || "info";
+}
+
+/** 账户状态 → 中文文本 */
+export const ACCOUNT_STATUS_TEXT: Record<string, string> = {
+  pending: "待审核",
+  active: "已激活",
+  disabled: "已禁用",
+};
+
+/** 账户状态 → Element Plus Tag type */
+export const ACCOUNT_STATUS_TAG: Record<string, "success" | "danger" | "warning" | "info"> = {
+  pending: "warning",
+  active: "success",
+  disabled: "danger",
+};
+
+/** 项目角色 → 中文文本 */
+export const PROJECT_ROLE_TEXT: Record<string, string> = {
+  viewer: "查看者",
+  operator: "操作员",
+  maintainer: "维护者",
+  owner: "项目负责人",
+};
+
+/** 项目角色 → Element Plus Tag type */
+export const PROJECT_ROLE_TAG: Record<string, "success" | "danger" | "warning" | "info"> = {
+  viewer: "info",
+  operator: "success",
+  maintainer: "warning",
+  owner: "danger",
+};
+
+export function accountStatusText(status: string): string {
+  return ACCOUNT_STATUS_TEXT[status] || status;
+}
+
+export function accountStatusTag(status: string): "success" | "danger" | "warning" | "info" {
+  return ACCOUNT_STATUS_TAG[status] || "info";
+}
+
+export function projectRoleText(role: string): string {
+  return PROJECT_ROLE_TEXT[role] || role;
+}
+
+export function projectRoleTag(role: string): "success" | "danger" | "warning" | "info" {
+  return PROJECT_ROLE_TAG[role] || "info";
 }
 
 export function triggerText(value: string): string {

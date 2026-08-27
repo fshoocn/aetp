@@ -35,8 +35,6 @@ from master.domain.models import (
     ScriptCase,
     SecretValueRecord,
     ShardAttempt,
-    Task,
-    TaskLog,
     TaskRun,
     TestScript,
     TestTask,
@@ -95,7 +93,7 @@ class TestScriptRepository(ABC):
     def get_by_script_id(self, script_id: str) -> TestScript | None: ...
 
     @abstractmethod
-    def get_by_hash(self, sha256: str) -> TestScript | None: ...
+    def get_by_hash(self, sha256: str, *, project_id: str) -> TestScript | None: ...
 
     @abstractmethod
     def find_by_name_version(self, project_id: str, name: str, version: int) -> TestScript | None: ...
@@ -114,6 +112,9 @@ class TestScriptRepository(ABC):
 
     @abstractmethod
     def delete(self, script_id: str) -> None: ...
+
+    @abstractmethod
+    def list_all_file_refs(self) -> list[str]: ...
 
 
 class ScriptCaseRepository(ABC):
@@ -282,6 +283,9 @@ class RunArtifactRepository(ABC):
 
     @abstractmethod
     def list_by_run(self, run_id: str) -> list[RunArtifact]: ...
+
+    @abstractmethod
+    def list_all_file_refs(self) -> list[str]: ...
 
 
 class RunLogRepository(ABC):
@@ -525,36 +529,6 @@ class ProjectNodeBindingRepository(ABC):
     def remove(self, binding: ProjectNodeBinding) -> None: ...
 
 
-class TaskRepository(ABC):
-    @abstractmethod
-    def add(self, task: Task) -> Task: ...
-
-    @abstractmethod
-    def get_by_task_id(self, task_id: str, project_id: str | None = None) -> Task | None: ...
-
-    @abstractmethod
-    def list(
-        self,
-        *,
-        project_id: str | None = None,
-        device_id: str | None = None,
-        status: str | None = None,
-        limit: int = 200,
-        offset: int = 0,
-    ) -> list[Task]: ...
-
-    @abstractmethod
-    def update(self, task: Task) -> Task: ...
-
-
-class TaskLogRepository(ABC):
-    @abstractmethod
-    def list_by_task(self, task_id: str, project_id: str | None = None) -> list[TaskLog]: ...
-
-    @abstractmethod
-    def add_many(self, logs: list[TaskLog]) -> list[TaskLog]: ...
-
-
 class UnitOfWork(ABC):
     """工作单元：一个业务事务内共享同一数据库会话。
 
@@ -585,8 +559,6 @@ class UnitOfWork(ABC):
     node_sessions: NodeSessionRepository
     devices: DeviceRepository
     bindings: ProjectNodeBindingRepository
-    tasks: TaskRepository
-    task_logs: TaskLogRepository
     notification_endpoints: NotificationEndpointRepository
     event_subscriptions: EventSubscriptionRepository
     event_deliveries: EventDeliveryRepository

@@ -55,28 +55,6 @@ class ProjectRole(StrEnum):
     OWNER = "owner"
 
 
-class TaskStatus(StrEnum):
-    """测试任务状态机（D-22 目标命名，P3.1 已迁移）。
-
-    pending → dispatching → running → succeeded / failed / timed_out
-    pending → cancelled
-    dispatching → failed（派发耗尽）
-    running → cancelling → cancelled
-
-    旧值迁移映射：dispatched/accepted → dispatching；
-    completed → succeeded；timeout → timed_out。
-    """
-
-    PENDING = "pending"
-    DISPATCHING = "dispatching"
-    RUNNING = "running"
-    CANCELLING = "cancelling"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    TIMED_OUT = "timed_out"
-
-
 class ScriptParseStatus(StrEnum):
     """测试脚本用例解析状态。"""
 

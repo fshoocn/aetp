@@ -1,18 +1,10 @@
-"""项目范围 TaskService 与任务 API 测试。"""
+"""已废弃 tasks 入口的契约测试。"""
 
 from __future__ import annotations
-
-import re
 
 import pytest
 
 from master.adapters.sqlalchemy.orm import Device, Node
-
-_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
-
-
-def _is_ulid(value: str) -> bool:
-    return bool(_ULID_RE.match(value))
 
 
 @pytest.fixture
@@ -57,36 +49,19 @@ def task_context(client, auth_token):
     return project.project_id, auth_header
 
 
-def test_create_and_list_tasks(client, task_context):
+def test_legacy_project_tasks_entry_is_removed(client, task_context):
     project_id, auth_header = task_context
     base = f"/api/v1/projects/{project_id}/tasks"
 
-    resp = client.post(
+    assert client.get(base, headers=auth_header).status_code == 404
+    assert client.post(
         base,
         json={"device_id": "task-device", "command": {"test": "vibration"}},
         headers=auth_header,
-    )
-    assert resp.status_code == 201
-    data = resp.json()
-    task_id = data["task_id"]
-    assert data["project_id"] == project_id
-    assert data["status"] == "pending"
-    assert data["device_id"] == "task-device"
-
-    resp = client.get(base, headers=auth_header)
-    assert resp.status_code == 200
-    assert len(resp.json()) == 1
-
-    resp = client.get(f"{base}/{task_id}", headers=auth_header)
-    assert resp.status_code == 200
-    assert resp.json()["task_id"] == task_id
-
-    resp = client.get(f"{base}/{task_id}/logs", headers=auth_header)
-    assert resp.status_code == 200
-    assert resp.json() == []
+    ).status_code == 405
 
 
-def test_get_nonexistent_task(client, task_context):
+def test_legacy_project_task_detail_entry_is_removed(client, task_context):
     project_id, auth_header = task_context
     resp = client.get(
         f"/api/v1/projects/{project_id}/tasks/T-NOEXIST",
@@ -97,7 +72,7 @@ def test_get_nonexistent_task(client, task_context):
 
 def test_tasks_require_auth(client):
     resp = client.get("/api/v1/projects/unknown/tasks")
-    assert resp.status_code == 401
+    assert resp.status_code == 404
 
 
 def test_global_task_endpoint_is_removed(client, auth_header):
@@ -106,30 +81,3 @@ def test_global_task_endpoint_is_removed(client, auth_header):
     assert resp.status_code == 404
 
 
-def test_create_task_rejects_unbound_device(client, task_context):
-    project_id, auth_header = task_context
-    resp = client.post(
-        f"/api/v1/projects/{project_id}/tasks",
-        json={"device_id": "not-bound", "command": {"cmd": "ping"}},
-        headers=auth_header,
-    )
-    assert resp.status_code == 404
-
-
-def test_create_task_service_direct(client, task_context):
-    project_id, _ = task_context
-    svc = client.app.state.container.task_service()
-    task = svc.create(
-        project_id=project_id,
-        device_id="task-device",
-        command={"cmd": "ping"},
-        created_by=1,
-    )
-    assert _is_ulid(task.task_id)
-    assert task.status == "pending"
-    assert task.project_id == project_id
-    assert task.device_id == "task-device"
-    assert task.command["cmd"] == "ping"
-    found = svc.get_by_id(task.task_id, project_id=project_id)
-    assert found is not None
-    assert found.task_id == task.task_id

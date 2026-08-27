@@ -8,77 +8,48 @@
     <el-card v-loading="taskLoading" class="info">
       <el-descriptions :column="2" border v-if="task">
         <el-descriptions-item label="任务ID">{{ task.task_id }}</el-descriptions-item>
-        <el-descriptions-item label="设备">{{ task.device_id }}</el-descriptions-item>
+        <el-descriptions-item label="节点">{{ task.node_ids.join(", ") || "-" }}</el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag :type="statusTag(task.status)">{{ statusText(task.status) }}</el-tag>
+          <el-tag :type="task.enabled ? 'success' : 'info'">{{ task.enabled ? "启用" : "停用" }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ fmt(task.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="开始时间">
-          {{ task.started_at ? fmt(task.started_at) : "-" }}
+        <el-descriptions-item label="创建时间">{{ task.created_at ? fmt(task.created_at) : "-" }}</el-descriptions-item>
+        <el-descriptions-item label="更新时间">{{ task.updated_at ? fmt(task.updated_at) : "-" }}</el-descriptions-item>
+        <el-descriptions-item label="脚本" :span="2">
+          <code>{{ task.script_id }} · v{{ task.script_version }}</code>
         </el-descriptions-item>
-        <el-descriptions-item label="完成时间">
-          {{ task.finished_at ? fmt(task.finished_at) : "-" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="命令" :span="2">
-          <code>{{ prettyJson(task.command) }}</code>
-        </el-descriptions-item>
-        <el-descriptions-item v-if="task.result" label="结果" :span="2">
-          <code>{{ prettyJson(task.result) }}</code>
-        </el-descriptions-item>
-        <el-descriptions-item v-if="task.error" label="错误" :span="2">
-          <span class="err">{{ task.error }}</span>
+        <el-descriptions-item label="配置" :span="2">
+          <code>{{ prettyJson(task.config) }}</code>
         </el-descriptions-item>
       </el-descriptions>
       <el-empty v-else-if="!taskLoading" description="任务不存在" />
     </el-card>
 
-    <h3 class="section">执行日志</h3>
+    <h3 class="section">任务定义说明</h3>
     <el-card>
-      <div v-loading="logsLoading" class="log-box">
-        <div v-for="log in logs" :key="log.sequence" class="log-line" :class="`log-${log.level}`">
-          <span class="seq">#{{ log.sequence }}</span>
-          <span class="ts">{{ fmt(log.ts) }}</span>
-          <span>{{ log.message }}</span>
-        </div>
-        <el-empty v-if="!logsLoading && logs.length === 0" description="暂无日志" />
-      </div>
+      <el-empty description="任务定义本身不记录执行日志，请从运行记录查看具体执行过程" />
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useQuery } from "@tanstack/vue-query";
 import { aetpApi } from "@/api/endpoints";
 import { useProjectStore } from "@/stores/project";
-import { useTaskEvents } from "@/composables/useTaskEvents";
-import { taskStatusText, taskStatusTag } from "@/utils/statusMaps";
 
 const props = defineProps<{ taskId: string }>();
 const projectStore = useProjectStore();
-const queryClient = useQueryClient();
-
-useTaskEvents(queryClient);
 
 const projectId = computed(() => projectStore.currentProjectId ?? "");
 
 const taskQuery = useQuery({
   queryKey: ["task", projectId, props.taskId],
-  queryFn: () => aetpApi.tasks.get(projectId.value, props.taskId),
+  queryFn: () => aetpApi.testTasks.get(projectId.value, props.taskId),
   enabled: computed(() => !!projectId.value),
-});
-
-const logsQuery = useQuery({
-  queryKey: ["logs", projectId, props.taskId],
-  queryFn: () => aetpApi.tasks.logs(projectId.value, props.taskId),
-  enabled: computed(() => !!projectId.value),
-  refetchInterval: 5000, // 日志兜底轮询（SSE 之外）
 });
 
 const taskLoading = computed(() => taskQuery.isLoading.value);
-const logsLoading = computed(() => logsQuery.isLoading.value);
 const task = computed(() => taskQuery.data.value ?? null);
-const logs = computed(() => logsQuery.data.value ?? []);
 
 function prettyJson(v: unknown): string {
   try {
@@ -86,14 +57,6 @@ function prettyJson(v: unknown): string {
   } catch {
     return String(v);
   }
-}
-
-function statusText(s: string) {
-  return taskStatusText(s);
-}
-
-function statusTag(s: string) {
-  return taskStatusTag(s);
 }
 
 function fmt(ts: string) {
