@@ -60,6 +60,8 @@ class PluginManifest(_Strict):
             PluginPoint.HOOK: ("master",),
             PluginPoint.SHARDING: ("master",),
             PluginPoint.UI: ("ui",),
+            PluginPoint.STORAGE: ("master", "agent"),
+            PluginPoint.TRANSPORT: ("master", "agent"),
             PluginPoint.IDENTITY: ("master",),
         }.get(self.point, ())
         missing = tuple(name for name in required if getattr(self.entrypoints, name) is None)

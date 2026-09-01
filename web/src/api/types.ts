@@ -1,9 +1,4 @@
-﻿import { api } from "@/api/client";
-
-/** 褰撳墠 API 鐗堟湰鐨勬牴璺緞锛涗互鍚庤縼绉荤増鏈彧闇€淇敼杩欓噷銆?*/
-const API_V1 = "/api/v1";
-
-export interface UserInfo {
+﻿export interface UserInfo {
   id: number;
   username: string;
   display_name: string;
@@ -255,6 +250,30 @@ export interface ManagedPlugin {
   sha256: string;
   enabled: boolean;
   installed: boolean;
+}
+
+export type V2PluginStatus =
+  | "uploaded"
+  | "verified"
+  | "installed"
+  | "pending_restart"
+  | "enabled"
+  | "disabled"
+  | "removed"
+  | "error";
+
+export interface V2PluginVersion {
+  plugin_id: string;
+  version: string;
+  point: string;
+  status: V2PluginStatus;
+  filename: string;
+  archive_sha256: string;
+  manifest_sha256: string;
+  manifest: Record<string, unknown>;
+  installed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface TaskTypeConfigContext {

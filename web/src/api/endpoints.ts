@@ -16,6 +16,7 @@ export type {
   LanguageRuntime,
   LoginResponse,
   ManagedPlugin,
+  V2PluginVersion,
   Node,
   NodeCapabilities,
   NotificationEndpointOut,

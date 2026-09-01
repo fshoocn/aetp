@@ -30,6 +30,7 @@ from .project import Project
 from .project_integration import ProjectIntegration
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
+from .plugin_governance import AgentPluginDesiredVersion, AgentPluginSyncOperation, PluginVersion
 from .refresh_token import RefreshToken
 from .run_artifact import RunArtifact
 from .run_case_result import RunCaseResult
@@ -66,6 +67,9 @@ __all__ = [
     "ProjectIntegration",
     "ProjectMember",
     "ProjectNodeBinding",
+    "PluginVersion",
+    "AgentPluginDesiredVersion",
+    "AgentPluginSyncOperation",
     "RefreshToken",
     "RunArtifact",
     "RunCaseResult",

@@ -21,10 +21,12 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
 
 from master.config import get_settings
+from aetp_protocol.plugin_types import PluginStatus
 
 from .api.v1.dependencies import DbDep
 from .api.v1.errors import register_application_error_handlers
 from .api.v1.router import router as v1_router
+from .api.v2.router import router as v2_router
 from .bootstrap.container import Container
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,10 @@ async def lifespan(app: FastAPI):
     logger.info("开始初始化数据库和执行迁移")
     container.database()
     logger.info("数据库初始化完成")
+    with container.uow_factory()() as uow:
+        container.v2_plugin_registry().load(
+            uow.plugin_versions.list(status=PluginStatus.ENABLED)
+        )
     # Master 插件注册表在应用启动时加载：脚本解析、验证、分片和硬件需求
     # 均由 Master 侧插件提供；Agent 只加载对应执行包。
     plugins = container.plugin_registry()
@@ -246,6 +252,7 @@ class RequestLoggingMiddleware:
 app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(v1_router)
+app.include_router(v2_router)
 
 
 @app.get("/api/v1/health", tags=["system"])

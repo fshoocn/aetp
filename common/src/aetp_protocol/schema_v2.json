@@ -1533,6 +1533,78 @@
     "title": "ConfigurationSchema",
     "type": "object"
   },
+  "desired_plugin_version": {
+    "$defs": {
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginPoint": {
+        "enum": [
+          "executor",
+          "resource",
+          "runtime",
+          "software",
+          "reporter",
+          "analyzer",
+          "notifier",
+          "integration",
+          "hook",
+          "sharding",
+          "ui",
+          "storage",
+          "transport",
+          "identity"
+        ],
+        "title": "PluginPoint",
+        "type": "string"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Master 针对节点的精确插件版本期望。",
+    "properties": {
+      "auto_update": {
+        "default": true,
+        "title": "Auto Update",
+        "type": "boolean"
+      },
+      "maintenance_window": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Maintenance Window"
+      },
+      "plugin_id": {
+        "$ref": "#/$defs/PluginId"
+      },
+      "point": {
+        "$ref": "#/$defs/PluginPoint"
+      },
+      "version": {
+        "$ref": "#/$defs/SemVer"
+      }
+    },
+    "required": [
+      "plugin_id",
+      "point",
+      "version"
+    ],
+    "title": "DesiredPluginVersion",
+    "type": "object"
+  },
   "envelope": {
     "$defs": {
       "BusinessId": {

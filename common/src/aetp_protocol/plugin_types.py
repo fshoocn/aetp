@@ -69,6 +69,18 @@ class PluginDistributionRef(BaseModel):
     download_url: str | None = None
 
 
+class DesiredPluginVersion(BaseModel):
+    """Master 针对节点的精确插件版本期望。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    plugin_id: PluginId
+    point: PluginPoint
+    version: SemVer
+    auto_update: bool = True
+    maintenance_window: str | None = None
+
+
 class EntrypointRef(RootModel[str]):
     root: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$")
 

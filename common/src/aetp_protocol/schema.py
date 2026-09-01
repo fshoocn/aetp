@@ -14,7 +14,7 @@ from .authorization import AuthorizationDecision, AuthorizationRequest, Principa
 from .capabilities import NodeCapabilitySnapshot
 from .execution import ExecutionPlan, ExecutionRequirement, ExecutionResult, ResourceLease
 from .payloads import V2_PAYLOAD_MODELS
-from .plugin_types import PluginRef
+from .plugin_types import DesiredPluginVersion, PluginRef
 from .plugins import PluginManifest
 from .v2_envelope import V2Envelope
 
@@ -24,6 +24,7 @@ V2_SCHEMA_MODELS: Mapping[str, SchemaModel] = {
     "envelope": V2Envelope,
     "plugin_manifest": PluginManifest,
     "plugin_ref": PluginRef,
+    "desired_plugin_version": DesiredPluginVersion,
     "node_capability_snapshot": NodeCapabilitySnapshot,
     "execution_requirement": ExecutionRequirement,
     "execution_plan": ExecutionPlan,

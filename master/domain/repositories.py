@@ -12,8 +12,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
+from aetp_protocol.ids import BusinessId, PluginId, SemVer, SessionId, Sha256
+from aetp_protocol.plugin_types import PluginPoint, PluginStatus
 from master.domain.enums import DisconnectReason, ShardStatus
 from master.domain.models import (
+    AgentPluginDesiredVersionRecord,
+    AgentPluginSyncOperationRecord,
     AuditLog,
     Device,
     DomainEvent,
@@ -26,6 +30,7 @@ from master.domain.models import (
     ProjectMemberWithUser,
     ProjectNodeBinding,
     ProjectNodeBindingView,
+    PluginVersionRecord,
     RefreshToken,
     RunArtifact,
     RunCaseResult,
@@ -529,6 +534,56 @@ class ProjectNodeBindingRepository(ABC):
     def remove(self, binding: ProjectNodeBinding) -> None: ...
 
 
+class PluginVersionRepository(ABC):
+    @abstractmethod
+    def get(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord | None: ...
+
+    @abstractmethod
+    def get_by_archive_sha256(self, archive_sha256: Sha256) -> PluginVersionRecord | None: ...
+
+    @abstractmethod
+    def list(
+        self,
+        *,
+        point: PluginPoint | None = None,
+        status: PluginStatus | None = None,
+    ) -> list[PluginVersionRecord]: ...
+
+    @abstractmethod
+    def add(self, record: PluginVersionRecord) -> PluginVersionRecord: ...
+
+    @abstractmethod
+    def update(self, record: PluginVersionRecord) -> PluginVersionRecord: ...
+
+
+class AgentPluginDesiredVersionRepository(ABC):
+    @abstractmethod
+    def get(self, node_id: BusinessId, plugin_id: PluginId) -> AgentPluginDesiredVersionRecord | None: ...
+
+    @abstractmethod
+    def list_by_node(self, node_id: BusinessId) -> list[AgentPluginDesiredVersionRecord]: ...
+
+    @abstractmethod
+    def upsert(self, record: AgentPluginDesiredVersionRecord) -> AgentPluginDesiredVersionRecord: ...
+
+    @abstractmethod
+    def remove(self, node_id: BusinessId, plugin_id: PluginId) -> None: ...
+
+
+class AgentPluginSyncOperationRepository(ABC):
+    @abstractmethod
+    def get(self, sync_id: BusinessId) -> AgentPluginSyncOperationRecord | None: ...
+
+    @abstractmethod
+    def list_by_node(self, node_id: BusinessId) -> list[AgentPluginSyncOperationRecord]: ...
+
+    @abstractmethod
+    def add(self, record: AgentPluginSyncOperationRecord) -> AgentPluginSyncOperationRecord: ...
+
+    @abstractmethod
+    def update(self, record: AgentPluginSyncOperationRecord) -> AgentPluginSyncOperationRecord: ...
+
+
 class UnitOfWork(ABC):
     """工作单元：一个业务事务内共享同一数据库会话。
 
@@ -567,6 +622,9 @@ class UnitOfWork(ABC):
     ci_trigger_bindings: CiTriggerBindingRepository
     ci_webhook_deliveries: CiWebhookDeliveryRepository
     hook_executions: HookExecutionRepository
+    plugin_versions: PluginVersionRepository
+    agent_plugin_desired_versions: AgentPluginDesiredVersionRepository
+    agent_plugin_sync_operations: AgentPluginSyncOperationRepository
 
     @abstractmethod
     def __enter__(self) -> UnitOfWork: ...

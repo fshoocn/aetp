@@ -8,6 +8,7 @@ import type {
   EventSubscriptionOut,
   LoginResponse,
   ManagedPlugin,
+  V2PluginVersion,
   Node,
   NotificationEndpointOut,
   Project,
@@ -228,6 +229,20 @@ export const aetpApi = {
     },
     remove(pluginId: string) {
       return api.delete(`${API_V1}/task-types/managed/${encodeURIComponent(pluginId)}`);
+    },
+    v2List() { return api.get<V2PluginVersion[]>('/api/v2/plugins'); },
+    v2Upload(file: File) { return api.upload<V2PluginVersion>('/api/v2/plugins', file); },
+    v2Install(pluginId: string, version: string) {
+      return api.post<V2PluginVersion>(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/install`);
+    },
+    v2Enable(pluginId: string, version: string) {
+      return api.post<V2PluginVersion>(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/enable`);
+    },
+    v2Disable(pluginId: string, version: string) {
+      return api.post<V2PluginVersion>(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/disable`);
+    },
+    v2Remove(pluginId: string, version: string) {
+      return api.delete(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}`);
     },
   },
 

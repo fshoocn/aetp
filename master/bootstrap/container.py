@@ -46,6 +46,8 @@ from master.application.services.node_service import NodeService
 from master.application.services.notification_dispatcher import NotificationDispatcher
 from master.application.services.notification_service import NotificationService
 from master.application.services.plugin_download_service import PluginDownloadService
+from master.application.services.plugin_governance_service import PluginGovernanceService
+from master.application.services.plugin_sync_service import PluginSyncService
 from master.application.services.project_member_service import ProjectMemberService
 from master.application.services.project_node_binding_service import (
     ProjectNodeBindingService,
@@ -72,6 +74,7 @@ from master.application.services.test_task_service import TestTaskService
 from master.config import get_settings, runtime_dir
 from master.plugins.manager import PluginManager
 from master.plugins.registry import create_default_registry
+from master.plugins.v2_registry import V2PluginRegistry
 from master.workers.event_hook_worker import EventHookWorker
 from master.workers.maintenance_worker import MaintenanceWorker
 from master.workers.outbox_worker import OutboxWorker
@@ -193,6 +196,19 @@ class Container(containers.DeclarativeContainer):
         secret=providers.Callable(_internal_signing_secret),
         base_url=providers.Callable(lambda: get_settings().public_base_url),
         ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
+    )
+    plugin_governance_service = providers.Singleton(
+        PluginGovernanceService,
+        uow_factory=uow_factory,
+        archive_root=providers.Callable(lambda: _data_dir() / "plugins-v2"),
+    )
+    v2_plugin_registry = providers.Singleton(
+        V2PluginRegistry,
+        archive_root=providers.Callable(lambda: _data_dir() / "plugins-v2"),
+    )
+    plugin_sync_service = providers.Singleton(
+        PluginSyncService,
+        uow_factory=uow_factory,
     )
     plugin_manager = providers.Singleton(
         PluginManager,

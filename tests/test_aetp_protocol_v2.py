@@ -9,6 +9,7 @@ import pytest
 from aetp_protocol import (
     V2_PROTOCOL_VERSION,
     ExecutionAck,
+    DesiredPluginVersion,
     MessagePayloadError,
     PluginManifest,
     V2Envelope,
@@ -103,3 +104,19 @@ def test_v2_schema_generation_covers_core_contracts() -> None:
 def test_v2_schema_snapshot_is_current() -> None:
     snapshot = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     assert snapshot == generate_v2_schemas()
+
+
+def test_desired_plugin_version_is_strict_and_typed() -> None:
+    desired = DesiredPluginVersion(
+        plugin_id="org.pytest.executor",
+        point="executor",
+        version="2.0.0",
+    )
+    assert desired.auto_update is True
+    with pytest.raises(ValidationError):
+        DesiredPluginVersion(
+            plugin_id="org.pytest.executor",
+            point="executor",
+            version="2.0.0",
+            unexpected=True,
+        )

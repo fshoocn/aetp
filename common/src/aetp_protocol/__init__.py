@@ -155,6 +155,7 @@ from .plugin import (
     TaskDefinitionSpec,
 )
 from .plugin_types import (
+    DesiredPluginVersion,
     PluginAvailability,
     PluginDistributionRef,
     PluginPoint,
@@ -249,6 +250,7 @@ __all__ = [
     "Presence",
     "DiagnosticsRequest",
     "DiagnosticsSnapshot",
+    "DesiredPluginVersion",
     "NumericConstraint",
     "OperatingSystem",
     "OperatingSystemRequirement",

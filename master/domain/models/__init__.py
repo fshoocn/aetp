@@ -5,6 +5,12 @@ from __future__ import annotations
 from .device import Device
 from .messaging import AuditLog, DomainEvent, InboxMessage, OutboxMessage
 from .node import Node, NodeSession
+from .plugin_governance import (
+    AgentPluginDesiredVersionRecord,
+    AgentPluginSyncOperationRecord,
+    PluginSyncOperationState,
+    PluginVersionRecord,
+)
 from .project import Project
 from .project_member import ProjectMember, ProjectMemberWithUser
 from .project_node_binding import ProjectNodeBinding, ProjectNodeBindingView
@@ -31,6 +37,10 @@ __all__ = [
     "InboxMessage",
     "Node",
     "NodeSession",
+    "AgentPluginDesiredVersionRecord",
+    "AgentPluginSyncOperationRecord",
+    "PluginSyncOperationState",
+    "PluginVersionRecord",
     "OutboxMessage",
     "Project",
     "ProjectMember",

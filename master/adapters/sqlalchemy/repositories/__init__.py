@@ -21,6 +21,11 @@ from .outbox_message_repository import OutboxMessageRepositoryImpl
 from .project_member_repository import ProjectMemberRepositoryImpl
 from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
 from .project_repository import ProjectRepositoryImpl
+from .plugin_governance_repository import (
+    AgentPluginDesiredVersionRepositoryImpl,
+    AgentPluginSyncOperationRepositoryImpl,
+    PluginVersionRepositoryImpl,
+)
 from .refresh_token_repository import RefreshTokenRepositoryImpl
 from .run_artifact_repository import RunArtifactRepositoryImpl
 from .run_case_result_repository import RunCaseResultRepositoryImpl
@@ -54,6 +59,9 @@ __all__ = [
     "ProjectMemberRepositoryImpl",
     "ProjectNodeBindingRepositoryImpl",
     "ProjectRepositoryImpl",
+    "PluginVersionRepositoryImpl",
+    "AgentPluginDesiredVersionRepositoryImpl",
+    "AgentPluginSyncOperationRepositoryImpl",
     "RefreshTokenRepositoryImpl",
     "RunArtifactRepositoryImpl",
     "RunCaseResultRepositoryImpl",

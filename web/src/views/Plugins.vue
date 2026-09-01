@@ -39,8 +39,8 @@
       ><el-alert
         v-if="isAdmin"
         class="upload-hint"
-        title="ZIP 插件规范"
-        description="压缩包根目录必须包含 plugin.json 和 main.py；main.py 固定导出 package。安装或启停后需重启 Master 生效。"
+        title="V2 插件归档规范"
+        description="归档必须通过 Manifest、入口路径和 SHA-256 校验。安装、启用和停用写入管理状态，重启后生效。"
         type="info"
         show-icon
         :closable="false" /><el-table :data="plugins" row-key="task_type"
@@ -87,43 +87,35 @@
     /></el-card>
     <el-card v-if="isAdmin" class="managed-card" shadow="never"
       ><template #header><strong>插件包生命周期</strong></template
-      ><el-table :data="managed" row-key="plugin_id"
+      ><el-table :data="managed" :row-key="(row: V2PluginVersion) => `${row.plugin_id}:${row.version}`"
         ><el-table-column
           prop="plugin_id"
-          label="插件"
+          label="插件 ID"
           min-width="220"
         /><el-table-column
-          prop="sha256"
-          label="SHA-256"
+          prop="version"
+          label="版本"
+          width="130"
+        /><el-table-column prop="point" label="扩展点" width="130" /><el-table-column
+          prop="archive_sha256"
+          label="归档 SHA-256"
           min-width="250"
         /><el-table-column label="状态" width="160"
           ><template #default="{ row }"
-            ><el-tag :type="row.enabled ? 'success' : 'info'">{{
-              row.enabled ? "启用" : "停用"
-            }}</el-tag
-            ><el-tag v-if="row.installed" type="warning" class="installed"
-              >已安装</el-tag
-            ></template
+            ><el-tag :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag></template
           ></el-table-column
         ><el-table-column label="操作" min-width="340"
           ><template #default="{ row }"
             ><el-button
-              v-if="!row.installed"
+              v-if="row.status === 'verified'"
               link
               type="success"
-              @click="install(row.plugin_id)"
-              >{{ row.enabled ? "安装" : "安装后启用" }}</el-button
-              ><el-button
-                v-if="row.installed"
-                link
-                type="primary"
-                :icon="Download"
-                @click="download(row)"
-                >下载</el-button
-            ><el-button link type="primary" @click="toggle(row)">{{
-              row.enabled ? "停用" : "启用"
+              @click="install(row)"
+              >安装</el-button
+            ><el-button v-if="['installed', 'disabled', 'enabled'].includes(row.status)" link type="primary" @click="toggle(row)">{{
+              row.status === "enabled" ? "停用" : "启用"
             }}</el-button
-            ><el-button link type="danger" @click="remove(row)" :disabled="row.enabled"
+            ><el-button link type="danger" @click="remove(row)" :disabled="!['disabled', 'error'].includes(row.status)"
               >删除</el-button
             ></template
           ></el-table-column
@@ -162,8 +154,8 @@
 import { computed, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Download, Grid, Refresh } from "@element-plus/icons-vue";
-import { aetpApi, type ManagedPlugin, type TaskTypePlugin } from "@/api/endpoints";
+import { Grid, Refresh } from "@element-plus/icons-vue";
+import { aetpApi, type TaskTypePlugin, type V2PluginVersion } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 const qc = useQueryClient();
 const auth = useAuthStore();
@@ -174,8 +166,8 @@ const query = useQuery({
   queryFn: () => aetpApi.plugins.list(),
 });
 const managedQuery = useQuery({
-  queryKey: ["plugins", "managed"],
-  queryFn: () => aetpApi.plugins.managed(),
+  queryKey: ["plugins", "v2"],
+  queryFn: () => aetpApi.plugins.v2List(),
   enabled: isAdmin,
 });
 const plugins = computed(() => query.data.value ?? []);
@@ -207,8 +199,8 @@ async function upload(event: Event) {
   }
   uploading.value = true;
   try {
-    await aetpApi.plugins.upload(file);
-    ElMessage.success("ZIP 插件包已上传，安装后重启 Master 生效");
+    await aetpApi.plugins.v2Upload(file);
+    ElMessage.success("V2 插件包已上传并完成校验");
     refresh();
   } catch (e) {
     ElMessage.error((e as Error).message);
@@ -217,46 +209,50 @@ async function upload(event: Event) {
     (event.target as HTMLInputElement).value = "";
   }
 }
-async function install(id: string) {
+function statusLabel(status: V2PluginVersion["status"]) {
+  return {
+    uploaded: "待校验",
+    verified: "已校验",
+    installed: "已安装",
+    pending_restart: "待重启",
+    enabled: "已启用",
+    disabled: "已停用",
+    removed: "已移除",
+    error: "错误",
+  }[status];
+}
+function statusType(status: V2PluginVersion["status"]) {
+  return status === "enabled" ? "success" : status === "error" ? "danger" : "info";
+}
+async function install(row: V2PluginVersion) {
   try {
-    await aetpApi.plugins.install(id);
-    ElMessage.success("ZIP 插件已安装，请重启 Master 后加载");
+    await aetpApi.plugins.v2Install(row.plugin_id, row.version);
+    ElMessage.success("V2 插件已安装");
     refresh();
   } catch (e) {
     ElMessage.error((e as Error).message);
   }
 }
-async function download(row: ManagedPlugin) {
+async function toggle(row: V2PluginVersion) {
   try {
-    const blob = await aetpApi.plugins.download(row.plugin_id);
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = row.filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  } catch (e) {
-    ElMessage.error((e as Error).message);
-  }
-}
-async function toggle(row: ManagedPlugin) {
-  try {
-    await aetpApi.plugins.setEnabled(row.plugin_id, !row.enabled);
-    ElMessage.success(row.enabled ? "ZIP 插件已停用" : "ZIP 插件已启用（重启后生效）");
+    if (row.status === "enabled") {
+      await aetpApi.plugins.v2Disable(row.plugin_id, row.version);
+    } else {
+      await aetpApi.plugins.v2Enable(row.plugin_id, row.version);
+    }
+    ElMessage.success("V2 插件状态已更新，重启后生效");
     refresh();
   } catch (e) {
     ElMessage.error((e as Error).message);
   }
 }
-async function remove(row: ManagedPlugin) {
+async function remove(row: V2PluginVersion) {
   try {
     await ElMessageBox.confirm(`确认删除 ${row.plugin_id}？`, "删除插件", {
       type: "warning",
     });
-    await aetpApi.plugins.remove(row.plugin_id);
-    ElMessage.success("ZIP 插件已删除");
+    await aetpApi.plugins.v2Remove(row.plugin_id, row.version);
+    ElMessage.success("V2 插件已删除");
     refresh();
   } catch (e) {
     if ((e as Error).message !== "cancel") ElMessage.error((e as Error).message);

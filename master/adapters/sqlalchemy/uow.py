@@ -33,6 +33,9 @@ from master.adapters.sqlalchemy.repositories import (
     ProjectMemberRepositoryImpl,
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
+    PluginVersionRepositoryImpl,
+    AgentPluginDesiredVersionRepositoryImpl,
+    AgentPluginSyncOperationRepositoryImpl,
     RefreshTokenRepositoryImpl,
     RunArtifactRepositoryImpl,
     RunCaseResultRepositoryImpl,
@@ -90,6 +93,9 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.ci_trigger_bindings = CiTriggerBindingRepositoryImpl(session)
         self.ci_webhook_deliveries = CiWebhookDeliveryRepositoryImpl(session)
         self.hook_executions = HookExecutionRepositoryImpl(session)
+        self.plugin_versions = PluginVersionRepositoryImpl(session)
+        self.agent_plugin_desired_versions = AgentPluginDesiredVersionRepositoryImpl(session)
+        self.agent_plugin_sync_operations = AgentPluginSyncOperationRepositoryImpl(session)
         return self
 
     def __exit__(
