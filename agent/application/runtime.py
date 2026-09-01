@@ -43,6 +43,7 @@ from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.script_preflight_service import (
     ScriptPreflightService,
 )
+from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.config import AgentSettings
 from agent.domain.enums import AgentOutboxStatus
 from agent.domain.ledger import Ledger
@@ -74,6 +75,7 @@ class AgentRuntime:
         script_preflight: ScriptPreflightService | None = None,
         execution_service: ExecutionService | None = None,
         capability_cache=None,
+        v2_capability_publisher: AgentV2CapabilityPublisher | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -81,6 +83,7 @@ class AgentRuntime:
         self._ledger = ledger
         self._registration = registration
         self._capability_cache = capability_cache
+        self._v2_capability_publisher = v2_capability_publisher
         self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
@@ -143,15 +146,16 @@ class AgentRuntime:
         self._stop_event.clear()
         self._transport.on_message(self._handle_message)
         self._transport.on_connection_change(self._handle_connection_change)
-        await self._transport.subscribe(
-            [
+        subscriptions = [
                 command_topic(self._settings.node_id, "register-ack"),
                 command_topic(self._settings.node_id, "assign"),
                 command_topic(self._settings.node_id, "cancel"),
                 command_topic(self._settings.node_id, "verify"),
                 command_topic(self._settings.node_id, "parse"),
             ]
-        )
+        if self._v2_capability_publisher is not None:
+            subscriptions.append(self._v2_capability_publisher.diagnostics_command_topic())
+        await self._transport.subscribe(subscriptions)
         self._outbox_task = asyncio.create_task(self._outbox_loop())
         await self._transport.connect()
         # 启动 USB 插拔监听（可选，usb-monitor 未安装/失败时静默降级为指纹兜底）
@@ -215,6 +219,13 @@ class AgentRuntime:
             try:
                 await self._registration.wait_for_register_ack()
                 await self._registration.start_heartbeat()
+                if self._v2_capability_publisher is not None:
+                    try:
+                        await self._v2_capability_publisher.publish_snapshot(
+                            self._v2_session_id()
+                        )
+                    except Exception:
+                        logger.exception("V2 能力快照发布失败")
                 return
             except asyncio.CancelledError:
                 raise
@@ -251,11 +262,25 @@ class AgentRuntime:
         assert self._dispatcher_obj is not None, "组件未初始化，请先调用 start()"
         if self._registration.handle_register_ack(message):
             return
+        if (
+            self._v2_capability_publisher is not None
+            and message.topic == self._v2_capability_publisher.diagnostics_command_topic()
+        ):
+            await self._v2_capability_publisher.handle_diagnostics_request(
+                message,
+                self._v2_session_id(),
+            )
+            return
         # P5.7：script.verify / script.parse 命令路由到脚本预检服务
         if self._route_script_preflight(message):
             return
         # P5.4：run.assign / run.cancel 命令路由
         self._dispatcher_obj.handle_command(message)
+
+    def _v2_session_id(self):
+        from aetp_protocol.ids import SessionId
+
+        return SessionId(self._registration.session_id)
 
     def _route_script_preflight(self, message: MqttMessage) -> bool:
         """解析入站命令；若为 script.verify/script.parse 则交给预检服务。"""

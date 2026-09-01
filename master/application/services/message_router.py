@@ -16,10 +16,12 @@ import json
 import logging
 from collections.abc import Callable
 
+from aetp_protocol.capabilities import NodeCapabilitySnapshot
 from aetp_protocol.envelope import Envelope
 from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
+    DiagnosticsSnapshot,
     NodeHeartbeatPayload,
     NodeRegisterPayload,
     PresencePayload,
@@ -32,10 +34,17 @@ from aetp_protocol.payloads import (
 )
 from aetp_protocol.topics import (
     validate_message_type_for_topic,
+    validate_message_type_for_v2_topic,
     validate_sender_for_topic,
+    validate_sender_for_v2_topic,
 )
+from aetp_protocol.v2_envelope import parse_v2_message
 
 from common.transport import MqttMessage
+from master.application.services.capability_snapshot_service import (
+    CapabilitySnapshotProjectionService,
+    DiagnosticsSnapshotProjectionService,
+)
 from master.application.services.event_publisher import EventPublisher
 from master.application.services.node_presence_service import (
     NodePresenceError,
@@ -65,6 +74,8 @@ class MasterMessageRouter:
         verification: ScriptVerificationService,
         scheduler: ShardSchedulerService | None = None,
         uow_factory=None,
+        capability_snapshot: CapabilitySnapshotProjectionService | None = None,
+        diagnostics_snapshot: DiagnosticsSnapshotProjectionService | None = None,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
@@ -72,6 +83,8 @@ class MasterMessageRouter:
         self._verification = verification
         self._scheduler = scheduler
         self._uow_factory = uow_factory
+        self._capability_snapshot = capability_snapshot
+        self._diagnostics_snapshot = diagnostics_snapshot
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -122,6 +135,8 @@ class MasterMessageRouter:
 
     async def handle(self, message: MqttMessage) -> bool:
         """处理一条入站消息；成功返回 True。"""
+        if message.topic.startswith("aetp/v2/"):
+            return await self._handle_v2(message)
         try:
             envelope = Envelope.model_validate(json.loads(message.payload.decode("utf-8")))
             validate_sender_for_topic(message.topic, envelope.sender)
@@ -185,6 +200,38 @@ class MasterMessageRouter:
                 envelope.sender.id,
                 exc,
             )
+            return False
+
+    async def _handle_v2(self, message: MqttMessage) -> bool:
+        """处理 M2 能力/诊断事件，拒绝未实现的 V2 事件。"""
+        try:
+            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_v2_topic(message.topic, envelope.sender)
+            validate_message_type_for_v2_topic(
+                message.topic,
+                MessageType(envelope.message_type),
+            )
+            if not isinstance(payload, (NodeCapabilitySnapshot, DiagnosticsSnapshot)):
+                return False
+            if payload.node_id != envelope.sender.id:
+                raise ValueError("V2 payload node_id 与 sender.id 不一致")
+            if isinstance(payload, NodeCapabilitySnapshot):
+                if self._capability_snapshot is None:
+                    return False
+                self._capability_snapshot.accept(
+                    payload,
+                    sender_session_id=envelope.sender.session_id,
+                )
+                return True
+            if self._diagnostics_snapshot is None:
+                return False
+            self._diagnostics_snapshot.accept(
+                payload,
+                sender_session_id=envelope.sender.session_id,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 - 单条 V2 事件不能中断消费循环
+            logger.warning("V2 入站消息处理失败: topic=%s error=%s", message.topic, exc)
             return False
 
     async def _publish(self, result: ProjectionResult) -> None:

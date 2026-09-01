@@ -19,9 +19,28 @@ from agent.application.services.capability_loader import CapabilityCache
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
 from agent.application.services.script_cache_service import ScriptCacheService
-from agent.config import get_settings, resolve_sqlite_url
+from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.config import AgentSettings, get_settings, resolve_sqlite_url
 from agent.plugins.installer import LocalPluginInstaller
 from agent.plugins.registry import create_default_registry
+from agent.plugins.v2_installer import V2PluginInstaller
+from agent.plugins.v2_registry import AgentV2PluginRegistry
+from common.transport import Transport
+
+
+def _build_v2_capability_publisher(
+    transport: Transport,
+    settings: AgentSettings,
+    registry: AgentV2PluginRegistry,
+) -> AgentV2CapabilityPublisher | None:
+    """仅为 V2 合法 BusinessId Agent 装配快照发布器。"""
+    from aetp_protocol.ids import BusinessId
+
+    try:
+        BusinessId(settings.node_id)
+    except ValueError:
+        return None
+    return AgentV2CapabilityPublisher(transport, settings, registry)
 
 
 class Container(containers.DeclarativeContainer):
@@ -53,6 +72,22 @@ class Container(containers.DeclarativeContainer):
     plugin_installer = providers.Singleton(
         LocalPluginInstaller,
         root=providers.Callable(lambda: get_settings().plugin_dir),
+    )
+
+    # M2 V2 插件库存与能力快照（与旧 V1 task_type registry 并行保留）
+    v2_plugin_registry = providers.Singleton(
+        AgentV2PluginRegistry,
+        root=providers.Callable(lambda: get_settings().plugin_dir),
+    )
+    v2_plugin_installer = providers.Singleton(
+        V2PluginInstaller,
+        root=providers.Callable(lambda: get_settings().plugin_dir),
+    )
+    v2_capability_publisher = providers.Factory(
+        _build_v2_capability_publisher,
+        transport=transport,
+        settings=settings,
+        registry=v2_plugin_registry,
     )
 
     # 脚本下载/缓存单例（P5.6：下载 + sha256 校验 + 按 hash 本地缓存）
@@ -105,4 +140,5 @@ class Container(containers.DeclarativeContainer):
         artifact_uploader=artifact_uploader,
         execution_service=execution_service,
         capability_cache=capability_cache,
+        v2_capability_publisher=v2_capability_publisher,
     )

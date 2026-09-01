@@ -12,10 +12,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from aetp_protocol.ids import BusinessId, PluginId, SemVer, SessionId, Sha256
+from aetp_protocol.ids import BusinessId, PluginId, RequestId, SemVer, Sha256
 from aetp_protocol.plugin_types import PluginPoint, PluginStatus
+
 from master.domain.enums import DisconnectReason, ShardStatus
 from master.domain.models import (
+    AgentDiagnosticsSnapshotRecord,
     AgentPluginDesiredVersionRecord,
     AgentPluginSyncOperationRecord,
     AuditLog,
@@ -23,14 +25,15 @@ from master.domain.models import (
     DomainEvent,
     InboxMessage,
     Node,
+    NodeCapabilitySnapshotRecord,
     NodeSession,
     OutboxMessage,
+    PluginVersionRecord,
     Project,
     ProjectMember,
     ProjectMemberWithUser,
     ProjectNodeBinding,
     ProjectNodeBindingView,
-    PluginVersionRecord,
     RefreshToken,
     RunArtifact,
     RunCaseResult,
@@ -471,6 +474,32 @@ class NodeRepository(ABC):
         """把所有节点投影重置为 offline（启动恢复用）。"""
 
 
+class NodeCapabilitySnapshotRepository(ABC):
+    """节点能力快照仓储：按 session/revision 保存不可变替换快照。"""
+
+    @abstractmethod
+    def get_latest(self, node_id: BusinessId) -> NodeCapabilitySnapshotRecord | None: ...
+
+    @abstractmethod
+    def list_by_node(self, node_id: BusinessId, *, limit: int = 100) -> list[NodeCapabilitySnapshotRecord]: ...
+
+    @abstractmethod
+    def add_if_newer(self, record: NodeCapabilitySnapshotRecord) -> bool: ...
+
+
+class AgentDiagnosticsSnapshotRepository(ABC):
+    """Agent 诊断快照仓储：按 request_id 幂等、按时间不可变保存。"""
+
+    @abstractmethod
+    def get_latest(self, node_id: BusinessId) -> AgentDiagnosticsSnapshotRecord | None: ...
+
+    @abstractmethod
+    def get_by_request_id(self, request_id: RequestId) -> AgentDiagnosticsSnapshotRecord | None: ...
+
+    @abstractmethod
+    def add(self, record: AgentDiagnosticsSnapshotRecord) -> AgentDiagnosticsSnapshotRecord: ...
+
+
 class NodeSessionRepository(ABC):
     """节点会话仓储（P4.4，node_sessions 表）。
 
@@ -611,6 +640,8 @@ class UnitOfWork(ABC):
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository
+    node_capability_snapshots: NodeCapabilitySnapshotRepository
+    agent_diagnostics_snapshots: AgentDiagnosticsSnapshotRepository
     node_sessions: NodeSessionRepository
     devices: DeviceRepository
     bindings: ProjectNodeBindingRepository

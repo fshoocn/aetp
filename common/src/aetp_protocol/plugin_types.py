@@ -85,5 +85,5 @@ class EntrypointRef(RootModel[str]):
     root: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$")
 
 
-class RelativeUiEntry(RootModel[str]):
+class RelativeUiEntry(RootModel[RelativePath]):
     root: RelativePath

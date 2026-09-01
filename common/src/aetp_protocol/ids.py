@@ -16,6 +16,7 @@ ULID 标准格式为 26 字符 Crockford Base32
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import time
 from typing import TypeAlias
@@ -124,7 +125,10 @@ class RelativePath(RootModel[str]):
 
 
 JsonPrimitive: TypeAlias = None | bool | int | float | str
-JsonValue = TypeAliasType("JsonValue", JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"])
+JsonValue = TypeAliasType(  # pyright: ignore[reportInvalidTypeForm]
+  "JsonValue",
+  JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"],  # pyright: ignore[reportInvalidTypeForm]
+)
 JsonObject: TypeAlias = dict[str, JsonValue]
 
 
@@ -142,6 +146,13 @@ def new_ulid() -> str:
     timestamp_ms = int(time.time() * 1000) & 0xFFFFFFFFFFFF  # 48-bit
     random_int = int.from_bytes(secrets.token_bytes(10), "big")  # 80-bit
     return _encode(timestamp_ms, _TIMESTAMP_CHARS) + _encode(random_int, _RANDOM_CHARS)
+
+
+def stable_id(namespace: str) -> BusinessId:
+    """根据稳定命名空间生成可重复的业务 ID。"""
+    value = int.from_bytes(hashlib.sha256(namespace.encode("utf-8")).digest()[:16], "big")
+    value &= (1 << 125) - 1
+    return BusinessId(_encode(value, _TIMESTAMP_CHARS + _RANDOM_CHARS))
 
 
 # 别名：业务标识统一入口（D-11：外部业务 ID 一律纯 ULID）

@@ -20,6 +20,7 @@
               <div class="cap-panel-title">节点能力</div>
               <CapabilityPanel :capabilities="row.capabilities" />
             </div>
+            <V2NodeDiagnosticsPanel :node-id="row.node_id" />
           </template>
         </el-table-column>
         <el-table-column label="节点" min-width="230">
@@ -60,6 +61,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
 import CapabilityPanel from "@/components/CapabilityPanel.vue";
+import V2NodeDiagnosticsPanel from "@/components/V2NodeDiagnosticsPanel.vue";
 
 const auth = useAuthStore();
 const projectStore = useProjectStore();

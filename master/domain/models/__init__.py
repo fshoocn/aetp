@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .capability_snapshot import AgentDiagnosticsSnapshotRecord, NodeCapabilitySnapshotRecord
 from .device import Device
 from .messaging import AuditLog, DomainEvent, InboxMessage, OutboxMessage
 from .node import Node, NodeSession
@@ -37,6 +38,8 @@ __all__ = [
     "InboxMessage",
     "Node",
     "NodeSession",
+    "AgentDiagnosticsSnapshotRecord",
+    "NodeCapabilitySnapshotRecord",
     "AgentPluginDesiredVersionRecord",
     "AgentPluginSyncOperationRecord",
     "PluginSyncOperationState",

@@ -15,17 +15,18 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from aetp_protocol.plugin_types import PluginStatus
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
 
 from master.config import get_settings
-from aetp_protocol.plugin_types import PluginStatus
 
 from .api.v1.dependencies import DbDep
 from .api.v1.errors import register_application_error_handlers
 from .api.v1.router import router as v1_router
+from .api.v2.nodes import router as v2_nodes_router
 from .api.v2.router import router as v2_router
 from .bootstrap.container import Container
 
@@ -253,6 +254,7 @@ app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(v1_router)
 app.include_router(v2_router)
+app.include_router(v2_nodes_router)
 
 
 @app.get("/api/v1/health", tags=["system"])

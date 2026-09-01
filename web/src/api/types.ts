@@ -262,6 +262,44 @@ export type V2PluginStatus =
   | "removed"
   | "error";
 
+export interface V2PluginManifest {
+  schema_version: 2;
+  id: string;
+  version: string;
+  api_version: string;
+  point: string;
+  display_name: string;
+  entrypoints: {
+    master?: string | null;
+    agent?: string | null;
+    ui?: string | null;
+  };
+  capabilities: string[];
+  static_requirements: {
+    runtimes: Array<{
+      runtime_type: string;
+      version: { exact: string | null; minimum: string | null; maximum: string | null } | null;
+    }>;
+    software: Array<{
+      name: string;
+      version: { exact: string | null; minimum: string | null; maximum: string | null } | null;
+      license_required: boolean;
+    }>;
+    resources: Array<{
+      resource_type: string;
+      quantity: number;
+      vendor: string | null;
+      model: string | null;
+      properties: Record<string, unknown>;
+      required_labels: Record<string, string>;
+      preferred_labels: Record<string, string>;
+      allow_switching: boolean;
+    }>;
+  };
+  configuration_schema: string | null;
+  ui_protocol_version: number | null;
+}
+
 export interface V2PluginVersion {
   plugin_id: string;
   version: string;
@@ -270,10 +308,169 @@ export interface V2PluginVersion {
   filename: string;
   archive_sha256: string;
   manifest_sha256: string;
-  manifest: Record<string, unknown>;
+  manifest: V2PluginManifest;
   installed_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export type V2PluginAvailability = "available" | "blocked" | "updating" | "error" | "not_installed";
+export type V2ResourceHealth = "ready" | "degraded" | "unavailable";
+export type V2MaintenanceState = "ready" | "idle" | "busy" | "draining" | "updating" | "restarting" | "degraded";
+
+export interface V2ExecutorCapability {
+  plugin_id: string;
+  version: string;
+  capabilities: string[];
+}
+
+export interface V2RuntimeCapability {
+  provider_id: string;
+  runtime_id: string;
+  runtime_type: string;
+  version: string;
+  executable_ref: string | null;
+}
+
+export interface V2SoftwareCapability {
+  provider_id: string;
+  name: string;
+  version: string;
+  properties: Record<string, unknown>;
+}
+
+export interface V2ResourceCapability {
+  resource_id: string;
+  provider_id: string;
+  resource_type: string;
+  vendor: string | null;
+  model: string | null;
+  channel: string | null;
+  function: string | null;
+  labels: Record<string, string>;
+  properties: Record<string, unknown>;
+  health: V2ResourceHealth;
+}
+
+export interface V2PluginInventoryItem {
+  plugin_id: string;
+  point: string;
+  version: string;
+  archive_sha256: string;
+  availability: V2PluginAvailability;
+  unavailable_reasons: string[];
+  checked_at: string;
+}
+
+export interface V2CapabilitySnapshot {
+  schema_version: 2;
+  node_id: string;
+  session_id: string;
+  revision: number;
+  reported_at: string;
+  tags: string[];
+  executors: V2ExecutorCapability[];
+  runtimes: V2RuntimeCapability[];
+  software: V2SoftwareCapability[];
+  resources: V2ResourceCapability[];
+  system: SystemCapability | null;
+  maintenance_state: V2MaintenanceState;
+  plugin_inventory: V2PluginInventoryItem[];
+}
+
+export interface V2CapabilitySnapshotView {
+  node_id: string;
+  session_id: string;
+  revision: number;
+  snapshot_sha256: string;
+  snapshot: V2CapabilitySnapshot;
+  reported_at: string;
+  created_at: string | null;
+}
+
+export interface V2LogEvent {
+  event_id: string;
+  source: "master" | "agent" | "web" | "plugin";
+  source_id: string;
+  sequence: number;
+  occurred_at: string;
+  level: "debug" | "info" | "warn" | "error";
+  component: string;
+  event_code: string;
+  message_template: string;
+  message: string;
+  context: {
+    request_id: string | null;
+    trace_id: string | null;
+    node_id: string | null;
+    project_id: string | null;
+    run_id: string | null;
+    attempt_id: string | null;
+    plan_id: string | null;
+    plugin_id: string | null;
+    plugin_version: string | null;
+  };
+  detail: Record<string, unknown>;
+  exception: {
+    type_name: string;
+    message: string;
+    stack_trace: string | null;
+  } | null;
+}
+
+export interface V2DiagnosticsSnapshot {
+  request_id: string;
+  node_id: string;
+  collected_at: string;
+  maintenance_state: V2MaintenanceState;
+  system: {
+    hostname: string;
+    os_name: string;
+    os_version: string;
+    process_id: number;
+    agent_started_at: string;
+    python_version: string;
+    cpu_cores: number;
+    memory_total_mb: number;
+    memory_available_mb: number;
+    disk_free_mb: number;
+    agent_version: string;
+    protocol_version: number;
+  };
+  mqtt: {
+    connected: boolean;
+    broker_endpoint: string;
+    last_connected_at: string | null;
+    reconnect_count: number;
+    last_error_code: string | null;
+    last_error_message: string | null;
+  };
+  plugins: V2PluginInventoryItem[];
+  active_attempts: Array<{
+    attempt_id: string;
+    plan_id: string;
+    run_id: string;
+    state: string;
+    started_at: string | null;
+  }>;
+  capability_revision: number;
+  log_tail: V2LogEvent[];
+}
+
+export interface V2DiagnosticsSnapshotView {
+  request_id: string;
+  node_id: string;
+  session_id: string;
+  snapshot: V2DiagnosticsSnapshot;
+  collected_at: string;
+  created_at: string | null;
+}
+
+export interface V2DiagnosticsCollectResponse {
+  operation_id: string;
+  request_id: string;
+  node_id: string;
+  status: "pending";
 }
 
 export interface TaskTypeConfigContext {

@@ -197,6 +197,275 @@
         "title": "ErrorCode",
         "type": "string"
       },
+      "ExceptionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "stack_trace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stack Trace"
+          },
+          "type_name": {
+            "title": "Type Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type_name",
+          "message"
+        ],
+        "title": "ExceptionInfo",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "LogCode": {
+        "pattern": "^[a-z][a-z0-9_.-]{1,127}$",
+        "title": "LogCode",
+        "type": "string"
+      },
+      "LogContext": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "plugin_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "plugin_version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TraceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "LogContext",
+        "type": "object"
+      },
+      "LogEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "context": {
+            "$ref": "#/$defs/LogContext"
+          },
+          "detail": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Detail",
+            "type": "object"
+          },
+          "event_code": {
+            "$ref": "#/$defs/LogCode"
+          },
+          "event_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "exception": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExceptionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "level": {
+            "$ref": "#/$defs/LogLevel"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "message_template": {
+            "title": "Message Template",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "master",
+              "agent",
+              "web",
+              "plugin"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "source",
+          "source_id",
+          "sequence",
+          "occurred_at",
+          "level",
+          "component",
+          "event_code",
+          "message_template",
+          "message"
+        ],
+        "title": "LogEvent",
+        "type": "object"
+      },
+      "LogLevel": {
+        "description": "任务日志等级（小写，与 Master/Agent 序列化约定一致）。",
+        "enum": [
+          "debug",
+          "info",
+          "warn",
+          "error"
+        ],
+        "title": "LogLevel",
+        "type": "string"
+      },
       "MqttConnectionInfo": {
         "additionalProperties": false,
         "properties": {
@@ -355,6 +624,13 @@
         "title": "Sha256",
         "type": "string"
       },
+      "TraceId": {
+        "maxLength": 128,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "TraceId",
+        "type": "string"
+      },
       "Version": {
         "pattern": "^v?\\d+(?:\\.\\d+)*$",
         "title": "Version",
@@ -379,6 +655,14 @@
         "format": "date-time",
         "title": "Collected At",
         "type": "string"
+      },
+      "log_tail": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/LogEvent"
+        },
+        "title": "Log Tail",
+        "type": "array"
       },
       "maintenance_state": {
         "$ref": "#/$defs/AgentMaintenanceState"

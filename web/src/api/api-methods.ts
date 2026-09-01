@@ -9,6 +9,9 @@ import type {
   LoginResponse,
   ManagedPlugin,
   V2PluginVersion,
+  V2CapabilitySnapshotView,
+  V2DiagnosticsSnapshotView,
+  V2DiagnosticsCollectResponse,
   Node,
   NotificationEndpointOut,
   Project,
@@ -206,6 +209,15 @@ export const aetpApi = {
       return api.get<Device[]>(`${API_V1}/devices${query}`);
     },
     getDevice(deviceId: string) { return api.get<Device>(`${API_V1}/devices/${deviceId}`); },
+    v2CapabilitySnapshot(nodeId: string) {
+      return api.get<V2CapabilitySnapshotView>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/capability-snapshot`);
+    },
+    v2Diagnostics(nodeId: string) {
+      return api.get<V2DiagnosticsSnapshotView>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/diagnostics`);
+    },
+    v2CollectDiagnostics(nodeId: string) {
+      return api.post<V2DiagnosticsCollectResponse>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/diagnostics/collect`);
+    },
   },
 
   plugins: {

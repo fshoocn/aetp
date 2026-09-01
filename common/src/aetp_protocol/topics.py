@@ -15,6 +15,7 @@ from .envelope import Sender, SenderKind
 from .errors import InvalidSenderError, ProtocolError, TopicMismatchError
 from .ids import BusinessId
 from .message_types import MessageType, topic_segment_for
+from .v2_envelope import V2Sender
 
 PREFIX = "aetp/v1"
 V2_PREFIX = "aetp/v2"
@@ -109,13 +110,13 @@ def parse_v2_topic(topic: str) -> TopicInfo:
     )
 
 
-def validate_sender_for_v2_topic(topic: str, sender: Sender) -> None:
+def validate_sender_for_v2_topic(topic: str, sender: V2Sender) -> None:
     """校验 V2 Topic 与 sender 身份。"""
     info = parse_v2_topic(topic)
     if info.direction == _COMMANDS_SEG:
-        if sender.kind != SenderKind.MASTER:
+        if sender.kind != "master":
             raise InvalidSenderError(f"V2 commands 主题发送方必须是 master: {topic}")
-    elif sender.kind != SenderKind.AGENT or sender.id != info.node_id:
+    elif sender.kind != "agent" or sender.id.root != info.node_id:
         raise InvalidSenderError(f"V2 events 主题 sender 与 node_id 不匹配: {topic}")
 
 

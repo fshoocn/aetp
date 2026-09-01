@@ -49,6 +49,20 @@ def test_v2_installer_is_immutable_and_does_not_load_code(tmp_path) -> None:
     assert not installed.install_path.exists()
 
 
+def test_v2_registry_restores_metadata_without_loading_entrypoint(tmp_path) -> None:
+    content = _archive()
+    package = _package(content)
+    installer = V2PluginInstaller(tmp_path, fetcher=lambda _: content)
+    installed = installer.install(package)
+
+    restored = AgentV2PluginRegistry(tmp_path)
+
+    record = restored.get(PLUGIN_ID.root, VERSION.root)
+    assert record is not None
+    assert record.manifest_path == installed.manifest_path
+    assert restored.list() == (record,)
+
+
 def test_agent_v2_sync_checks_session_and_returns_typed_result(tmp_path) -> None:
     content = _archive()
     package = _package(content)

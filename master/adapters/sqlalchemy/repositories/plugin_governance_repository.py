@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.ids import BusinessId, PluginId, SemVer, SessionId, Sha256
 from aetp_protocol.plugin_types import DesiredPluginVersion, PluginPoint, PluginStatus
 from aetp_protocol.plugins import PluginManifest, PluginSyncItem, PluginSyncItemResult
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from master.adapters.sqlalchemy.orm import (
     AgentPluginDesiredVersion as DesiredORM,
+)
+from master.adapters.sqlalchemy.orm import (
     AgentPluginSyncOperation as SyncORM,
+)
+from master.adapters.sqlalchemy.orm import (
     PluginVersion as PluginVersionORM,
 )
 from master.domain.models import (

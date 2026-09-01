@@ -34,13 +34,20 @@ from master.application.services.artifact_service import ArtifactService
 from master.application.services.artifact_storage_service import ArtifactStorageService
 from master.application.services.auth_service import AuthService
 from master.application.services.capability_service import CapabilityService
+from master.application.services.capability_snapshot_service import (
+    CapabilitySnapshotProjectionService,
+    DiagnosticsSnapshotProjectionService,
+    NodeCapabilityRevisionCache,
+)
 from master.application.services.case_duration_service import CaseDurationStatsService
 from master.application.services.ci_integration_service import CiIntegrationService
 from master.application.services.device_service import DeviceService
+from master.application.services.diagnostics_request_service import DiagnosticsRequestService
 from master.application.services.event_publisher import EventPublisher
 from master.application.services.hook_runner import HookRunner
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
+from master.application.services.node_matching_service import NodeMatchingService
 from master.application.services.node_presence_service import NodePresenceService
 from master.application.services.node_service import NodeService
 from master.application.services.notification_dispatcher import NotificationDispatcher
@@ -72,6 +79,7 @@ from master.application.services.shard_scheduler_service import (
 from master.application.services.storage_cleanup_service import StorageCleanupService
 from master.application.services.test_task_service import TestTaskService
 from master.config import get_settings, runtime_dir
+from master.domain.node_matcher import NodeMatcher
 from master.plugins.manager import PluginManager
 from master.plugins.registry import create_default_registry
 from master.plugins.v2_registry import V2PluginRegistry
@@ -298,6 +306,26 @@ class Container(containers.DeclarativeContainer):
 
     # 硬件能力匹配服务（P4.5：谓词匹配/硬校验/候选过滤，无状态）
     capability_service = providers.Factory(CapabilityService)
+    capability_snapshot_cache = providers.Singleton(NodeCapabilityRevisionCache)
+    capability_snapshot_service = providers.Singleton(
+        CapabilitySnapshotProjectionService,
+        uow_factory=uow_factory,
+        cache=capability_snapshot_cache,
+    )
+    diagnostics_snapshot_service = providers.Factory(
+        DiagnosticsSnapshotProjectionService,
+        uow_factory=uow_factory,
+    )
+    diagnostics_request_service = providers.Factory(
+        DiagnosticsRequestService,
+        uow_factory=uow_factory,
+    )
+    node_matching_service = providers.Factory(
+        NodeMatchingService,
+        uow_factory=uow_factory,
+        capability_snapshots=capability_snapshot_service,
+        matcher=providers.Factory(NodeMatcher),
+    )
 
     # 脚本签名下载服务（P4.7：限时 HMAC 签名 URL，Agent 下载校验 sha256）
     script_download_service = providers.Factory(
@@ -389,6 +417,8 @@ class Container(containers.DeclarativeContainer):
         verification=script_verification_service,
         scheduler=shard_scheduler_service,
         uow_factory=uow_factory,
+        capability_snapshot=capability_snapshot_service,
+        diagnostics_snapshot=diagnostics_snapshot_service,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）

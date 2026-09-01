@@ -1,0 +1,133 @@
+"""Agent V2 能力和诊断消息发布测试。"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import UTC, datetime
+
+from aetp_protocol.capabilities import NodeCapabilities
+from aetp_protocol.ids import BusinessId, RequestId, SemVer, SessionId, TraceId, new_id
+from aetp_protocol.logs import LogCode, LogEvent, LogLevel
+from aetp_protocol.message_types import MessageType
+from aetp_protocol.payloads import DiagnosticsRequest
+from aetp_protocol.topics import v2_command_topic, v2_event_topic
+from aetp_protocol.v2_envelope import V2Envelope, V2Sender, parse_v2_message
+
+from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.config import AgentSettings
+from agent.plugins.v2_registry import AgentV2PluginRegistry
+from common.transport import MqttMessage
+
+NODE_ID = BusinessId("01J00000000000000000000000")
+MASTER_ID = BusinessId("01J00000000000000000000001")
+SESSION_ID = SessionId("session-00000001")
+
+
+class FakeTransport:
+    connected = True
+
+    def __init__(self) -> None:
+        self.published: list[tuple[str, bytes, int]] = []
+
+    async def publish(self, topic: str, payload: bytes, qos: int = 1) -> None:
+        self.published.append((topic, payload, qos))
+
+
+def _publisher(tmp_path) -> tuple[AgentV2CapabilityPublisher, FakeTransport]:
+    transport = FakeTransport()
+    settings = AgentSettings(
+        node_id=NODE_ID.root,
+        name="Bench 01",
+        mqtt_host="broker.test",
+        mqtt_port=8883,
+        mqtt_client_id="aetp-agent-bench-01",
+        mqtt_use_tls=False,
+        plugin_dir=tmp_path / "plugins",
+    )
+    publisher = AgentV2CapabilityPublisher(
+        transport,
+        settings,
+        AgentV2PluginRegistry(),
+        capability_scanner=lambda: NodeCapabilities(),
+        started_at=datetime(2026, 9, 1, tzinfo=UTC),
+    )
+    return publisher, transport
+
+
+def test_publisher_emits_typed_capability_snapshot(tmp_path) -> None:
+    publisher, transport = _publisher(tmp_path)
+
+    snapshot = asyncio.run(publisher.publish_snapshot(SESSION_ID))
+
+    assert snapshot.revision == 1
+    assert transport.published[0][0] == v2_event_topic(NODE_ID.root, "capability.snapshot")
+    envelope, payload = parse_v2_message(json.loads(transport.published[0][1]))
+    assert envelope.message_type == MessageType.NODE_CAPABILITY_SNAPSHOT.value
+    assert payload.node_id == NODE_ID
+    assert payload.session_id == SESSION_ID
+    assert payload.revision == 1
+
+
+def test_diagnostics_snapshot_contains_typed_system_and_log_tail(tmp_path) -> None:
+    log_event = LogEvent(
+        event_id=BusinessId("01J00000000000000000000002"),
+        source="agent",
+        source_id=NODE_ID.root,
+        sequence=1,
+        occurred_at=datetime(2026, 9, 1, tzinfo=UTC),
+        level=LogLevel.INFO,
+        component="capability",
+        event_code=LogCode("agent.capability.snapshot"),
+        message_template="snapshot generated",
+        message="snapshot generated",
+    )
+    publisher, transport = _publisher(tmp_path)
+    publisher._log_tail = lambda _count: (log_event,)
+    request = DiagnosticsRequest(
+        request_id=RequestId("request-00000001"),
+        node_id=NODE_ID,
+        include_log_tail=True,
+        log_tail_count=20,
+    )
+
+    snapshot = asyncio.run(publisher.publish_diagnostics(request, SESSION_ID))
+
+    assert snapshot.node_id == NODE_ID
+    assert snapshot.system.agent_version == SemVer("2.0.0")
+    assert snapshot.system.protocol_version == 2
+    assert snapshot.log_tail == (log_event,)
+    assert transport.published[0][0] == v2_event_topic(NODE_ID.root, "agent.diagnostics.snapshot")
+    envelope, payload = parse_v2_message(json.loads(transport.published[0][1]))
+    assert envelope.message_type == MessageType.AGENT_DIAGNOSTICS_SNAPSHOT.value
+    assert payload.request_id == request.request_id
+
+
+def test_diagnostics_request_handler_rejects_non_master_and_handles_v2_request(tmp_path) -> None:
+    publisher, transport = _publisher(tmp_path)
+    request = DiagnosticsRequest(
+        request_id=RequestId("request-00000002"),
+        node_id=NODE_ID,
+        include_log_tail=False,
+    )
+    envelope = V2Envelope(
+        message_id=new_id(),
+        sent_at=datetime.now(UTC),
+        sender=V2Sender(kind="master", id=MASTER_ID, session_id=SessionId("master-session-01")),
+        message_type=MessageType.AGENT_DIAGNOSTICS_REQUEST.value,
+        trace_id=TraceId(new_id()),
+        payload=request.model_dump(mode="json"),
+    )
+
+    handled = asyncio.run(
+        publisher.handle_diagnostics_request(
+            MqttMessage(
+                topic=v2_command_topic(NODE_ID.root, "agent.diagnostics.request"),
+                payload=envelope.model_dump_json().encode("utf-8"),
+            ),
+            SESSION_ID,
+        )
+    )
+
+    assert handled is True
+    assert len(transport.published) == 1

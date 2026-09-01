@@ -14,6 +14,7 @@ from .base import (
     UTCDateTime,
     utcnow,
 )
+from .capability_snapshot import AgentDiagnosticsSnapshot, NodeCapabilitySnapshot
 from .ci_trigger_binding import CiTriggerBinding
 from .ci_webhook_delivery import CiWebhookDelivery
 from .device import Device
@@ -26,11 +27,11 @@ from .node import Node
 from .node_session import NodeSession
 from .notification_endpoint import NotificationEndpoint
 from .outbox_message import OutboxMessage
+from .plugin_governance import AgentPluginDesiredVersion, AgentPluginSyncOperation, PluginVersion
 from .project import Project
 from .project_integration import ProjectIntegration
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
-from .plugin_governance import AgentPluginDesiredVersion, AgentPluginSyncOperation, PluginVersion
 from .refresh_token import RefreshToken
 from .run_artifact import RunArtifact
 from .run_case_result import RunCaseResult
@@ -52,6 +53,7 @@ __all__ = [
     "Base",
     "CiTriggerBinding",
     "CiWebhookDelivery",
+    "AgentDiagnosticsSnapshot",
     "Device",
     "DomainEvent",
     "EventDelivery",
@@ -60,6 +62,7 @@ __all__ = [
     "InboxMessage",
     "JSONType",
     "Node",
+    "NodeCapabilitySnapshot",
     "NodeSession",
     "NotificationEndpoint",
     "OutboxMessage",

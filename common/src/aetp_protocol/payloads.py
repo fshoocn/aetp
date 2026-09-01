@@ -31,7 +31,7 @@ from .execution import (
     ReconcileAttempt,
 )
 from .ids import BusinessId, JsonObject, RequestId, SemVer, SessionId, Sha256, Version
-from .logs import AgentLogBatch, LogLevel
+from .logs import AgentLogBatch, LogEvent, LogLevel
 from .message_types import MessageType
 from .plugins import PluginSyncRequest, PluginSyncResult
 
@@ -391,7 +391,7 @@ class NodeRegisterAck(_Strict):
 
 class Heartbeat(_Strict):
     node_id: BusinessId
-    status: NodePresenceState = "online"
+    status: NodePresenceState = NodePresenceState.ONLINE
     maintenance_state: AgentMaintenanceState
     load: NodeLoad
     active_attempt_ids: tuple[BusinessId, ...] = ()
@@ -583,6 +583,7 @@ class DiagnosticsSnapshot(_Strict):
     plugins: tuple[PluginInventoryItem, ...]
     active_attempts: tuple[ActiveAttemptInfo, ...]
     capability_revision: int = Field(ge=1)
+    log_tail: tuple[LogEvent, ...] = ()
 
 
 class AgentLogReceived(_Strict):

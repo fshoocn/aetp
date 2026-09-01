@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Agent -> Master 事件通配主题：aetp/v1/agents/{node_id}/events/{segment}
 EVENTS_TOPIC_FILTER = "aetp/v1/agents/+/events/#"
+V2_EVENTS_TOPIC_FILTER = "aetp/v2/agents/+/events/#"
 
 
 class MasterMqttRuntime:
@@ -33,11 +34,13 @@ class MasterMqttRuntime:
         outbox_worker,
         *,
         events_topic_filter: str = EVENTS_TOPIC_FILTER,
+        v2_events_topic_filter: str = V2_EVENTS_TOPIC_FILTER,
     ) -> None:
         self._transport = transport
         self._router = router
         self._outbox_worker = outbox_worker
         self._events_topic_filter = events_topic_filter
+        self._v2_events_topic_filter = v2_events_topic_filter
         self._started = False
 
     async def start(self) -> None:
@@ -46,7 +49,7 @@ class MasterMqttRuntime:
             return
         self._started = True
         self._transport.on_message(self._router.handle)
-        await self._transport.subscribe([self._events_topic_filter])
+        await self._transport.subscribe([self._events_topic_filter, self._v2_events_topic_filter])
         await self._outbox_worker.start()
         await self._transport.connect()
         logger.info("Master MQTT runtime 已启动（订阅 %s）", self._events_topic_filter)

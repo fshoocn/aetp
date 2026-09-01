@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from .audit_log_repository import AuditLogRepositoryImpl
+from .capability_snapshot_repository import (
+    AgentDiagnosticsSnapshotRepositoryImpl,
+    NodeCapabilitySnapshotRepositoryImpl,
+)
 from .ci_integration_repository import (
     CiTriggerBindingRepositoryImpl,
     CiWebhookDeliveryRepositoryImpl,
@@ -18,14 +22,14 @@ from .node_repository import NodeRepositoryImpl
 from .node_session_repository import NodeSessionRepositoryImpl
 from .notification_endpoint_repository import NotificationEndpointRepositoryImpl
 from .outbox_message_repository import OutboxMessageRepositoryImpl
-from .project_member_repository import ProjectMemberRepositoryImpl
-from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
-from .project_repository import ProjectRepositoryImpl
 from .plugin_governance_repository import (
     AgentPluginDesiredVersionRepositoryImpl,
     AgentPluginSyncOperationRepositoryImpl,
     PluginVersionRepositoryImpl,
 )
+from .project_member_repository import ProjectMemberRepositoryImpl
+from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
+from .project_repository import ProjectRepositoryImpl
 from .refresh_token_repository import RefreshTokenRepositoryImpl
 from .run_artifact_repository import RunArtifactRepositoryImpl
 from .run_case_result_repository import RunCaseResultRepositoryImpl
@@ -45,6 +49,7 @@ __all__ = [
     "AuditLogRepositoryImpl",
     "CiTriggerBindingRepositoryImpl",
     "CiWebhookDeliveryRepositoryImpl",
+    "AgentDiagnosticsSnapshotRepositoryImpl",
     "DeviceRepositoryImpl",
     "DomainEventRepositoryImpl",
     "EventDeliveryRepositoryImpl",
@@ -52,6 +57,7 @@ __all__ = [
     "HookExecutionRepositoryImpl",
     "InboxMessageRepositoryImpl",
     "NodeRepositoryImpl",
+    "NodeCapabilitySnapshotRepositoryImpl",
     "NodeSessionRepositoryImpl",
     "NotificationEndpointRepositoryImpl",
     "OutboxMessageRepositoryImpl",

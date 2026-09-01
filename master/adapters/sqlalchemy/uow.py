@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.repositories import (
+    AgentDiagnosticsSnapshotRepositoryImpl,
+    AgentPluginDesiredVersionRepositoryImpl,
+    AgentPluginSyncOperationRepositoryImpl,
     AuditLogRepositoryImpl,
     CiTriggerBindingRepositoryImpl,
     CiWebhookDeliveryRepositoryImpl,
@@ -25,17 +28,16 @@ from master.adapters.sqlalchemy.repositories import (
     EventSubscriptionRepositoryImpl,
     HookExecutionRepositoryImpl,
     InboxMessageRepositoryImpl,
+    NodeCapabilitySnapshotRepositoryImpl,
     NodeRepositoryImpl,
     NodeSessionRepositoryImpl,
     NotificationEndpointRepositoryImpl,
     OutboxMessageRepositoryImpl,
+    PluginVersionRepositoryImpl,
     ProjectIntegrationRepositoryImpl,
     ProjectMemberRepositoryImpl,
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
-    PluginVersionRepositoryImpl,
-    AgentPluginDesiredVersionRepositoryImpl,
-    AgentPluginSyncOperationRepositoryImpl,
     RefreshTokenRepositoryImpl,
     RunArtifactRepositoryImpl,
     RunCaseResultRepositoryImpl,
@@ -82,6 +84,8 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.projects = ProjectRepositoryImpl(session)
         self.members = ProjectMemberRepositoryImpl(session)
         self.nodes = NodeRepositoryImpl(session)
+        self.node_capability_snapshots = NodeCapabilitySnapshotRepositoryImpl(session)
+        self.agent_diagnostics_snapshots = AgentDiagnosticsSnapshotRepositoryImpl(session)
         self.node_sessions = NodeSessionRepositoryImpl(session)
         self.devices = DeviceRepositoryImpl(session)
         self.bindings = ProjectNodeBindingRepositoryImpl(session)

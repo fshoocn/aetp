@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 from aetp_protocol import (
     V2_PROTOCOL_VERSION,
-    ExecutionAck,
     DesiredPluginVersion,
+    ExecutionAck,
     MessagePayloadError,
+    NodeCapabilitySnapshot,
     PluginManifest,
     V2Envelope,
     parse_v2_message,
@@ -39,6 +40,14 @@ def test_v2_golden_messages_parse_as_typed_payloads() -> None:
     progress_envelope, progress = parse_v2_message(golden["execution.progress"])
     assert progress_envelope.message_type == "execution.progress"
     assert progress.sequence == 3
+
+    snapshot_envelope, snapshot = parse_v2_message(golden["node.capability.snapshot"])
+    assert snapshot_envelope.message_type == "node.capability.snapshot"
+    assert snapshot.revision == 1
+
+    diagnostics_envelope, diagnostics = parse_v2_message(golden["agent.diagnostics.snapshot"])
+    assert diagnostics_envelope.message_type == "agent.diagnostics.snapshot"
+    assert diagnostics.log_tail == ()
 
 
 def test_v2_manifest_golden_and_point_entrypoint_rule() -> None:
@@ -119,4 +128,25 @@ def test_desired_plugin_version_is_strict_and_typed() -> None:
             point="executor",
             version="2.0.0",
             unexpected=True,
+        )
+
+
+def test_node_capability_snapshot_rejects_duplicate_plugin_inventory() -> None:
+    item = {
+        "plugin_id": "org.pytest.executor",
+        "point": "executor",
+        "version": "2.0.0",
+        "archive_sha256": "a" * 64,
+        "availability": "available",
+        "checked_at": "2026-09-01T08:00:00Z",
+    }
+    with pytest.raises(ValidationError, match="plugin_inventory"):
+        NodeCapabilitySnapshot(
+            schema_version=2,
+            node_id="01J00000000000000000000000",
+            session_id="session-00000001",
+            revision=1,
+            reported_at="2026-09-01T08:00:00Z",
+            maintenance_state="idle",
+            plugin_inventory=(item, item),
         )

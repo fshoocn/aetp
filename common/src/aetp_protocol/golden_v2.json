@@ -33,6 +33,79 @@
       }
     }
   },
+  "node.capability.snapshot": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000014",
+    "correlation_id": null,
+    "sent_at": "2026-09-01T08:00:01Z",
+    "sender": {
+      "kind": "agent",
+      "id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9"
+    },
+    "message_type": "node.capability.snapshot",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "schema_version": 2,
+      "node_id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9",
+      "revision": 1,
+      "reported_at": "2026-09-01T08:00:01Z",
+      "tags": ["bench"],
+      "executors": [],
+      "runtimes": [],
+      "software": [],
+      "resources": [],
+      "system": null,
+      "maintenance_state": "idle",
+      "plugin_inventory": []
+    }
+  },
+  "agent.diagnostics.snapshot": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000015",
+    "correlation_id": "01900000000000000000000016",
+    "sent_at": "2026-09-01T08:00:02Z",
+    "sender": {
+      "kind": "agent",
+      "id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9"
+    },
+    "message_type": "agent.diagnostics.snapshot",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "request_id": "01900000000000000000000016",
+      "node_id": "01J00000000000000000000000",
+      "collected_at": "2026-09-01T08:00:02Z",
+      "maintenance_state": "idle",
+      "system": {
+        "hostname": "bench-01",
+        "os_name": "windows",
+        "os_version": "10.0",
+        "process_id": 100,
+        "agent_started_at": "2026-09-01T07:00:00Z",
+        "python_version": "3.14",
+        "cpu_cores": 8,
+        "memory_total_mb": 16384,
+        "memory_available_mb": 8192,
+        "disk_free_mb": 100000,
+        "agent_version": "2.0.0",
+        "protocol_version": 2
+      },
+      "mqtt": {
+        "connected": true,
+        "broker_endpoint": "broker.example:8883",
+        "last_connected_at": "2026-09-01T07:00:01Z",
+        "reconnect_count": 0,
+        "last_error_code": null,
+        "last_error_message": null
+      },
+      "plugins": [],
+      "active_attempts": [],
+      "capability_revision": 1,
+      "log_tail": []
+    }
+  },
   "execution.progress": {
     "protocol_version": 2,
     "message_id": "01900000000000000000000013",

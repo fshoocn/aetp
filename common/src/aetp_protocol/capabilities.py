@@ -408,6 +408,16 @@ class NodeCapabilitySnapshot(_Strict):
     maintenance_state: AgentMaintenanceState
     plugin_inventory: tuple[PluginInventoryItem, ...] = ()
 
+    @model_validator(mode="after")
+    def _validate_unique_plugin_inventory(self) -> NodeCapabilitySnapshot:
+        keys = tuple(
+            (item.plugin_id.root, item.point.value, item.version.root)
+            for item in self.plugin_inventory
+        )
+        if len(keys) != len(set(keys)):
+            raise ValueError("plugin_inventory 中 plugin_id/point/version 不能重复")
+        return self
+
 
 PluginInventoryItem.model_rebuild()
 NodeCapabilitySnapshot.model_rebuild()
