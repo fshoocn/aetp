@@ -6,13 +6,15 @@ import asyncio
 from datetime import UTC, datetime
 
 from aetp_protocol.capabilities import AgentMaintenanceState, NodeCapabilitySnapshot
-from aetp_protocol.ids import BusinessId, RequestId, SemVer, SessionId, TraceId, Version, new_id
+from aetp_protocol.execution import AttemptStatus
+from aetp_protocol.ids import BusinessId, MessageId, RequestId, SemVer, SessionId, TraceId, Version, new_id, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     ActiveAttemptInfo,
     AgentSystemInfo,
     DiagnosticsSnapshot,
     MqttConnectionInfo,
+    NodeRegister,
 )
 from aetp_protocol.topics import v2_event_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
@@ -52,9 +54,13 @@ def _seed_node(container) -> None:
         )
 
 
-def _envelope(message_type: MessageType, session_id: SessionId, payload: object) -> bytes:
+def _envelope(
+    message_type: MessageType,
+    session_id: SessionId,
+    payload: NodeCapabilitySnapshot | DiagnosticsSnapshot,
+) -> bytes:
     envelope = V2Envelope(
-        message_id=new_id(),
+        message_id=MessageId(new_id()),
         sent_at=NOW,
         sender=V2Sender(kind="agent", id=NODE_ID, session_id=session_id),
         message_type=message_type.value,
@@ -73,6 +79,30 @@ def _capability(revision: int, session_id: SessionId = SESSION_ID) -> NodeCapabi
         reported_at=NOW,
         maintenance_state=AgentMaintenanceState.IDLE,
     )
+
+
+def _register() -> NodeRegister:
+    snapshot = _capability(1)
+    return NodeRegister(
+        node_id=NODE_ID,
+        session_id=SESSION_ID,
+        name="Bench 01",
+        tags=("can",),
+        capability_snapshot=snapshot,
+    )
+
+
+def _register_envelope(payload: NodeRegister) -> tuple[MessageId, bytes]:
+    message_id = MessageId(new_id())
+    envelope = V2Envelope(
+        message_id=message_id,
+        sent_at=NOW,
+        sender=V2Sender(kind="agent", id=NODE_ID, session_id=SESSION_ID),
+        message_type=MessageType.NODE_REGISTER.value,
+        trace_id=TraceId(new_id()),
+        payload=payload.model_dump(mode="json"),
+    )
+    return message_id, envelope.model_dump_json().encode("utf-8")
 
 
 def _diagnostics(request_id: str) -> DiagnosticsSnapshot:
@@ -106,7 +136,7 @@ def _diagnostics(request_id: str) -> DiagnosticsSnapshot:
                 attempt_id=BusinessId("01J00000000000000000000001"),
                 plan_id=BusinessId("01J00000000000000000000002"),
                 run_id=BusinessId("01J00000000000000000000003"),
-                state="running",
+                state=AttemptStatus.RUNNING,
             ),
         ),
         capability_revision=1,
@@ -129,6 +159,37 @@ def test_master_router_accepts_idempotent_current_session_snapshot(client) -> No
         records = uow.node_capability_snapshots.list_by_node(NODE_ID)
         assert len(records) == 1
         assert records[0].revision == 1
+
+
+def test_master_router_accepts_v2_register_and_reuses_ack(client) -> None:
+    container = client.app.state.container
+    router = container.message_router()
+    register = _register()
+    message_id, payload = _register_envelope(register)
+    message = MqttMessage(
+        topic=v2_event_topic(NODE_ID.root, "register"),
+        payload=payload,
+    )
+
+    assert asyncio.run(router.handle(message)) is True
+    assert asyncio.run(router.handle(message)) is True
+
+    with container.uow_factory()() as uow:
+        node = uow.nodes.get_by_id(NODE_ID.root)
+        assert node is not None
+        assert node.online is True
+        assert node.tags == ["can"]
+        session = uow.node_sessions.get_current(node.id)
+        assert session is not None
+        assert session.session_id == SESSION_ID.root
+        snapshot = uow.node_capability_snapshots.get_latest(NODE_ID)
+        assert snapshot is not None
+        assert snapshot.revision == 1
+        outbox_id = stable_id(f"v2-register-ack:{message_id.root}").root
+        ack = uow.outbox_messages.get_by_outbox_id(outbox_id)
+        assert ack is not None
+        assert ack.topic == "aetp/v2/master/agents/01J00000000000000000000000/commands/register.ack"
+        assert ack.payload["correlation_id"] == message_id.root
 
 
 def test_master_router_rejects_old_session_snapshot(client) -> None:

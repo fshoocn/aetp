@@ -15,7 +15,7 @@ from pathlib import Path
 
 from aetp_protocol.capabilities import AgentMaintenanceState, NodeCapabilities, NodeCapabilitySnapshot
 from aetp_protocol.envelope import SenderKind
-from aetp_protocol.ids import BusinessId, MessageId, SemVer, SessionId, TraceId, Version, new_id
+from aetp_protocol.ids import BusinessId, MessageId, SemVer, SessionId, TraceId, Version, new_id, stable_id
 from aetp_protocol.logs import LogEvent
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
@@ -24,6 +24,8 @@ from aetp_protocol.payloads import (
     DiagnosticsRequest,
     DiagnosticsSnapshot,
     MqttConnectionInfo,
+    NodeRegister,
+    NodeRegisterAck,
 )
 from aetp_protocol.topics import (
     parse_v2_topic,
@@ -39,6 +41,7 @@ from agent.application.services.capability_snapshot_service import (
     CapabilityRevisionCache,
 )
 from agent.config import AgentSettings
+from agent.domain.ledger import Ledger
 from agent.plugins.v2_registry import AgentV2PluginRegistry
 from common.transport import MqttMessage, Transport
 
@@ -71,6 +74,79 @@ class AgentV2CapabilityPublisher:
         self._agent_version = agent_version or SemVer("2.0.0")
         self._started_at = started_at or datetime.now(UTC)
         self._revision_cache = CapabilityRevisionCache()
+        self._maintenance_state = AgentMaintenanceState.IDLE
+        self._v2_registered = False
+        self._pending_register_message_id: MessageId | None = None
+
+    @property
+    def v2_registered(self) -> bool:
+        """是否收到当前 session 的 V2 注册 ACK。"""
+        return self._v2_registered
+
+    @property
+    def pending_register_message_id(self) -> MessageId | None:
+        """当前 V2 注册消息 ID，ACK 必须通过 correlation_id 关联。"""
+        return self._pending_register_message_id
+
+    def reset_session(self) -> None:
+        """切换 MQTT session 时清除旧的 V2 注册状态。"""
+        self._v2_registered = False
+        self._pending_register_message_id = None
+
+    def set_maintenance_state(self, state: AgentMaintenanceState) -> None:
+        """更新后续能力快照和诊断中的维护状态。"""
+        self._maintenance_state = state
+
+    def register_ack_topic(self) -> str:
+        """返回本节点 V2 注册 ACK 主题。"""
+        return v2_command_topic(self._node_id().root, "register.ack")
+
+    def enqueue_register(self, ledger: Ledger, session_id: SessionId) -> str:
+        """把带完整能力快照的 V2 注册写入 Agent outbox。"""
+        snapshot = self.build_snapshot(session_id)
+        payload = NodeRegister(
+            node_id=self._node_id(),
+            session_id=session_id,
+            name=self._settings.name,
+            tags=self._tags,
+            capability_snapshot=snapshot,
+        )
+        envelope = self._build_envelope(MessageType.NODE_REGISTER, payload, session_id)
+        self._pending_register_message_id = envelope.message_id
+        self._v2_registered = False
+        ledger.replace_outbox(
+            f"v2-register:{self._node_id().root}",
+            v2_event_topic(self._node_id().root, "register"),
+            envelope.model_dump(mode="json"),
+        )
+        return envelope.message_id.root
+
+    def handle_register_ack(self, message: MqttMessage, session_id: SessionId) -> bool:
+        """校验 V2 注册 ACK 并更新当前 session 注册状态。"""
+        try:
+            topic_info = parse_v2_topic(message.topic)
+            if (
+                topic_info.direction != "commands"
+                or topic_info.node_id != self._node_id().root
+                or topic_info.segment != "register.ack"
+            ):
+                return False
+            envelope = V2Envelope.model_validate(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_v2_topic(message.topic, envelope.sender)
+            validate_message_type_for_v2_topic(message.topic, MessageType(envelope.message_type))
+            payload = envelope.parse_payload()
+            if not isinstance(payload, NodeRegisterAck):
+                return False
+            if envelope.sender.id != stable_id(self._settings.master_id):
+                return False
+            if envelope.correlation_id != self._pending_register_message_id:
+                return False
+            if payload.node_id != self._node_id() or payload.session_id != session_id:
+                return False
+            self._v2_registered = payload.accepted
+            return True
+        except Exception:
+            return False
 
     def build_snapshot(self, session_id: SessionId) -> NodeCapabilitySnapshot:
         """生成当前 session 的下一版能力快照。"""
@@ -104,7 +180,7 @@ class AgentV2CapabilityPublisher:
             request_id=request.request_id,
             node_id=self._node_id(),
             collected_at=datetime.now(UTC),
-            maintenance_state=AgentMaintenanceState.IDLE,
+            maintenance_state=self._maintenance_state,
             system=self._system_info(capability_snapshot),
             mqtt=self._mqtt_info(),
             plugins=capability_snapshot.plugin_inventory,
@@ -173,23 +249,11 @@ class AgentV2CapabilityPublisher:
     async def _publish(
         self,
         message_type: MessageType,
-        payload: NodeCapabilitySnapshot | DiagnosticsSnapshot,
+        payload: NodeRegister | NodeCapabilitySnapshot | DiagnosticsSnapshot,
         session_id: SessionId,
         correlation_id: MessageId | None = None,
     ) -> None:
-        envelope = V2Envelope(
-            message_id=MessageId(new_id()),
-            correlation_id=correlation_id,
-            sent_at=datetime.now(UTC),
-            sender=V2Sender(
-                kind="agent",
-                id=self._node_id(),
-                session_id=session_id,
-            ),
-            message_type=message_type.value,
-            trace_id=TraceId(new_id()),
-            payload=payload.model_dump(mode="json"),
-        )
+        envelope = self._build_envelope(message_type, payload, session_id, correlation_id=correlation_id)
         await self._transport.publish(
             v2_event_topic(self._node_id().root, self._message_segment(message_type)),
             envelope.model_dump_json().encode("utf-8"),
@@ -202,9 +266,32 @@ class AgentV2CapabilityPublisher:
         except ValueError as exc:
             raise ValueError("V2 Agent node_id 必须是 BusinessId") from exc
 
+    def _build_envelope(
+        self,
+        message_type: MessageType,
+        payload: NodeRegister | NodeCapabilitySnapshot | DiagnosticsSnapshot,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> V2Envelope:
+        return V2Envelope(
+            message_id=MessageId(new_id()),
+            correlation_id=correlation_id,
+            sent_at=datetime.now(UTC),
+            sender=V2Sender(
+                kind="agent",
+                id=self._node_id(),
+                session_id=session_id,
+            ),
+            message_type=message_type.value,
+            trace_id=TraceId(new_id()),
+            payload=payload.model_dump(mode="json"),
+        )
+
     @staticmethod
     def _message_segment(message_type: MessageType) -> str:
         return {
+            MessageType.NODE_REGISTER: "register",
             MessageType.NODE_CAPABILITY_SNAPSHOT: "capability.snapshot",
             MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: "agent.diagnostics.snapshot",
         }[message_type]

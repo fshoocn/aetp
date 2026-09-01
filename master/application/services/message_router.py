@@ -23,6 +23,7 @@ from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     DiagnosticsSnapshot,
     NodeHeartbeatPayload,
+    NodeRegister,
     NodeRegisterPayload,
     PresencePayload,
     RunAckPayload,
@@ -203,7 +204,7 @@ class MasterMessageRouter:
             return False
 
     async def _handle_v2(self, message: MqttMessage) -> bool:
-        """处理 M2 能力/诊断事件，拒绝未实现的 V2 事件。"""
+        """处理 V2 注册、能力和诊断事件，拒绝未实现的 V2 事件。"""
         try:
             envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
             validate_sender_for_v2_topic(message.topic, envelope.sender)
@@ -211,6 +212,27 @@ class MasterMessageRouter:
                 message.topic,
                 MessageType(envelope.message_type),
             )
+            if isinstance(payload, NodeRegister):
+                if payload.session_id != envelope.sender.session_id:
+                    raise ValueError("V2 注册 payload session_id 与 sender 不一致")
+                self._node_presence.handle_v2_register(
+                    envelope=envelope,
+                    payload=payload,
+                )
+                if self._capability_snapshot is not None:
+                    self._capability_snapshot.accept(
+                        payload.capability_snapshot,
+                        sender_session_id=envelope.sender.session_id,
+                    )
+                if self._scheduler is not None:
+                    try:
+                        self._scheduler.reschedule_pending_runs(node_id=envelope.sender.id.root)
+                    except Exception:
+                        logger.exception(
+                            "V2 节点上线后的补偿调度失败（不阻塞注册）: node=%s",
+                            envelope.sender.id.root,
+                        )
+                return True
             if not isinstance(payload, (NodeCapabilitySnapshot, DiagnosticsSnapshot)):
                 return False
             if payload.node_id != envelope.sender.id:

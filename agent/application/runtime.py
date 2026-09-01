@@ -147,14 +147,19 @@ class AgentRuntime:
         self._transport.on_message(self._handle_message)
         self._transport.on_connection_change(self._handle_connection_change)
         subscriptions = [
-                command_topic(self._settings.node_id, "register-ack"),
-                command_topic(self._settings.node_id, "assign"),
-                command_topic(self._settings.node_id, "cancel"),
-                command_topic(self._settings.node_id, "verify"),
-                command_topic(self._settings.node_id, "parse"),
-            ]
+            command_topic(self._settings.node_id, "register-ack"),
+            command_topic(self._settings.node_id, "assign"),
+            command_topic(self._settings.node_id, "cancel"),
+            command_topic(self._settings.node_id, "verify"),
+            command_topic(self._settings.node_id, "parse"),
+        ]
         if self._v2_capability_publisher is not None:
-            subscriptions.append(self._v2_capability_publisher.diagnostics_command_topic())
+            subscriptions.extend(
+                [
+                    self._v2_capability_publisher.register_ack_topic(),
+                    self._v2_capability_publisher.diagnostics_command_topic(),
+                ]
+            )
         await self._transport.subscribe(subscriptions)
         self._outbox_task = asyncio.create_task(self._outbox_loop())
         await self._transport.connect()
@@ -198,10 +203,21 @@ class AgentRuntime:
         """连接成功触发重新注册，断开撤销注册状态。"""
         await self._registration.handle_connection_change(connected, session_id)
         if connected:
+            if self._v2_capability_publisher is not None:
+                try:
+                    self._v2_capability_publisher.reset_session()
+                    self._v2_capability_publisher.enqueue_register(
+                        self._ledger,
+                        self._v2_session_id(),
+                    )
+                except Exception:
+                    logger.exception("V2 节点注册写入 outbox 失败")
             self._cancel_registration_waiter()
             self._registration_task = asyncio.create_task(self._wait_for_registration())
         else:
             self._cancel_registration_waiter()
+            if self._v2_capability_publisher is not None:
+                self._v2_capability_publisher.reset_session()
 
     async def _wait_for_registration(self) -> None:
         """等待 ACK；超时后按指数退避重发注册（保持 broker 连接）。
@@ -237,6 +253,14 @@ class AgentRuntime:
                 if self._stop_event.is_set():
                     return
                 self._registration.enqueue_register()
+                if self._v2_capability_publisher is not None:
+                    try:
+                        self._v2_capability_publisher.enqueue_register(
+                            self._ledger,
+                            self._v2_session_id(),
+                        )
+                    except Exception:
+                        logger.exception("V2 节点注册重发写入 outbox 失败")
             except RegistrationRejectedError as exc:
                 # 被拒绝：通常需重新连接（如 session 冲突），断开重连
                 logger.warning("Agent 注册被拒绝，将触发重连: %s", exc)
@@ -261,6 +285,11 @@ class AgentRuntime:
         """路由入站消息到 register-ack / 命令分发器 / 脚本预检（P5.4/P5.7）。"""
         assert self._dispatcher_obj is not None, "组件未初始化，请先调用 start()"
         if self._registration.handle_register_ack(message):
+            return
+        if self._v2_capability_publisher is not None and self._v2_capability_publisher.handle_register_ack(
+            message,
+            self._v2_session_id(),
+        ):
             return
         if (
             self._v2_capability_publisher is not None

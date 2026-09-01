@@ -16,16 +16,20 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from aetp_protocol.capabilities import NodeCapabilities
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
-from aetp_protocol.ids import new_id
+from aetp_protocol.ids import MessageId, SessionId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     NodeHeartbeatPayload,
+    NodeRegister,
+    NodeRegisterAck,
     NodeRegisterPayload,
     PresencePayload,
     RegisterAckPayload,
 )
-from aetp_protocol.topics import command_topic
+from aetp_protocol.topics import command_topic, v2_command_topic
+from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 
 from master.application.services.recovery_service import RecoveryService
 from master.domain.enums import DisconnectReason, NodeStatus, OutboxStatus
@@ -147,6 +151,91 @@ class NodePresenceService:
             )
             return ack
 
+    def handle_v2_register(self, *, envelope: V2Envelope, payload: NodeRegister) -> OutboxMessage:
+        """处理 V2 注册并返回幂等的 node.register.ack outbox。"""
+        if envelope.sender.kind != "agent":
+            raise NodePresenceError("V2 注册 sender.kind 必须为 agent")
+        if envelope.sender.id != payload.node_id:
+            raise NodePresenceError("V2 注册 sender.id 与 node_id 不一致")
+        if envelope.sender.session_id != payload.session_id:
+            raise NodePresenceError("V2 注册 sender.session_id 与 payload.session_id 不一致")
+        snapshot = payload.capability_snapshot
+        if snapshot.node_id != payload.node_id or snapshot.session_id != payload.session_id:
+            raise NodePresenceError("V2 注册能力快照身份与注册载荷不一致")
+
+        now = utcnow()
+        with self._uow_factory() as uow:
+            node = uow.nodes.get_by_id(payload.node_id.root)
+            if node is None:
+                node = Node(
+                    id=None,
+                    node_id=payload.node_id.root,
+                    name=payload.name,
+                    hostname="",
+                    status=NodeStatus.ONLINE,
+                    online=True,
+                    enabled=True,
+                    tags=list(payload.tags),
+                    capabilities=NodeCapabilities(),
+                    protocol_version="2",
+                    last_seen_at=now,
+                    load={},
+                )
+            else:
+                node.name = payload.name or node.name
+                node.status = NodeStatus.ONLINE if node.enabled else NodeStatus.DISABLED
+                node.online = True
+                node.tags = list(payload.tags)
+                node.protocol_version = "2"
+                node.last_seen_at = now
+            node.resource_occupancy = {}
+            node = uow.nodes.save(node)
+            assert node.id is not None
+
+            current = uow.node_sessions.get_current(node.id)
+            if current is not None and current.session_id != payload.session_id.root:
+                uow.node_sessions.close(
+                    current,
+                    reason=DisconnectReason.SESSION_REPLACED,
+                    at=now,
+                )
+
+            existing = uow.node_sessions.get(node.id, payload.session_id.root)
+            if existing is None:
+                uow.node_sessions.create(
+                    NodeSession(
+                        node_pk=node.id,
+                        node_id=node.node_id,
+                        session_id=payload.session_id.root,
+                        client_id=payload.session_id.root,
+                        connected_at=now,
+                    )
+                )
+
+            outbox_id = stable_id(f"v2-register-ack:{envelope.message_id.root}").root
+            existing_ack = uow.outbox_messages.get_by_outbox_id(outbox_id)
+            if existing_ack is not None:
+                return existing_ack
+            ack = uow.outbox_messages.enqueue(
+                OutboxMessage(
+                    outbox_id=outbox_id,
+                    aggregate_type="node",
+                    aggregate_id=node.node_id,
+                    topic=v2_command_topic(node.node_id, "register.ack"),
+                    payload=self._build_v2_ack_envelope(envelope, payload).model_dump(mode="json"),
+                    qos=1,
+                    status=OutboxStatus.PENDING,
+                    attempts=0,
+                    next_attempt_at=None,
+                )
+            )
+            logger.info(
+                "V2 节点注册成功: node=%s session=%s → node.register.ack 入 outbox",
+                node.node_id,
+                payload.session_id.root,
+            )
+            return ack
+
     # -- 心跳 ---------------------------------------------------------------
 
     def handle_heartbeat(self, *, envelope: Envelope, payload: NodeHeartbeatPayload) -> None:
@@ -255,3 +344,23 @@ class NodePresenceService:
             ).model_dump(mode="json"),
         )
         return ack.model_dump(mode="json")
+
+    def _build_v2_ack_envelope(self, request: V2Envelope, payload: NodeRegister) -> V2Envelope:
+        """构造 V2 注册回执，correlation_id 指向原注册消息。"""
+        return V2Envelope(
+            message_id=MessageId(new_id()),
+            correlation_id=request.message_id,
+            sent_at=utcnow(),
+            sender=V2Sender(
+                kind="master",
+                id=stable_id(self._master_id),
+                session_id=SessionId(stable_id(f"{self._master_id}:session").root),
+            ),
+            message_type=MessageType.NODE_REGISTER_ACK.value,
+            trace_id=request.trace_id,
+            payload=NodeRegisterAck(
+                node_id=payload.node_id,
+                session_id=payload.session_id,
+                accepted=True,
+            ).model_dump(mode="json"),
+        )
