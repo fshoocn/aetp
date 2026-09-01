@@ -6,15 +6,16 @@ from collections.abc import Callable
 from datetime import datetime
 
 from aetp_protocol.errors import ErrorCode
+from aetp_protocol.execution import ExecutionStatus
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.payloads import ExecutionAck, LeaseRenewed, LeaseRenewRequest
+from aetp_protocol.payloads import ExecutionAck, ExecutionFinished, LeaseRenewed, LeaseRenewRequest
 from aetp_protocol.topics import v2_command_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 
 from master.application.services.plan_lease_service import PlanLeaseService
-from master.domain.enums import OutboxStatus, RunStatus, ShardAttemptStatus
-from master.domain.models import OutboxMessage
+from master.domain.enums import CaseStatus, OutboxStatus, RunStatus, ShardAttemptStatus, ShardStatus
+from master.domain.models import OutboxMessage, RunCaseResult
 from master.domain.repositories import UnitOfWork
 from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
@@ -147,6 +148,109 @@ class V2ExecutionService:
                 )
         return True
 
+    def handle_execution_finished(
+        self,
+        finished: ExecutionFinished,
+        *,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        """校验并投影 execution.finished，同时释放 Attempt 的全部 Lease。"""
+        with self._uow_factory() as uow:
+            plan_record = uow.execution_plans.get_by_plan_id(finished.plan_id)
+            if plan_record is None:
+                return False
+            plan = plan_record.plan
+            if not self._matches_plan_identity(
+                plan,
+                run_id=finished.run_id,
+                shard_id=finished.shard_id,
+                attempt_id=finished.attempt_id,
+                plan_hash=finished.plan_hash,
+                sender_node_id=sender_node_id,
+                sender_session_id=sender_session_id,
+            ):
+                return False
+            attempt = uow.shard_attempts.get_by_attempt_id(finished.attempt_id.root)
+            if attempt is None:
+                return False
+            terminal_attempts = {
+                ShardAttemptStatus.SUCCEEDED,
+                ShardAttemptStatus.FAILED,
+                ShardAttemptStatus.CANCELLED,
+                ShardAttemptStatus.TIMED_OUT,
+                ShardAttemptStatus.LOST,
+            }
+            if attempt.status in terminal_attempts:
+                return True
+            target_attempt = {
+                ExecutionStatus.SUCCEEDED: ShardAttemptStatus.SUCCEEDED,
+                ExecutionStatus.FAILED: ShardAttemptStatus.FAILED,
+                ExecutionStatus.CANCELLED: ShardAttemptStatus.CANCELLED,
+                ExecutionStatus.TIMED_OUT: ShardAttemptStatus.TIMED_OUT,
+            }[finished.result.status]
+            if attempt.status is ShardAttemptStatus.DISPATCHED:
+                assert_transition(attempt.status, ShardAttemptStatus.ACKED)
+                attempt.status = ShardAttemptStatus.ACKED
+            if attempt.status is ShardAttemptStatus.ACKED:
+                assert_transition(attempt.status, ShardAttemptStatus.RUNNING)
+                attempt.status = ShardAttemptStatus.RUNNING
+            assert_transition(attempt.status, target_attempt)
+            attempt.status = target_attempt
+            if finished.result.error is not None:
+                attempt.error_code = finished.result.error.code.root
+                attempt.error_message = finished.result.error.message
+            attempt.finished_at = finished.finished_at
+            uow.shard_attempts.update(attempt)
+            if finished.result.case_results:
+                uow.run_case_results.add_many(
+                    [
+                        RunCaseResult(
+                            run_id=finished.run_id.root,
+                            shard_id=finished.shard_id.root,
+                            case_key=case.case_key,
+                            attempt_no=attempt.attempt_no,
+                            status=CaseStatus(case.status.value),
+                            duration_ms=case.duration_ms,
+                            error_summary=case.error_summary,
+                            detail=case.detail,
+                        )
+                        for case in finished.result.case_results
+                    ]
+                )
+
+            shard = uow.run_shards.get_by_shard_id(finished.shard_id.root)
+            if shard is not None and shard.status not in {
+                ShardStatus.SUCCEEDED,
+                ShardStatus.FAILED,
+                ShardStatus.CANCELLED,
+                ShardStatus.TIMED_OUT,
+            }:
+                target_shard = {
+                    ExecutionStatus.SUCCEEDED: ShardStatus.SUCCEEDED,
+                    ExecutionStatus.FAILED: ShardStatus.FAILED,
+                    ExecutionStatus.CANCELLED: ShardStatus.CANCELLED,
+                    ExecutionStatus.TIMED_OUT: ShardStatus.TIMED_OUT,
+                }[finished.result.status]
+                if shard.status is ShardStatus.DISPATCHING:
+                    assert_transition(shard.status, ShardStatus.RUNNING)
+                    shard.status = ShardStatus.RUNNING
+                assert_transition(shard.status, target_shard)
+                shard.status = target_shard
+                shard.final_node = sender_node_id.root
+                uow.run_shards.update(shard)
+
+            for lease_record in uow.resource_leases.list_by_attempt(finished.attempt_id):
+                if lease_record.lease.state.value != "active":
+                    continue
+                uow.resource_leases.release(
+                    lease_record.lease.lease_id,
+                    now=self._now(),
+                    expected_revision=lease_record.lease.revision,
+                )
+            self._project_run_if_terminal(uow, finished.run_id)
+            return True
+
     def _project_rejected_ack(self, uow: UnitOfWork, ack: ExecutionAck, attempt) -> None:
         if attempt is not None and attempt.status not in {
             ShardAttemptStatus.FAILED,
@@ -169,6 +273,58 @@ class V2ExecutionService:
                 expected_revision=record.lease.revision,
             )
 
+    @staticmethod
+    def _matches_plan_identity(
+        plan,
+        *,
+        run_id: BusinessId,
+        shard_id: BusinessId,
+        attempt_id: BusinessId,
+        plan_hash,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        return (
+            plan.plan_hash == plan_hash
+            and plan.run_id == run_id
+            and plan.shard_id == shard_id
+            and plan.attempt_id == attempt_id
+            and plan.node_id == sender_node_id
+            and plan.target_session_id == sender_session_id
+        )
+
+    @staticmethod
+    def _project_run_if_terminal(uow: UnitOfWork, run_id: BusinessId) -> None:
+        run = uow.task_runs.get_by_run_id(run_id.root)
+        if run is None or run.status in {
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.TIMED_OUT,
+            RunStatus.LOST,
+        }:
+            return
+        shards = uow.run_shards.list_by_run(run_id.root)
+        terminal = {
+            ShardStatus.SUCCEEDED,
+            ShardStatus.FAILED,
+            ShardStatus.CANCELLED,
+            ShardStatus.TIMED_OUT,
+        }
+        if not shards or not all(shard.status in terminal for shard in shards):
+            return
+        target = RunStatus.SUCCEEDED
+        if any(shard.status in {ShardStatus.FAILED, ShardStatus.TIMED_OUT} for shard in shards):
+            target = RunStatus.FAILED
+        elif any(shard.status is ShardStatus.CANCELLED for shard in shards):
+            target = RunStatus.CANCELLED
+        if run.status in {RunStatus.DISPATCHED, RunStatus.ACKED}:
+            assert_transition(run.status, RunStatus.RUNNING)
+            run.status = RunStatus.RUNNING
+        assert_transition(run.status, target)
+        run.status = target
+        run.finished_at = utcnow()
+        uow.task_runs.update(run)
     def _is_current_session(self, node_id: BusinessId, session_id: SessionId) -> bool:
         with self._uow_factory() as uow:
             node = uow.nodes.get_by_id(node_id.root)

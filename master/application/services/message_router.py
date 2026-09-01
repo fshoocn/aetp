@@ -23,6 +23,7 @@ from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     DiagnosticsSnapshot,
     ExecutionAck,
+    ExecutionFinished,
     LeaseRenewRequest,
     MaintenanceStatus,
     NodeHeartbeatPayload,
@@ -247,6 +248,14 @@ class MasterMessageRouter:
                 if self._v2_execution is None or envelope.correlation_id is None:
                     return False
                 return self._v2_execution.handle_execution_ack(
+                    payload,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
+            if isinstance(payload, ExecutionFinished):
+                if self._v2_execution is None or envelope.correlation_id is None:
+                    return False
+                return self._v2_execution.handle_execution_finished(
                     payload,
                     sender_node_id=envelope.sender.id,
                     sender_session_id=envelope.sender.session_id,

@@ -54,6 +54,7 @@ def test_v2_golden_messages_parse_as_typed_payloads() -> None:
         ("agent.plugin.sync", "agent.plugin.sync"),
         ("agent.plugin.sync.result", "agent.plugin.sync.result"),
         ("agent.maintenance.status", "agent.maintenance.status"),
+        ("execution.finished", "execution.finished"),
     ):
         envelope, _payload = parse_v2_message(golden[key])
         assert envelope.message_type == message_type

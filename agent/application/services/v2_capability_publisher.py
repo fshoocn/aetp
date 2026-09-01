@@ -24,6 +24,7 @@ from aetp_protocol.payloads import (
     DiagnosticsRequest,
     DiagnosticsSnapshot,
     ExecutionAck,
+    ExecutionFinished,
     LeaseRenewRequest,
     MaintenanceStatus,
     MqttConnectionInfo,
@@ -136,6 +137,29 @@ class AgentV2CapabilityPublisher:
         ledger.replace_outbox(
             outbox_id,
             v2_event_topic(self._node_id().root, "execution.ack"),
+            envelope.model_dump(mode="json"),
+        )
+        return outbox_id
+
+    def enqueue_execution_finished(
+        self,
+        ledger: Ledger,
+        finished: ExecutionFinished,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> str:
+        """将 execution.finished 写入可靠 Agent outbox。"""
+        envelope = self._build_envelope(
+            MessageType.EXECUTION_FINISHED,
+            finished,
+            session_id,
+            correlation_id=correlation_id,
+        )
+        outbox_id = f"v2-execution-finished:{finished.plan_id.root}"
+        ledger.replace_outbox(
+            outbox_id,
+            v2_event_topic(self._node_id().root, "execution.finished"),
             envelope.model_dump(mode="json"),
         )
         return outbox_id
@@ -365,6 +389,7 @@ class AgentV2CapabilityPublisher:
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
             | ExecutionAck
+            | ExecutionFinished
             | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
@@ -393,6 +418,7 @@ class AgentV2CapabilityPublisher:
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
             | ExecutionAck
+            | ExecutionFinished
             | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
@@ -422,6 +448,7 @@ class AgentV2CapabilityPublisher:
             MessageType.NODE_CAPABILITY_SNAPSHOT: "capability.snapshot",
             MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: "agent.diagnostics.snapshot",
             MessageType.EXECUTION_ACK: "execution.ack",
+            MessageType.EXECUTION_FINISHED: "execution.finished",
             MessageType.LEASE_RENEW: "lease.renew",
             MessageType.AGENT_PLUGIN_SYNC_RESULT: "agent.plugin.sync.result",
             MessageType.AGENT_MAINTENANCE_STATUS: "agent.maintenance.status",

@@ -233,6 +233,36 @@
       "message": "running"
     }
   },
+  "execution.finished": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000021",
+    "correlation_id": "01900000000000000000000005",
+    "sent_at": "2026-09-01T08:02:00Z",
+    "sender": {
+      "kind": "agent",
+      "id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9"
+    },
+    "message_type": "execution.finished",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "run_id": "01J00000000000000000000006",
+      "shard_id": "01J00000000000000000000007",
+      "attempt_id": "01J00000000000000000000008",
+      "plan_id": "01J00000000000000000000005",
+      "plan_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "result": {
+        "status": "succeeded",
+        "passed": true,
+        "case_results": [],
+        "artifacts": [],
+        "metrics": {},
+        "data": {},
+        "error": null
+      },
+      "finished_at": "2026-09-01T08:02:00Z"
+    }
+  },
   "plugin.manifest": {
     "schema_version": 2,
     "id": "org.pytest.executor",

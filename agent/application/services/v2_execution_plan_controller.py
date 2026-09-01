@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ExecutionPlan
@@ -22,6 +23,7 @@ from aetp_protocol.v2_envelope import V2Envelope, parse_v2_message
 
 from agent.application.services.script_cache_service import ScriptCacheError, ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.v2_execution_runner import V2ExecutionRunner
 from agent.application.services.v2_lease_renewal_service import AgentV2LeaseRenewalService
 from agent.domain.ledger import Ledger
 from agent.plugins.v2_registry import AgentV2PluginRegistry
@@ -50,6 +52,7 @@ class AgentV2ExecutionPlanController:
         master_id: str = "aetp-master",
         now: Callable[[], datetime] | None = None,
         lease_renewal: AgentV2LeaseRenewalService | None = None,
+        execution_runner: V2ExecutionRunner | None = None,
     ) -> None:
         self._node_id = node_id
         self._ledger = ledger
@@ -60,6 +63,7 @@ class AgentV2ExecutionPlanController:
         self._master_id = master_id
         self._now = now or (lambda: datetime.now(UTC))
         self._lease_renewal = lease_renewal
+        self._execution_runner = execution_runner
 
     def command_topic(self) -> str:
         """返回本节点 execution.plan 命令主题。"""
@@ -90,17 +94,23 @@ class AgentV2ExecutionPlanController:
             return True
 
         if self._script_cache is not None:
-            try:
-                self._script_cache.ensure_cached(plan.script.model_dump(mode="json"))
-            except ScriptCacheError as exc:
-                await self._reject(
-                    plan,
-                    session_id,
-                    envelope.message_id,
-                    _SCRIPT_INVALID,
-                    f"脚本准备失败: {exc}",
-                )
-                return True
+            cached = self._ledger.get_cached_script(
+                plan.script.script_id.root,
+                plan.script.version,
+                plan.script.sha256.root,
+            )
+            if cached is None or not Path(cached.path).is_file():
+                try:
+                    self._script_cache.ensure_cached(plan.script.model_dump(mode="json"))
+                except ScriptCacheError as exc:
+                    await self._reject(
+                        plan,
+                        session_id,
+                        envelope.message_id,
+                        _SCRIPT_INVALID,
+                        f"脚本准备失败: {exc}",
+                    )
+                    return True
 
         claimed = self._ledger.claim_run(
             plan.run_id.root,
@@ -122,6 +132,12 @@ class AgentV2ExecutionPlanController:
         await self._accept(plan, session_id, envelope.message_id)
         if self._lease_renewal is not None:
             self._lease_renewal.register_plan(plan)
+        if self._execution_runner is not None:
+            self._execution_runner.start(
+                plan,
+                session_id,
+                correlation_id=envelope.message_id,
+            )
         return True
 
     def _parse_plan(self, message: MqttMessage) -> tuple[V2Envelope, ExecutionPlan] | None:
