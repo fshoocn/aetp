@@ -217,6 +217,8 @@ class Container(containers.DeclarativeContainer):
     plugin_sync_service = providers.Singleton(
         PluginSyncService,
         uow_factory=uow_factory,
+        package_url_builder=plugin_download_service.provided.build_versioned_download_url,
+        master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
     )
     plugin_manager = providers.Singleton(
         PluginManager,
@@ -419,6 +421,7 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         capability_snapshot=capability_snapshot_service,
         diagnostics_snapshot=diagnostics_snapshot_service,
+        plugin_sync=plugin_sync_service,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）

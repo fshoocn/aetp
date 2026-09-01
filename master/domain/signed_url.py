@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 
 _SCRIPT_URL_PATH = "/api/v1/internal/scripts/{script_id}/download"
 _PLUGIN_URL_PATH = "/api/v1/internal/plugins/{plugin_id}/download"
+_PLUGIN_VERSION_URL_PATH = "/api/v1/internal/plugins/{plugin_id}/{version}/download"
 
 
 def _signature(resource_id: str, expires: int, secret: str) -> str:
@@ -32,6 +33,8 @@ def build_signed_path(
     ttl_s: int,
     *,
     path_template: str = _SCRIPT_URL_PATH,
+    version: str = "",
+    path_resource_id: str | None = None,
     now: datetime | None = None,
 ) -> str:
     """生成签名下载相对路径（含 query）。
@@ -42,7 +45,8 @@ def build_signed_path(
     current = now or datetime.now(UTC)
     expires = int(current.timestamp()) + int(ttl_s)
     signature = _signature(resource_id, expires, secret)
-    path = path_template.format(script_id=resource_id, plugin_id=resource_id)
+    path_id = path_resource_id or resource_id
+    path = path_template.format(script_id=path_id, plugin_id=path_id, version=version)
     return f"{path}?expires={expires}&signature={signature}"
 
 

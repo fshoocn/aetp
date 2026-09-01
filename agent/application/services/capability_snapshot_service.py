@@ -17,8 +17,8 @@ from aetp_protocol.capabilities import (
     ResourceHealth,
     RuntimeCapability,
     SoftwareCapability,
-    Version as CapabilityVersion,
 )
+from aetp_protocol.capabilities import Version as CapabilityVersion
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ResourceRequirement, RuntimeRequirement
 from aetp_protocol.ids import BusinessId, SessionId, Version, VersionConstraint, stable_id

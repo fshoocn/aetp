@@ -44,6 +44,7 @@ from agent.application.services.script_preflight_service import (
     ScriptPreflightService,
 )
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.v2_plugin_sync_controller import AgentV2PluginSyncController
 from agent.config import AgentSettings
 from agent.domain.enums import AgentOutboxStatus
 from agent.domain.ledger import Ledger
@@ -53,6 +54,8 @@ from common.transport import MqttMessage, Transport
 if TYPE_CHECKING:
     from agent.plugins import AgentPluginRegistry
     from agent.plugins.installer import PluginPackageInstaller
+    from agent.plugins.v2_installer import V2PluginInstaller
+    from agent.plugins.v2_registry import AgentV2PluginRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +79,9 @@ class AgentRuntime:
         execution_service: ExecutionService | None = None,
         capability_cache=None,
         v2_capability_publisher: AgentV2CapabilityPublisher | None = None,
+        v2_plugin_installer: V2PluginInstaller | None = None,
+        v2_plugin_registry: AgentV2PluginRegistry | None = None,
+        v2_plugin_sync_controller: AgentV2PluginSyncController | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -84,6 +90,9 @@ class AgentRuntime:
         self._registration = registration
         self._capability_cache = capability_cache
         self._v2_capability_publisher = v2_capability_publisher
+        self._v2_plugin_installer = v2_plugin_installer
+        self._v2_plugin_registry = v2_plugin_registry
+        self._v2_plugin_sync_controller = v2_plugin_sync_controller
         self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
@@ -135,6 +144,22 @@ class AgentRuntime:
                 is_registered=lambda: self._registration.registered,
                 session_id=lambda: self._registration.session_id,
             )
+        if (
+            self._v2_plugin_sync_controller is None
+            and self._v2_capability_publisher is not None
+            and self._v2_plugin_installer is not None
+            and self._v2_plugin_registry is not None
+        ):
+            from aetp_protocol.ids import BusinessId
+
+            self._v2_plugin_sync_controller = AgentV2PluginSyncController(
+                BusinessId(self._settings.node_id),
+                self._ledger,
+                self._v2_plugin_installer,
+                self._v2_plugin_registry,
+                self._v2_capability_publisher,
+                master_id=self._settings.master_id,
+            )
         assert self._dispatcher_obj is not None
         assert self._orchestrator is not None
 
@@ -160,6 +185,8 @@ class AgentRuntime:
                     self._v2_capability_publisher.diagnostics_command_topic(),
                 ]
             )
+        if self._v2_plugin_sync_controller is not None:
+            subscriptions.append(self._v2_plugin_sync_controller.command_topic())
         await self._transport.subscribe(subscriptions)
         self._outbox_task = asyncio.create_task(self._outbox_loop())
         await self._transport.connect()
@@ -205,6 +232,8 @@ class AgentRuntime:
         if connected:
             if self._v2_capability_publisher is not None:
                 try:
+                    if self._v2_plugin_sync_controller is not None:
+                        self._v2_plugin_sync_controller.reset_session()
                     self._v2_capability_publisher.reset_session()
                     self._v2_capability_publisher.enqueue_register(
                         self._ledger,
@@ -218,6 +247,8 @@ class AgentRuntime:
             self._cancel_registration_waiter()
             if self._v2_capability_publisher is not None:
                 self._v2_capability_publisher.reset_session()
+            if self._v2_plugin_sync_controller is not None:
+                self._v2_plugin_sync_controller.reset_session()
 
     async def _wait_for_registration(self) -> None:
         """等待 ACK；超时后按指数退避重发注册（保持 broker 连接）。
@@ -290,6 +321,12 @@ class AgentRuntime:
             message,
             self._v2_session_id(),
         ):
+            return
+        if (
+            self._v2_plugin_sync_controller is not None
+            and message.topic == self._v2_plugin_sync_controller.command_topic()
+        ):
+            await self._v2_plugin_sync_controller.handle(message, self._v2_session_id())
             return
         if (
             self._v2_capability_publisher is not None

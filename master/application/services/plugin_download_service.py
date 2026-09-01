@@ -10,8 +10,11 @@
 
 from __future__ import annotations
 
+from aetp_protocol.ids import PluginId, SemVer
+
 from master.domain.signed_url import (
     _PLUGIN_URL_PATH,
+    _PLUGIN_VERSION_URL_PATH,
     build_signed_path,
     verify_signed_path,
 )
@@ -44,6 +47,28 @@ class PluginDownloadService:
         """生成完整插件签名下载 URL（base_url + 相对路径）。"""
         return f"{self._base_url}{self.build_path(plugin_id)}"
 
+    def build_versioned_download_url(self, plugin_id: PluginId, version: SemVer) -> str:
+        """生成 V2 指定插件版本的签名下载 URL。"""
+        resource_id = f"{plugin_id.root}@{version.root}"
+        path = build_signed_path(
+            resource_id,
+            self._secret,
+            self._ttl_s,
+            path_template=_PLUGIN_VERSION_URL_PATH,
+            version=version.root,
+            path_resource_id=plugin_id.root,
+        )
+        return f"{self._base_url}{path}"
+
     def verify(self, plugin_id: str, expires: int, signature: str) -> bool:
         """校验插件签名 URL 是否有效。"""
         return verify_signed_path(plugin_id, expires, signature, self._secret)
+
+    def verify_version(self, plugin_id: PluginId, version: SemVer, expires: int, signature: str) -> bool:
+        """校验 V2 指定版本插件签名 URL。"""
+        return verify_signed_path(
+            f"{plugin_id.root}@{version.root}",
+            expires,
+            signature,
+            self._secret,
+        )

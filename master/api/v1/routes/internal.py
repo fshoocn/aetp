@@ -13,8 +13,11 @@ P5.5 插件签名下载：Agent 检查本地插件版本缺失/不兼容时，�
 
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import quote
 
+from aetp_protocol.ids import PluginId, SemVer
+from aetp_protocol.plugin_types import PluginStatus
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
@@ -110,6 +113,49 @@ def download_plugin(
         headers={
             "X-Checksum-Sha256": record.sha256,
             "Content-Disposition": (f"attachment; filename*=UTF-8''{quote(record.filename, safe='')}"),
+        },
+    )
+
+
+@router.get("/plugins/{plugin_id}/{version}/download")
+def download_v2_plugin(
+    plugin_id: str,
+    version: str,
+    expires: int,
+    signature: str,
+    uow_factory: UowFactoryDep,
+    download_service: PluginDownloadServiceDep,
+) -> StreamingResponse:
+    """按 V2 插件 ID、版本和签名下载 Master Registry 中的精确归档。"""
+    try:
+        typed_plugin_id = PluginId(plugin_id)
+        typed_version = SemVer(version)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="插件 ID 或版本不合法") from exc
+    if not download_service.verify_version(typed_plugin_id, typed_version, expires, signature):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="签名无效或已过期",
+        )
+    with uow_factory() as uow:
+        record = uow.plugin_versions.get(typed_plugin_id, typed_version)
+    if record is None or record.status is PluginStatus.REMOVED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="V2 插件版本不存在或已移除",
+        )
+    archive = Path(record.archive_path).resolve()
+    if not archive.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="V2 插件归档文件缺失",
+        )
+    return StreamingResponse(
+        archive.open("rb"),
+        media_type="application/zip",
+        headers={
+            "X-Checksum-Sha256": record.archive_sha256.root,
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(record.filename, safe='')}",
         },
     )
 

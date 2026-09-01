@@ -49,6 +49,15 @@ def test_v2_golden_messages_parse_as_typed_payloads() -> None:
     assert diagnostics_envelope.message_type == "agent.diagnostics.snapshot"
     assert diagnostics.log_tail == ()
 
+    for key, message_type in (
+        ("node.register.ack", "node.register.ack"),
+        ("agent.plugin.sync", "agent.plugin.sync"),
+        ("agent.plugin.sync.result", "agent.plugin.sync.result"),
+        ("agent.maintenance.status", "agent.maintenance.status"),
+    ):
+        envelope, _payload = parse_v2_message(golden[key])
+        assert envelope.message_type == message_type
+
 
 def test_v2_manifest_golden_and_point_entrypoint_rule() -> None:
     manifest = PluginManifest.model_validate(_golden()["plugin.manifest"])

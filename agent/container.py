@@ -141,4 +141,6 @@ class Container(containers.DeclarativeContainer):
         execution_service=execution_service,
         capability_cache=capability_cache,
         v2_capability_publisher=v2_capability_publisher,
+        v2_plugin_installer=v2_plugin_installer,
+        v2_plugin_registry=v2_plugin_registry,
     )

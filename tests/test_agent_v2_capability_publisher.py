@@ -22,7 +22,7 @@ from agent.plugins.v2_registry import AgentV2PluginRegistry
 from common.transport import MqttMessage, Transport
 
 NODE_ID = BusinessId("01J00000000000000000000000")
-MASTER_ID = BusinessId("01J00000000000000000000001")
+MASTER_ID = stable_id("aetp-master")
 SESSION_ID = SessionId("session-00000001")
 
 

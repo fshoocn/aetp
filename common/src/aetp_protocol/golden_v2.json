@@ -106,6 +106,110 @@
       "log_tail": []
     }
   },
+  "node.register.ack": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000017",
+    "correlation_id": "01900000000000000000000011",
+    "sent_at": "2026-09-01T08:00:00Z",
+    "sender": {
+      "kind": "master",
+      "id": "01J00000000000000000000001",
+      "session_id": "master-session-00001"
+    },
+    "message_type": "node.register.ack",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "node_id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9",
+      "accepted": true,
+      "code": null,
+      "message": "accepted"
+    }
+  },
+  "agent.plugin.sync": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000018",
+    "correlation_id": null,
+    "sent_at": "2026-09-01T08:00:03Z",
+    "sender": {
+      "kind": "master",
+      "id": "01J00000000000000000000001",
+      "session_id": "master-session-00001"
+    },
+    "message_type": "agent.plugin.sync",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "sync_id": "01J00000000000000000000002",
+      "node_id": "01J00000000000000000000000",
+      "expected_session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9",
+      "items": [
+        {
+          "plugin_id": "org.pytest.executor",
+          "version": "2.0.0",
+          "action": "install",
+          "package": {
+            "plugin_id": "org.pytest.executor",
+            "version": "2.0.0",
+            "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "download_url": "https://master.example/api/v1/internal/plugins/org.pytest.executor/2.0.0/download"
+          },
+          "expected_previous_version": null
+        }
+      ],
+      "drain_timeout_s": 1800,
+      "restart_after": true
+    }
+  },
+  "agent.plugin.sync.result": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000019",
+    "correlation_id": "01900000000000000000000018",
+    "sent_at": "2026-09-01T08:00:04Z",
+    "sender": {
+      "kind": "agent",
+      "id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9"
+    },
+    "message_type": "agent.plugin.sync.result",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "sync_id": "01J00000000000000000000002",
+      "node_id": "01J00000000000000000000000",
+      "accepted": true,
+      "restart_required": true,
+      "items": [
+        {
+          "plugin_id": "org.pytest.executor",
+          "version": "2.0.0",
+          "state": "active",
+          "unavailable_reasons": [],
+          "message": ""
+        }
+      ]
+    }
+  },
+  "agent.maintenance.status": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000020",
+    "correlation_id": "01900000000000000000000018",
+    "sent_at": "2026-09-01T08:00:03Z",
+    "sender": {
+      "kind": "agent",
+      "id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9"
+    },
+    "message_type": "agent.maintenance.status",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "node_id": "01J00000000000000000000000",
+      "sequence": 1,
+      "state": "updating",
+      "sync_id": "01J00000000000000000000002",
+      "active_attempt_count": 0,
+      "message": "正在同步插件",
+      "occurred_at": "2026-09-01T08:00:03Z"
+    }
+  },
   "execution.progress": {
     "protocol_version": 2,
     "message_id": "01900000000000000000000013",

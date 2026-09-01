@@ -22,6 +22,7 @@ from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     DiagnosticsSnapshot,
+    MaintenanceStatus,
     NodeHeartbeatPayload,
     NodeRegister,
     NodeRegisterPayload,
@@ -33,6 +34,7 @@ from aetp_protocol.payloads import (
     RunResultPayload,
     ScriptVerifyResultPayload,
 )
+from aetp_protocol.plugins import PluginSyncResult
 from aetp_protocol.topics import (
     validate_message_type_for_topic,
     validate_message_type_for_v2_topic,
@@ -51,6 +53,7 @@ from master.application.services.node_presence_service import (
     NodePresenceError,
     NodePresenceService,
 )
+from master.application.services.plugin_sync_service import PluginSyncService
 from master.application.services.run_projection_service import (
     ProjectionResult,
     RunProjectionService,
@@ -77,6 +80,7 @@ class MasterMessageRouter:
         uow_factory=None,
         capability_snapshot: CapabilitySnapshotProjectionService | None = None,
         diagnostics_snapshot: DiagnosticsSnapshotProjectionService | None = None,
+        plugin_sync: PluginSyncService | None = None,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
@@ -86,6 +90,7 @@ class MasterMessageRouter:
         self._uow_factory = uow_factory
         self._capability_snapshot = capability_snapshot
         self._diagnostics_snapshot = diagnostics_snapshot
+        self._plugin_sync = plugin_sync
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -233,10 +238,29 @@ class MasterMessageRouter:
                             envelope.sender.id.root,
                         )
                 return True
+            if (
+                isinstance(payload, (NodeCapabilitySnapshot, DiagnosticsSnapshot, PluginSyncResult, MaintenanceStatus))
+                and payload.node_id != envelope.sender.id
+            ):
+                raise ValueError("V2 payload node_id 与 sender.id 不一致")
+            if isinstance(payload, PluginSyncResult):
+                if self._plugin_sync is None or envelope.correlation_id is None:
+                    return False
+                self._plugin_sync.record_result(
+                    payload,
+                    sender_session_id=envelope.sender.session_id,
+                )
+                return True
+            if isinstance(payload, MaintenanceStatus):
+                if self._plugin_sync is None:
+                    return False
+                self._plugin_sync.record_maintenance_status(
+                    payload,
+                    sender_session_id=envelope.sender.session_id,
+                )
+                return True
             if not isinstance(payload, (NodeCapabilitySnapshot, DiagnosticsSnapshot)):
                 return False
-            if payload.node_id != envelope.sender.id:
-                raise ValueError("V2 payload node_id 与 sender.id 不一致")
             if isinstance(payload, NodeCapabilitySnapshot):
                 if self._capability_snapshot is None:
                     return False

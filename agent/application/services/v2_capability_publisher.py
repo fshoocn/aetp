@@ -23,10 +23,12 @@ from aetp_protocol.payloads import (
     AgentSystemInfo,
     DiagnosticsRequest,
     DiagnosticsSnapshot,
+    MaintenanceStatus,
     MqttConnectionInfo,
     NodeRegister,
     NodeRegisterAck,
 )
+from aetp_protocol.plugins import PluginSyncResult
 from aetp_protocol.topics import (
     parse_v2_topic,
     v2_command_topic,
@@ -77,6 +79,7 @@ class AgentV2CapabilityPublisher:
         self._maintenance_state = AgentMaintenanceState.IDLE
         self._v2_registered = False
         self._pending_register_message_id: MessageId | None = None
+        self._maintenance_sequence = 0
 
     @property
     def v2_registered(self) -> bool:
@@ -210,6 +213,53 @@ class AgentV2CapabilityPublisher:
         )
         return snapshot
 
+    async def publish_plugin_sync_result(
+        self,
+        result: PluginSyncResult,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> None:
+        """发布插件同步逐项结果。"""
+        await self._publish(
+            MessageType.AGENT_PLUGIN_SYNC_RESULT,
+            result,
+            session_id,
+            correlation_id=correlation_id,
+        )
+
+    async def publish_maintenance_status(
+        self,
+        state: AgentMaintenanceState,
+        session_id: SessionId,
+        *,
+        sync_id: BusinessId | None = None,
+        active_attempt_count: int | None = None,
+        message: str = "",
+        correlation_id: MessageId | None = None,
+    ) -> MaintenanceStatus:
+        """发布带单调 sequence 的 Agent 维护状态。"""
+        self.set_maintenance_state(state)
+        self._maintenance_sequence += 1
+        status = MaintenanceStatus(
+            node_id=self._node_id(),
+            sequence=self._maintenance_sequence,
+            state=state,
+            sync_id=sync_id,
+            active_attempt_count=(
+                len(self._active_attempts()) if active_attempt_count is None else active_attempt_count
+            ),
+            message=message,
+            occurred_at=datetime.now(UTC),
+        )
+        await self._publish(
+            MessageType.AGENT_MAINTENANCE_STATUS,
+            status,
+            session_id,
+            correlation_id=correlation_id,
+        )
+        return status
+
     async def handle_diagnostics_request(
         self,
         message: MqttMessage,
@@ -230,6 +280,8 @@ class AgentV2CapabilityPublisher:
                 return False
             if envelope.sender.kind != SenderKind.MASTER:
                 return False
+            if envelope.sender.id != stable_id(self._settings.master_id):
+                return False
             request = envelope.parse_payload()
             if not isinstance(request, DiagnosticsRequest):
                 return False
@@ -249,7 +301,13 @@ class AgentV2CapabilityPublisher:
     async def _publish(
         self,
         message_type: MessageType,
-        payload: NodeRegister | NodeCapabilitySnapshot | DiagnosticsSnapshot,
+        payload: (
+            NodeRegister
+            | NodeCapabilitySnapshot
+            | DiagnosticsSnapshot
+            | PluginSyncResult
+            | MaintenanceStatus
+        ),
         session_id: SessionId,
         correlation_id: MessageId | None = None,
     ) -> None:
@@ -269,7 +327,13 @@ class AgentV2CapabilityPublisher:
     def _build_envelope(
         self,
         message_type: MessageType,
-        payload: NodeRegister | NodeCapabilitySnapshot | DiagnosticsSnapshot,
+        payload: (
+            NodeRegister
+            | NodeCapabilitySnapshot
+            | DiagnosticsSnapshot
+            | PluginSyncResult
+            | MaintenanceStatus
+        ),
         session_id: SessionId,
         *,
         correlation_id: MessageId | None = None,
@@ -294,6 +358,8 @@ class AgentV2CapabilityPublisher:
             MessageType.NODE_REGISTER: "register",
             MessageType.NODE_CAPABILITY_SNAPSHOT: "capability.snapshot",
             MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: "agent.diagnostics.snapshot",
+            MessageType.AGENT_PLUGIN_SYNC_RESULT: "agent.plugin.sync.result",
+            MessageType.AGENT_MAINTENANCE_STATUS: "agent.maintenance.status",
         }[message_type]
 
     def _system_info(self, snapshot: NodeCapabilitySnapshot) -> AgentSystemInfo:
