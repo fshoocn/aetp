@@ -123,6 +123,7 @@ class RecoveryService:
                 ShardAttemptStatus.DISPATCHED,
                 ShardAttemptStatus.ACKED,
                 ShardAttemptStatus.RUNNING,
+                ShardAttemptStatus.UNKNOWN,
             }
         ]
         for attempt in active_attempts:

@@ -138,17 +138,20 @@ class ShardStatus(StrEnum):
 class ShardAttemptStatus(StrEnum):
     """Shard 向某 Node 的一次派发尝试状态（D-20 历史全量保留）。
 
-    created → dispatched → acked → running → succeeded / failed / cancelled / timed_out
+    created → dispatched → acked → running → succeeded / failed / cancelled / timed_out；
+    unknown 表示 Lease/节点事实暂时丢失，lost 表示对账窗口耗尽。
     """
 
     CREATED = "created"
     DISPATCHED = "dispatched"
     ACKED = "acked"
     RUNNING = "running"
+    UNKNOWN = "unknown"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
     TIMED_OUT = "timed_out"
+    LOST = "lost"
 
 
 class CaseStatus(StrEnum):

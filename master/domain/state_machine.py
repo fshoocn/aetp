@@ -66,7 +66,14 @@ _SHARD_TRANSITIONS: dict[ShardStatus, frozenset[ShardStatus]] = {
     # pending → dispatching → running → succeeded/failed/cancelled/timed_out
     # running → waiting_recovery（节点离线等待恢复）；恢复后重新派发/继续
     ShardStatus.PENDING: frozenset({ShardStatus.DISPATCHING, ShardStatus.FAILED, ShardStatus.CANCELLED}),
-    ShardStatus.DISPATCHING: frozenset({ShardStatus.RUNNING, ShardStatus.FAILED, ShardStatus.CANCELLED}),
+    ShardStatus.DISPATCHING: frozenset(
+        {
+            ShardStatus.RUNNING,
+            ShardStatus.WAITING_RECOVERY,
+            ShardStatus.FAILED,
+            ShardStatus.CANCELLED,
+        }
+    ),
     ShardStatus.RUNNING: frozenset(
         {
             ShardStatus.SUCCEEDED,
@@ -91,7 +98,12 @@ _ATTEMPT_TRANSITIONS: dict[ShardAttemptStatus, frozenset[ShardAttemptStatus]] = 
     # created → dispatched → acked → running → succeeded/failed/cancelled/timed_out
     # failover：attempt 到 failed（终态）后不迁移，由调度器新建 attempt_no+1（D-20）
     ShardAttemptStatus.CREATED: frozenset(
-        {ShardAttemptStatus.DISPATCHED, ShardAttemptStatus.FAILED, ShardAttemptStatus.CANCELLED}
+        {
+            ShardAttemptStatus.DISPATCHED,
+            ShardAttemptStatus.FAILED,
+            ShardAttemptStatus.CANCELLED,
+            ShardAttemptStatus.UNKNOWN,
+        }
     ),
     ShardAttemptStatus.DISPATCHED: frozenset(
         {
@@ -99,10 +111,26 @@ _ATTEMPT_TRANSITIONS: dict[ShardAttemptStatus, frozenset[ShardAttemptStatus]] = 
             ShardAttemptStatus.RUNNING,
             ShardAttemptStatus.FAILED,
             ShardAttemptStatus.CANCELLED,
+            ShardAttemptStatus.UNKNOWN,
         }
     ),
     ShardAttemptStatus.ACKED: frozenset(
-        {ShardAttemptStatus.RUNNING, ShardAttemptStatus.FAILED, ShardAttemptStatus.CANCELLED}
+        {
+            ShardAttemptStatus.RUNNING,
+            ShardAttemptStatus.FAILED,
+            ShardAttemptStatus.CANCELLED,
+            ShardAttemptStatus.UNKNOWN,
+        }
+    ),
+    ShardAttemptStatus.UNKNOWN: frozenset(
+        {
+            ShardAttemptStatus.RUNNING,
+            ShardAttemptStatus.SUCCEEDED,
+            ShardAttemptStatus.FAILED,
+            ShardAttemptStatus.CANCELLED,
+            ShardAttemptStatus.TIMED_OUT,
+            ShardAttemptStatus.LOST,
+        }
     ),
     ShardAttemptStatus.RUNNING: frozenset(
         {
@@ -110,6 +138,7 @@ _ATTEMPT_TRANSITIONS: dict[ShardAttemptStatus, frozenset[ShardAttemptStatus]] = 
             ShardAttemptStatus.FAILED,
             ShardAttemptStatus.CANCELLED,
             ShardAttemptStatus.TIMED_OUT,
+            ShardAttemptStatus.UNKNOWN,
         }
     ),
 }

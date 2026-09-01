@@ -462,6 +462,7 @@ class Container(containers.DeclarativeContainer):
         MaintenanceWorker,
         schedule_service=schedule_service,
         recovery_service=recovery_service,
+        plan_lease_service=plan_lease_service,
         storage_cleanup_service=storage_cleanup_service,
         interval_s=providers.Callable(lambda: get_settings().maintenance_interval_s),
     )

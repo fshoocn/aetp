@@ -22,9 +22,10 @@ from aetp_protocol.topics import v2_command_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 from sqlalchemy.exc import IntegrityError
 
-from master.domain.enums import OutboxStatus
+from master.domain.enums import OutboxStatus, ShardAttemptStatus, ShardStatus
 from master.domain.models import ExecutionPlanRecord, OutboxMessage, ResourceLeaseRecord
 from master.domain.repositories import UnitOfWork
+from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
 
 
@@ -205,9 +206,48 @@ class PlanLeaseService:
         return tuple(released)
 
     def expire_due(self) -> tuple[ResourceLeaseRecord, ...]:
-        """条件回收所有 expires_at <= now 的 active Lease。"""
+        """条件回收到期 Lease，并把受影响 Attempt 标记为 unknown。"""
+        now = self._now()
         with self._uow_factory() as uow:
-            return tuple(uow.resource_leases.expire_due(now=self._now()))
+            expired = tuple(uow.resource_leases.expire_due(now=now))
+            affected: set[str] = set()
+            for record in expired:
+                attempt_id = record.lease.attempt_id.root
+                if attempt_id in affected:
+                    continue
+                affected.add(attempt_id)
+                attempt = uow.shard_attempts.get_by_attempt_id(attempt_id)
+                if attempt is None:
+                    continue
+                if attempt.status in {
+                    ShardAttemptStatus.CREATED,
+                    ShardAttemptStatus.DISPATCHED,
+                    ShardAttemptStatus.ACKED,
+                    ShardAttemptStatus.RUNNING,
+                }:
+                    assert_transition(attempt.status, ShardAttemptStatus.UNKNOWN)
+                    attempt.status = ShardAttemptStatus.UNKNOWN
+                    attempt.error_code = "RESOURCE_LEASE_EXPIRED"
+                    attempt.error_message = "执行所需资源 Lease 已过期"
+                    attempt.finished_at = now
+                    uow.shard_attempts.update(attempt)
+                shard = uow.run_shards.get_by_shard_id(attempt.shard_id)
+                if shard is not None and shard.status in {
+                    ShardStatus.DISPATCHING,
+                    ShardStatus.RUNNING,
+                }:
+                    assert_transition(shard.status, ShardStatus.WAITING_RECOVERY)
+                    shard.status = ShardStatus.WAITING_RECOVERY
+                    uow.run_shards.update(shard)
+                for active in uow.resource_leases.list_by_attempt(record.lease.attempt_id):
+                    if active.lease.state is not LeaseState.ACTIVE:
+                        continue
+                    uow.resource_leases.release(
+                        active.lease.lease_id,
+                        now=now,
+                        expected_revision=active.lease.revision,
+                    )
+            return expired
 
     def _validate_target_session(self, uow: UnitOfWork, plan: ExecutionPlan) -> None:
         node = uow.nodes.get_by_id(plan.node_id.root)

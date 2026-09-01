@@ -25,8 +25,15 @@ from master.application.services.plan_lease_service import (
     calculate_plan_hash,
     with_plan_hash,
 )
-from master.domain.enums import NodeStatus
-from master.domain.models import Node, NodeSession
+from master.domain.enums import (
+    NodeStatus,
+    ProjectStatus,
+    ScriptParseLocation,
+    ScriptParseStatus,
+    ShardAttemptStatus,
+    ShardStatus,
+)
+from master.domain.models import Node, NodeSession, Project, RunShard, ShardAttempt, TaskRun, TestScript, TestTask
 
 NODE_ID = BusinessId("01J00000000000000000000000")
 SESSION_ID = SessionId("session-00000001")
@@ -250,3 +257,94 @@ def test_release_and_expire_are_conditional_and_idempotent(client) -> None:
     assert len(expired) == 1
     assert expired[0].lease.state is LeaseState.EXPIRED
     assert service.expire_due() == ()
+
+
+def test_expired_lease_moves_attempt_to_unknown_and_shard_to_recovery(client) -> None:
+    container = client.app.state.container
+    _seed_node(container)
+    assert container.auth_service().bootstrap_admin("lease-admin", "admin-pass-123", "Lease Admin")
+    clock = [NOW]
+    service = PlanLeaseService(container.uow_factory(), now=lambda: clock[0])
+    plan = with_plan_hash(_plan())
+    with container.uow_factory()() as uow:
+        user = uow.users.get_by_username("lease-admin")
+        assert user is not None and user.id is not None
+        uow.projects.add(
+            Project(
+                id=None,
+                project_id=plan.project_id.root,
+                project_key="LEASE",
+                name="Lease Project",
+                description="",
+                status=ProjectStatus.ACTIVE,
+                created_by=user.id,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        uow.test_scripts.add(
+            TestScript(
+                project_id=plan.project_id.root,
+                script_id=plan.script.script_id.root,
+                task_type="example",
+                name="lease-script",
+                version=plan.script.version,
+                file_ref="scripts/lease.zip",
+                size=plan.script.size,
+                sha256=plan.script.sha256.root,
+                parse_status=ScriptParseStatus.PARSED,
+                parse_location=ScriptParseLocation.MASTER,
+                result_parse_location=ScriptParseLocation.MASTER,
+                plugin_version="2.0.0",
+                created_by=user.id,
+            )
+        )
+        uow.test_tasks.add(
+            TestTask(
+                task_id=plan.task_id.root,
+                project_id=plan.project_id.root,
+                script_id=plan.script.script_id.root,
+                script_version=plan.script.version,
+                task_type="example",
+                name="lease-task",
+                created_by=user.id,
+            )
+        )
+        uow.task_runs.add(
+            TaskRun(
+                run_id=plan.run_id.root,
+                project_id=plan.project_id.root,
+                task_id=plan.task_id.root,
+            )
+        )
+        uow.run_shards.add(
+            RunShard(
+                shard_id=plan.shard_id.root,
+                run_id=plan.run_id.root,
+                shard_index=0,
+                status=ShardStatus.DISPATCHING,
+            )
+        )
+        uow.shard_attempts.add(
+            ShardAttempt(
+                attempt_id=plan.attempt_id.root,
+                shard_id=plan.shard_id.root,
+                attempt_no=plan.attempt_no,
+                node_id=plan.node_id.root,
+                status=ShardAttemptStatus.RUNNING,
+            )
+        )
+    service.allocate(plan)
+    clock[0] = NOW + timedelta(minutes=6)
+
+    expired = service.expire_due()
+
+    assert len(expired) == 1
+    with container.uow_factory()() as uow:
+        attempt = uow.shard_attempts.get_by_attempt_id(plan.attempt_id.root)
+        shard = uow.run_shards.get_by_shard_id(plan.shard_id.root)
+        run = uow.task_runs.get_by_run_id(plan.run_id.root)
+        assert attempt is not None and attempt.status is ShardAttemptStatus.UNKNOWN
+        assert attempt.error_code == "RESOURCE_LEASE_EXPIRED"
+        assert shard is not None and shard.status is ShardStatus.WAITING_RECOVERY
+        assert run is not None and run.status.value == "created"

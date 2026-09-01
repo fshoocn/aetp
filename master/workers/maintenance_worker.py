@@ -16,6 +16,7 @@ import asyncio
 import logging
 from contextlib import suppress
 
+from master.application.services.plan_lease_service import PlanLeaseService
 from master.application.services.recovery_service import RecoveryService
 from master.application.services.schedule_service import ScheduleService
 from master.application.services.storage_cleanup_service import StorageCleanupService
@@ -32,11 +33,13 @@ class MaintenanceWorker:
         recovery_service: RecoveryService,
         *,
         storage_cleanup_service: StorageCleanupService | None = None,
+        plan_lease_service: PlanLeaseService | None = None,
         interval_s: float = 30.0,
     ) -> None:
         self._schedule = schedule_service
         self._recovery = recovery_service
         self._storage_cleanup = storage_cleanup_service
+        self._plan_leases = plan_lease_service
         self._interval_s = interval_s
         self._running = False
         self._task: asyncio.Task[None] | None = None
@@ -70,6 +73,8 @@ class MaintenanceWorker:
     async def run_once(self) -> dict[str, int]:
         """执行一轮维护（触发到期调度 + 检测超时 Run + 清理孤儿文件）。"""
         stats: dict[str, int] = {"schedules_triggered": 0, "stale_runs": 0, "orphans_removed": 0}
+        if self._plan_leases is not None:
+            stats["leases_expired"] = 0
         try:
             stats["schedules_triggered"] = await self._schedule.tick()
         except Exception:
@@ -78,6 +83,11 @@ class MaintenanceWorker:
             stats["stale_runs"] = self._recovery.detect_stale_runs()
         except Exception:
             logger.exception("Stale Run 检测失败")
+        if self._plan_leases is not None:
+            try:
+                stats["leases_expired"] = len(self._plan_leases.expire_due())
+            except Exception:
+                logger.exception("V2 Lease 到期回收失败")
         if self._storage_cleanup is not None:
             try:
                 stats["orphans_removed"] = self._storage_cleanup.cleanup_orphans()["removed"]
