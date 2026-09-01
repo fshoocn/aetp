@@ -217,7 +217,7 @@ class AgentV2CapabilityPublisher:
             session_id=session_id,
             registry=self._registry,
             tags=self._tags,
-            maintenance_state=AgentMaintenanceState.IDLE,
+            maintenance_state=self._maintenance_state,
             capability_scanner=self._capability_scanner,
             revision_cache=self._revision_cache,
         )

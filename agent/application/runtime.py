@@ -196,8 +196,6 @@ class AgentRuntime:
                 master_id=self._settings.master_id,
                 lease_renewal=self._v2_lease_renewal_service,
             )
-            if self._v2_execution_plan_controller is not None:
-                self._v2_execution_plan_controller._lease_renewal = self._v2_lease_renewal_service
         assert self._dispatcher_obj is not None
         assert self._orchestrator is not None
 
