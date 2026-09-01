@@ -22,6 +22,7 @@ from aetp_protocol.v2_envelope import V2Envelope, parse_v2_message
 
 from agent.application.services.script_cache_service import ScriptCacheError, ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.v2_lease_renewal_service import AgentV2LeaseRenewalService
 from agent.domain.ledger import Ledger
 from agent.plugins.v2_registry import AgentV2PluginRegistry
 from common.transport import MqttMessage
@@ -48,6 +49,7 @@ class AgentV2ExecutionPlanController:
         is_registered: Callable[[], bool] | None = None,
         master_id: str = "aetp-master",
         now: Callable[[], datetime] | None = None,
+        lease_renewal: AgentV2LeaseRenewalService | None = None,
     ) -> None:
         self._node_id = node_id
         self._ledger = ledger
@@ -57,6 +59,7 @@ class AgentV2ExecutionPlanController:
         self._is_registered = is_registered or (lambda: True)
         self._master_id = master_id
         self._now = now or (lambda: datetime.now(UTC))
+        self._lease_renewal = lease_renewal
 
     def command_topic(self) -> str:
         """返回本节点 execution.plan 命令主题。"""
@@ -117,6 +120,8 @@ class AgentV2ExecutionPlanController:
                 envelope.message_type,
             )
         await self._accept(plan, session_id, envelope.message_id)
+        if self._lease_renewal is not None:
+            self._lease_renewal.register_plan(plan)
         return True
 
     def _parse_plan(self, message: MqttMessage) -> tuple[V2Envelope, ExecutionPlan] | None:

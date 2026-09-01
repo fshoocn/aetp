@@ -24,6 +24,7 @@ from aetp_protocol.payloads import (
     DiagnosticsRequest,
     DiagnosticsSnapshot,
     ExecutionAck,
+    LeaseRenewRequest,
     MaintenanceStatus,
     MqttConnectionInfo,
     NodeRegister,
@@ -96,6 +97,25 @@ class AgentV2CapabilityPublisher:
             session_id,
             correlation_id=correlation_id,
         )
+
+    def enqueue_lease_renew(
+        self,
+        ledger: Ledger,
+        request: LeaseRenewRequest,
+        session_id: SessionId,
+    ) -> MessageId:
+        """将 lease.renew 写入可靠 Agent outbox，并返回消息 ID。"""
+        envelope = self._build_envelope(
+            MessageType.LEASE_RENEW,
+            request,
+            session_id,
+        )
+        ledger.replace_outbox(
+            f"v2-lease-renew:{request.plan_id.root}:{request.lease_id.root}:{request.revision}",
+            v2_event_topic(self._node_id().root, "lease.renew"),
+            envelope.model_dump(mode="json"),
+        )
+        return envelope.message_id
 
     def enqueue_execution_ack(
         self,
@@ -345,6 +365,7 @@ class AgentV2CapabilityPublisher:
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
             | ExecutionAck
+            | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
         ),
@@ -372,6 +393,7 @@ class AgentV2CapabilityPublisher:
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
             | ExecutionAck
+            | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
         ),
@@ -400,6 +422,7 @@ class AgentV2CapabilityPublisher:
             MessageType.NODE_CAPABILITY_SNAPSHOT: "capability.snapshot",
             MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: "agent.diagnostics.snapshot",
             MessageType.EXECUTION_ACK: "execution.ack",
+            MessageType.LEASE_RENEW: "lease.renew",
             MessageType.AGENT_PLUGIN_SYNC_RESULT: "agent.plugin.sync.result",
             MessageType.AGENT_MAINTENANCE_STATUS: "agent.maintenance.status",
         }[message_type]
