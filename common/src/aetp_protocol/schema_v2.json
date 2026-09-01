@@ -1,0 +1,8185 @@
+{
+  "agent.diagnostics.request": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "RequestId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "RequestId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "include_log_tail": {
+        "default": true,
+        "title": "Include Log Tail",
+        "type": "boolean"
+      },
+      "log_tail_count": {
+        "default": 200,
+        "maximum": 2000,
+        "minimum": 0,
+        "title": "Log Tail Count",
+        "type": "integer"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "request_id": {
+        "$ref": "#/$defs/RequestId"
+      }
+    },
+    "required": [
+      "request_id",
+      "node_id"
+    ],
+    "title": "DiagnosticsRequest",
+    "type": "object"
+  },
+  "agent.diagnostics.snapshot": {
+    "$defs": {
+      "ActiveAttemptInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "plan_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/$defs/AttemptStatus"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "plan_id",
+          "run_id",
+          "state"
+        ],
+        "title": "ActiveAttemptInfo",
+        "type": "object"
+      },
+      "AgentMaintenanceState": {
+        "enum": [
+          "ready",
+          "idle",
+          "busy",
+          "draining",
+          "updating",
+          "restarting",
+          "degraded"
+        ],
+        "title": "AgentMaintenanceState",
+        "type": "string"
+      },
+      "AgentSystemInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_started_at": {
+            "format": "date-time",
+            "title": "Agent Started At",
+            "type": "string"
+          },
+          "agent_version": {
+            "$ref": "#/$defs/SemVer"
+          },
+          "cpu_cores": {
+            "minimum": 0,
+            "title": "Cpu Cores",
+            "type": "integer"
+          },
+          "disk_free_mb": {
+            "minimum": 0,
+            "title": "Disk Free Mb",
+            "type": "integer"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "memory_available_mb": {
+            "minimum": 0,
+            "title": "Memory Available Mb",
+            "type": "integer"
+          },
+          "memory_total_mb": {
+            "minimum": 0,
+            "title": "Memory Total Mb",
+            "type": "integer"
+          },
+          "os_name": {
+            "title": "Os Name",
+            "type": "string"
+          },
+          "os_version": {
+            "title": "Os Version",
+            "type": "string"
+          },
+          "process_id": {
+            "minimum": 0,
+            "title": "Process Id",
+            "type": "integer"
+          },
+          "protocol_version": {
+            "title": "Protocol Version",
+            "type": "integer"
+          },
+          "python_version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "hostname",
+          "os_name",
+          "os_version",
+          "process_id",
+          "agent_started_at",
+          "python_version",
+          "cpu_cores",
+          "memory_total_mb",
+          "memory_available_mb",
+          "disk_free_mb",
+          "agent_version",
+          "protocol_version"
+        ],
+        "title": "AgentSystemInfo",
+        "type": "object"
+      },
+      "AttemptStatus": {
+        "enum": [
+          "created",
+          "dispatched",
+          "acked",
+          "running",
+          "unknown",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out",
+          "lost"
+        ],
+        "title": "AttemptStatus",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "MqttConnectionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "broker_endpoint": {
+            "title": "Broker Endpoint",
+            "type": "string"
+          },
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "last_connected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Connected At"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ErrorCode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "last_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Last Error Message"
+          },
+          "reconnect_count": {
+            "minimum": 0,
+            "title": "Reconnect Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connected",
+          "broker_endpoint",
+          "reconnect_count"
+        ],
+        "title": "MqttConnectionInfo",
+        "type": "object"
+      },
+      "PluginAvailability": {
+        "enum": [
+          "available",
+          "blocked",
+          "updating",
+          "error",
+          "not_installed"
+        ],
+        "title": "PluginAvailability",
+        "type": "string"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginInventoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "availability": {
+            "$ref": "#/$defs/PluginAvailability"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "point": {
+            "$ref": "#/$defs/PluginPoint"
+          },
+          "unavailable_reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "title": "Unavailable Reasons",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "point",
+          "version",
+          "archive_sha256",
+          "availability",
+          "checked_at"
+        ],
+        "title": "PluginInventoryItem",
+        "type": "object"
+      },
+      "PluginPoint": {
+        "enum": [
+          "executor",
+          "resource",
+          "runtime",
+          "software",
+          "reporter",
+          "analyzer",
+          "notifier",
+          "integration",
+          "hook",
+          "sharding",
+          "ui",
+          "storage",
+          "transport",
+          "identity"
+        ],
+        "title": "PluginPoint",
+        "type": "string"
+      },
+      "RequestId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "RequestId",
+        "type": "string"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "active_attempts": {
+        "items": {
+          "$ref": "#/$defs/ActiveAttemptInfo"
+        },
+        "title": "Active Attempts",
+        "type": "array"
+      },
+      "capability_revision": {
+        "minimum": 1,
+        "title": "Capability Revision",
+        "type": "integer"
+      },
+      "collected_at": {
+        "format": "date-time",
+        "title": "Collected At",
+        "type": "string"
+      },
+      "maintenance_state": {
+        "$ref": "#/$defs/AgentMaintenanceState"
+      },
+      "mqtt": {
+        "$ref": "#/$defs/MqttConnectionInfo"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plugins": {
+        "items": {
+          "$ref": "#/$defs/PluginInventoryItem"
+        },
+        "title": "Plugins",
+        "type": "array"
+      },
+      "request_id": {
+        "$ref": "#/$defs/RequestId"
+      },
+      "system": {
+        "$ref": "#/$defs/AgentSystemInfo"
+      }
+    },
+    "required": [
+      "request_id",
+      "node_id",
+      "collected_at",
+      "maintenance_state",
+      "system",
+      "mqtt",
+      "plugins",
+      "active_attempts",
+      "capability_revision"
+    ],
+    "title": "DiagnosticsSnapshot",
+    "type": "object"
+  },
+  "agent.log.batch": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ExceptionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "stack_trace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Stack Trace"
+          },
+          "type_name": {
+            "title": "Type Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type_name",
+          "message"
+        ],
+        "title": "ExceptionInfo",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "LogCode": {
+        "pattern": "^[a-z][a-z0-9_.-]{1,127}$",
+        "title": "LogCode",
+        "type": "string"
+      },
+      "LogContext": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "plugin_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "plugin_version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RequestId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TraceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "LogContext",
+        "type": "object"
+      },
+      "LogEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "context": {
+            "$ref": "#/$defs/LogContext"
+          },
+          "detail": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Detail",
+            "type": "object"
+          },
+          "event_code": {
+            "$ref": "#/$defs/LogCode"
+          },
+          "event_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "exception": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExceptionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "level": {
+            "$ref": "#/$defs/LogLevel"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "message_template": {
+            "title": "Message Template",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "source": {
+            "enum": [
+              "master",
+              "agent",
+              "web",
+              "plugin"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "source",
+          "source_id",
+          "sequence",
+          "occurred_at",
+          "level",
+          "component",
+          "event_code",
+          "message_template",
+          "message"
+        ],
+        "title": "LogEvent",
+        "type": "object"
+      },
+      "LogLevel": {
+        "description": "任务日志等级（小写，与 Master/Agent 序列化约定一致）。",
+        "enum": [
+          "debug",
+          "info",
+          "warn",
+          "error"
+        ],
+        "title": "LogLevel",
+        "type": "string"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "RequestId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "RequestId",
+        "type": "string"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "TraceId": {
+        "maxLength": 128,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "TraceId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "events": {
+        "items": {
+          "$ref": "#/$defs/LogEvent"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "title": "Events",
+        "type": "array"
+      },
+      "first_sequence": {
+        "minimum": 1,
+        "title": "First Sequence",
+        "type": "integer"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "session_id": {
+        "$ref": "#/$defs/SessionId"
+      }
+    },
+    "required": [
+      "node_id",
+      "session_id",
+      "first_sequence",
+      "events"
+    ],
+    "title": "AgentLogBatch",
+    "type": "object"
+  },
+  "agent.log.received": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "first_sequence": {
+        "minimum": 1,
+        "title": "First Sequence",
+        "type": "integer"
+      },
+      "last_sequence": {
+        "minimum": 1,
+        "title": "Last Sequence",
+        "type": "integer"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "session_id": {
+        "$ref": "#/$defs/SessionId"
+      }
+    },
+    "required": [
+      "node_id",
+      "session_id",
+      "first_sequence",
+      "last_sequence"
+    ],
+    "title": "AgentLogReceived",
+    "type": "object"
+  },
+  "agent.maintenance.status": {
+    "$defs": {
+      "AgentMaintenanceState": {
+        "enum": [
+          "ready",
+          "idle",
+          "busy",
+          "draining",
+          "updating",
+          "restarting",
+          "degraded"
+        ],
+        "title": "AgentMaintenanceState",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "active_attempt_count": {
+        "minimum": 0,
+        "title": "Active Attempt Count",
+        "type": "integer"
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "occurred_at": {
+        "format": "date-time",
+        "title": "Occurred At",
+        "type": "string"
+      },
+      "sequence": {
+        "minimum": 1,
+        "title": "Sequence",
+        "type": "integer"
+      },
+      "state": {
+        "$ref": "#/$defs/AgentMaintenanceState"
+      },
+      "sync_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "node_id",
+      "sequence",
+      "state",
+      "active_attempt_count",
+      "occurred_at"
+    ],
+    "title": "MaintenanceStatus",
+    "type": "object"
+  },
+  "agent.plugin.sync": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "PluginDistributionRef": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "archive_sha256"
+        ],
+        "title": "PluginDistributionRef",
+        "type": "object"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginSyncAction": {
+        "enum": [
+          "install",
+          "upgrade",
+          "downgrade",
+          "remove"
+        ],
+        "title": "PluginSyncAction",
+        "type": "string"
+      },
+      "PluginSyncItem": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/$defs/PluginSyncAction"
+          },
+          "expected_previous_version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "package": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginDistributionRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "action"
+        ],
+        "title": "PluginSyncItem",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "drain_timeout_s": {
+        "default": 1800,
+        "minimum": 0,
+        "title": "Drain Timeout S",
+        "type": "integer"
+      },
+      "expected_session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/PluginSyncItem"
+        },
+        "title": "Items",
+        "type": "array"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "restart_after": {
+        "default": true,
+        "title": "Restart After",
+        "type": "boolean"
+      },
+      "sync_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "sync_id",
+      "node_id",
+      "expected_session_id",
+      "items"
+    ],
+    "title": "PluginSyncRequest",
+    "type": "object"
+  },
+  "agent.plugin.sync.result": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginSyncItemResult": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "state": {
+            "enum": [
+              "installed",
+              "active",
+              "blocked",
+              "failed",
+              "skipped",
+              "removed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "unavailable_reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "title": "Unavailable Reasons",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "state"
+        ],
+        "title": "PluginSyncItemResult",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/PluginSyncItemResult"
+        },
+        "title": "Items",
+        "type": "array"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "restart_required": {
+        "title": "Restart Required",
+        "type": "boolean"
+      },
+      "sync_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "sync_id",
+      "node_id",
+      "accepted",
+      "restart_required",
+      "items"
+    ],
+    "title": "PluginSyncResult",
+    "type": "object"
+  },
+  "artifact_ref": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifact_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "attempt_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "content_type": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Content Type",
+        "type": "string"
+      },
+      "derived_from": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "filename": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Filename",
+        "type": "string"
+      },
+      "kind": {
+        "$ref": "#/$defs/ArtifactKind"
+      },
+      "node_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "run_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "sha256": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "shard_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "size": {
+        "minimum": 0,
+        "title": "Size",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "artifact_id",
+      "project_id",
+      "kind",
+      "filename",
+      "content_type",
+      "size",
+      "sha256"
+    ],
+    "title": "ArtifactRef",
+    "type": "object"
+  },
+  "authorization_decision": {
+    "$defs": {
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "allowed": {
+        "title": "Allowed",
+        "type": "boolean"
+      },
+      "reason_code": {
+        "$ref": "#/$defs/ErrorCode"
+      }
+    },
+    "required": [
+      "allowed",
+      "reason_code"
+    ],
+    "title": "AuthorizationDecision",
+    "type": "object"
+  },
+  "authorization_request": {
+    "$defs": {
+      "Action": {
+        "enum": [
+          "read",
+          "create",
+          "update",
+          "delete",
+          "execute",
+          "cancel",
+          "admin"
+        ],
+        "title": "Action",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "PlatformRole": {
+        "enum": [
+          "user",
+          "admin"
+        ],
+        "title": "PlatformRole",
+        "type": "string"
+      },
+      "Principal": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "platform_roles": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/PlatformRole"
+            },
+            "title": "Platform Roles",
+            "type": "array"
+          },
+          "subject": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject"
+        ],
+        "title": "Principal",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/Action"
+      },
+      "object_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "object_type": {
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Object Type",
+        "type": "string"
+      },
+      "principal": {
+        "$ref": "#/$defs/Principal"
+      },
+      "project_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "principal",
+      "object_type",
+      "action"
+    ],
+    "title": "AuthorizationRequest",
+    "type": "object"
+  },
+  "configuration": {
+    "$defs": {
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "schema_hash": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "schema_version": {
+        "minimum": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "values": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Values",
+        "type": "object"
+      }
+    },
+    "required": [
+      "schema_version",
+      "schema_hash",
+      "values"
+    ],
+    "title": "Configuration",
+    "type": "object"
+  },
+  "configuration_schema": {
+    "$defs": {
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "RelativePath": {
+        "pattern": "[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*",
+        "title": "RelativePath",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "document": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Document",
+        "type": "object"
+      },
+      "schema_hash": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "schema_version": {
+        "minimum": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "ui_entry": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RelativePath"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "schema_version",
+      "schema_hash",
+      "document"
+    ],
+    "title": "ConfigurationSchema",
+    "type": "object"
+  },
+  "envelope": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "MessageId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "MessageId",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "TraceId": {
+        "maxLength": 128,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "TraceId",
+        "type": "string"
+      },
+      "V2Sender": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "kind": {
+            "enum": [
+              "master",
+              "agent"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "session_id": {
+            "$ref": "#/$defs/SessionId"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "session_id"
+        ],
+        "title": "V2Sender",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "V2 公共消息头；payload 必须通过 parse_payload 二次解析。",
+    "properties": {
+      "correlation_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MessageId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message_id": {
+        "$ref": "#/$defs/MessageId"
+      },
+      "message_type": {
+        "title": "Message Type",
+        "type": "string"
+      },
+      "payload": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Payload",
+        "type": "object"
+      },
+      "protocol_version": {
+        "const": 2,
+        "default": 2,
+        "title": "Protocol Version",
+        "type": "integer"
+      },
+      "sender": {
+        "$ref": "#/$defs/V2Sender"
+      },
+      "sent_at": {
+        "format": "date-time",
+        "title": "Sent At",
+        "type": "string"
+      },
+      "trace_id": {
+        "$ref": "#/$defs/TraceId"
+      }
+    },
+    "required": [
+      "message_id",
+      "sent_at",
+      "sender",
+      "message_type",
+      "trace_id",
+      "payload"
+    ],
+    "title": "V2Envelope",
+    "type": "object"
+  },
+  "execution.ack": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "plan_hash": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "run_id",
+      "shard_id",
+      "attempt_id",
+      "plan_id",
+      "plan_hash",
+      "accepted"
+    ],
+    "title": "ExecutionAck",
+    "type": "object"
+  },
+  "execution.cancel": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CancelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_no": {
+            "minimum": 1,
+            "title": "Attempt No",
+            "type": "integer"
+          },
+          "cancel_request_id": {
+            "$ref": "#/$defs/MessageId"
+          },
+          "plan_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "shard_id": {
+            "$ref": "#/$defs/BusinessId"
+          }
+        },
+        "required": [
+          "cancel_request_id",
+          "run_id",
+          "shard_id",
+          "attempt_no",
+          "plan_id"
+        ],
+        "title": "CancelRequest",
+        "type": "object"
+      },
+      "MessageId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "MessageId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "request": {
+        "$ref": "#/$defs/CancelRequest"
+      }
+    },
+    "required": [
+      "request"
+    ],
+    "title": "ExecutionCancel",
+    "type": "object"
+  },
+  "execution.case_status": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CaseStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "passed",
+          "failed",
+          "skipped",
+          "error"
+        ],
+        "title": "CaseStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "case_key": {
+        "minLength": 1,
+        "title": "Case Key",
+        "type": "string"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "sequence": {
+        "minimum": 1,
+        "title": "Sequence",
+        "type": "integer"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "status": {
+        "$ref": "#/$defs/CaseStatus"
+      }
+    },
+    "required": [
+      "run_id",
+      "shard_id",
+      "attempt_id",
+      "plan_id",
+      "case_key",
+      "sequence",
+      "status"
+    ],
+    "title": "CaseStatusEvent",
+    "type": "object"
+  },
+  "execution.finished": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "content_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "derived_from": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ArtifactKind"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "shard_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "project_id",
+          "kind",
+          "filename",
+          "content_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CaseResult": {
+        "additionalProperties": false,
+        "properties": {
+          "case_key": {
+            "minLength": 1,
+            "title": "Case Key",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/$defs/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Ms"
+          },
+          "error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Summary"
+          },
+          "status": {
+            "$ref": "#/$defs/CaseStatus"
+          }
+        },
+        "required": [
+          "case_key",
+          "status"
+        ],
+        "title": "CaseResult",
+        "type": "object"
+      },
+      "CaseStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "passed",
+          "failed",
+          "skipped",
+          "error"
+        ],
+        "title": "CaseStatus",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ExecutionError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ExecutionError",
+        "type": "object"
+      },
+      "ExecutionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "case_results": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/CaseResult"
+            },
+            "title": "Case Results",
+            "type": "array"
+          },
+          "data": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Data",
+            "type": "object"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExecutionError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/$defs/ExecutionStatus"
+          }
+        },
+        "required": [
+          "status",
+          "passed"
+        ],
+        "title": "ExecutionResult",
+        "type": "object"
+      },
+      "ExecutionStatus": {
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "ExecutionStatus",
+        "type": "string"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "finished_at": {
+        "format": "date-time",
+        "title": "Finished At",
+        "type": "string"
+      },
+      "plan_hash": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "result": {
+        "$ref": "#/$defs/ExecutionResult"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "run_id",
+      "shard_id",
+      "attempt_id",
+      "plan_id",
+      "plan_hash",
+      "result",
+      "finished_at"
+    ],
+    "title": "ExecutionFinished",
+    "type": "object"
+  },
+  "execution.log": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ExecutionLogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Detail",
+            "type": "object"
+          },
+          "level": {
+            "$ref": "#/$defs/LogLevel"
+          },
+          "message": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "level",
+          "message",
+          "occurred_at"
+        ],
+        "title": "ExecutionLogEntry",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "LogLevel": {
+        "description": "任务日志等级（小写，与 Master/Agent 序列化约定一致）。",
+        "enum": [
+          "debug",
+          "info",
+          "warn",
+          "error"
+        ],
+        "title": "LogLevel",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "entries": {
+        "items": {
+          "$ref": "#/$defs/ExecutionLogEntry"
+        },
+        "maxItems": 50,
+        "minItems": 1,
+        "title": "Entries",
+        "type": "array"
+      },
+      "first_sequence": {
+        "minimum": 1,
+        "title": "First Sequence",
+        "type": "integer"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "run_id",
+      "shard_id",
+      "attempt_id",
+      "plan_id",
+      "first_sequence",
+      "entries"
+    ],
+    "title": "ExecutionLogBatch",
+    "type": "object"
+  },
+  "execution.log_complete": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "content_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "derived_from": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ArtifactKind"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "shard_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "project_id",
+          "kind",
+          "filename",
+          "content_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifact_refs": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "title": "Artifact Refs",
+        "type": "array"
+      },
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "entry_count": {
+        "minimum": 0,
+        "title": "Entry Count",
+        "type": "integer"
+      },
+      "last_sequence": {
+        "minimum": 0,
+        "title": "Last Sequence",
+        "type": "integer"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "run_id",
+      "shard_id",
+      "attempt_id",
+      "plan_id",
+      "last_sequence",
+      "entry_count"
+    ],
+    "title": "LogComplete",
+    "type": "object"
+  },
+  "execution.plan": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "content_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "derived_from": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ArtifactKind"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "shard_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "project_id",
+          "kind",
+          "filename",
+          "content_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "ExecutorRef": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version"
+        ],
+        "title": "ExecutorRef",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PlanResourceBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "lease_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "lease_revision": {
+            "minimum": 1,
+            "title": "Lease Revision",
+            "type": "integer"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "resource_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "switch_route": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SwitchRouteAllocation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "lease_id",
+          "resource_id",
+          "resource_type",
+          "lease_revision",
+          "expires_at"
+        ],
+        "title": "PlanResourceBinding",
+        "type": "object"
+      },
+      "PluginDistributionRef": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "archive_sha256"
+        ],
+        "title": "PluginDistributionRef",
+        "type": "object"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "RuntimeSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_id": {
+            "title": "Runtime Id",
+            "type": "string"
+          },
+          "runtime_type": {
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "runtime_id",
+          "runtime_type",
+          "version"
+        ],
+        "title": "RuntimeSelection",
+        "type": "object"
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SwitchRouteAllocation": {
+        "additionalProperties": false,
+        "description": "经切换开关的分配路径（Agent 据此切换）。",
+        "properties": {
+          "port": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Port",
+            "type": "string"
+          },
+          "switch_device_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Switch Device Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "switch_device_id",
+          "port"
+        ],
+        "title": "SwitchRouteAllocation",
+        "type": "object"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifact_upload_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Artifact Upload Url"
+      },
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "attempt_no": {
+        "minimum": 1,
+        "title": "Attempt No",
+        "type": "integer"
+      },
+      "case_keys": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Case Keys",
+        "type": "array"
+      },
+      "configuration": {
+        "$ref": "#/$defs/Configuration"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "deadline_at": {
+        "format": "date-time",
+        "title": "Deadline At",
+        "type": "string"
+      },
+      "execution_parameters": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Execution Parameters",
+        "type": "object"
+      },
+      "executor": {
+        "$ref": "#/$defs/ExecutorRef"
+      },
+      "input_artifacts": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "title": "Input Artifacts",
+        "type": "array"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plan_hash": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plugin_package": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PluginDistributionRef"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "resource_bindings": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/PlanResourceBinding"
+        },
+        "title": "Resource Bindings",
+        "type": "array"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "runtime": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RuntimeSelection"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "schema_version": {
+        "const": 2,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "script": {
+        "$ref": "#/$defs/ScriptRef"
+      },
+      "script_binding_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "script_definition_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "target_session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "task_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "schema_version",
+      "plan_id",
+      "plan_hash",
+      "run_id",
+      "task_id",
+      "script_binding_id",
+      "script_definition_id",
+      "shard_id",
+      "attempt_id",
+      "attempt_no",
+      "project_id",
+      "node_id",
+      "target_session_id",
+      "executor",
+      "script",
+      "configuration",
+      "case_keys",
+      "created_at",
+      "deadline_at"
+    ],
+    "title": "ExecutionPlan",
+    "type": "object"
+  },
+  "execution.progress": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "percent": {
+        "maximum": 100,
+        "minimum": 0,
+        "title": "Percent",
+        "type": "integer"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "sequence": {
+        "minimum": 1,
+        "title": "Sequence",
+        "type": "integer"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "stage": {
+        "title": "Stage",
+        "type": "string"
+      }
+    },
+    "required": [
+      "run_id",
+      "shard_id",
+      "attempt_id",
+      "plan_id",
+      "sequence",
+      "percent",
+      "stage"
+    ],
+    "title": "ExecutionProgress",
+    "type": "object"
+  },
+  "execution.reconcile": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "content_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "derived_from": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ArtifactKind"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "shard_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "project_id",
+          "kind",
+          "filename",
+          "content_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CaseResult": {
+        "additionalProperties": false,
+        "properties": {
+          "case_key": {
+            "minLength": 1,
+            "title": "Case Key",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/$defs/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Ms"
+          },
+          "error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Summary"
+          },
+          "status": {
+            "$ref": "#/$defs/CaseStatus"
+          }
+        },
+        "required": [
+          "case_key",
+          "status"
+        ],
+        "title": "CaseResult",
+        "type": "object"
+      },
+      "CaseStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "passed",
+          "failed",
+          "skipped",
+          "error"
+        ],
+        "title": "CaseStatus",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ExecutionError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ExecutionError",
+        "type": "object"
+      },
+      "ExecutionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "case_results": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/CaseResult"
+            },
+            "title": "Case Results",
+            "type": "array"
+          },
+          "data": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Data",
+            "type": "object"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExecutionError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/$defs/ExecutionStatus"
+          }
+        },
+        "required": [
+          "status",
+          "passed"
+        ],
+        "title": "ExecutionResult",
+        "type": "object"
+      },
+      "ExecutionStatus": {
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "ExecutionStatus",
+        "type": "string"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ReconcileAttempt": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "last_progress_sequence": {
+            "minimum": 0,
+            "title": "Last Progress Sequence",
+            "type": "integer"
+          },
+          "plan_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "plan_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExecutionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "timed_out"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "plan_id",
+          "plan_hash",
+          "state",
+          "last_progress_sequence"
+        ],
+        "title": "ReconcileAttempt",
+        "type": "object"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "attempts": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ReconcileAttempt"
+        },
+        "title": "Attempts",
+        "type": "array"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "node_id"
+    ],
+    "title": "ExecutionReconcile",
+    "type": "object"
+  },
+  "execution.reconcile_result": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "content_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "derived_from": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ArtifactKind"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "shard_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "project_id",
+          "kind",
+          "filename",
+          "content_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CaseResult": {
+        "additionalProperties": false,
+        "properties": {
+          "case_key": {
+            "minLength": 1,
+            "title": "Case Key",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/$defs/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Ms"
+          },
+          "error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Summary"
+          },
+          "status": {
+            "$ref": "#/$defs/CaseStatus"
+          }
+        },
+        "required": [
+          "case_key",
+          "status"
+        ],
+        "title": "CaseResult",
+        "type": "object"
+      },
+      "CaseStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "passed",
+          "failed",
+          "skipped",
+          "error"
+        ],
+        "title": "CaseStatus",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ExecutionError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ExecutionError",
+        "type": "object"
+      },
+      "ExecutionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ArtifactRef"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "case_results": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/CaseResult"
+            },
+            "title": "Case Results",
+            "type": "array"
+          },
+          "data": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Data",
+            "type": "object"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExecutionError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/$defs/ExecutionStatus"
+          }
+        },
+        "required": [
+          "status",
+          "passed"
+        ],
+        "title": "ExecutionResult",
+        "type": "object"
+      },
+      "ExecutionStatus": {
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "ExecutionStatus",
+        "type": "string"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ReconcileAttempt": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "last_progress_sequence": {
+            "minimum": 0,
+            "title": "Last Progress Sequence",
+            "type": "integer"
+          },
+          "plan_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "plan_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ExecutionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "timed_out"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "plan_id",
+          "plan_hash",
+          "state",
+          "last_progress_sequence"
+        ],
+        "title": "ReconcileAttempt",
+        "type": "object"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "attempts": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ReconcileAttempt"
+        },
+        "title": "Attempts",
+        "type": "array"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "node_id",
+      "accepted"
+    ],
+    "title": "ExecutionReconcileResult",
+    "type": "object"
+  },
+  "execution_plan": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "content_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "derived_from": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ArtifactKind"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "shard_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "project_id",
+          "kind",
+          "filename",
+          "content_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "ExecutorRef": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version"
+        ],
+        "title": "ExecutorRef",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PlanResourceBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "lease_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "lease_revision": {
+            "minimum": 1,
+            "title": "Lease Revision",
+            "type": "integer"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "resource_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "switch_route": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SwitchRouteAllocation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "lease_id",
+          "resource_id",
+          "resource_type",
+          "lease_revision",
+          "expires_at"
+        ],
+        "title": "PlanResourceBinding",
+        "type": "object"
+      },
+      "PluginDistributionRef": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "archive_sha256"
+        ],
+        "title": "PluginDistributionRef",
+        "type": "object"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "RuntimeSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_id": {
+            "title": "Runtime Id",
+            "type": "string"
+          },
+          "runtime_type": {
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "runtime_id",
+          "runtime_type",
+          "version"
+        ],
+        "title": "RuntimeSelection",
+        "type": "object"
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SwitchRouteAllocation": {
+        "additionalProperties": false,
+        "description": "经切换开关的分配路径（Agent 据此切换）。",
+        "properties": {
+          "port": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Port",
+            "type": "string"
+          },
+          "switch_device_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Switch Device Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "switch_device_id",
+          "port"
+        ],
+        "title": "SwitchRouteAllocation",
+        "type": "object"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifact_upload_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Artifact Upload Url"
+      },
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "attempt_no": {
+        "minimum": 1,
+        "title": "Attempt No",
+        "type": "integer"
+      },
+      "case_keys": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Case Keys",
+        "type": "array"
+      },
+      "configuration": {
+        "$ref": "#/$defs/Configuration"
+      },
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "deadline_at": {
+        "format": "date-time",
+        "title": "Deadline At",
+        "type": "string"
+      },
+      "execution_parameters": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Execution Parameters",
+        "type": "object"
+      },
+      "executor": {
+        "$ref": "#/$defs/ExecutorRef"
+      },
+      "input_artifacts": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "title": "Input Artifacts",
+        "type": "array"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plan_hash": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plugin_package": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PluginDistributionRef"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "resource_bindings": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/PlanResourceBinding"
+        },
+        "title": "Resource Bindings",
+        "type": "array"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "runtime": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RuntimeSelection"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "schema_version": {
+        "const": 2,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "script": {
+        "$ref": "#/$defs/ScriptRef"
+      },
+      "script_binding_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "script_definition_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "target_session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "task_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "schema_version",
+      "plan_id",
+      "plan_hash",
+      "run_id",
+      "task_id",
+      "script_binding_id",
+      "script_definition_id",
+      "shard_id",
+      "attempt_id",
+      "attempt_no",
+      "project_id",
+      "node_id",
+      "target_session_id",
+      "executor",
+      "script",
+      "configuration",
+      "case_keys",
+      "created_at",
+      "deadline_at"
+    ],
+    "title": "ExecutionPlan",
+    "type": "object"
+  },
+  "execution_requirement": {
+    "$defs": {
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/VersionRange"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version"
+        ],
+        "title": "PluginRequirement",
+        "type": "object"
+      },
+      "ResourceRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_switching": {
+            "default": false,
+            "title": "Allow Switching",
+            "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "preferred_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Preferred Labels",
+            "type": "object"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "required_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Labels",
+            "type": "object"
+          },
+          "resource_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_type"
+        ],
+        "title": "ResourceRequirement",
+        "type": "object"
+      },
+      "RuntimeRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "runtime_type"
+        ],
+        "title": "RuntimeRequirement",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SoftwareRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "license_required": {
+            "default": false,
+            "title": "License Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SoftwareRequirement",
+        "type": "object"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      },
+      "VersionConstraint": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionConstraint",
+        "type": "object"
+      },
+      "VersionRange": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionRange",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "executor": {
+        "$ref": "#/$defs/PluginRequirement"
+      },
+      "required_tags": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Required Tags",
+        "type": "array"
+      },
+      "resources": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ResourceRequirement"
+        },
+        "title": "Resources",
+        "type": "array"
+      },
+      "runtimes": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RuntimeRequirement"
+        },
+        "title": "Runtimes",
+        "type": "array"
+      },
+      "software": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SoftwareRequirement"
+        },
+        "title": "Software",
+        "type": "array"
+      }
+    },
+    "required": [
+      "executor"
+    ],
+    "title": "ExecutionRequirement",
+    "type": "object"
+  },
+  "execution_result": {
+    "$defs": {
+      "ArtifactKind": {
+        "enum": [
+          "report",
+          "log_archive",
+          "data"
+        ],
+        "title": "ArtifactKind",
+        "type": "string"
+      },
+      "ArtifactRef": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "content_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "derived_from": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/ArtifactKind"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "project_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "shard_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "project_id",
+          "kind",
+          "filename",
+          "content_type",
+          "size",
+          "sha256"
+        ],
+        "title": "ArtifactRef",
+        "type": "object"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CaseResult": {
+        "additionalProperties": false,
+        "properties": {
+          "case_key": {
+            "minLength": 1,
+            "title": "Case Key",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/$defs/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Ms"
+          },
+          "error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Summary"
+          },
+          "status": {
+            "$ref": "#/$defs/CaseStatus"
+          }
+        },
+        "required": [
+          "case_key",
+          "status"
+        ],
+        "title": "CaseResult",
+        "type": "object"
+      },
+      "CaseStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "passed",
+          "failed",
+          "skipped",
+          "error"
+        ],
+        "title": "CaseStatus",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ExecutionError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ExecutionError",
+        "type": "object"
+      },
+      "ExecutionStatus": {
+        "enum": [
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out"
+        ],
+        "title": "ExecutionStatus",
+        "type": "string"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "artifacts": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "title": "Artifacts",
+        "type": "array"
+      },
+      "case_results": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/CaseResult"
+        },
+        "title": "Case Results",
+        "type": "array"
+      },
+      "data": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Data",
+        "type": "object"
+      },
+      "error": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExecutionError"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "metrics": {
+        "additionalProperties": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "title": "Metrics",
+        "type": "object"
+      },
+      "passed": {
+        "title": "Passed",
+        "type": "boolean"
+      },
+      "status": {
+        "$ref": "#/$defs/ExecutionStatus"
+      }
+    },
+    "required": [
+      "status",
+      "passed"
+    ],
+    "title": "ExecutionResult",
+    "type": "object"
+  },
+  "lease.renew": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "lease_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "requested_expires_at": {
+        "format": "date-time",
+        "title": "Requested Expires At",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "plan_id",
+      "attempt_id",
+      "lease_id",
+      "revision",
+      "requested_expires_at"
+    ],
+    "title": "LeaseRenewRequest",
+    "type": "object"
+  },
+  "lease.renewed": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "expires_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expires At"
+      },
+      "lease_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plan_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "plan_id",
+      "attempt_id",
+      "lease_id",
+      "accepted",
+      "revision"
+    ],
+    "title": "LeaseRenewed",
+    "type": "object"
+  },
+  "node.capability.snapshot": {
+    "$defs": {
+      "AgentMaintenanceState": {
+        "enum": [
+          "ready",
+          "idle",
+          "busy",
+          "draining",
+          "updating",
+          "restarting",
+          "degraded"
+        ],
+        "title": "AgentMaintenanceState",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CapabilityName": {
+        "description": "能力名称，至少包含 domain.action 两段。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+){1,3}$",
+        "title": "CapabilityName",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ExecutorCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/$defs/CapabilityName"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "capabilities"
+        ],
+        "title": "ExecutorCapability",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "OperatingSystem": {
+        "additionalProperties": false,
+        "description": "操作系统名称与语义化版本。",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "OperatingSystem",
+        "type": "object"
+      },
+      "PluginAvailability": {
+        "enum": [
+          "available",
+          "blocked",
+          "updating",
+          "error",
+          "not_installed"
+        ],
+        "title": "PluginAvailability",
+        "type": "string"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginInventoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "availability": {
+            "$ref": "#/$defs/PluginAvailability"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "point": {
+            "$ref": "#/$defs/PluginPoint"
+          },
+          "unavailable_reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "title": "Unavailable Reasons",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "point",
+          "version",
+          "archive_sha256",
+          "availability",
+          "checked_at"
+        ],
+        "title": "PluginInventoryItem",
+        "type": "object"
+      },
+      "PluginPoint": {
+        "enum": [
+          "executor",
+          "resource",
+          "runtime",
+          "software",
+          "reporter",
+          "analyzer",
+          "notifier",
+          "integration",
+          "hook",
+          "sharding",
+          "ui",
+          "storage",
+          "transport",
+          "identity"
+        ],
+        "title": "PluginPoint",
+        "type": "string"
+      },
+      "ResourceCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Channel"
+          },
+          "function": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Function"
+          },
+          "health": {
+            "$ref": "#/$defs/ResourceHealth"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "resource_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "switch_connection": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SwitchConnection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_id",
+          "provider_id",
+          "resource_type",
+          "health"
+        ],
+        "title": "ResourceCapability",
+        "type": "object"
+      },
+      "ResourceHealth": {
+        "enum": [
+          "ready",
+          "degraded",
+          "unavailable"
+        ],
+        "title": "ResourceHealth",
+        "type": "string"
+      },
+      "RuntimeCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "executable_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Executable Ref"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "runtime_id": {
+            "title": "Runtime Id",
+            "type": "string"
+          },
+          "runtime_type": {
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "provider_id",
+          "runtime_id",
+          "runtime_type",
+          "version"
+        ],
+        "title": "RuntimeCapability",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SoftwareCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "provider_id",
+          "name",
+          "version"
+        ],
+        "title": "SoftwareCapability",
+        "type": "object"
+      },
+      "SwitchConnection": {
+        "additionalProperties": false,
+        "description": "资源经切换开关连接时的路径描述。",
+        "properties": {
+          "ports": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SwitchPort"
+            },
+            "title": "Ports",
+            "type": "array"
+          },
+          "switch_device_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Switch Device Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "switch_device_id"
+        ],
+        "title": "SwitchConnection",
+        "type": "object"
+      },
+      "SwitchPort": {
+        "additionalProperties": false,
+        "description": "切换开关的一个端口，带接线标签。",
+        "properties": {
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "port": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Port",
+            "type": "string"
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "title": "SwitchPort",
+        "type": "object"
+      },
+      "SystemCapability": {
+        "additionalProperties": false,
+        "description": "总类 system：操作系统、内存、CPU。",
+        "properties": {
+          "cpu_cores": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu Cores"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "operating_system": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperatingSystem"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "SystemCapability",
+        "type": "object"
+      },
+      "Version": {
+        "description": "可比较的点分数字版本（例如 17.10、3.11、10.0.19045）。",
+        "minLength": 1,
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "executors": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ExecutorCapability"
+        },
+        "title": "Executors",
+        "type": "array"
+      },
+      "maintenance_state": {
+        "$ref": "#/$defs/AgentMaintenanceState"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plugin_inventory": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/PluginInventoryItem"
+        },
+        "title": "Plugin Inventory",
+        "type": "array"
+      },
+      "reported_at": {
+        "format": "date-time",
+        "title": "Reported At",
+        "type": "string"
+      },
+      "resources": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ResourceCapability"
+        },
+        "title": "Resources",
+        "type": "array"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "runtimes": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RuntimeCapability"
+        },
+        "title": "Runtimes",
+        "type": "array"
+      },
+      "schema_version": {
+        "const": 2,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "software": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SoftwareCapability"
+        },
+        "title": "Software",
+        "type": "array"
+      },
+      "system": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SystemCapability"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "tags": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Tags",
+        "type": "array"
+      }
+    },
+    "required": [
+      "schema_version",
+      "node_id",
+      "session_id",
+      "revision",
+      "reported_at",
+      "maintenance_state"
+    ],
+    "title": "NodeCapabilitySnapshot",
+    "type": "object"
+  },
+  "node.heartbeat": {
+    "$defs": {
+      "AgentMaintenanceState": {
+        "enum": [
+          "ready",
+          "idle",
+          "busy",
+          "draining",
+          "updating",
+          "restarting",
+          "degraded"
+        ],
+        "title": "AgentMaintenanceState",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "NodeLoad": {
+        "additionalProperties": false,
+        "properties": {
+          "queued_attempts": {
+            "minimum": 0,
+            "title": "Queued Attempts",
+            "type": "integer"
+          },
+          "running_attempts": {
+            "minimum": 0,
+            "title": "Running Attempts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running_attempts",
+          "queued_attempts"
+        ],
+        "title": "NodeLoad",
+        "type": "object"
+      },
+      "NodePresenceState": {
+        "enum": [
+          "online",
+          "offline"
+        ],
+        "title": "NodePresenceState",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "active_attempt_ids": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/BusinessId"
+        },
+        "title": "Active Attempt Ids",
+        "type": "array"
+      },
+      "capability_revision": {
+        "minimum": 1,
+        "title": "Capability Revision",
+        "type": "integer"
+      },
+      "load": {
+        "$ref": "#/$defs/NodeLoad"
+      },
+      "maintenance_state": {
+        "$ref": "#/$defs/AgentMaintenanceState"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "status": {
+        "$ref": "#/$defs/NodePresenceState",
+        "default": "online"
+      }
+    },
+    "required": [
+      "node_id",
+      "maintenance_state",
+      "load",
+      "capability_revision"
+    ],
+    "title": "Heartbeat",
+    "type": "object"
+  },
+  "node.register": {
+    "$defs": {
+      "AgentMaintenanceState": {
+        "enum": [
+          "ready",
+          "idle",
+          "busy",
+          "draining",
+          "updating",
+          "restarting",
+          "degraded"
+        ],
+        "title": "AgentMaintenanceState",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CapabilityName": {
+        "description": "能力名称，至少包含 domain.action 两段。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+){1,3}$",
+        "title": "CapabilityName",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ExecutorCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/$defs/CapabilityName"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "capabilities"
+        ],
+        "title": "ExecutorCapability",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "NodeCapabilitySnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "executors": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ExecutorCapability"
+            },
+            "title": "Executors",
+            "type": "array"
+          },
+          "maintenance_state": {
+            "$ref": "#/$defs/AgentMaintenanceState"
+          },
+          "node_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "plugin_inventory": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/PluginInventoryItem"
+            },
+            "title": "Plugin Inventory",
+            "type": "array"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "title": "Reported At",
+            "type": "string"
+          },
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ResourceCapability"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "revision": {
+            "minimum": 1,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "runtimes": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RuntimeCapability"
+            },
+            "title": "Runtimes",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "session_id": {
+            "$ref": "#/$defs/SessionId"
+          },
+          "software": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SoftwareCapability"
+            },
+            "title": "Software",
+            "type": "array"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SystemCapability"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "node_id",
+          "session_id",
+          "revision",
+          "reported_at",
+          "maintenance_state"
+        ],
+        "title": "NodeCapabilitySnapshot",
+        "type": "object"
+      },
+      "OperatingSystem": {
+        "additionalProperties": false,
+        "description": "操作系统名称与语义化版本。",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "OperatingSystem",
+        "type": "object"
+      },
+      "PluginAvailability": {
+        "enum": [
+          "available",
+          "blocked",
+          "updating",
+          "error",
+          "not_installed"
+        ],
+        "title": "PluginAvailability",
+        "type": "string"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginInventoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "availability": {
+            "$ref": "#/$defs/PluginAvailability"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "point": {
+            "$ref": "#/$defs/PluginPoint"
+          },
+          "unavailable_reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "title": "Unavailable Reasons",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "point",
+          "version",
+          "archive_sha256",
+          "availability",
+          "checked_at"
+        ],
+        "title": "PluginInventoryItem",
+        "type": "object"
+      },
+      "PluginPoint": {
+        "enum": [
+          "executor",
+          "resource",
+          "runtime",
+          "software",
+          "reporter",
+          "analyzer",
+          "notifier",
+          "integration",
+          "hook",
+          "sharding",
+          "ui",
+          "storage",
+          "transport",
+          "identity"
+        ],
+        "title": "PluginPoint",
+        "type": "string"
+      },
+      "ResourceCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Channel"
+          },
+          "function": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Function"
+          },
+          "health": {
+            "$ref": "#/$defs/ResourceHealth"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "resource_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "switch_connection": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SwitchConnection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_id",
+          "provider_id",
+          "resource_type",
+          "health"
+        ],
+        "title": "ResourceCapability",
+        "type": "object"
+      },
+      "ResourceHealth": {
+        "enum": [
+          "ready",
+          "degraded",
+          "unavailable"
+        ],
+        "title": "ResourceHealth",
+        "type": "string"
+      },
+      "RuntimeCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "executable_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Executable Ref"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "runtime_id": {
+            "title": "Runtime Id",
+            "type": "string"
+          },
+          "runtime_type": {
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "provider_id",
+          "runtime_id",
+          "runtime_type",
+          "version"
+        ],
+        "title": "RuntimeCapability",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SoftwareCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "provider_id",
+          "name",
+          "version"
+        ],
+        "title": "SoftwareCapability",
+        "type": "object"
+      },
+      "SwitchConnection": {
+        "additionalProperties": false,
+        "description": "资源经切换开关连接时的路径描述。",
+        "properties": {
+          "ports": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SwitchPort"
+            },
+            "title": "Ports",
+            "type": "array"
+          },
+          "switch_device_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Switch Device Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "switch_device_id"
+        ],
+        "title": "SwitchConnection",
+        "type": "object"
+      },
+      "SwitchPort": {
+        "additionalProperties": false,
+        "description": "切换开关的一个端口，带接线标签。",
+        "properties": {
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "port": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Port",
+            "type": "string"
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "title": "SwitchPort",
+        "type": "object"
+      },
+      "SystemCapability": {
+        "additionalProperties": false,
+        "description": "总类 system：操作系统、内存、CPU。",
+        "properties": {
+          "cpu_cores": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu Cores"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "operating_system": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperatingSystem"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "SystemCapability",
+        "type": "object"
+      },
+      "Version": {
+        "description": "可比较的点分数字版本（例如 17.10、3.11、10.0.19045）。",
+        "minLength": 1,
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "capability_snapshot": {
+        "$ref": "#/$defs/NodeCapabilitySnapshot"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "tags": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Tags",
+        "type": "array"
+      }
+    },
+    "required": [
+      "node_id",
+      "session_id",
+      "name",
+      "capability_snapshot"
+    ],
+    "title": "NodeRegister",
+    "type": "object"
+  },
+  "node.register.ack": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "session_id": {
+        "$ref": "#/$defs/SessionId"
+      }
+    },
+    "required": [
+      "node_id",
+      "session_id",
+      "accepted"
+    ],
+    "title": "NodeRegisterAck",
+    "type": "object"
+  },
+  "node_capability_snapshot": {
+    "$defs": {
+      "AgentMaintenanceState": {
+        "enum": [
+          "ready",
+          "idle",
+          "busy",
+          "draining",
+          "updating",
+          "restarting",
+          "degraded"
+        ],
+        "title": "AgentMaintenanceState",
+        "type": "string"
+      },
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CapabilityName": {
+        "description": "能力名称，至少包含 domain.action 两段。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+){1,3}$",
+        "title": "CapabilityName",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ExecutorCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/$defs/CapabilityName"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "capabilities"
+        ],
+        "title": "ExecutorCapability",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "OperatingSystem": {
+        "additionalProperties": false,
+        "description": "操作系统名称与语义化版本。",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "OperatingSystem",
+        "type": "object"
+      },
+      "PluginAvailability": {
+        "enum": [
+          "available",
+          "blocked",
+          "updating",
+          "error",
+          "not_installed"
+        ],
+        "title": "PluginAvailability",
+        "type": "string"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginInventoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "availability": {
+            "$ref": "#/$defs/PluginAvailability"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "point": {
+            "$ref": "#/$defs/PluginPoint"
+          },
+          "unavailable_reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ErrorCode"
+            },
+            "title": "Unavailable Reasons",
+            "type": "array"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "point",
+          "version",
+          "archive_sha256",
+          "availability",
+          "checked_at"
+        ],
+        "title": "PluginInventoryItem",
+        "type": "object"
+      },
+      "PluginPoint": {
+        "enum": [
+          "executor",
+          "resource",
+          "runtime",
+          "software",
+          "reporter",
+          "analyzer",
+          "notifier",
+          "integration",
+          "hook",
+          "sharding",
+          "ui",
+          "storage",
+          "transport",
+          "identity"
+        ],
+        "title": "PluginPoint",
+        "type": "string"
+      },
+      "ResourceCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Channel"
+          },
+          "function": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Function"
+          },
+          "health": {
+            "$ref": "#/$defs/ResourceHealth"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "resource_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "resource_type": {
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "switch_connection": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SwitchConnection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_id",
+          "provider_id",
+          "resource_type",
+          "health"
+        ],
+        "title": "ResourceCapability",
+        "type": "object"
+      },
+      "ResourceHealth": {
+        "enum": [
+          "ready",
+          "degraded",
+          "unavailable"
+        ],
+        "title": "ResourceHealth",
+        "type": "string"
+      },
+      "RuntimeCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "executable_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Executable Ref"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "runtime_id": {
+            "title": "Runtime Id",
+            "type": "string"
+          },
+          "runtime_type": {
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "provider_id",
+          "runtime_id",
+          "runtime_type",
+          "version"
+        ],
+        "title": "RuntimeCapability",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SoftwareCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/$defs/Version"
+          }
+        },
+        "required": [
+          "provider_id",
+          "name",
+          "version"
+        ],
+        "title": "SoftwareCapability",
+        "type": "object"
+      },
+      "SwitchConnection": {
+        "additionalProperties": false,
+        "description": "资源经切换开关连接时的路径描述。",
+        "properties": {
+          "ports": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SwitchPort"
+            },
+            "title": "Ports",
+            "type": "array"
+          },
+          "switch_device_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Switch Device Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "switch_device_id"
+        ],
+        "title": "SwitchConnection",
+        "type": "object"
+      },
+      "SwitchPort": {
+        "additionalProperties": false,
+        "description": "切换开关的一个端口，带接线标签。",
+        "properties": {
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "port": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Port",
+            "type": "string"
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "title": "SwitchPort",
+        "type": "object"
+      },
+      "SystemCapability": {
+        "additionalProperties": false,
+        "description": "总类 system：操作系统、内存、CPU。",
+        "properties": {
+          "cpu_cores": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu Cores"
+          },
+          "memory_mb": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mb"
+          },
+          "operating_system": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/OperatingSystem"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "SystemCapability",
+        "type": "object"
+      },
+      "Version": {
+        "description": "可比较的点分数字版本（例如 17.10、3.11、10.0.19045）。",
+        "minLength": 1,
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "executors": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ExecutorCapability"
+        },
+        "title": "Executors",
+        "type": "array"
+      },
+      "maintenance_state": {
+        "$ref": "#/$defs/AgentMaintenanceState"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plugin_inventory": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/PluginInventoryItem"
+        },
+        "title": "Plugin Inventory",
+        "type": "array"
+      },
+      "reported_at": {
+        "format": "date-time",
+        "title": "Reported At",
+        "type": "string"
+      },
+      "resources": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ResourceCapability"
+        },
+        "title": "Resources",
+        "type": "array"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "runtimes": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/RuntimeCapability"
+        },
+        "title": "Runtimes",
+        "type": "array"
+      },
+      "schema_version": {
+        "const": 2,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "software": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/SoftwareCapability"
+        },
+        "title": "Software",
+        "type": "array"
+      },
+      "system": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SystemCapability"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "tags": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "title": "Tags",
+        "type": "array"
+      }
+    },
+    "required": [
+      "schema_version",
+      "node_id",
+      "session_id",
+      "revision",
+      "reported_at",
+      "maintenance_state"
+    ],
+    "title": "NodeCapabilitySnapshot",
+    "type": "object"
+  },
+  "plugin_manifest": {
+    "$defs": {
+      "CapabilityName": {
+        "description": "能力名称，至少包含 domain.action 两段。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+){1,3}$",
+        "title": "CapabilityName",
+        "type": "string"
+      },
+      "EntrypointRef": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$",
+        "title": "EntrypointRef",
+        "type": "string"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginEntrypoints": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EntrypointRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "master": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EntrypointRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ui": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RelativePath"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "PluginEntrypoints",
+        "type": "object"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginPoint": {
+        "enum": [
+          "executor",
+          "resource",
+          "runtime",
+          "software",
+          "reporter",
+          "analyzer",
+          "notifier",
+          "integration",
+          "hook",
+          "sharding",
+          "ui",
+          "storage",
+          "transport",
+          "identity"
+        ],
+        "title": "PluginPoint",
+        "type": "string"
+      },
+      "RelativePath": {
+        "pattern": "[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*",
+        "title": "RelativePath",
+        "type": "string"
+      },
+      "ResourceRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_switching": {
+            "default": false,
+            "title": "Allow Switching",
+            "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "preferred_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Preferred Labels",
+            "type": "object"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "required_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Labels",
+            "type": "object"
+          },
+          "resource_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_type"
+        ],
+        "title": "ResourceRequirement",
+        "type": "object"
+      },
+      "RuntimeRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "runtime_type"
+        ],
+        "title": "RuntimeRequirement",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "SoftwareRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "license_required": {
+            "default": false,
+            "title": "License Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SoftwareRequirement",
+        "type": "object"
+      },
+      "StaticRequirements": {
+        "additionalProperties": false,
+        "properties": {
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ResourceRequirement"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "runtimes": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RuntimeRequirement"
+            },
+            "title": "Runtimes",
+            "type": "array"
+          },
+          "software": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SoftwareRequirement"
+            },
+            "title": "Software",
+            "type": "array"
+          }
+        },
+        "title": "StaticRequirements",
+        "type": "object"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      },
+      "VersionConstraint": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionConstraint",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "api_version": {
+        "$ref": "#/$defs/SemVer"
+      },
+      "capabilities": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/CapabilityName"
+        },
+        "title": "Capabilities",
+        "type": "array"
+      },
+      "configuration_schema": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RelativePath"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "display_name": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Display Name",
+        "type": "string"
+      },
+      "entrypoints": {
+        "$ref": "#/$defs/PluginEntrypoints"
+      },
+      "id": {
+        "$ref": "#/$defs/PluginId"
+      },
+      "point": {
+        "$ref": "#/$defs/PluginPoint"
+      },
+      "schema_version": {
+        "const": 2,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "static_requirements": {
+        "$ref": "#/$defs/StaticRequirements"
+      },
+      "ui_protocol_version": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Ui Protocol Version"
+      },
+      "version": {
+        "$ref": "#/$defs/SemVer"
+      }
+    },
+    "required": [
+      "schema_version",
+      "id",
+      "version",
+      "api_version",
+      "point",
+      "display_name",
+      "entrypoints"
+    ],
+    "title": "PluginManifest",
+    "type": "object"
+  },
+  "plugin_ref": {
+    "$defs": {
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "archive_sha256": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "plugin_id": {
+        "$ref": "#/$defs/PluginId"
+      },
+      "version": {
+        "$ref": "#/$defs/SemVer"
+      }
+    },
+    "required": [
+      "plugin_id",
+      "version",
+      "archive_sha256"
+    ],
+    "title": "PluginRef",
+    "type": "object"
+  },
+  "presence": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "occurred_at": {
+        "format": "date-time",
+        "title": "Occurred At",
+        "type": "string"
+      },
+      "reason": {
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "node_id",
+      "reason",
+      "occurred_at"
+    ],
+    "title": "Presence",
+    "type": "object"
+  },
+  "principal": {
+    "$defs": {
+      "PlatformRole": {
+        "enum": [
+          "user",
+          "admin"
+        ],
+        "title": "PlatformRole",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "display_name": {
+        "default": "",
+        "title": "Display Name",
+        "type": "string"
+      },
+      "platform_roles": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/PlatformRole"
+        },
+        "title": "Platform Roles",
+        "type": "array"
+      },
+      "subject": {
+        "maxLength": 256,
+        "minLength": 1,
+        "title": "Subject",
+        "type": "string"
+      }
+    },
+    "required": [
+      "subject"
+    ],
+    "title": "Principal",
+    "type": "object"
+  },
+  "project_scope": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ProjectRole": {
+        "enum": [
+          "viewer",
+          "operator",
+          "maintainer",
+          "owner"
+        ],
+        "title": "ProjectRole",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "role": {
+        "$ref": "#/$defs/ProjectRole"
+      }
+    },
+    "required": [
+      "project_id",
+      "role"
+    ],
+    "title": "ProjectScope",
+    "type": "object"
+  },
+  "resource_lease": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "LeaseState": {
+        "enum": [
+          "active",
+          "released",
+          "expired"
+        ],
+        "title": "LeaseState",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "acquired_at": {
+        "format": "date-time",
+        "title": "Acquired At",
+        "type": "string"
+      },
+      "attempt_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "title": "Expires At",
+        "type": "string"
+      },
+      "heartbeat_at": {
+        "format": "date-time",
+        "title": "Heartbeat At",
+        "type": "string"
+      },
+      "lease_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "resource_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "shard_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "state": {
+        "$ref": "#/$defs/LeaseState"
+      }
+    },
+    "required": [
+      "lease_id",
+      "run_id",
+      "shard_id",
+      "attempt_id",
+      "node_id",
+      "resource_id",
+      "state",
+      "revision",
+      "acquired_at",
+      "heartbeat_at",
+      "expires_at"
+    ],
+    "title": "ResourceLease",
+    "type": "object"
+  },
+  "script.parse": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "configuration": {
+        "$ref": "#/$defs/Configuration"
+      },
+      "parse_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "script": {
+        "$ref": "#/$defs/ScriptRef"
+      }
+    },
+    "required": [
+      "parse_id",
+      "project_id",
+      "script",
+      "configuration"
+    ],
+    "title": "ScriptParseRequest",
+    "type": "object"
+  },
+  "script.verify": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "configuration": {
+        "$ref": "#/$defs/Configuration"
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "script": {
+        "$ref": "#/$defs/ScriptRef"
+      },
+      "verify_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "verify_id",
+      "project_id",
+      "script",
+      "configuration"
+    ],
+    "title": "ScriptVerifyRequest",
+    "type": "object"
+  },
+  "script_ref": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "download_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Download Url"
+      },
+      "filename": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Filename",
+        "type": "string"
+      },
+      "script_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "sha256": {
+        "$ref": "#/$defs/Sha256"
+      },
+      "size": {
+        "minimum": 0,
+        "title": "Size",
+        "type": "integer"
+      },
+      "version": {
+        "minimum": 1,
+        "title": "Version",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "script_id",
+      "version",
+      "filename",
+      "size",
+      "sha256"
+    ],
+    "title": "ScriptRef",
+    "type": "object"
+  }
+}

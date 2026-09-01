@@ -1,0 +1,79 @@
+{
+  "node.register": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000011",
+    "correlation_id": null,
+    "sent_at": "2026-09-01T08:00:00Z",
+    "sender": {
+      "kind": "agent",
+      "id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9"
+    },
+    "message_type": "node.register",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "node_id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9",
+      "name": "Bench 1",
+      "tags": ["bench"],
+      "capability_snapshot": {
+        "schema_version": 2,
+        "node_id": "01J00000000000000000000000",
+        "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9",
+        "revision": 1,
+        "reported_at": "2026-09-01T08:00:00Z",
+        "tags": ["bench"],
+        "executors": [],
+        "runtimes": [],
+        "software": [],
+        "resources": [],
+        "system": null,
+        "maintenance_state": "idle",
+        "plugin_inventory": []
+      }
+    }
+  },
+  "execution.progress": {
+    "protocol_version": 2,
+    "message_id": "01900000000000000000000013",
+    "correlation_id": "01900000000000000000000005",
+    "sent_at": "2026-09-01T08:01:00Z",
+    "sender": {
+      "kind": "agent",
+      "id": "01J00000000000000000000000",
+      "session_id": "6a6f4f7b5bd24a85a6e1c4f3c2d1b0a9"
+    },
+    "message_type": "execution.progress",
+    "trace_id": "01900000000000000000000012",
+    "payload": {
+      "run_id": "01J00000000000000000000006",
+      "shard_id": "01J00000000000000000000007",
+      "attempt_id": "01J00000000000000000000008",
+      "plan_id": "01J00000000000000000000005",
+      "sequence": 3,
+      "percent": 40,
+      "stage": "execute",
+      "message": "running"
+    }
+  },
+  "plugin.manifest": {
+    "schema_version": 2,
+    "id": "org.pytest.executor",
+    "version": "2.0.0",
+    "api_version": "2.0.0",
+    "point": "executor",
+    "display_name": "Pytest Executor",
+    "entrypoints": {
+      "master": "master.plugin:create_plugin",
+      "agent": "agent.plugin:create_plugin"
+    },
+    "capabilities": ["test.collect", "test.execute", "test.cancel"],
+    "static_requirements": {
+      "runtimes": [],
+      "software": [],
+      "resources": []
+    },
+    "configuration_schema": "schemas/task-config.json",
+    "ui_protocol_version": 2
+  }
+}

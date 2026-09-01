@@ -24,9 +24,15 @@ Pydantic 模型固定。新增 Vector、同星、LIN、ETH、示波器等只新�
 
 from __future__ import annotations
 
-from typing import Annotated
+from datetime import datetime
+from enum import StrEnum
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+
+from .errors import ErrorCode
+from .ids import BusinessId, CapabilityName, JsonObject, PluginId, SemVer, SessionId, Sha256
+from .plugin_types import PluginAvailability, PluginPoint
 
 
 class _Strict(BaseModel):
@@ -324,3 +330,84 @@ class HardwareRequirements(_Strict):
     serial_ports: tuple[SerialPortRequirement, ...] = ()
     required_tags: tuple[Identifier, ...] = ()
     devices: tuple[DeviceRequirement, ...] = ()
+
+
+class ResourceHealth(StrEnum):
+    READY = "ready"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+
+
+class AgentMaintenanceState(StrEnum):
+    READY = "ready"
+    IDLE = "idle"
+    BUSY = "busy"
+    DRAINING = "draining"
+    UPDATING = "updating"
+    RESTARTING = "restarting"
+    DEGRADED = "degraded"
+
+
+class RuntimeCapability(_Strict):
+    provider_id: str
+    runtime_id: str
+    runtime_type: str
+    version: Version
+    executable_ref: str | None = None
+
+
+class ExecutorCapability(_Strict):
+    plugin_id: PluginId
+    version: SemVer
+    capabilities: tuple[CapabilityName, ...]
+
+
+class SoftwareCapability(_Strict):
+    provider_id: str
+    name: str
+    version: Version
+    properties: JsonObject = Field(default_factory=dict)
+
+
+class ResourceCapability(_Strict):
+    resource_id: BusinessId
+    provider_id: str
+    resource_type: str
+    vendor: str | None = None
+    model: str | None = None
+    channel: str | None = None
+    function: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+    properties: JsonObject = Field(default_factory=dict)
+    health: ResourceHealth
+    switch_connection: SwitchConnection | None = None
+
+
+class PluginInventoryItem(_Strict):
+    plugin_id: PluginId
+    point: PluginPoint
+    version: SemVer
+    archive_sha256: Sha256
+    availability: PluginAvailability
+    unavailable_reasons: tuple[ErrorCode, ...] = ()
+    checked_at: datetime
+
+
+class NodeCapabilitySnapshot(_Strict):
+    schema_version: Literal[2]
+    node_id: BusinessId
+    session_id: SessionId
+    revision: int = Field(ge=1)
+    reported_at: datetime
+    tags: tuple[str, ...] = ()
+    executors: tuple[ExecutorCapability, ...] = ()
+    runtimes: tuple[RuntimeCapability, ...] = ()
+    software: tuple[SoftwareCapability, ...] = ()
+    resources: tuple[ResourceCapability, ...] = ()
+    system: SystemCapability | None = None
+    maintenance_state: AgentMaintenanceState
+    plugin_inventory: tuple[PluginInventoryItem, ...] = ()
+
+
+PluginInventoryItem.model_rebuild()
+NodeCapabilitySnapshot.model_rebuild()

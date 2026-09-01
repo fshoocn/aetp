@@ -9,6 +9,7 @@ description = "AETP 共享协议包：Envelope / topics / payloads / golden mess
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7",
+    "typing-extensions>=4.12",
 ]
 
 [tool.setuptools]

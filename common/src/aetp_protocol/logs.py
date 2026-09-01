@@ -19,9 +19,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+
+from .ids import BusinessId, JsonObject, PluginId, RequestId, SemVer, SessionId, TraceId
 
 
 class LogLevel(StrEnum):
@@ -82,3 +84,68 @@ class RunLogBatch(BaseModel):
                 if cur.sequence <= prev.sequence:
                     raise ValueError(f"entries 必须按 sequence 严格递增: {prev.sequence} -> {cur.sequence}")
         return self
+
+
+class LogCode(RootModel[str]):
+    root: str = Field(pattern=r"^[a-z][a-z0-9_.-]{1,127}$")
+
+
+class LogContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request_id: RequestId | None = None
+    trace_id: TraceId | None = None
+    node_id: BusinessId | None = None
+    project_id: BusinessId | None = None
+    run_id: BusinessId | None = None
+    attempt_id: BusinessId | None = None
+    plan_id: BusinessId | None = None
+    plugin_id: PluginId | None = None
+    plugin_version: SemVer | None = None
+
+
+class ExceptionInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type_name: str
+    message: str
+    stack_trace: str | None = None
+
+
+class LogEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event_id: BusinessId
+    source: Literal["master", "agent", "web", "plugin"]
+    source_id: str
+    sequence: int = Field(ge=1)
+    occurred_at: datetime
+    level: LogLevel
+    component: str
+    event_code: LogCode
+    message_template: str
+    message: str
+    context: LogContext = Field(default_factory=LogContext)
+    detail: JsonObject = Field(default_factory=dict)
+    exception: ExceptionInfo | None = None
+
+
+class AgentLogBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    node_id: BusinessId
+    session_id: SessionId
+    first_sequence: int = Field(ge=1)
+    events: tuple[LogEvent, ...] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_sequences(self) -> AgentLogBatch:
+        sequences = tuple(event.sequence for event in self.events)
+        if sequences[0] != self.first_sequence or sequences != tuple(sorted(sequences)):
+            raise ValueError("agent log sequences must start at first_sequence and increase")
+        if len(sequences) != len(set(sequences)):
+            raise ValueError("agent log sequences must be strictly increasing")
+        return self
+
+
+AgentLogBatch.model_rebuild()

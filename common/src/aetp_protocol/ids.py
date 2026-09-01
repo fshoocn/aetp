@@ -18,6 +18,10 @@ from __future__ import annotations
 
 import secrets
 import time
+from typing import TypeAlias
+
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
+from typing_extensions import TypeAliasType
 
 # Crockford Base32 字母表（排除 I、L、O、U，避免视觉混淆）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -25,6 +29,103 @@ _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 # ULID 时间戳段与随机段长度（字符数）
 _TIMESTAMP_CHARS = 10
 _RANDOM_CHARS = 16
+
+
+class BusinessId(RootModel[str]):
+  """V2 业务 ID：26 字符 Crockford Base32 ULID。"""
+
+  root: str = Field(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
+
+
+class PluginId(RootModel[str]):
+  """插件稳定标识。"""
+
+  root: str = Field(pattern=r"^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+$")
+
+
+class CapabilityName(RootModel[str]):
+  """能力名称，至少包含 domain.action 两段。"""
+
+  root: str = Field(pattern=r"^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+){1,3}$")
+
+
+class SessionId(RootModel[str]):
+  root: str = Field(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class MessageId(RootModel[str]):
+  root: str = Field(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class RequestId(RootModel[str]):
+  root: str = Field(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class TraceId(RootModel[str]):
+  root: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class Sha256(RootModel[str]):
+  root: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
+
+  @field_validator("root")
+  @classmethod
+  def normalize(cls, value: str) -> str:
+    return value.lower()
+
+
+class SemVer(RootModel[str]):
+  root: str = Field(
+    pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+  )
+
+
+class Version(RootModel[str]):
+  root: str = Field(pattern=r"^v?\d+(?:\.\d+)*$")
+
+
+class VersionConstraint(BaseModel):
+  model_config = ConfigDict(extra="forbid", frozen=True)
+
+  exact: Version | None = None
+  minimum: Version | None = None
+  maximum: Version | None = None
+
+  @model_validator(mode="after")
+  def validate_presence(self) -> VersionConstraint:
+    if self.exact is None and self.minimum is None and self.maximum is None:
+      raise ValueError("version constraint must contain exact, minimum or maximum")
+    return self
+
+
+class VersionRange(BaseModel):
+  model_config = ConfigDict(extra="forbid", frozen=True)
+
+  exact: SemVer | None = None
+  minimum: SemVer | None = None
+  maximum: SemVer | None = None
+
+  @model_validator(mode="after")
+  def validate_presence(self) -> VersionRange:
+    if self.exact is None and self.minimum is None and self.maximum is None:
+      raise ValueError("version range must contain exact, minimum or maximum")
+    return self
+
+
+class RelativePath(RootModel[str]):
+  root: str = Field(pattern=r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
+
+  @field_validator("root")
+  @classmethod
+  def validate_relative(cls, value: str) -> str:
+    if value.startswith("/") or "\\" in value or any(part == ".." for part in value.split("/")):
+      raise ValueError("path must be relative and cannot contain parent traversal")
+    return value
+
+
+JsonPrimitive: TypeAlias = None | bool | int | float | str
+JsonValue = TypeAliasType("JsonValue", JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"])
+JsonObject: TypeAlias = dict[str, JsonValue]
 
 
 def _encode(value: int, length: int) -> str:
