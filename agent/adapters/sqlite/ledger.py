@@ -70,6 +70,7 @@ class AgentRunORM(_Base):
 
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     cancelled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     result_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -168,6 +169,7 @@ class SQLiteLedger:
         """
         additions: tuple[tuple[str, str, str], ...] = (
             # (表名, 列名, 列定义)
+            ("agent_runs", "plan_id", "VARCHAR(64)"),
             ("agent_runs", "device_ids", "JSON NOT NULL DEFAULT '[]'"),
         )
         with self._engine.begin() as conn:
@@ -180,7 +182,13 @@ class SQLiteLedger:
 
     # ---- agent_runs：原子 claim ----
 
-    def claim_run(self, run_id: str, attempt_no: int, device_ids: list[str] | None = None) -> bool:
+    def claim_run(
+        self,
+        run_id: str,
+        attempt_no: int,
+        device_ids: list[str] | None = None,
+        plan_id: str | None = None,
+    ) -> bool:
         """原子 claim：新 run 或新 attempt 返回 True；重复派发返回 False。
 
         用 ``ON CONFLICT DO NOTHING`` 保证“先插入者胜”：插入成功即首次
@@ -197,6 +205,7 @@ class SQLiteLedger:
                     .values(
                         run_id=run_id,
                         attempt_no=attempt_no,
+                        plan_id=plan_id,
                         status=AgentRunStatus.CLAIMED.value,
                         cancelled=False,
                         result_summary={},
@@ -228,6 +237,7 @@ class SQLiteLedger:
                 .where(AgentRunORM.run_id == run_id)
                 .values(
                     attempt_no=attempt_no,
+                    plan_id=plan_id,
                     status=AgentRunStatus.CLAIMED.value,
                     cancelled=False,
                     device_ids=device_ids,
@@ -250,6 +260,7 @@ class SQLiteLedger:
                 .where(AgentRunORM.run_id == run.run_id)
                 .values(
                     attempt_no=run.attempt_no,
+                    plan_id=run.plan_id,
                     status=run.status.value,
                     cancelled=run.cancelled,
                     result_summary=run.result_summary,
@@ -555,6 +566,7 @@ def _to_run(row: AgentRunORM) -> AgentRun:
     return AgentRun(
         run_id=row.run_id,
         attempt_no=row.attempt_no,
+        plan_id=row.plan_id,
         status=AgentRunStatus(row.status),
         cancelled=row.cancelled,
         result_summary=dict(row.result_summary or {}),

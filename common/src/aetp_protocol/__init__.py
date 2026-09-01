@@ -161,6 +161,7 @@ from .payloads import (
     ScriptVerifyPayload,
     ScriptVerifyResultPayload,
 )
+from .plan_hash import calculate_plan_hash, canonical_plan_document, with_plan_hash
 from .plugin import (
     AgentExecutionPlugin,
     AgentPackageSpec,
@@ -229,6 +230,8 @@ __all__ = [
     "CaseStatusEvent",
     "CaseSelection",
     "CaseStatus",
+    "calculate_plan_hash",
+    "canonical_plan_document",
     "Configuration",
     "ConfigurationSchema",
     "DeviceAllocation",
@@ -377,4 +380,5 @@ __all__ = [
     "validate_sender_for_v2_topic",
     "v2_command_topic",
     "v2_event_topic",
+    "with_plan_hash",
 ]

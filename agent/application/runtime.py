@@ -44,6 +44,7 @@ from agent.application.services.script_preflight_service import (
     ScriptPreflightService,
 )
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.v2_execution_plan_controller import AgentV2ExecutionPlanController
 from agent.application.services.v2_plugin_sync_controller import AgentV2PluginSyncController
 from agent.config import AgentSettings
 from agent.domain.enums import AgentOutboxStatus
@@ -82,6 +83,7 @@ class AgentRuntime:
         v2_plugin_installer: V2PluginInstaller | None = None,
         v2_plugin_registry: AgentV2PluginRegistry | None = None,
         v2_plugin_sync_controller: AgentV2PluginSyncController | None = None,
+        v2_execution_plan_controller: AgentV2ExecutionPlanController | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -93,6 +95,7 @@ class AgentRuntime:
         self._v2_plugin_installer = v2_plugin_installer
         self._v2_plugin_registry = v2_plugin_registry
         self._v2_plugin_sync_controller = v2_plugin_sync_controller
+        self._v2_execution_plan_controller = v2_execution_plan_controller
         self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
@@ -160,6 +163,23 @@ class AgentRuntime:
                 self._v2_capability_publisher,
                 master_id=self._settings.master_id,
             )
+        if (
+            self._v2_execution_plan_controller is None
+            and self._v2_capability_publisher is not None
+            and self._v2_plugin_registry is not None
+        ):
+            from aetp_protocol.ids import BusinessId
+
+            publisher = self._v2_capability_publisher
+            self._v2_execution_plan_controller = AgentV2ExecutionPlanController(
+                BusinessId(self._settings.node_id),
+                self._ledger,
+                publisher,
+                self._v2_plugin_registry,
+                script_cache=self._script_cache,
+                is_registered=lambda: publisher.v2_registered,
+                master_id=self._settings.master_id,
+            )
         assert self._dispatcher_obj is not None
         assert self._orchestrator is not None
 
@@ -187,6 +207,8 @@ class AgentRuntime:
             )
         if self._v2_plugin_sync_controller is not None:
             subscriptions.append(self._v2_plugin_sync_controller.command_topic())
+        if self._v2_execution_plan_controller is not None:
+            subscriptions.append(self._v2_execution_plan_controller.command_topic())
         await self._transport.subscribe(subscriptions)
         self._outbox_task = asyncio.create_task(self._outbox_loop())
         await self._transport.connect()
@@ -327,6 +349,12 @@ class AgentRuntime:
             and message.topic == self._v2_plugin_sync_controller.command_topic()
         ):
             await self._v2_plugin_sync_controller.handle(message, self._v2_session_id())
+            return
+        if (
+            self._v2_execution_plan_controller is not None
+            and message.topic == self._v2_execution_plan_controller.command_topic()
+        ):
+            await self._v2_execution_plan_controller.handle(message, self._v2_session_id())
             return
         if (
             self._v2_capability_publisher is not None

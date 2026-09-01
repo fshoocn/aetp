@@ -2,27 +2,22 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable
 from datetime import datetime
-from typing import cast
 
-import rfc8785
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ExecutionPlan, LeaseState, ResourceLease
 from aetp_protocol.ids import (
     BusinessId,
-    JsonObject,
     MessageId,
     SessionId,
-    Sha256,
     TraceId,
     new_id,
     stable_id,
 )
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import LeaseRenewed, LeaseRenewRequest
+from aetp_protocol.plan_hash import calculate_plan_hash, canonical_plan_document, with_plan_hash
 from aetp_protocol.topics import v2_command_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 from sqlalchemy.exc import IntegrityError
@@ -44,29 +39,6 @@ class ResourceLeaseConflict(ValueError):
 _RESOURCE_LEASE_EXPIRED = ErrorCode("RESOURCE_LEASE_EXPIRED")
 _STALE_SESSION = ErrorCode("STALE_SESSION")
 _STALE_ATTEMPT = ErrorCode("STALE_ATTEMPT")
-
-
-def canonical_plan_document(plan: ExecutionPlan) -> JsonObject:
-    """生成参与 hash 的 Plan 语义文档，去除 hash 和临时 URL。"""
-    document = cast(JsonObject, json.loads(plan.model_dump_json()))
-    document.pop("plan_hash", None)
-    document.pop("artifact_upload_url", None)
-    for field_name in ("script", "plugin_package"):
-        value = document.get(field_name)
-        if isinstance(value, dict):
-            value.pop("download_url", None)
-    return document
-
-
-def calculate_plan_hash(plan: ExecutionPlan) -> Sha256:
-    """按 RFC 8785 对 Plan 语义计算小写 SHA-256。"""
-    canonical = rfc8785.dumps(canonical_plan_document(plan))
-    return Sha256(hashlib.sha256(canonical).hexdigest())
-
-
-def with_plan_hash(plan: ExecutionPlan) -> ExecutionPlan:
-    """用规范算法填充 Plan hash。"""
-    return plan.model_copy(update={"plan_hash": calculate_plan_hash(plan)})
 
 
 class PlanLeaseService:

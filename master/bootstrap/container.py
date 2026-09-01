@@ -52,6 +52,7 @@ from master.application.services.node_presence_service import NodePresenceServic
 from master.application.services.node_service import NodeService
 from master.application.services.notification_dispatcher import NotificationDispatcher
 from master.application.services.notification_service import NotificationService
+from master.application.services.plan_lease_service import PlanLeaseService
 from master.application.services.plugin_download_service import PluginDownloadService
 from master.application.services.plugin_governance_service import PluginGovernanceService
 from master.application.services.plugin_sync_service import PluginSyncService
@@ -78,6 +79,7 @@ from master.application.services.shard_scheduler_service import (
 )
 from master.application.services.storage_cleanup_service import StorageCleanupService
 from master.application.services.test_task_service import TestTaskService
+from master.application.services.v2_execution_service import V2ExecutionService
 from master.config import get_settings, runtime_dir
 from master.domain.node_matcher import NodeMatcher
 from master.plugins.manager import PluginManager
@@ -218,6 +220,17 @@ class Container(containers.DeclarativeContainer):
         PluginSyncService,
         uow_factory=uow_factory,
         package_url_builder=plugin_download_service.provided.build_versioned_download_url,
+        master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
+    )
+    plan_lease_service = providers.Singleton(
+        PlanLeaseService,
+        uow_factory=uow_factory,
+        master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
+    )
+    v2_execution_service = providers.Singleton(
+        V2ExecutionService,
+        uow_factory=uow_factory,
+        plan_leases=plan_lease_service,
         master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
     )
     plugin_manager = providers.Singleton(
@@ -422,6 +435,7 @@ class Container(containers.DeclarativeContainer):
         capability_snapshot=capability_snapshot_service,
         diagnostics_snapshot=diagnostics_snapshot_service,
         plugin_sync=plugin_sync_service,
+        v2_execution=v2_execution_service,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）

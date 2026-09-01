@@ -23,6 +23,7 @@ from aetp_protocol.payloads import (
     AgentSystemInfo,
     DiagnosticsRequest,
     DiagnosticsSnapshot,
+    ExecutionAck,
     MaintenanceStatus,
     MqttConnectionInfo,
     NodeRegister,
@@ -80,6 +81,44 @@ class AgentV2CapabilityPublisher:
         self._v2_registered = False
         self._pending_register_message_id: MessageId | None = None
         self._maintenance_sequence = 0
+
+    async def publish_execution_ack(
+        self,
+        ack: ExecutionAck,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> None:
+        """发布 execution.ack。"""
+        await self._publish(
+            MessageType.EXECUTION_ACK,
+            ack,
+            session_id,
+            correlation_id=correlation_id,
+        )
+
+    def enqueue_execution_ack(
+        self,
+        ledger: Ledger,
+        ack: ExecutionAck,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> str:
+        """将 execution.ack 写入可靠 outbox。"""
+        envelope = self._build_envelope(
+            MessageType.EXECUTION_ACK,
+            ack,
+            session_id,
+            correlation_id=correlation_id,
+        )
+        outbox_id = f"v2-execution-ack:{ack.plan_id.root}"
+        ledger.replace_outbox(
+            outbox_id,
+            v2_event_topic(self._node_id().root, "execution.ack"),
+            envelope.model_dump(mode="json"),
+        )
+        return outbox_id
 
     @property
     def v2_registered(self) -> bool:
@@ -305,6 +344,7 @@ class AgentV2CapabilityPublisher:
             NodeRegister
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
+            | ExecutionAck
             | PluginSyncResult
             | MaintenanceStatus
         ),
@@ -331,6 +371,7 @@ class AgentV2CapabilityPublisher:
             NodeRegister
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
+            | ExecutionAck
             | PluginSyncResult
             | MaintenanceStatus
         ),
@@ -358,6 +399,7 @@ class AgentV2CapabilityPublisher:
             MessageType.NODE_REGISTER: "register",
             MessageType.NODE_CAPABILITY_SNAPSHOT: "capability.snapshot",
             MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: "agent.diagnostics.snapshot",
+            MessageType.EXECUTION_ACK: "execution.ack",
             MessageType.AGENT_PLUGIN_SYNC_RESULT: "agent.plugin.sync.result",
             MessageType.AGENT_MAINTENANCE_STATUS: "agent.maintenance.status",
         }[message_type]

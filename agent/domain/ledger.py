@@ -26,6 +26,7 @@ class AgentRun:
 
     run_id: str
     attempt_no: int
+    plan_id: str | None = None
     status: AgentRunStatus = AgentRunStatus.CLAIMED
     cancelled: bool = False
     result_summary: dict = field(default_factory=dict)
@@ -85,11 +86,18 @@ class ScriptCacheEntry:
 class Ledger(Protocol):
     """Agent 本地账本端口（鸭子类型）。"""
 
-    def claim_run(self, run_id: str, attempt_no: int, device_ids: list[str] | None = None) -> bool:
+    def claim_run(
+        self,
+        run_id: str,
+        attempt_no: int,
+        device_ids: list[str] | None = None,
+        plan_id: str | None = None,
+    ) -> bool:
         """原子 claim：首次（或新 attempt）返回 True；重复派发返回 False。
 
         ``device_ids`` 记录本次 Run 占用的物理设备集合（随 run.assign 下发），
         供心跳汇总占用状态上报 Master。
+        ``plan_id`` 记录 V2 execution.plan 身份；旧 V1 调用可省略。
         """
         ...
 

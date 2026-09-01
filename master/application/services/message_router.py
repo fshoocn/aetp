@@ -22,6 +22,8 @@ from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     DiagnosticsSnapshot,
+    ExecutionAck,
+    LeaseRenewRequest,
     MaintenanceStatus,
     NodeHeartbeatPayload,
     NodeRegister,
@@ -63,6 +65,7 @@ from master.application.services.script_verification_service import (
     ScriptVerificationService,
 )
 from master.application.services.shard_scheduler_service import ShardSchedulerService
+from master.application.services.v2_execution_service import V2ExecutionService
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,7 @@ class MasterMessageRouter:
         capability_snapshot: CapabilitySnapshotProjectionService | None = None,
         diagnostics_snapshot: DiagnosticsSnapshotProjectionService | None = None,
         plugin_sync: PluginSyncService | None = None,
+        v2_execution: V2ExecutionService | None = None,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
@@ -91,6 +95,7 @@ class MasterMessageRouter:
         self._capability_snapshot = capability_snapshot
         self._diagnostics_snapshot = diagnostics_snapshot
         self._plugin_sync = plugin_sync
+        self._v2_execution = v2_execution
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -238,6 +243,23 @@ class MasterMessageRouter:
                             envelope.sender.id.root,
                         )
                 return True
+            if isinstance(payload, ExecutionAck):
+                if self._v2_execution is None or envelope.correlation_id is None:
+                    return False
+                return self._v2_execution.handle_execution_ack(
+                    payload,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
+            if isinstance(payload, LeaseRenewRequest):
+                if self._v2_execution is None:
+                    return False
+                return self._v2_execution.handle_lease_renew(
+                    payload,
+                    message_id=envelope.message_id,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
             if (
                 isinstance(payload, (NodeCapabilitySnapshot, DiagnosticsSnapshot, PluginSyncResult, MaintenanceStatus))
                 and payload.node_id != envelope.sender.id
