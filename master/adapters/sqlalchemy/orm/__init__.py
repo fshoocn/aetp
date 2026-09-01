@@ -21,6 +21,7 @@ from .device import Device
 from .domain_event import DomainEvent
 from .event_delivery import EventDelivery
 from .event_subscription import EventSubscription
+from .execution_plan import ExecutionPlan
 from .hook_execution import HookExecution
 from .inbox_message import InboxMessage
 from .node import Node
@@ -33,6 +34,7 @@ from .project_integration import ProjectIntegration
 from .project_member import ProjectMember
 from .project_node_binding import ProjectNodeBinding
 from .refresh_token import RefreshToken
+from .resource_lease import ResourceLease
 from .run_artifact import RunArtifact
 from .run_case_result import RunCaseResult
 from .run_log import RunLog
@@ -56,6 +58,7 @@ __all__ = [
     "AgentDiagnosticsSnapshot",
     "Device",
     "DomainEvent",
+    "ExecutionPlan",
     "EventDelivery",
     "EventSubscription",
     "HookExecution",
@@ -74,6 +77,7 @@ __all__ = [
     "AgentPluginDesiredVersion",
     "AgentPluginSyncOperation",
     "RefreshToken",
+    "ResourceLease",
     "RunArtifact",
     "RunCaseResult",
     "RunLog",

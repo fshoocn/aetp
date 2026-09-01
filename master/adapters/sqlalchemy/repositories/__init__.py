@@ -16,6 +16,7 @@ from .device_repository import DeviceRepositoryImpl
 from .domain_event_repository import DomainEventRepositoryImpl
 from .event_delivery_repository import EventDeliveryRepositoryImpl
 from .event_subscription_repository import EventSubscriptionRepositoryImpl
+from .execution_plan_repository import ExecutionPlanRepositoryImpl
 from .hook_execution_repository import HookExecutionRepositoryImpl
 from .inbox_message_repository import InboxMessageRepositoryImpl
 from .node_repository import NodeRepositoryImpl
@@ -31,6 +32,7 @@ from .project_member_repository import ProjectMemberRepositoryImpl
 from .project_node_binding_repository import ProjectNodeBindingRepositoryImpl
 from .project_repository import ProjectRepositoryImpl
 from .refresh_token_repository import RefreshTokenRepositoryImpl
+from .resource_lease_repository import ResourceLeaseRepositoryImpl
 from .run_artifact_repository import RunArtifactRepositoryImpl
 from .run_case_result_repository import RunCaseResultRepositoryImpl
 from .run_log_repository import RunLogRepositoryImpl
@@ -52,6 +54,7 @@ __all__ = [
     "AgentDiagnosticsSnapshotRepositoryImpl",
     "DeviceRepositoryImpl",
     "DomainEventRepositoryImpl",
+    "ExecutionPlanRepositoryImpl",
     "EventDeliveryRepositoryImpl",
     "EventSubscriptionRepositoryImpl",
     "HookExecutionRepositoryImpl",
@@ -69,6 +72,7 @@ __all__ = [
     "AgentPluginDesiredVersionRepositoryImpl",
     "AgentPluginSyncOperationRepositoryImpl",
     "RefreshTokenRepositoryImpl",
+    "ResourceLeaseRepositoryImpl",
     "RunArtifactRepositoryImpl",
     "RunCaseResultRepositoryImpl",
     "RunLogRepositoryImpl",

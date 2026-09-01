@@ -23,6 +23,7 @@ from master.domain.models import (
     AuditLog,
     Device,
     DomainEvent,
+    ExecutionPlanRecord,
     InboxMessage,
     Node,
     NodeCapabilitySnapshotRecord,
@@ -35,6 +36,7 @@ from master.domain.models import (
     ProjectNodeBinding,
     ProjectNodeBindingView,
     RefreshToken,
+    ResourceLeaseRecord,
     RunArtifact,
     RunCaseResult,
     RunLog,
@@ -474,6 +476,66 @@ class NodeRepository(ABC):
         """把所有节点投影重置为 offline（启动恢复用）。"""
 
 
+class ExecutionPlanRepository(ABC):
+    """V2 ExecutionPlan 不可变快照仓储。"""
+
+    @abstractmethod
+    def get_by_plan_id(self, plan_id: BusinessId) -> ExecutionPlanRecord | None: ...
+
+    @abstractmethod
+    def get_by_attempt(
+        self,
+        run_id: BusinessId,
+        script_binding_id: BusinessId,
+        shard_id: BusinessId,
+        attempt_no: int,
+    ) -> ExecutionPlanRecord | None: ...
+
+    @abstractmethod
+    def list_by_run(self, run_id: BusinessId) -> list[ExecutionPlanRecord]: ...
+
+    @abstractmethod
+    def add(self, record: ExecutionPlanRecord) -> ExecutionPlanRecord: ...
+
+
+class ResourceLeaseRepository(ABC):
+    """V2 ResourceLease 条件更新仓储。"""
+
+    @abstractmethod
+    def get_by_lease_id(self, lease_id: BusinessId) -> ResourceLeaseRecord | None: ...
+
+    @abstractmethod
+    def get_active_by_resource(self, resource_id: BusinessId) -> ResourceLeaseRecord | None: ...
+
+    @abstractmethod
+    def list_by_attempt(self, attempt_id: BusinessId) -> list[ResourceLeaseRecord]: ...
+
+    @abstractmethod
+    def add(self, record: ResourceLeaseRecord) -> ResourceLeaseRecord: ...
+
+    @abstractmethod
+    def renew(
+        self,
+        lease_id: BusinessId,
+        *,
+        expected_revision: int,
+        requested_expires_at: datetime,
+        now: datetime,
+    ) -> ResourceLeaseRecord | None: ...
+
+    @abstractmethod
+    def release(
+        self,
+        lease_id: BusinessId,
+        *,
+        now: datetime,
+        expected_revision: int | None = None,
+    ) -> ResourceLeaseRecord | None: ...
+
+    @abstractmethod
+    def expire_due(self, *, now: datetime) -> list[ResourceLeaseRecord]: ...
+
+
 class NodeCapabilitySnapshotRepository(ABC):
     """节点能力快照仓储：按 session/revision 保存不可变替换快照。"""
 
@@ -640,6 +702,8 @@ class UnitOfWork(ABC):
     projects: ProjectRepository
     members: ProjectMemberRepository
     nodes: NodeRepository
+    execution_plans: ExecutionPlanRepository
+    resource_leases: ResourceLeaseRepository
     node_capability_snapshots: NodeCapabilitySnapshotRepository
     agent_diagnostics_snapshots: AgentDiagnosticsSnapshotRepository
     node_sessions: NodeSessionRepository

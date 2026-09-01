@@ -26,6 +26,7 @@ from master.adapters.sqlalchemy.repositories import (
     DomainEventRepositoryImpl,
     EventDeliveryRepositoryImpl,
     EventSubscriptionRepositoryImpl,
+    ExecutionPlanRepositoryImpl,
     HookExecutionRepositoryImpl,
     InboxMessageRepositoryImpl,
     NodeCapabilitySnapshotRepositoryImpl,
@@ -39,6 +40,7 @@ from master.adapters.sqlalchemy.repositories import (
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
     RefreshTokenRepositoryImpl,
+    ResourceLeaseRepositoryImpl,
     RunArtifactRepositoryImpl,
     RunCaseResultRepositoryImpl,
     RunLogRepositoryImpl,
@@ -84,6 +86,8 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.projects = ProjectRepositoryImpl(session)
         self.members = ProjectMemberRepositoryImpl(session)
         self.nodes = NodeRepositoryImpl(session)
+        self.execution_plans = ExecutionPlanRepositoryImpl(session)
+        self.resource_leases = ResourceLeaseRepositoryImpl(session)
         self.node_capability_snapshots = NodeCapabilitySnapshotRepositoryImpl(session)
         self.agent_diagnostics_snapshots = AgentDiagnosticsSnapshotRepositoryImpl(session)
         self.node_sessions = NodeSessionRepositoryImpl(session)

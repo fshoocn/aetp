@@ -6,6 +6,7 @@ from .capability_snapshot import AgentDiagnosticsSnapshotRecord, NodeCapabilityS
 from .device import Device
 from .messaging import AuditLog, DomainEvent, InboxMessage, OutboxMessage
 from .node import Node, NodeSession
+from .plan_lease import ExecutionPlanRecord, ResourceLeaseRecord
 from .plugin_governance import (
     AgentPluginDesiredVersionRecord,
     AgentPluginSyncOperationRecord,
@@ -42,6 +43,7 @@ __all__ = [
     "NodeCapabilitySnapshotRecord",
     "AgentPluginDesiredVersionRecord",
     "AgentPluginSyncOperationRecord",
+    "ExecutionPlanRecord",
     "PluginSyncOperationState",
     "PluginVersionRecord",
     "OutboxMessage",
@@ -51,6 +53,7 @@ __all__ = [
     "ProjectNodeBinding",
     "ProjectNodeBindingView",
     "RefreshToken",
+    "ResourceLeaseRecord",
     "RunArtifact",
     "RunCaseResult",
     "RunLog",

@@ -281,7 +281,7 @@ class ExecutionPlan(_Strict):
             raise ValueError("deadline_at must be later than created_at")
         if len(self.case_keys) != len(set(self.case_keys)):
             raise ValueError("case_keys must be unique")
-        lease_ids = tuple(binding.lease_id for binding in self.resource_bindings)
+        lease_ids = tuple(binding.lease_id.root for binding in self.resource_bindings)
         if len(lease_ids) != len(set(lease_ids)):
             raise ValueError("resource lease_id must be unique")
         return self
