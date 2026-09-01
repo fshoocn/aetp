@@ -11,7 +11,7 @@ from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ExecutionPlan
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, stable_id
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.payloads import ExecutionAck
+from aetp_protocol.payloads import ExecutionAck, ExecutionCancel
 from aetp_protocol.plan_hash import calculate_plan_hash
 from aetp_protocol.topics import (
     parse_v2_topic,
@@ -21,10 +21,12 @@ from aetp_protocol.topics import (
 )
 from aetp_protocol.v2_envelope import V2Envelope, parse_v2_message
 
+from agent.application.services.execution_service import ExecutionService
 from agent.application.services.script_cache_service import ScriptCacheError, ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_execution_runner import V2ExecutionRunner
 from agent.application.services.v2_lease_renewal_service import AgentV2LeaseRenewalService
+from agent.domain.enums import AgentRunStatus
 from agent.domain.ledger import Ledger
 from agent.plugins.v2_registry import AgentV2PluginRegistry
 from common.transport import MqttMessage
@@ -53,6 +55,7 @@ class AgentV2ExecutionPlanController:
         now: Callable[[], datetime] | None = None,
         lease_renewal: AgentV2LeaseRenewalService | None = None,
         execution_runner: V2ExecutionRunner | None = None,
+        execution_service: ExecutionService | None = None,
     ) -> None:
         self._node_id = node_id
         self._ledger = ledger
@@ -64,10 +67,54 @@ class AgentV2ExecutionPlanController:
         self._now = now or (lambda: datetime.now(UTC))
         self._lease_renewal = lease_renewal
         self._execution_runner = execution_runner
+        self._execution_service = execution_service
 
     def command_topic(self) -> str:
         """返回本节点 execution.plan 命令主题。"""
         return v2_command_topic(self._node_id.root, "execution.plan")
+
+    def cancel_command_topic(self) -> str:
+        """返回本节点 execution.cancel 命令主题。"""
+        return v2_command_topic(self._node_id.root, "execution.cancel")
+
+    async def handle_cancel(self, message: MqttMessage, session_id: SessionId) -> bool:
+        """校验 execution.cancel 并触发本地取消请求。"""
+        try:
+            topic = parse_v2_topic(message.topic)
+            if (
+                topic.direction != "commands"
+                or topic.node_id != self._node_id.root
+                or topic.segment != "execution.cancel"
+            ):
+                return False
+            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_v2_topic(message.topic, envelope.sender)
+            validate_message_type_for_v2_topic(
+                message.topic,
+                MessageType(envelope.message_type),
+            )
+            if envelope.sender.id != stable_id(self._master_id) or not isinstance(payload, ExecutionCancel):
+                return False
+            request = payload.request
+            run = self._ledger.get_run(request.run_id.root)
+            if (
+                run is None
+                or run.plan_id != request.plan_id.root
+                or run.attempt_no != request.attempt_no
+            ):
+                return False
+            if run.status in {
+                AgentRunStatus.SUCCEEDED,
+                AgentRunStatus.FAILED,
+                AgentRunStatus.CANCELLED,
+                AgentRunStatus.TIMED_OUT,
+            }:
+                return True
+            if self._execution_service is not None:
+                self._execution_service.cancel(request.run_id.root)
+            return True
+        except Exception:
+            return False
 
     async def handle(self, message: MqttMessage, session_id: SessionId) -> bool:
         """预检并 ACK 一条 execution.plan；合法 V2 消息均视为已消费。"""
@@ -118,11 +165,18 @@ class AgentV2ExecutionPlanController:
             [binding.resource_id.root for binding in plan.resource_bindings],
             plan.plan_id.root,
         )
+        start_execution = True
         if not claimed:
             existing = self._ledger.get_run(plan.run_id.root)
             if existing is None or existing.plan_id != plan.plan_id.root:
                 await self._reject(plan, session_id, envelope.message_id, _STALE_ATTEMPT, "Attempt 已被其它 Plan 占用")
                 return True
+            start_execution = existing.status not in {
+                AgentRunStatus.SUCCEEDED,
+                AgentRunStatus.FAILED,
+                AgentRunStatus.CANCELLED,
+                AgentRunStatus.TIMED_OUT,
+            }
         else:
             self._ledger.record_inbox(
                 envelope.sender.id.root,
@@ -132,7 +186,7 @@ class AgentV2ExecutionPlanController:
         await self._accept(plan, session_id, envelope.message_id)
         if self._lease_renewal is not None:
             self._lease_renewal.register_plan(plan)
-        if self._execution_runner is not None:
+        if self._execution_runner is not None and start_execution:
             self._execution_runner.start(
                 plan,
                 session_id,

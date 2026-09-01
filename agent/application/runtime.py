@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from aetp_protocol.envelope import Envelope
+from aetp_protocol.execution import ExecutionPlan
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.topics import (
     command_topic,
@@ -47,6 +48,7 @@ from agent.application.services.script_preflight_service import (
 )
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_execution_plan_controller import AgentV2ExecutionPlanController
+from agent.application.services.v2_execution_runner import V2ExecutionRunner
 from agent.application.services.v2_lease_renewal_service import AgentV2LeaseRenewalService
 from agent.application.services.v2_plugin_sync_controller import AgentV2PluginSyncController
 from agent.config import AgentSettings
@@ -87,6 +89,8 @@ class AgentRuntime:
         v2_plugin_registry: AgentV2PluginRegistry | None = None,
         v2_plugin_sync_controller: AgentV2PluginSyncController | None = None,
         v2_execution_plan_controller: AgentV2ExecutionPlanController | None = None,
+        v2_execution_runner: V2ExecutionRunner | None = None,
+        v2_executor_resolver: Callable[[ExecutionPlan], object] | None = None,
         v2_lease_renewal_service: AgentV2LeaseRenewalService | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
@@ -100,6 +104,8 @@ class AgentRuntime:
         self._v2_plugin_registry = v2_plugin_registry
         self._v2_plugin_sync_controller = v2_plugin_sync_controller
         self._v2_execution_plan_controller = v2_execution_plan_controller
+        self._v2_execution_runner = v2_execution_runner
+        self._v2_executor_resolver = v2_executor_resolver
         self._v2_lease_renewal_service = v2_lease_renewal_service
         self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
@@ -179,6 +185,20 @@ class AgentRuntime:
                 master_id=self._settings.master_id,
             )
         if (
+            self._v2_execution_runner is None
+            and self._v2_capability_publisher is not None
+            and self._v2_executor_resolver is not None
+        ):
+            assert self._execution_service is not None
+            self._v2_execution_runner = V2ExecutionRunner(
+                self._settings,
+                self._ledger,
+                self._execution_service,
+                self._v2_capability_publisher,
+                self._v2_executor_resolver,
+                script_cache=self._script_cache,
+            )
+        if (
             self._v2_execution_plan_controller is None
             and self._v2_capability_publisher is not None
             and self._v2_plugin_registry is not None
@@ -195,6 +215,8 @@ class AgentRuntime:
                 is_registered=lambda: publisher.v2_registered,
                 master_id=self._settings.master_id,
                 lease_renewal=self._v2_lease_renewal_service,
+                execution_runner=self._v2_execution_runner,
+                execution_service=self._execution_service,
             )
         assert self._dispatcher_obj is not None
         assert self._orchestrator is not None
@@ -225,6 +247,7 @@ class AgentRuntime:
             subscriptions.append(self._v2_plugin_sync_controller.command_topic())
         if self._v2_execution_plan_controller is not None:
             subscriptions.append(self._v2_execution_plan_controller.command_topic())
+            subscriptions.append(self._v2_execution_plan_controller.cancel_command_topic())
         if self._v2_lease_renewal_service is not None:
             subscriptions.append(v2_command_topic(self._settings.node_id, "lease.renewed"))
         await self._transport.subscribe(subscriptions)
@@ -258,6 +281,8 @@ class AgentRuntime:
             with suppress(asyncio.CancelledError):
                 await self._lease_renewal_task
             self._lease_renewal_task = None
+        if self._v2_execution_runner is not None:
+            await self._v2_execution_runner.stop()
         if self._outbox_task is not None:
             self._outbox_task.cancel()
             try:
@@ -382,6 +407,12 @@ class AgentRuntime:
             and message.topic == self._v2_execution_plan_controller.command_topic()
         ):
             await self._v2_execution_plan_controller.handle(message, self._v2_session_id())
+            return
+        if (
+            self._v2_execution_plan_controller is not None
+            and message.topic == self._v2_execution_plan_controller.cancel_command_topic()
+        ):
+            await self._v2_execution_plan_controller.handle_cancel(message, self._v2_session_id())
             return
         if (
             self._v2_lease_renewal_service is not None

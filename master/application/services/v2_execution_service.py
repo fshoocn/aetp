@@ -6,10 +6,16 @@ from collections.abc import Callable
 from datetime import datetime
 
 from aetp_protocol.errors import ErrorCode
-from aetp_protocol.execution import ExecutionStatus
+from aetp_protocol.execution import CancelRequest, ExecutionStatus
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.payloads import ExecutionAck, ExecutionFinished, LeaseRenewed, LeaseRenewRequest
+from aetp_protocol.payloads import (
+    ExecutionAck,
+    ExecutionCancel,
+    ExecutionFinished,
+    LeaseRenewed,
+    LeaseRenewRequest,
+)
 from aetp_protocol.topics import v2_command_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 
@@ -89,6 +95,59 @@ class V2ExecutionService:
                 run.status = RunStatus.ACKED
                 uow.task_runs.update(run)
             return True
+
+    def request_cancel(self, plan_id: BusinessId, *, reason: str = "") -> OutboxMessage:
+        """为已持久化 Plan 创建幂等 execution.cancel command。"""
+        with self._uow_factory() as uow:
+            plan_record = uow.execution_plans.get_by_plan_id(plan_id)
+            if plan_record is None:
+                raise KeyError(f"ExecutionPlan 不存在: {plan_id.root}")
+            plan = plan_record.plan
+            node = uow.nodes.get_by_id(plan.node_id.root)
+            if node is None or node.id is None:
+                raise ValueError("Plan 目标节点不存在")
+            session = uow.node_sessions.get_current(node.id)
+            if session is None or session.session_id != plan.target_session_id.root:
+                raise ValueError("Plan 目标 session 已失效")
+            cancel = ExecutionCancel(
+                request=CancelRequest(
+                    cancel_request_id=MessageId(new_id()),
+                    run_id=plan.run_id,
+                    shard_id=plan.shard_id,
+                    attempt_no=plan.attempt_no,
+                    plan_id=plan.plan_id,
+                    reason=reason,
+                )
+            )
+            outbox_id = stable_id(f"execution-cancel:{cancel.request.cancel_request_id.root}").root
+            envelope = V2Envelope(
+                message_id=MessageId(new_id()),
+                sent_at=self._now(),
+                sender=V2Sender(
+                    kind="master",
+                    id=stable_id(self._master_id),
+                    session_id=SessionId(stable_id(f"{self._master_id}:session").root),
+                ),
+                message_type=MessageType.EXECUTION_CANCEL.value,
+                trace_id=TraceId(new_id()),
+                payload=cancel.model_dump(mode="json"),
+            )
+            existing = uow.outbox_messages.get_by_outbox_id(outbox_id)
+            if existing is not None:
+                return existing
+            return uow.outbox_messages.enqueue(
+                OutboxMessage(
+                    outbox_id=outbox_id,
+                    aggregate_type="execution_plan",
+                    aggregate_id=plan.plan_id.root,
+                    topic=v2_command_topic(plan.node_id.root, "execution.cancel"),
+                    payload=envelope.model_dump(mode="json"),
+                    qos=1,
+                    status=OutboxStatus.PENDING,
+                    attempts=0,
+                    next_attempt_at=None,
+                )
+            )
 
     def handle_lease_renew(
         self,

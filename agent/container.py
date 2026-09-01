@@ -20,6 +20,7 @@ from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.v2_executor_resolver import V2ExecutorResolver
 from agent.config import AgentSettings, get_settings, resolve_sqlite_url
 from agent.plugins.installer import LocalPluginInstaller
 from agent.plugins.registry import create_default_registry
@@ -78,6 +79,10 @@ class Container(containers.DeclarativeContainer):
     v2_plugin_registry = providers.Singleton(
         AgentV2PluginRegistry,
         root=providers.Callable(lambda: get_settings().plugin_dir),
+    )
+    v2_executor_resolver = providers.Singleton(
+        V2ExecutorResolver,
+        registry=v2_plugin_registry,
     )
     v2_plugin_installer = providers.Singleton(
         V2PluginInstaller,
@@ -143,4 +148,5 @@ class Container(containers.DeclarativeContainer):
         v2_capability_publisher=v2_capability_publisher,
         v2_plugin_installer=v2_plugin_installer,
         v2_plugin_registry=v2_plugin_registry,
+        v2_executor_resolver=v2_executor_resolver.provided.resolve,
     )

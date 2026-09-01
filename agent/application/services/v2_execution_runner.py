@@ -153,24 +153,30 @@ class V2ExecutionRunner:
             result=finished_result,
             finished_at=self._now(),
         )
-        self._publisher.enqueue_execution_finished(
-            self._ledger,
-            finished,
-            session_id,
-            correlation_id=correlation_id,
-        )
-        self._completed.add(plan.plan_id.root)
-        self._cleanup_script_directory(plan.run_id.root)
+        try:
+            self._publisher.enqueue_execution_finished(
+                self._ledger,
+                finished,
+                session_id,
+                correlation_id=correlation_id,
+            )
+            self._completed.add(plan.plan_id.root)
+        finally:
+            self._cleanup_script_directory(plan.run_id.root)
 
     def _prepare_script_directory(self, source: str, run_id: str) -> str:
         source_path = Path(source)
         workspace = Path(self._settings.script_cache_dir).resolve().parent / "runs"
         workspace.mkdir(parents=True, exist_ok=True)
         target = Path(tempfile.mkdtemp(prefix="aetp-v2-run-", dir=str(workspace)))
-        if zipfile.is_zipfile(source_path):
-            extract_zip_safely(source_path, target)
-        else:
-            shutil.copy2(source_path, target / "test_script.py")
+        try:
+            if zipfile.is_zipfile(source_path):
+                extract_zip_safely(source_path, target)
+            else:
+                shutil.copy2(source_path, target / "test_script.py")
+        except Exception:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
         self._script_dirs[run_id] = target
         return str(target)
 
