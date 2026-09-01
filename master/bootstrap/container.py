@@ -80,6 +80,7 @@ from master.application.services.shard_scheduler_service import (
 from master.application.services.storage_cleanup_service import StorageCleanupService
 from master.application.services.test_task_service import TestTaskService
 from master.application.services.v2_execution_service import V2ExecutionService
+from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
 from master.config import get_settings, runtime_dir
 from master.domain.node_matcher import NodeMatcher
 from master.plugins.manager import PluginManager
@@ -226,6 +227,11 @@ class Container(containers.DeclarativeContainer):
         PlanLeaseService,
         uow_factory=uow_factory,
         master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
+    )
+    v2_plan_materialization_service = providers.Factory(
+        V2PlanMaterializationService,
+        uow_factory=uow_factory,
+        plan_leases=plan_lease_service,
     )
     v2_execution_service = providers.Singleton(
         V2ExecutionService,

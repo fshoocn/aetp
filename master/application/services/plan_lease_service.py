@@ -58,9 +58,73 @@ class PlanLeaseService:
 
     def allocate(self, plan: ExecutionPlan) -> ExecutionPlanRecord:
         """原子申请 Plan 所需全部 Lease 并写入 execution.plan outbox。"""
+        try:
+            with self._uow_factory() as uow:
+                return self.allocate_in_uow(uow, plan)
+        except IntegrityError as exc:
+            raise ResourceLeaseConflict("资源 Lease 发生数据库并发冲突") from exc
+
+    def allocate_in_uow(self, uow: UnitOfWork, plan: ExecutionPlan) -> ExecutionPlanRecord:
+        """在调用方事务中完成 Lease、Plan 和 execution.plan Outbox。"""
+        now = self._now()
+        self._validate_plan_window(plan, now)
+        existing = uow.execution_plans.get_by_plan_id(plan.plan_id)
+        if existing is not None:
+            if existing.plan != plan:
+                raise PlanRejected("plan_id 已用于不同的 Plan")
+            return existing
+        self._validate_target_session(uow, plan)
+        for binding in plan.resource_bindings:
+            if uow.resource_leases.get_active_by_resource(binding.resource_id) is not None:
+                raise ResourceLeaseConflict(f"资源已有 active Lease: {binding.resource_id.root}")
+            uow.resource_leases.add(
+                ResourceLeaseRecord(
+                    id=None,
+                    lease=ResourceLease(
+                        lease_id=binding.lease_id,
+                        run_id=plan.run_id,
+                        shard_id=plan.shard_id,
+                        attempt_id=plan.attempt_id,
+                        node_id=plan.node_id,
+                        resource_id=binding.resource_id,
+                        state=LeaseState.ACTIVE,
+                        revision=binding.lease_revision,
+                        acquired_at=now,
+                        heartbeat_at=now,
+                        expires_at=binding.expires_at,
+                    ),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        record = uow.execution_plans.add(
+            ExecutionPlanRecord(
+                id=None,
+                plan=plan,
+                created_at=plan.created_at,
+                updated_at=plan.created_at,
+            )
+        )
+        envelope = self._build_plan_envelope(plan)
+        uow.outbox_messages.enqueue(
+            OutboxMessage(
+                outbox_id=stable_id(f"execution-plan:{plan.plan_id.root}").root,
+                aggregate_type="execution_plan",
+                aggregate_id=plan.plan_id.root,
+                topic=v2_command_topic(plan.node_id.root, "execution.plan"),
+                payload=envelope.model_dump(mode="json"),
+                qos=1,
+                status=OutboxStatus.PENDING,
+                attempts=0,
+                next_attempt_at=None,
+            )
+        )
+        return record
+
+    @staticmethod
+    def _validate_plan_window(plan: ExecutionPlan, now: datetime) -> None:
         if calculate_plan_hash(plan) != plan.plan_hash:
             raise PlanRejected("ExecutionPlan plan_hash 校验失败")
-        now = self._now()
         if plan.deadline_at <= now:
             raise PlanRejected("ExecutionPlan deadline 已过期")
         resource_ids = tuple(binding.resource_id.root for binding in plan.resource_bindings)
@@ -71,65 +135,6 @@ class PlanLeaseService:
             for binding in plan.resource_bindings
         ):
             raise PlanRejected("Lease expires_at 必须晚于当前时间且不超过 Plan deadline")
-
-        try:
-            with self._uow_factory() as uow:
-                existing = uow.execution_plans.get_by_plan_id(plan.plan_id)
-                if existing is not None:
-                    if existing.plan != plan:
-                        raise PlanRejected("plan_id 已用于不同的 Plan")
-                    return existing
-                self._validate_target_session(uow, plan)
-                for binding in plan.resource_bindings:
-                    if uow.resource_leases.get_active_by_resource(binding.resource_id) is not None:
-                        raise ResourceLeaseConflict(
-                            f"资源已有 active Lease: {binding.resource_id.root}"
-                        )
-                    uow.resource_leases.add(
-                        ResourceLeaseRecord(
-                            id=None,
-                            lease=ResourceLease(
-                                lease_id=binding.lease_id,
-                                run_id=plan.run_id,
-                                shard_id=plan.shard_id,
-                                attempt_id=plan.attempt_id,
-                                node_id=plan.node_id,
-                                resource_id=binding.resource_id,
-                                state=LeaseState.ACTIVE,
-                                revision=binding.lease_revision,
-                                acquired_at=now,
-                                heartbeat_at=now,
-                                expires_at=binding.expires_at,
-                            ),
-                            created_at=now,
-                            updated_at=now,
-                        )
-                    )
-                record = uow.execution_plans.add(
-                    ExecutionPlanRecord(
-                        id=None,
-                        plan=plan,
-                        created_at=plan.created_at,
-                        updated_at=plan.created_at,
-                    )
-                )
-                envelope = self._build_plan_envelope(plan)
-                uow.outbox_messages.enqueue(
-                    OutboxMessage(
-                        outbox_id=stable_id(f"execution-plan:{plan.plan_id.root}").root,
-                        aggregate_type="execution_plan",
-                        aggregate_id=plan.plan_id.root,
-                        topic=v2_command_topic(plan.node_id.root, "execution.plan"),
-                        payload=envelope.model_dump(mode="json"),
-                        qos=1,
-                        status=OutboxStatus.PENDING,
-                        attempts=0,
-                        next_attempt_at=None,
-                    )
-                )
-                return record
-        except IntegrityError as exc:
-            raise ResourceLeaseConflict("资源 Lease 发生数据库并发冲突") from exc
 
     def renew(
         self,

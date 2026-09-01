@@ -32,7 +32,8 @@ class ShardAttempt(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("shard_pk", "attempt_no", name="uq_shard_attempts_shard_attempt"),
         CheckConstraint(
-            "status IN ('created','dispatched','acked','running','unknown','succeeded','failed','cancelled','timed_out','lost')",
+            "status IN ('created','dispatched','acked','running','unknown','succeeded',"
+            "'failed','cancelled','timed_out','lost')",
             name="ck_shard_attempts_status",
         ),
     )
