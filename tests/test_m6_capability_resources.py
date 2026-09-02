@@ -8,12 +8,9 @@ from aetp_protocol.capabilities import NodeCapabilities, ResourceCapability, Res
 from aetp_protocol.ids import BusinessId, SessionId
 
 from agent.application.services.capability_snapshot_service import AgentCapabilitySnapshotService
-from agent.application.services.resource_provider import (
-    CanResourceProvider,
-    PowerResourceProvider,
-    ResourceProviderRegistry,
-)
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.plugins.v2_registry import AgentV2PluginRegistry
+from plugins.resource_providers import PowerResourceProvider, VectorCanResourceProvider
 
 NODE_ID = BusinessId("01J000000000000000000000A0")
 SESSION_ID = SessionId("session-00000100")
@@ -22,7 +19,7 @@ SESSION_ID = SessionId("session-00000100")
 def test_capability_snapshot_uses_provider_resources_without_legacy_duplicates(tmp_path: Path) -> None:
     can_resource = ResourceCapability(
         resource_id=BusinessId("01J000000000000000000000B1"),
-        provider_id="agent.can",
+        provider_id="com.vector.can-resource",
         resource_type="can",
         channel="CAN1",
         vendor="vector",
@@ -30,7 +27,7 @@ def test_capability_snapshot_uses_provider_resources_without_legacy_duplicates(t
     )
     power_resource = ResourceCapability(
         resource_id=BusinessId("01J000000000000000000000B2"),
-        provider_id="agent.power",
+        provider_id="org.aetp.power-resource",
         resource_type="power",
         channel="PSU1",
         function="supply",
@@ -38,7 +35,7 @@ def test_capability_snapshot_uses_provider_resources_without_legacy_duplicates(t
     )
     providers = ResourceProviderRegistry(
         (
-            CanResourceProvider(discoverer=lambda: (can_resource,)),
+            VectorCanResourceProvider(discoverer=lambda: (can_resource,)),
             PowerResourceProvider(resources=(power_resource,)),
         )
     )
@@ -56,4 +53,7 @@ def test_capability_snapshot_uses_provider_resources_without_legacy_duplicates(t
         ("can", "CAN1"),
         ("power", "PSU1"),
     ]
-    assert {resource.provider_id for resource in snapshot.resources} == {"agent.can", "agent.power"}
+    assert {resource.provider_id for resource in snapshot.resources} == {
+        "com.vector.can-resource",
+        "org.aetp.power-resource",
+    }

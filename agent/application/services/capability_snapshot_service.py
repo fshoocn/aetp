@@ -25,7 +25,7 @@ from aetp_protocol.ids import BusinessId, SessionId, Version, VersionConstraint,
 from aetp_protocol.plugin_types import PluginAvailability, PluginPoint
 from aetp_protocol.plugins import PluginManifest
 
-from agent.application.services.capability_loader import scan_capabilities
+from agent.application.services.capability_loader import scan_base_capabilities, scan_capabilities
 from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.software_discovery import discover_software
 from agent.plugins.v2_registry import AgentV2PluginRegistry
@@ -122,7 +122,9 @@ class AgentCapabilitySnapshotService:
         self._registry = registry
         self._tags = tags
         self._maintenance_state = maintenance_state
-        self._capability_scanner = capability_scanner or scan_capabilities
+        self._capability_scanner = capability_scanner or (
+            scan_base_capabilities if resource_providers is not None else scan_capabilities
+        )
         self._runtime_discoverer = runtime_discoverer or self._legacy_runtimes
         self._software_discoverer = software_discoverer or (lambda _legacy: discover_software())
         self._resource_discoverer = resource_discoverer or self._legacy_resources

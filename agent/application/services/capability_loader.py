@@ -1,4 +1,4 @@
-"""Agent 节点能力自动扫描（P5，§18.5）。
+"""Agent 基础能力兼容适配层（P5，V2 resource 扫描由插件负责）。
 
 Agent 启动时**自动扫描**本机能力并随 ``node.register`` 上报，无需手工维护
 能力 JSON：
@@ -6,10 +6,10 @@ Agent 启动时**自动扫描**本机能力并随 ``node.register`` 上报，无
 - ``system``：自动检测操作系统 / 内存 / CPU（标准库实现，跨平台）；
 - ``language``：自动检测已安装的运行时（python / java / node / dotnet 等，
   通过 ``shutil.which`` 探测可执行文件）；
-- ``serial``：从**串口映射文件**读取「功能名 -> 端口号」映射，然后逐个检查
-  端口当前是否存在（Windows 下 ``os.path.exists("COMx")`` 存在即端口可用）；
-- ``vehicle``：CAN 通道扫描为**占位实现**，由台架侧按需实现
-  （见 :func:`scan_vehicle`）。
+- V2 的 CAN 和串口资源发现不在本模块实现，分别委托
+    ``plugins.resource_providers.vector_can`` 与 ``plugins.resource_providers.serial``；
+- ``scan_capabilities`` 仅作为 V1 兼容入口保留，V2 使用
+    ``scan_base_capabilities`` 加 resource Provider Registry。
 
 串口映射文件示例（``serial_ports.json``）::
 
@@ -25,7 +25,6 @@ Agent 启动时**自动扫描**本机能力并随 ``node.register`` 上报，无
 from __future__ import annotations
 
 import ctypes
-import json
 import logging
 import os
 import platform
@@ -34,17 +33,14 @@ import subprocess
 from pathlib import Path
 
 from aetp_protocol.capabilities import (
-    HardwareChannel,
     LanguageCapability,
     LanguageRuntime,
     NodeCapabilities,
     OperatingSystem,
     SerialCapability,
-    SerialPortCapability,
     SystemCapability,
     VehicleBus,
     VehicleCapability,
-    VehicleVendor,
     Version,
 )
 
@@ -79,6 +75,14 @@ def scan_capabilities(
         language=_scan_language(),
         serial=_scan_serial(serial_map_file),
         vehicle=scan_vehicle(),
+    )
+
+
+def scan_base_capabilities() -> NodeCapabilities:
+    """扫描 V2 核心负责的系统和语言运行时能力。"""
+    return NodeCapabilities(
+        system=_scan_system(),
+        language=_scan_language(),
     )
 
 
@@ -216,64 +220,29 @@ def _is_version_like(token: str) -> bool:
 
 
 def _scan_serial(serial_map_file: str | Path | None) -> SerialCapability | None:
-    """从映射文件读取「功能名 -> 端口号」，并检查端口是否存在。
+    """兼容 V1 能力入口；具体串口扫描由 Agent resource 插件执行。"""
+    from plugins.resource_providers.serial import scan_serial_ports
 
-    映射文件为 JSON 对象：``{"relay_board": "COM20", "psu": "COM30"}``。
-    仅保留当前存在的端口（``os.path.exists``，Windows 下 ``COMx`` 存在即可用）。
-    """
-    path = _resolve_serial_map(serial_map_file)
-    if path is None or not path.exists():
-        if path is not None:
-            logger.warning("串口映射文件不存在，跳过串口能力: %s", path)
-        return None
-
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        logger.exception("串口映射文件解析失败: %s", path)
-        return None
-
-    if not isinstance(raw, dict):
-        logger.warning("串口映射文件格式错误（应为 JSON 对象）: %s", path)
-        return None
-
-    ports: list[SerialPortCapability] = []
-    for function, port in raw.items():
-        if not isinstance(port, str) or not port:
-            continue
-        exists = _port_exists(port)
-        ports.append(SerialPortCapability(function=function, port=port, enabled=exists))
-        if not exists:
-            logger.warning("串口 %s (%s) 当前不存在，已标记为禁用", port, function)
-
-    if not ports:
-        return None
-    return SerialCapability(ports=tuple(ports))
+    return scan_serial_ports(_resolve_serial_map(serial_map_file))
 
 
 def _resolve_serial_map(serial_map_file: str | Path | None) -> Path | None:
-    """解析串口映射文件路径；未指定时尝试 Agent 运行目录下的默认文件名。"""
+    """兼容 V1 能力入口；路径解析委托串口 resource 插件。"""
+    from plugins.resource_providers.serial import resolve_serial_map
+
     if serial_map_file:
         return Path(serial_map_file)
-    # 未指定：尝试 Agent 运行目录下的默认文件
     from agent.config import runtime_dir
 
     candidate = runtime_dir() / DEFAULT_SERIAL_MAP_FILE
-    return candidate if candidate.exists() else None
+    return resolve_serial_map(candidate)
 
 
 def _port_exists(port: str) -> bool:
-    """检查串口端口当前是否存在。
+    """兼容 V1 能力入口；端口存在性由串口 resource 插件执行。"""
+    from plugins.resource_providers.serial import port_exists_on_host
 
-    Windows 下 ``os.path.exists("COM20")`` 在端口存在时返回 True；
-    POSIX 下检查 ``/dev/`` 设备节点。
-    """
-    try:
-        if os.name == "nt":
-            return os.path.exists(port) or os.path.exists(f"\\\\.\\{port}")
-        return os.path.exists(port)
-    except Exception:  # noqa: BLE001
-        return False
+    return port_exists_on_host(port)
 
 
 # ---------------------------------------------------------------------------
@@ -282,93 +251,24 @@ def _port_exists(port: str) -> bool:
 
 
 def scan_vehicle() -> VehicleCapability | None:
-    """扫描车载硬件能力（Vector CAN/LIN/FlexRay/Ethernet 通道）。
+    """兼容 V1 能力入口；具体车载扫描由 Vector resource 插件执行。"""
+    from plugins.resource_providers.vector_can import scan_vector_vehicle
 
-    通过 ``py-canoe`` 的 ``VxlDriver`` 读取 Vector XL 驱动发现的硬件设备与
-    通道，映射为强类型能力树 ``VehicleCapability -> VehicleVendor -> VehicleBus
-    -> HardwareChannel``（§18.5）。
-
-    - 厂商名固定为 ``vector``（py-canoe 仅支持 Vector 硬件）；
-    - 总线类型由通道的 ``can``/``lin``/``flexray``/``ethernet`` 能力位判定；
-    - 通道名由「设备名 + 通道名」组成（如 ``Virtual Channel 1``），
-      ``hardware_model`` 填设备型号（如 ``VN1640``）。
-
-    扫描失败（py-canoe 未安装 / XL 驱动未就绪 / 无硬件）返回 ``None``，
-    不阻塞 Agent 启动（与 system/language/serial 扫描一致）。
-    """
-    try:
-        from py_canoe.helpers.vxlapi import VxlDriver
-    except Exception:  # noqa: BLE001 - py-canoe 未安装则无车载能力
-        logger.warning("py-canoe 未安装，跳过车载能力扫描")
-        return None
-
-    try:
-        devices = VxlDriver().get_devices()
-    except Exception:  # noqa: BLE001 - XL 驱动未就绪/无硬件
-        logger.warning("Vector XL 驱动扫描失败，跳过车载能力")
-        return None
-
-    buses = _group_buses_by_type(devices)
-    if not buses:
-        return None
-    return VehicleCapability(
-        vendors=(
-            VehicleVendor(name="vector", buses=tuple(buses)),
-        )
-    )
-
-
-# 通道能力位 -> 总线类型（与 py-canoe XlBusType 对应，§18.5）
-_BUS_TYPE_ATTRS: tuple[tuple[str, str], ...] = (
-    ("can", "can"),
-    ("lin", "lin"),
-    ("flexray", "flexray"),
-    ("ethernet", "ethernet"),
-)
+    return scan_vector_vehicle()
 
 
 def _group_buses_by_type(devices: list) -> list[VehicleBus]:
-    """把 Vector 硬件通道按总线类型分组，返回 ``VehicleBus`` 列表。
+    """兼容 V1 测试入口；分组逻辑由 Vector resource 插件执行。"""
+    from plugins.resource_providers.vector_can import group_buses_by_type
 
-    一个设备可能提供多个总线类型的通道；按总线类型聚合。通道名由「设备名 +
-    通道名」组成（如 ``Virtual Channel 1``），可直接看出通道归属设备；
-    ``hardware_model`` 记录设备型号（如 ``VN1640``）。
-    """
-    by_type: dict[str, list[HardwareChannel]] = {}
-    for device in devices:
-        model = getattr(device, "name", None) or None
-        for channel in getattr(device, "channels", []):
-            for bus_type, attr in _BUS_TYPE_ATTRS:
-                if getattr(channel, attr, False):
-                    by_type.setdefault(bus_type, []).append(
-                        HardwareChannel(
-                            name=_channel_name(device, channel),
-                            hardware_model=model,
-                            enabled=True,
-                        )
-                    )
-    buses: list[VehicleBus] = []
-    for bus_type in ("can", "lin", "flexray", "ethernet"):
-        channels = by_type.get(bus_type)
-        if not channels:
-            continue
-        buses.append(VehicleBus(bus_type=bus_type, channels=tuple(channels)))
-    return buses
+    return group_buses_by_type(devices)
 
 
 def _channel_name(device, channel) -> str:
-    """用「设备名 + 通道名」组成通道名（如 ``Virtual Channel 1``）。
+    """兼容 V1 测试入口；通道命名由 Vector resource 插件执行。"""
+    from plugins.resource_providers.vector_can import channel_name
 
-    py-canoe 的 ``ChannelInfo.name`` 已包含设备名前缀（XL 驱动返回的完整
-    通道名），直接使用即可保证唯一；通道名缺失时回退到硬件通道号拼接。
-    """
-    device_name = getattr(device, "name", "") or ""
-    channel_name = getattr(channel, "name", "") or ""
-    if channel_name:
-        return channel_name
-    if device_name:
-        return f"{device_name} {getattr(channel, 'hw_channel', 0)}"
-    return f"ch{getattr(channel, 'hw_channel', 0)}"
+    return channel_name(device, channel)
 
 
 # ---------------------------------------------------------------------------
@@ -383,40 +283,10 @@ def _device_fingerprint(serial_map_file: str | Path | None) -> tuple:
     system / language 是安装状态，运行中不变，不参与指纹。指纹未变时
     复用缓存能力，避免每次全量扫描（尤其 language 的多次 subprocess）。
     """
-    serial_ports: list[tuple[str, str, bool]] = []
-    path = _resolve_serial_map(serial_map_file)
-    if path is not None and path.exists():
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                for function, port in raw.items():
-                    if isinstance(port, str) and port:
-                        serial_ports.append(
-                            (function, port, _port_exists(port))
-                        )
-        except Exception:  # noqa: BLE001 - 指纹失败视为无串口
-            serial_ports = []
+    from plugins.resource_providers.serial import serial_fingerprint
+    from plugins.resource_providers.vector_can import can_fingerprint
 
-    vehicle_channels: list[tuple[str, str, str]] = []
-    try:
-        from py_canoe.helpers.vxlapi import VxlDriver
-
-        devices = VxlDriver().get_devices()
-    except Exception:  # noqa: BLE001 - py-canoe 未安装/无硬件
-        devices = []
-    for device in devices:
-        for channel in getattr(device, "channels", []):
-            for bus_type, attr in _BUS_TYPE_ATTRS:
-                if getattr(channel, attr, False):
-                    vehicle_channels.append(
-                        (
-                            bus_type,
-                            _channel_name(device, channel),
-                            getattr(device, "name", "") or "",
-                        )
-                    )
-
-    return (tuple(serial_ports), tuple(vehicle_channels))
+    return (serial_fingerprint(serial_map_file), can_fingerprint())
 
 
 class CapabilityCache:

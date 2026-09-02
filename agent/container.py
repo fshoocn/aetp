@@ -19,12 +19,7 @@ from agent.application.services.artifact_upload_service import ArtifactUploadSer
 from agent.application.services.capability_loader import CapabilityCache
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
-from agent.application.services.resource_provider import (
-    CanResourceProvider,
-    PowerResourceProvider,
-    ResourceProviderRegistry,
-    SerialResourceProvider,
-)
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_executor_resolver import V2ExecutorResolver
@@ -34,6 +29,7 @@ from agent.plugins.registry import create_default_registry
 from agent.plugins.v2_installer import V2PluginInstaller
 from agent.plugins.v2_registry import AgentV2PluginRegistry
 from common.transport import Transport
+from plugins.resource_providers import PowerResourceProvider, SerialResourceProvider, VectorCanResourceProvider
 
 
 def _build_v2_capability_publisher(
@@ -60,7 +56,7 @@ def _build_v2_capability_publisher(
 def _build_resource_provider_registry(settings: AgentSettings) -> ResourceProviderRegistry:
     return ResourceProviderRegistry(
         (
-            CanResourceProvider(),
+            VectorCanResourceProvider(),
             SerialResourceProvider(settings.serial_map_file),
             PowerResourceProvider(),
         )

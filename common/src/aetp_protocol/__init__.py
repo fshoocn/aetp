@@ -201,6 +201,12 @@ from .plugins import (
     PluginSyncResult,
     StaticRequirements,
 )
+from .resource import (
+    ResourceActivationError,
+    ResourceDiscoveryError,
+    ResourceProvider,
+    ResourceProviderError,
+)
 from .task import RunScriptSnapshot, RunSnapshot, ScriptDefinition, TaskScriptRef, TestRun, TestTask
 from .topics import (
     TopicInfo,
@@ -300,7 +306,11 @@ __all__ = [
     "OperatingSystemRequirement",
     "PhysicalDeviceCapability",
     "ResourceBinding",
+    "ResourceActivationError",
     "ResourceCapability",
+    "ResourceDiscoveryError",
+    "ResourceProvider",
+    "ResourceProviderError",
     "ResourceHealth",
     "ResourceInfo",
     "ResourceRequirement",

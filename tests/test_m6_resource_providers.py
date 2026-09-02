@@ -10,13 +10,13 @@ import pytest
 from aetp_protocol.capabilities import ResourceCapability, ResourceHealth
 from aetp_protocol.execution import PlanResourceBinding
 from aetp_protocol.ids import BusinessId, stable_id
+from aetp_protocol.resource import ResourceActivationError
 
-from agent.application.services.resource_provider import (
-    CanResourceProvider,
+from agent.application.services.resource_provider import ResourceProviderRegistry
+from plugins.resource_providers import (
     PowerResourceProvider,
-    ResourceActivationError,
-    ResourceProviderRegistry,
     SerialResourceProvider,
+    VectorCanResourceProvider,
 )
 
 
@@ -34,7 +34,7 @@ def _binding(resource_id: BusinessId, resource_type: str, *, labels: dict[str, s
 def test_registry_discovers_can_and_power_from_provider_adapters(tmp_path: Path) -> None:
     can_resource = ResourceCapability(
         resource_id=stable_id("can:CAN1"),
-        provider_id="agent.can",
+        provider_id="com.vector.can-resource",
         resource_type="can",
         channel="CAN1",
         vendor="vector",
@@ -45,7 +45,7 @@ def test_registry_discovers_can_and_power_from_provider_adapters(tmp_path: Path)
     )
     power_resource = ResourceCapability(
         resource_id=stable_id("power:PSU1"),
-        provider_id="agent.power",
+        provider_id="org.aetp.power-resource",
         resource_type="power",
         channel="PSU1",
         function="bench_supply",
@@ -53,7 +53,7 @@ def test_registry_discovers_can_and_power_from_provider_adapters(tmp_path: Path)
     )
     registry = ResourceProviderRegistry(
         (
-            CanResourceProvider(discoverer=lambda: (can_resource,)),
+            VectorCanResourceProvider(discoverer=lambda: (can_resource,)),
             PowerResourceProvider(resources=(power_resource,)),
         )
     )
@@ -93,18 +93,18 @@ def test_serial_provider_marks_missing_port_unavailable_and_rechecks_activation(
 def test_provider_rejects_unavailable_resource_and_label_mismatch(tmp_path: Path) -> None:
     resource = ResourceCapability(
         resource_id=stable_id("can:CAN2"),
-        provider_id="agent.can",
+        provider_id="com.vector.can-resource",
         resource_type="can",
         channel="CAN2",
         labels={"bus": "test"},
         health=ResourceHealth.UNAVAILABLE,
     )
-    provider = CanResourceProvider(resources=(resource,))
+    provider = VectorCanResourceProvider(resources=(resource,))
 
     with pytest.raises(ResourceActivationError, match="资源不可用"):
         asyncio.run(provider.activate(_binding(resource.resource_id, "can")))
 
-    ready_provider = CanResourceProvider(
+    ready_provider = VectorCanResourceProvider(
         resources=(resource.model_copy(update={"health": ResourceHealth.READY}),)
     )
     with pytest.raises(ResourceActivationError, match="资源标签不匹配"):
