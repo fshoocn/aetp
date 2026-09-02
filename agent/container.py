@@ -19,7 +19,12 @@ from agent.application.services.artifact_upload_service import ArtifactUploadSer
 from agent.application.services.capability_loader import CapabilityCache
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
-from agent.application.services.resource_provider import ResourceProviderRegistry
+from agent.application.services.resource_provider import (
+    CanResourceProvider,
+    PowerResourceProvider,
+    ResourceProviderRegistry,
+    SerialResourceProvider,
+)
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_executor_resolver import V2ExecutorResolver
@@ -35,6 +40,7 @@ def _build_v2_capability_publisher(
     transport: Transport,
     settings: AgentSettings,
     registry: AgentV2PluginRegistry,
+    resource_providers: ResourceProviderRegistry,
 ) -> AgentV2CapabilityPublisher | None:
     """仅为 V2 合法 BusinessId Agent 装配快照发布器。"""
     from aetp_protocol.ids import BusinessId
@@ -43,7 +49,22 @@ def _build_v2_capability_publisher(
         BusinessId(settings.node_id)
     except ValueError:
         return None
-    return AgentV2CapabilityPublisher(transport, settings, registry)
+    return AgentV2CapabilityPublisher(
+        transport,
+        settings,
+        registry,
+        resource_providers=resource_providers,
+    )
+
+
+def _build_resource_provider_registry(settings: AgentSettings) -> ResourceProviderRegistry:
+    return ResourceProviderRegistry(
+        (
+            CanResourceProvider(),
+            SerialResourceProvider(settings.serial_map_file),
+            PowerResourceProvider(),
+        )
+    )
 
 
 class Container(containers.DeclarativeContainer):
@@ -90,13 +111,17 @@ class Container(containers.DeclarativeContainer):
         V2PluginInstaller,
         root=providers.Callable(lambda: get_settings().plugin_dir),
     )
+    resource_provider_registry = providers.Singleton(
+        _build_resource_provider_registry,
+        settings=settings,
+    )
     v2_capability_publisher = providers.Factory(
         _build_v2_capability_publisher,
         transport=transport,
         settings=settings,
         registry=v2_plugin_registry,
+        resource_providers=resource_provider_registry,
     )
-    resource_provider_registry = providers.Singleton(ResourceProviderRegistry)
 
     # 脚本下载/缓存单例（P5.6：下载 + sha256 校验 + 按 hash 本地缓存）
     script_cache = providers.Singleton(

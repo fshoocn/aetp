@@ -26,6 +26,7 @@ from aetp_protocol.plugin_types import PluginAvailability, PluginPoint
 from aetp_protocol.plugins import PluginManifest
 
 from agent.application.services.capability_loader import scan_capabilities
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.software_discovery import discover_software
 from agent.plugins.v2_registry import AgentV2PluginRegistry
 
@@ -111,6 +112,7 @@ class AgentCapabilitySnapshotService:
         runtime_discoverer: Callable[[NodeCapabilities], tuple[RuntimeCapability, ...]] | None = None,
         software_discoverer: Callable[[NodeCapabilities], tuple[SoftwareCapability, ...]] | None = None,
         resource_discoverer: Callable[[NodeCapabilities], tuple[ResourceCapability, ...]] | None = None,
+        resource_providers: ResourceProviderRegistry | None = None,
         health_checker: Callable[[PluginManifest], tuple[ErrorCode, ...]] | None = None,
         revision_cache: CapabilityRevisionCache | None = None,
         now: Callable[[], datetime] | None = None,
@@ -124,6 +126,7 @@ class AgentCapabilitySnapshotService:
         self._runtime_discoverer = runtime_discoverer or self._legacy_runtimes
         self._software_discoverer = software_discoverer or (lambda _legacy: discover_software())
         self._resource_discoverer = resource_discoverer or self._legacy_resources
+        self._resource_providers = resource_providers
         self._health_checker = health_checker
         self._revision_cache = revision_cache or CapabilityRevisionCache()
         self._now = now or (lambda: datetime.now(UTC))
@@ -138,7 +141,17 @@ class AgentCapabilitySnapshotService:
 
         runtimes = self._runtime_discoverer(legacy)
         software = self._software_discoverer(legacy)
-        resources = self._resource_discoverer(legacy)
+        legacy_resources = self._resource_discoverer(legacy)
+        if self._resource_providers is None:
+            resources = legacy_resources
+        else:
+            discovered_resources = self._resource_providers.discover()
+            provider_types = self._resource_providers.resource_types
+            resources = discovered_resources + tuple(
+                resource
+                for resource in legacy_resources
+                if resource.resource_type not in provider_types
+            )
         inventory: list[PluginInventoryItem] = []
         executors: list[ExecutorCapability] = []
         checked_at = self._now()

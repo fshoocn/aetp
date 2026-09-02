@@ -54,6 +54,7 @@ from agent.application.services.capability_snapshot_service import (
     AgentCapabilitySnapshotService,
     CapabilityRevisionCache,
 )
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.config import AgentSettings
 from agent.domain.ledger import Ledger
 from agent.plugins.v2_registry import AgentV2PluginRegistry
@@ -76,6 +77,7 @@ class AgentV2CapabilityPublisher:
         mqtt_info: Callable[[], MqttConnectionInfo] | None = None,
         agent_version: SemVer | None = None,
         started_at: datetime | None = None,
+        resource_providers: ResourceProviderRegistry | None = None,
     ) -> None:
         self._transport = transport
         self._settings = settings
@@ -87,6 +89,7 @@ class AgentV2CapabilityPublisher:
         self._mqtt_info = mqtt_info or self._default_mqtt_info
         self._agent_version = agent_version or SemVer("2.0.0")
         self._started_at = started_at or datetime.now(UTC)
+        self._resource_providers = resource_providers
         self._revision_cache = CapabilityRevisionCache()
         self._maintenance_state = AgentMaintenanceState.IDLE
         self._v2_registered = False
@@ -409,6 +412,7 @@ class AgentV2CapabilityPublisher:
             tags=self._tags,
             maintenance_state=self._maintenance_state,
             capability_scanner=self._capability_scanner,
+            resource_providers=self._resource_providers,
             revision_cache=self._revision_cache,
         )
         return service.build_snapshot()
