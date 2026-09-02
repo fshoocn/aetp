@@ -16,6 +16,11 @@ import type {
   V2CapabilitySnapshotView,
   V2DiagnosticsSnapshotView,
   V2DiagnosticsCollectResponse,
+  V2AgentLogView,
+  V2RemoteOperation,
+  V2PluginSyncView,
+  V2LogLevelUpdateRequest,
+  V2MaintenanceRequest,
   Node,
   NotificationEndpointOut,
   Project,
@@ -221,6 +226,34 @@ export const aetpApi = {
     },
     v2CollectDiagnostics(nodeId: string) {
       return api.post<V2DiagnosticsCollectResponse>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/diagnostics/collect`);
+    },
+    v2Logs(nodeId: string, params: { afterSequence?: number; limit?: number; level?: string; component?: string; keyword?: string } = {}) {
+      const query = new URLSearchParams();
+      if (params.afterSequence !== undefined) query.set("after_sequence", String(params.afterSequence));
+      if (params.limit !== undefined) query.set("limit", String(params.limit));
+      if (params.level) query.set("level", params.level);
+      if (params.component) query.set("component", params.component);
+      if (params.keyword) query.set("keyword", params.keyword);
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      return api.get<V2AgentLogView[]>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/logs${suffix}`);
+    },
+    v2MaintenanceOperations(nodeId: string, limit = 50) {
+      return api.get<V2RemoteOperation[]>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/maintenance/operations?limit=${limit}`);
+    },
+    v2MaintenanceOperation(nodeId: string, operationId: string) {
+      return api.get<V2RemoteOperation>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/maintenance/operations/${encodeURIComponent(operationId)}`);
+    },
+    v2SetLogLevel(nodeId: string, body: V2LogLevelUpdateRequest) {
+      return api.post<V2RemoteOperation>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/log-level`, body);
+    },
+    v2Drain(nodeId: string, body: V2MaintenanceRequest = {}) {
+      return api.post<V2RemoteOperation>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/maintenance/drain`, body);
+    },
+    v2Restart(nodeId: string, body: V2MaintenanceRequest = {}) {
+      return api.post<V2RemoteOperation>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/maintenance/restart`, body);
+    },
+    v2PluginSync(nodeId: string, body: { items: unknown[]; drain_timeout_s?: number; restart_after?: boolean }) {
+      return api.post<V2PluginSyncView>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/maintenance/sync`, body);
     },
   },
 

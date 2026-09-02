@@ -644,6 +644,57 @@ export interface V2DiagnosticsCollectResponse {
   status: "pending";
 }
 
+export type V2RemoteOperationKind = "diagnostics" | "plugin_sync" | "log_level" | "drain" | "restart";
+export type V2RemoteOperationStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface V2RemoteOperation {
+  operation_id: string;
+  node_id: string;
+  kind: V2RemoteOperationKind;
+  status: V2RemoteOperationStatus;
+  expected_session_id: string | null;
+  request: Record<string, unknown>;
+  error_code: string | null;
+  message: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface V2PluginSyncView {
+  sync_id: string;
+  node_id: string;
+  expected_session_id: string;
+  state: "pending" | "draining" | "installing" | "restarting" | "succeeded" | "failed" | "cancelled";
+  items: Array<Record<string, unknown>>;
+  results: Array<Record<string, unknown>> | null;
+  accepted: boolean | null;
+  restart_required: boolean;
+  completed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface V2AgentLogView {
+  node_id: string;
+  session_id: string;
+  sequence: number;
+  event: V2LogEvent;
+  batch_first_sequence: number;
+  received_at: string;
+}
+
+export interface V2LogLevelUpdateRequest {
+  component: string;
+  plugin_id?: string | null;
+  level: "debug" | "info" | "warn" | "error";
+  expires_at?: string | null;
+}
+
+export interface V2MaintenanceRequest {
+  drain_timeout_s?: number;
+  reason?: string;
+}
+
 export interface TaskTypeConfigContext {
   project_id: string;
   task_type: string;

@@ -28,7 +28,37 @@ export function connectEvents(
   onError?: (error: Error) => void,
   onOpen?: () => void
 ): () => void {
-  if (!localStorage.getItem("token") || !projectId) return () => {};
+  if (!projectId) return () => {};
+  return connectSse(
+    `${BASE}/api/v1/events?project_id=${encodeURIComponent(projectId)}`,
+    onEvent,
+    onError,
+    onOpen,
+  );
+}
+
+export function connectAgentLogs(
+  nodeId: string,
+  onEvent: (ev: DomainEvent) => void,
+  onError?: (error: Error) => void,
+  onOpen?: () => void,
+): () => void {
+  if (!nodeId) return () => {};
+  return connectSse(
+    `${BASE}/api/v2/nodes/${encodeURIComponent(nodeId)}/logs/stream`,
+    onEvent,
+    onError,
+    onOpen,
+  );
+}
+
+function connectSse(
+  url: string,
+  onEvent: (ev: DomainEvent) => void,
+  onError?: (error: Error) => void,
+  onOpen?: () => void,
+): () => void {
+  if (!localStorage.getItem("token")) return () => {};
 
   let stopped = false;
   let controller: AbortController | null = null;
@@ -46,13 +76,7 @@ export function connectEvents(
         Authorization: `Bearer ${token}`,
       };
       if (lastEventId) headers["Last-Event-ID"] = lastEventId;
-      const resp = await fetch(
-        `${BASE}/api/v1/events?project_id=${encodeURIComponent(projectId)}`,
-        {
-          headers,
-          signal: controller.signal,
-        }
-      );
+      const resp = await fetch(url, { headers, signal: controller.signal });
       if (resp.status === 401) {
         if (await refreshAccessToken()) return connect();
         clearSession();
