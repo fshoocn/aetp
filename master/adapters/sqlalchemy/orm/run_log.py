@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 class RunLog(Base, TimestampMixin):
     __tablename__ = "run_logs"
     __table_args__ = (
-        UniqueConstraint("run_pk", "sequence", name="uq_run_logs_run_sequence"),
+        UniqueConstraint("run_pk", "attempt_id", "sequence", name="uq_run_logs_run_attempt_sequence"),
         Index("ix_run_logs_run_sequence", "run_pk", "sequence"),
         CheckConstraint(
             "level IN ('debug','info','warn','error')",
@@ -47,6 +47,10 @@ class RunLog(Base, TimestampMixin):
     shard_pk: Mapped[int | None] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True)
     # sym:node_id 产生日志的 Agent 节点业务 ID（无 FK 保留业务键）
     node_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    # sym:attempt_id V2 日志所属 Attempt；V1 日志使用空字符串
+    attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    # sym:plan_id V2 日志所属 Plan；V1 日志为空
+    plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:sequence Run 内单调递增序号；(run_pk, sequence) 唯一
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     # sym:level 日志等级（debug/info/warn/error）

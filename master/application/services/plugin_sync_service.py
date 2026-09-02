@@ -182,6 +182,72 @@ class PluginSyncService:
         with self._uow_factory() as uow:
             uow.agent_plugin_desired_versions.remove(node_id, plugin_id)
 
+    def set_desired_version_for_nodes(
+        self,
+        node_ids: tuple[BusinessId, ...],
+        desired: DesiredPluginVersion,
+    ) -> tuple[AgentPluginDesiredVersionRecord, ...]:
+        """为指定节点集合原子设置同一版本期望。"""
+        now = datetime.now(UTC)
+        with self._uow_factory() as uow:
+            self._validate_desired_plugin(uow, desired)
+            records: list[AgentPluginDesiredVersionRecord] = []
+            unique_nodes = {node_id.root: node_id for node_id in node_ids}
+            for node_id in unique_nodes.values():
+                node = uow.nodes.get_by_id(node_id.root)
+                if node is None:
+                    raise KeyError(f"节点不存在: {node_id.root}")
+                records.append(
+                    uow.agent_plugin_desired_versions.upsert(
+                        AgentPluginDesiredVersionRecord(
+                            id=None,
+                            node_id=node_id,
+                            desired=desired,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                )
+            return tuple(records)
+
+    def set_desired_version_for_tag(
+        self,
+        tag: str,
+        desired: DesiredPluginVersion,
+    ) -> tuple[AgentPluginDesiredVersionRecord, ...]:
+        """按节点标签选择目标节点并原子设置版本期望。"""
+        normalized_tag = tag.strip()
+        if not normalized_tag:
+            raise ValueError("节点组标签不能为空")
+        with self._uow_factory() as uow:
+            self._validate_desired_plugin(uow, desired)
+            nodes = tuple(
+                node
+                for node in uow.nodes.list_all()
+                if normalized_tag in node.tags
+            )
+            now = datetime.now(UTC)
+            return tuple(
+                uow.agent_plugin_desired_versions.upsert(
+                    AgentPluginDesiredVersionRecord(
+                        id=None,
+                        node_id=BusinessId(node.node_id),
+                        desired=desired,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                for node in nodes
+            )
+
+    @staticmethod
+    def _validate_desired_plugin(uow: UnitOfWork, desired: DesiredPluginVersion) -> None:
+        plugin = uow.plugin_versions.get(desired.plugin_id, desired.version)
+        if plugin is None or plugin.status is PluginStatus.REMOVED:
+            raise ValueError("期望插件版本不存在或已移除")
+        if plugin.point is not desired.point:
+            raise ValueError("期望插件 point 与插件版本不一致")
+
     def create_sync_operation(
         self,
         request: PluginSyncRequest,
@@ -315,6 +381,8 @@ class PluginSyncService:
             plugin = uow.plugin_versions.get(item.plugin_id, item.version)
             if plugin is None or plugin.status is PluginStatus.REMOVED:
                 raise ValueError(f"同步插件版本不可用: {item.plugin_id.root}@{item.version.root}")
+            if plugin.point is not item.point:
+                raise ValueError("同步插件 point 与 Master 记录不一致")
             if plugin.archive_sha256 != item.package.archive_sha256:
                 raise ValueError("同步包 SHA-256 与 Master 记录不一致")
 

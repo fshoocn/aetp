@@ -16,6 +16,7 @@ from .execution import ExecutionPlan, ExecutionRequirement, ExecutionResult, Res
 from .payloads import V2_PAYLOAD_MODELS
 from .plugin_types import DesiredPluginVersion, PluginRef
 from .plugins import PluginManifest
+from .task import RunScriptSnapshot, RunSnapshot, ScriptDefinition, TaskScriptRef, TestRun, TestTask
 from .v2_envelope import V2Envelope
 
 SchemaModel: TypeAlias = type[BaseModel]
@@ -38,6 +39,12 @@ V2_SCHEMA_MODELS: Mapping[str, SchemaModel] = {
     "authorization_request": AuthorizationRequest,
     "authorization_decision": AuthorizationDecision,
     "project_scope": ProjectScope,
+    "script_definition": ScriptDefinition,
+    "task_script_ref": TaskScriptRef,
+    "test_task": TestTask,
+    "run_script_snapshot": RunScriptSnapshot,
+    "run_snapshot": RunSnapshot,
+    "test_run": TestRun,
 }
 
 V2_PAYLOAD_SCHEMAS: Mapping[str, SchemaModel] = {

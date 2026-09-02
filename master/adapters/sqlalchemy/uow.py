@@ -47,6 +47,7 @@ from master.adapters.sqlalchemy.repositories import (
     RunResultRepositoryImpl,
     RunShardRepositoryImpl,
     ScriptCaseRepositoryImpl,
+    ScriptDefinitionRepositoryImpl,
     SecretValueRepositoryImpl,
     ShardAttemptRepositoryImpl,
     TaskRunRepositoryImpl,
@@ -54,6 +55,7 @@ from master.adapters.sqlalchemy.repositories import (
     TestScriptRepositoryImpl,
     TestTaskRepositoryImpl,
     UserRepositoryImpl,
+    V2TestTaskRepositoryImpl,
 )
 from master.domain.repositories import UnitOfWork
 
@@ -72,6 +74,8 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.script_cases = ScriptCaseRepositoryImpl(session)
         self.secret_values = SecretValueRepositoryImpl(session)
         self.test_tasks = TestTaskRepositoryImpl(session)
+        self.script_definitions = ScriptDefinitionRepositoryImpl(session)
+        self.v2_test_tasks = V2TestTaskRepositoryImpl(session)
         self.task_runs = TaskRunRepositoryImpl(session)
         self.run_shards = RunShardRepositoryImpl(session)
         self.shard_attempts = ShardAttemptRepositoryImpl(session)

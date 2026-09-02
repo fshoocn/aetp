@@ -20,10 +20,14 @@ def _to_domain(orm: RunArtifactORM) -> RunArtifact:
         run_id=orm.run.run_id if orm.run is not None else "",
         shard_id=orm.shard.shard_id if orm.shard is not None else None,
         node_id=orm.node_id,
+        attempt_id=orm.attempt_id,
         kind=ArtifactKind(orm.kind),
         file_ref=orm.file_ref,
+        filename=orm.filename,
+        content_type=orm.content_type,
         size=orm.size,
         sha256=orm.sha256,
+        derived_from=orm.derived_from,
         uploaded_at=orm.uploaded_at,
         created_at=orm.created_at,
     )
@@ -44,15 +48,24 @@ class RunArtifactRepositoryImpl(RunArtifactRepository):
             ).scalar_one_or_none()
             if shard_pk is None:
                 raise ValueError(f"Shard 不存在: {artifact.shard_id}")
+            shard_run_pk = self._s.execute(
+                select(RunShardORM.run_pk).where(RunShardORM.id == shard_pk)
+            ).scalar_one_or_none()
+            if shard_run_pk != run_pk:
+                raise ValueError("产物 Shard 不属于指定 Run")
         orm = RunArtifactORM(
             artifact_id=artifact.artifact_id,
             run_pk=run_pk,
             shard_pk=shard_pk,
             node_id=artifact.node_id,
+            attempt_id=artifact.attempt_id,
             kind=artifact.kind.value,
             file_ref=artifact.file_ref,
+            filename=artifact.filename,
+            content_type=artifact.content_type,
             size=artifact.size,
             sha256=artifact.sha256,
+            derived_from=artifact.derived_from,
             uploaded_at=artifact.uploaded_at,
         )
         self._s.add(orm)
@@ -69,6 +82,21 @@ class RunArtifactRepositoryImpl(RunArtifactRepository):
                     joinedload(RunArtifactORM.shard),
                 )
                 .where(RunArtifactORM.artifact_id == artifact_id)
+            )
+            .scalars()
+            .one_or_none()
+        )
+        return _to_domain(orm) if orm is not None else None
+
+    def get_by_file_ref(self, file_ref: str) -> RunArtifact | None:
+        orm = (
+            self._s.execute(
+                select(RunArtifactORM)
+                .options(
+                    joinedload(RunArtifactORM.run),
+                    joinedload(RunArtifactORM.shard),
+                )
+                .where(RunArtifactORM.file_ref == file_ref)
             )
             .scalars()
             .one_or_none()

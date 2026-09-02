@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "id": "org.pytest.executor",
+  "version": "2.0.0",
+  "api_version": "2.0.0",
+  "point": "executor",
+  "display_name": "pytest V2 执行器",
+  "entrypoints": {
+    "master": "v2_executor:create_executor",
+    "agent": "v2_executor:create_executor"
+  },
+  "capabilities": [
+    "test.execute",
+    "test.case-results",
+    "test.junit-report"
+  ],
+  "static_requirements": {
+    "runtimes": [
+      {
+        "runtime_type": "python"
+      }
+    ],
+    "software": [],
+    "resources": []
+  }
+}

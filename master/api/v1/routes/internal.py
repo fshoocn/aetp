@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 
 from master.api.v1.dependencies import (
     ArtifactServiceDep,
+    ArtifactUploadSigningServiceDep,
     PluginDownloadServiceDep,
     PluginManagerDep,
     ScriptDownloadServiceDep,
@@ -168,13 +169,30 @@ async def upload_artifact(
     kind: str,
     file: UploadFile,
     artifact_service: ArtifactServiceDep,
+    signing_service: ArtifactUploadSigningServiceDep,
+    expires: int,
+    signature: str,
     shard_id: str | None = None,
+    attempt_id: str | None = None,
 ) -> dict:
     """Agent 上传结束产物（报告/日志归档/数据），写 run_artifacts。
 
     §7.4 内部端点：仅 Agent 服务身份调用（不走用户 JWT）。kind 由调用方
     声明（report/log_archive/data），数据内容经 Storage 端口落盘。
     """
+    if not signing_service.verify(
+        run_id,
+        project_id,
+        node_id,
+        shard_id or "",
+        attempt_id,
+        expires,
+        signature,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="签名无效或已过期",
+        )
     if kind not in ("report", "log_archive", "data"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -189,6 +207,8 @@ async def upload_artifact(
         filename=file.filename or "artifact",
         data=data,
         shard_id=shard_id,
+        attempt_id=attempt_id,
+        content_type=file.content_type or "application/octet-stream",
     )
     return {
         "artifact_id": artifact.artifact_id,
@@ -196,4 +216,10 @@ async def upload_artifact(
         "kind": artifact.kind.value,
         "size": artifact.size,
         "sha256": artifact.sha256,
+        "project_id": project_id,
+        "shard_id": artifact.shard_id,
+        "attempt_id": artifact.attempt_id,
+        "filename": artifact.filename,
+        "content_type": artifact.content_type,
+        "derived_from": artifact.derived_from,
     }

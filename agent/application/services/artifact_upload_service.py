@@ -30,15 +30,25 @@ class ArtifactUploadService:
         *,
         kind: str,
         filename: str | None = None,
+        max_attempts: int = 3,
     ) -> dict:
         """异步上传单个文件并返回 Master 创建的 artifact 引用。"""
-        return await asyncio.to_thread(
-            self._upload_sync,
-            url,
-            Path(path),
-            kind,
-            filename,
-        )
+        if max_attempts < 1:
+            raise ValueError("max_attempts 必须大于 0")
+        for attempt in range(max_attempts):
+            try:
+                return await asyncio.to_thread(
+                    self._upload_sync,
+                    url,
+                    Path(path),
+                    kind,
+                    filename,
+                )
+            except ArtifactUploadError:
+                if attempt + 1 >= max_attempts:
+                    raise
+                await asyncio.sleep(min(2**attempt, 5))
+        raise AssertionError("unreachable")
 
     @staticmethod
     def _upload_sync(

@@ -18,6 +18,7 @@ from agent.application.services.artifact_upload_service import ArtifactUploadSer
 from agent.application.services.capability_loader import CapabilityCache
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.registration_service import RegistrationService
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_executor_resolver import V2ExecutorResolver
@@ -94,6 +95,7 @@ class Container(containers.DeclarativeContainer):
         settings=settings,
         registry=v2_plugin_registry,
     )
+    resource_provider_registry = providers.Singleton(ResourceProviderRegistry)
 
     # 脚本下载/缓存单例（P5.6：下载 + sha256 校验 + 按 hash 本地缓存）
     script_cache = providers.Singleton(
@@ -149,4 +151,5 @@ class Container(containers.DeclarativeContainer):
         v2_plugin_installer=v2_plugin_installer,
         v2_plugin_registry=v2_plugin_registry,
         v2_executor_resolver=v2_executor_resolver.provided.resolve,
+        resource_providers=resource_provider_registry,
     )

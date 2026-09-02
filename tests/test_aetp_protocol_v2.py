@@ -10,15 +10,28 @@ from aetp_protocol import (
     V2_PROTOCOL_VERSION,
     DesiredPluginVersion,
     ExecutionAck,
+    ExecutionReconcileResult,
     MessagePayloadError,
     NodeCapabilitySnapshot,
     PluginManifest,
+    RunScriptSnapshot,
+    RunSnapshot,
+    ScriptDefinition,
+    TaskScriptRef,
     V2Envelope,
     parse_v2_message,
     parse_v2_topic,
     v2_command_topic,
     v2_event_topic,
 )
+from aetp_protocol import (
+    TestTask as ProtocolTestTask,
+)
+from aetp_protocol.artifacts import CaseSelection, Configuration, ScriptRef
+from aetp_protocol.artifacts import TestCase as ProtocolTestCase
+from aetp_protocol.execution import ExecutionRequirement, PluginRequirement, RetryPolicy, SplitPolicy, TriggerType
+from aetp_protocol.ids import BusinessId, PluginId, SemVer, Sha256, VersionRange
+from aetp_protocol.plugin_types import PluginRef
 from aetp_protocol.schema import generate_v2_schemas
 from pydantic import ValidationError
 
@@ -102,6 +115,14 @@ def test_v2_rejected_ack_requires_error_code() -> None:
         )
 
 
+def test_v2_rejected_reconcile_requires_error_code() -> None:
+    with pytest.raises(ValidationError, match="reconcile result must contain code"):
+        ExecutionReconcileResult(
+            node_id=BusinessId("01J00000000000000000000025"),
+            accepted=False,
+        )
+
+
 def test_v2_topics_are_distinct_and_strict() -> None:
     event = v2_event_topic("01J00000000000000000000000", "execution.progress")
     command = v2_command_topic("01J00000000000000000000000", "execution.plan")
@@ -159,4 +180,105 @@ def test_node_capability_snapshot_rejects_duplicate_plugin_inventory() -> None:
             reported_at="2026-09-01T08:00:00Z",
             maintenance_state="idle",
             plugin_inventory=(item, item),
+        )
+
+
+def _script_definition() -> ScriptDefinition:
+    return ScriptDefinition(
+        script_definition_id=BusinessId("01J00000000000000000000020"),
+        project_id=BusinessId("01J00000000000000000000021"),
+        revision=1,
+        name="smoke",
+        executor=PluginRef(
+            plugin_id=PluginId("org.pytest.executor"),
+            version=SemVer("2.0.0"),
+            archive_sha256=Sha256("a" * 64),
+        ),
+        source=ScriptRef(
+            script_id=BusinessId("01J00000000000000000000022"),
+            version=1,
+            filename="tests.zip",
+            size=10,
+            sha256=Sha256("b" * 64),
+        ),
+        configuration=Configuration(
+            schema_version=1,
+            schema_hash=Sha256("c" * 64),
+            values={},
+        ),
+        cases=(ProtocolTestCase(stable_key="case-a", name="Case A"),),
+    )
+
+
+def test_v2_multiscript_task_and_run_snapshot_contract() -> None:
+    script = _script_definition()
+    binding = TaskScriptRef(
+        binding_id=BusinessId("01J00000000000000000000023"),
+        script_definition_id=script.script_definition_id,
+        script_revision=script.revision,
+        case_selection=CaseSelection(selected_keys=("case-a",)),
+        configuration=script.configuration,
+        split_policy=SplitPolicy(type="none"),
+        order_index=0,
+    )
+    task = ProtocolTestTask(
+        task_id=BusinessId("01J00000000000000000000024"),
+        project_id=script.project_id,
+        revision=1,
+        name="smoke task",
+        scripts=(binding,),
+        retry_policy=RetryPolicy(max_attempts=2),
+    )
+    snapshot = RunSnapshot(
+        task_id=task.task_id,
+        task_revision=task.revision,
+        scripts=(
+            RunScriptSnapshot(
+                binding_id=binding.binding_id,
+                script_definition_id=script.script_definition_id,
+                script_revision=script.revision,
+                executor=script.executor,
+                source=script.source,
+                configuration=script.configuration,
+                requirement=ExecutionRequirement(
+                    executor=PluginRequirement(
+                        plugin_id=script.executor.plugin_id,
+                        version=VersionRange(exact=script.executor.version),
+                    )
+                ),
+                selected_case_keys=("case-a",),
+                split_policy=binding.split_policy,
+            ),
+        ),
+        execution_mode=task.execution_mode,
+        stop_on_failure=task.stop_on_failure,
+        retry_policy=task.retry_policy,
+        node_ids=task.node_ids,
+        trigger_type=TriggerType.MANUAL_WEB,
+    )
+    assert snapshot.scripts[0].source.download_url is None
+
+
+def test_v2_multiscript_contract_rejects_duplicate_binding_and_case() -> None:
+    script_data = _script_definition().model_dump(mode="json")
+    script_data["cases"] = [script_data["cases"][0], script_data["cases"][0]]
+    with pytest.raises(ValidationError, match="case stable_key"):
+        ScriptDefinition.model_validate(script_data)
+
+    binding = TaskScriptRef(
+        binding_id=BusinessId("01J00000000000000000000023"),
+        script_definition_id=BusinessId("01J00000000000000000000020"),
+        script_revision=1,
+        case_selection=CaseSelection(include_all=True),
+        configuration=Configuration(schema_version=1, schema_hash=Sha256("c" * 64), values={}),
+        split_policy=SplitPolicy(type="none"),
+        order_index=0,
+    )
+    with pytest.raises(ValidationError, match="binding_id"):
+        ProtocolTestTask(
+            task_id=BusinessId("01J00000000000000000000024"),
+            project_id=BusinessId("01J00000000000000000000021"),
+            revision=1,
+            name="invalid",
+            scripts=(binding, binding.model_copy(update={"order_index": 1})),
         )

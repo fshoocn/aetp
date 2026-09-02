@@ -314,6 +314,177 @@ export interface V2PluginVersion {
   updated_at: string | null;
 }
 
+export interface V2PluginRef {
+  plugin_id: string;
+  version: string;
+  archive_sha256: string;
+}
+
+export interface V2Configuration {
+  schema_version: number;
+  schema_hash: string;
+  values: Record<string, unknown>;
+}
+
+export interface V2ScriptRef {
+  script_id: string;
+  version: number;
+  filename: string;
+  size: number;
+  sha256: string;
+  download_url: string | null;
+}
+
+export interface V2TestCase {
+  stable_key: string;
+  name: string;
+  parent_path: string;
+  tags: string[];
+  estimated_duration_s: number | null;
+}
+
+export interface V2CaseSelection {
+  selected_keys: string[];
+  include_all: boolean;
+}
+
+export interface V2SplitPolicy {
+  type: "none" | "by_time" | "by_case_count" | "custom";
+  target_count: number | null;
+  target_duration_s: number | null;
+  plugin_id: string | null;
+}
+
+export interface V2VersionConstraint {
+  exact: string | null;
+  minimum: string | null;
+  maximum: string | null;
+}
+
+export interface V2RuntimeRequirement {
+  runtime_type: string;
+  version: V2VersionConstraint | null;
+}
+
+export interface V2SoftwareRequirement {
+  name: string;
+  version: V2VersionConstraint | null;
+  license_required: boolean;
+}
+
+export interface V2ResourceRequirement {
+  resource_type: string;
+  quantity: number;
+  vendor: string | null;
+  model: string | null;
+  properties: Record<string, unknown>;
+  required_labels: Record<string, string>;
+  preferred_labels: Record<string, string>;
+  allow_switching: boolean;
+}
+
+export interface V2ExecutionRequirement {
+  executor: {
+    plugin_id: string;
+    version: V2VersionConstraint;
+  };
+  runtimes: V2RuntimeRequirement[];
+  software: V2SoftwareRequirement[];
+  resources: V2ResourceRequirement[];
+  required_tags: string[];
+}
+
+export interface V2ScriptDefinition {
+  script_definition_id: string;
+  project_id: string;
+  revision: number;
+  name: string;
+  executor: V2PluginRef;
+  source: V2ScriptRef;
+  configuration: V2Configuration;
+  cases: V2TestCase[];
+  requirement: V2ExecutionRequirement | null;
+  enabled: boolean;
+}
+
+export interface V2TaskScriptRef {
+  binding_id: string;
+  script_definition_id: string;
+  script_revision: number;
+  case_selection: V2CaseSelection;
+  configuration: V2Configuration;
+  split_policy: V2SplitPolicy;
+  order_index: number;
+  enabled: boolean;
+}
+
+export interface V2RetryPolicy {
+  max_attempts: number;
+  failover_nodes: boolean;
+  retry_failed_cases: boolean;
+  backoff_initial_s: number;
+  backoff_max_s: number;
+}
+
+export interface V2TestTask {
+  task_id: string;
+  project_id: string;
+  revision: number;
+  name: string;
+  scripts: V2TaskScriptRef[];
+  execution_mode: "parallel" | "sequence";
+  stop_on_failure: boolean;
+  retry_policy: V2RetryPolicy;
+  node_ids: string[];
+  priority: number;
+  enabled: boolean;
+}
+
+export interface V2RunScriptSnapshot {
+  binding_id: string;
+  script_definition_id: string;
+  script_revision: number;
+  executor: V2PluginRef;
+  source: V2ScriptRef;
+  configuration: V2Configuration;
+  requirement: V2ExecutionRequirement;
+  selected_case_keys: string[];
+  split_policy: V2SplitPolicy;
+}
+
+export interface V2RunSnapshot {
+  task_id: string;
+  task_revision: number;
+  scripts: V2RunScriptSnapshot[];
+  execution_mode: "parallel" | "sequence";
+  stop_on_failure: boolean;
+  retry_policy: V2RetryPolicy;
+  node_ids: string[];
+  trigger_type: V2TriggerType;
+  original_run_id: string | null;
+}
+
+export type V2TriggerType = "manual_web" | "api" | "schedule" | "ci_webhook" | "retry" | "recovery";
+
+export interface V2RunShard {
+  shard_id: string;
+  script_binding_id: string;
+  shard_index: number;
+  case_keys: string[];
+  status: string;
+}
+
+export interface V2RunView {
+  run_id: string;
+  task_id: string;
+  snapshot: V2RunSnapshot;
+  status: string;
+  shards: V2RunShard[];
+  scheduled: number;
+  pending_shard_ids: string[];
+  cancelled_shard_ids: string[];
+}
+
 export type V2PluginAvailability = "available" | "blocked" | "updating" | "error" | "not_installed";
 export type V2ResourceHealth = "ready" | "degraded" | "unavailable";
 export type V2MaintenanceState = "ready" | "idle" | "busy" | "draining" | "updating" | "restarting" | "degraded";

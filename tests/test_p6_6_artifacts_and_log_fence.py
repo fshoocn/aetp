@@ -177,6 +177,38 @@ def test_register_artifact_rejects_unknown_run(client) -> None:
         )
 
 
+def test_internal_artifact_upload_requires_scoped_signature(client) -> None:
+    container = client.app.state.container
+    run_id = _seed_run(container)
+    from master.domain.models import RunShard
+
+    with _uow(container) as uow:
+        uow.run_shards.add(
+            RunShard(
+                shard_id="SH-UPLOAD-1",
+                run_id=run_id,
+                shard_index=0,
+            )
+        )
+    signer = container.artifact_upload_signing_service()
+    signed = signer.build_url(run_id, "p1", "node-a", "SH-UPLOAD-1")
+    path = signed[signed.index("/api/v1") :]
+    response = client.post(
+        f"{path}&kind=report",
+        files={"file": ("report.xml", b"<report />", "application/xml")},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["project_id"] == "p1"
+    assert response.json()["shard_id"] == "SH-UPLOAD-1"
+
+    tampered = path.replace("node-a", "node-b", 1)
+    denied = client.post(
+        f"{tampered}&kind=report",
+        files={"file": ("report.xml", b"<report />", "application/xml")},
+    )
+    assert denied.status_code == 403
+
+
 def test_register_artifact_rejects_path_traversal_filename(client) -> None:
     container = client.app.state.container
     run_id = _seed_run(container)

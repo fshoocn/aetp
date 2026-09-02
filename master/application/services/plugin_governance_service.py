@@ -7,6 +7,7 @@ import json
 import os
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from aetp_protocol.ids import PluginId, SemVer, Sha256
@@ -81,7 +82,12 @@ class PluginGovernanceService:
         return [record for record in records if record.plugin_id == plugin_id]
 
     def install(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
-        return self._transition(plugin_id, version, PluginStatus.INSTALLED)
+        with self._uow_factory() as uow:
+            record = self._require(uow, plugin_id, version)
+            assert_transition(record.status, PluginStatus.INSTALLED)
+            return uow.plugin_versions.update(
+                replace(record, status=PluginStatus.INSTALLED, installed_at=record.installed_at or datetime.now(UTC))
+            )
 
     def request_enabled(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
         with self._uow_factory() as uow:
@@ -111,6 +117,19 @@ class PluginGovernanceService:
         try:
             with self._uow_factory() as uow:
                 record = self._require(uow, plugin_id, version)
+                previous = self._active_record(uow, plugin_id)
+                if (
+                    enabled
+                    and previous is not None
+                    and previous.id != record.id
+                    and previous.status is PluginStatus.ENABLED
+                ):
+                    assert_transition(previous.status, PluginStatus.PENDING_RESTART)
+                    previous = uow.plugin_versions.update(
+                        replace(previous, status=PluginStatus.PENDING_RESTART)
+                    )
+                    assert_transition(previous.status, PluginStatus.DISABLED)
+                    uow.plugin_versions.update(replace(previous, status=PluginStatus.DISABLED))
                 assert_transition(record.status, target)
                 updated = uow.plugin_versions.update(replace(record, status=target))
                 if enabled:
@@ -120,9 +139,51 @@ class PluginGovernanceService:
                         archive_sha256=updated.archive_sha256,
                     ).model_dump_json())
                     pointer_changed = True
-                elif pointer_path.exists():
+                elif pointer_path.exists() and self._pointer_matches(pointer_path, plugin_id, version):
                     pointer_path.unlink()
                     pointer_changed = True
+                return updated
+        except Exception:
+            if pointer_changed:
+                self._restore_active_pointer(pointer_path, previous_pointer)
+            raise
+
+    def rollback(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
+        """切换 active pointer 到已安装的指定版本，并停用当前版本。"""
+        pointer_path = self._active_path(plugin_id)
+        previous_pointer = pointer_path.read_bytes() if pointer_path.exists() else None
+        pointer_changed = False
+        try:
+            with self._uow_factory() as uow:
+                target = self._require(uow, plugin_id, version)
+                if target.status not in {PluginStatus.INSTALLED, PluginStatus.DISABLED, PluginStatus.ENABLED}:
+                    raise ValueError(f"插件版本当前不可回滚: {target.status.value}")
+                current = self._active_record(uow, plugin_id)
+                if current is not None and current.id == target.id:
+                    return target
+                if current is not None and current.status is PluginStatus.ENABLED:
+                    assert_transition(current.status, PluginStatus.PENDING_RESTART)
+                    current = uow.plugin_versions.update(
+                        replace(current, status=PluginStatus.PENDING_RESTART)
+                    )
+                    assert_transition(current.status, PluginStatus.DISABLED)
+                    uow.plugin_versions.update(replace(current, status=PluginStatus.DISABLED))
+                if target.status in {PluginStatus.INSTALLED, PluginStatus.DISABLED}:
+                    assert_transition(target.status, PluginStatus.PENDING_RESTART)
+                    target = uow.plugin_versions.update(
+                        replace(target, status=PluginStatus.PENDING_RESTART)
+                    )
+                assert_transition(target.status, PluginStatus.ENABLED)
+                updated = uow.plugin_versions.update(replace(target, status=PluginStatus.ENABLED))
+                self._write_active_pointer(
+                    pointer_path,
+                    PluginRef(
+                        plugin_id=plugin_id,
+                        version=version,
+                        archive_sha256=updated.archive_sha256,
+                    ).model_dump_json(),
+                )
+                pointer_changed = True
                 return updated
         except Exception:
             if pointer_changed:
@@ -159,6 +220,27 @@ class PluginGovernanceService:
 
     def _active_path(self, plugin_id: PluginId) -> Path:
         return self._archive_root / "active" / plugin_id.root / "active.json"
+
+    def _active_record(self, uow: UnitOfWork, plugin_id: PluginId) -> PluginVersionRecord | None:
+        path = self._active_path(plugin_id)
+        if not path.is_file():
+            return None
+        try:
+            reference = PluginRef.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise ValueError("active pointer 不是有效的 V2 PluginRef") from exc
+        record = uow.plugin_versions.get(reference.plugin_id, reference.version)
+        if record is None or record.plugin_id != plugin_id or record.archive_sha256 != reference.archive_sha256:
+            raise ValueError("active pointer 与插件治理记录不一致")
+        return record
+
+    @staticmethod
+    def _pointer_matches(path: Path, plugin_id: PluginId, version: SemVer) -> bool:
+        try:
+            reference = PluginRef.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValueError:
+            return False
+        return reference.plugin_id == plugin_id and reference.version == version
 
     @staticmethod
     def _write_active_pointer(path: Path, content: str) -> None:

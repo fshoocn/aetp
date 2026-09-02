@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from aetp_protocol.task import RunSnapshot
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -19,10 +20,12 @@ def _to_domain(orm: TaskRunORM) -> TaskRun:
         id=orm.id,
         run_id=orm.run_id,
         project_id=orm.project.project_id if orm.project is not None else "",
-        task_id=orm.task.task_id if orm.task is not None else "",
+        task_id=orm.task.task_id if orm.task is not None else (orm.task_id or ""),
+        task_revision=orm.task_revision,
         script_ref=dict(orm.script_ref or {}),
         case_selection=list(orm.case_selection or []),
         split_policy=dict(orm.split_policy or {}),
+        snapshot=RunSnapshot.model_validate(orm.task_snapshot) if orm.task_snapshot is not None else None,
         trigger_type=TriggerType(orm.trigger_type),
         triggered_by_user_id=orm.triggered_by_user_pk,
         integration_id=orm.integration_id,
@@ -53,7 +56,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         task_pk = self._s.execute(
             select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)
         ).scalar_one_or_none()
-        if task_pk is None:
+        if task_pk is None and run.snapshot is None:
             raise ValueError(f"Task not found: {run.task_id}")
 
         # Resolve triggered_by_user_pk if needed
@@ -67,11 +70,14 @@ class TaskRunRepositoryImpl(TaskRunRepository):
 
         orm = TaskRunORM(
             run_id=run.run_id,
+            task_id=run.task_id or None,
             project_pk=project_pk,
             task_pk=task_pk,
+            task_revision=run.task_revision,
             script_ref=run.script_ref,
             case_selection=run.case_selection,
             split_policy=run.split_policy,
+            task_snapshot=run.snapshot.model_dump(mode="json") if run.snapshot is not None else None,
             trigger_type=run.trigger_type.value,
             triggered_by_user_pk=triggered_by_user_pk,
             integration_id=run.integration_id,
@@ -131,7 +137,8 @@ class TaskRunRepositoryImpl(TaskRunRepository):
             )
         if task_id is not None:
             stmt = stmt.where(
-                TaskRunORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery()
+                (TaskRunORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery())
+                | (TaskRunORM.task_id == task_id)
             )
         if status is not None:
             stmt = stmt.where(TaskRunORM.status == status)
@@ -150,6 +157,9 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         orm.trigger_context = run.trigger_context
         orm.log_complete = run.log_complete
         orm.last_log_sequence = run.last_log_sequence
+        orm.task_id = run.task_id or None
+        orm.task_revision = run.task_revision
+        orm.task_snapshot = run.snapshot.model_dump(mode="json") if run.snapshot is not None else None
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
@@ -191,7 +201,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         result: Result[Any] = self._s.execute(
             sa_update(TaskRunORM)
             .where(TaskRunORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery())
-            .values(task_pk=None)
+            .values(task_pk=None, task_id=None)
         )
         count = int(getattr(result, "rowcount", 0) or 0)
         if count:

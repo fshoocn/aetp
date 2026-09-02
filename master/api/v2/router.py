@@ -143,6 +143,21 @@ def disable_plugin(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/{plugin_id}/{version}/rollback", response_model=PluginVersionView)
+def rollback_plugin(
+    plugin_id: str,
+    version: str,
+    _admin: PlatformAdminDep,
+    service: Annotated[PluginGovernanceService, Depends(get_plugin_service)],
+) -> PluginVersionView:
+    try:
+        return _view(service.rollback(_plugin_id(plugin_id), _version(version)))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.delete("/{plugin_id}/{version}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_plugin(
     plugin_id: str,

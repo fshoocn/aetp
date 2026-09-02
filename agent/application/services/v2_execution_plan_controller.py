@@ -164,6 +164,9 @@ class AgentV2ExecutionPlanController:
             plan.attempt_no,
             [binding.resource_id.root for binding in plan.resource_bindings],
             plan.plan_id.root,
+            shard_id=plan.shard_id.root,
+            attempt_id=plan.attempt_id.root,
+            plan_hash=plan.plan_hash.root,
         )
         start_execution = True
         if not claimed:

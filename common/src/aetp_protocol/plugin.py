@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .capabilities import HardwareRequirements
+from .execution import PlanResourceBinding
 from .payloads import PluginPackageRef
 
 
@@ -61,6 +62,7 @@ class AgentTaskContext(Protocol):
     node_id: str
     params: Mapping[str, Any]
     script_ref: Mapping[str, Any]
+    resources: tuple[PlanResourceBinding, ...]
 
     async def progress(self, percent: int, stage: str, message: str = "") -> None: ...
 
@@ -100,6 +102,8 @@ class AgentExecutionPlugin(Protocol):
     async def execute(self, context: AgentTaskContext) -> Any: ...
 
     async def cancel(self) -> None: ...
+
+    async def cleanup(self, context: AgentTaskContext) -> None: ...
 
     async def analyze_results(
         self,

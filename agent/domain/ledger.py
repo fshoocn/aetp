@@ -27,12 +27,16 @@ class AgentRun:
     run_id: str
     attempt_no: int
     plan_id: str | None = None
+    shard_id: str | None = None
+    attempt_id: str | None = None
+    plan_hash: str | None = None
     status: AgentRunStatus = AgentRunStatus.CLAIMED
     cancelled: bool = False
     result_summary: dict = field(default_factory=dict)
     # sym:device_ids 本次 Run 占用的物理设备集合（来自 run.assign.device_allocations）
     # 用于心跳汇总「谁占了哪个口」并上报给 Master（§9.8 占用状态）。
     device_ids: list[str] = field(default_factory=list)
+    last_progress_sequence: int = 0
     claimed_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -92,6 +96,9 @@ class Ledger(Protocol):
         attempt_no: int,
         device_ids: list[str] | None = None,
         plan_id: str | None = None,
+        shard_id: str | None = None,
+        attempt_id: str | None = None,
+        plan_hash: str | None = None,
     ) -> bool:
         """原子 claim：首次（或新 attempt）返回 True；重复派发返回 False。
 
@@ -113,12 +120,20 @@ class Ledger(Protocol):
         """返回未终结的 Run（claimed/running，用于心跳负载与恢复现场）。"""
         ...
 
+    def list_reconcile_runs(self) -> list[AgentRun]:
+        """返回带 V2 Plan 身份的本地执行记录，供重连对账。"""
+        ...
+
     def record_inbox(self, origin_id: str, message_id: str, message_type: str) -> bool:
         """入站去重：已存在返回 False，首次记录返回 True。"""
         ...
 
     def enqueue_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:
         """写入一条待发送出站消息。"""
+        ...
+
+    def get_outbox(self, outbox_id: str) -> AgentOutboxEntry | None:
+        """读取一条出站消息，不改变其发送状态。"""
         ...
 
     def replace_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:

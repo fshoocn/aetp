@@ -48,6 +48,7 @@ from .task_schedule import TaskSchedule
 from .test_script import TestScript
 from .test_task import TestTask
 from .user import User
+from .v2_task import ScriptDefinition, TestTaskScript, V2TestTask
 
 __all__ = [
     "NAMING_CONVENTION",
@@ -90,6 +91,9 @@ __all__ = [
     "TaskSchedule",
     "TestScript",
     "TestTask",
+    "ScriptDefinition",
+    "TestTaskScript",
+    "V2TestTask",
     "TimestampMixin",
     "UTCDateTime",
     "User",

@@ -1206,6 +1206,26 @@
         "title": "PluginId",
         "type": "string"
       },
+      "PluginPoint": {
+        "enum": [
+          "executor",
+          "resource",
+          "runtime",
+          "software",
+          "reporter",
+          "analyzer",
+          "notifier",
+          "integration",
+          "hook",
+          "sharding",
+          "ui",
+          "storage",
+          "transport",
+          "identity"
+        ],
+        "title": "PluginPoint",
+        "type": "string"
+      },
       "PluginSyncAction": {
         "enum": [
           "install",
@@ -1246,6 +1266,10 @@
           },
           "plugin_id": {
             "$ref": "#/$defs/PluginId"
+          },
+          "point": {
+            "$ref": "#/$defs/PluginPoint",
+            "default": "executor"
           },
           "version": {
             "$ref": "#/$defs/SemVer"
@@ -8189,6 +8213,1195 @@
     "title": "ResourceLease",
     "type": "object"
   },
+  "run_script_snapshot": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "ExecutionRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "executor": {
+            "$ref": "#/$defs/PluginRequirement"
+          },
+          "required_tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Tags",
+            "type": "array"
+          },
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ResourceRequirement"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "runtimes": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RuntimeRequirement"
+            },
+            "title": "Runtimes",
+            "type": "array"
+          },
+          "software": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SoftwareRequirement"
+            },
+            "title": "Software",
+            "type": "array"
+          }
+        },
+        "required": [
+          "executor"
+        ],
+        "title": "ExecutionRequirement",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginRef": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "archive_sha256"
+        ],
+        "title": "PluginRef",
+        "type": "object"
+      },
+      "PluginRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/VersionRange"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version"
+        ],
+        "title": "PluginRequirement",
+        "type": "object"
+      },
+      "ResourceRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_switching": {
+            "default": false,
+            "title": "Allow Switching",
+            "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "preferred_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Preferred Labels",
+            "type": "object"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "required_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Labels",
+            "type": "object"
+          },
+          "resource_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_type"
+        ],
+        "title": "ResourceRequirement",
+        "type": "object"
+      },
+      "RuntimeRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "runtime_type"
+        ],
+        "title": "RuntimeRequirement",
+        "type": "object"
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SoftwareRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "license_required": {
+            "default": false,
+            "title": "License Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SoftwareRequirement",
+        "type": "object"
+      },
+      "SplitPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "target_count": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Count"
+          },
+          "target_duration_s": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Duration S"
+          },
+          "type": {
+            "enum": [
+              "none",
+              "by_time",
+              "by_case_count",
+              "custom"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "SplitPolicy",
+        "type": "object"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      },
+      "VersionConstraint": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionConstraint",
+        "type": "object"
+      },
+      "VersionRange": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionRange",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "binding_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "configuration": {
+        "$ref": "#/$defs/Configuration"
+      },
+      "executor": {
+        "$ref": "#/$defs/PluginRef"
+      },
+      "requirement": {
+        "$ref": "#/$defs/ExecutionRequirement"
+      },
+      "script_definition_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "script_revision": {
+        "minimum": 1,
+        "title": "Script Revision",
+        "type": "integer"
+      },
+      "selected_case_keys": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Selected Case Keys",
+        "type": "array"
+      },
+      "source": {
+        "$ref": "#/$defs/ScriptRef"
+      },
+      "split_policy": {
+        "$ref": "#/$defs/SplitPolicy"
+      }
+    },
+    "required": [
+      "binding_id",
+      "script_definition_id",
+      "script_revision",
+      "executor",
+      "source",
+      "configuration",
+      "requirement",
+      "selected_case_keys",
+      "split_policy"
+    ],
+    "title": "RunScriptSnapshot",
+    "type": "object"
+  },
+  "run_snapshot": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "ExecutionRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "executor": {
+            "$ref": "#/$defs/PluginRequirement"
+          },
+          "required_tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Tags",
+            "type": "array"
+          },
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ResourceRequirement"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "runtimes": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RuntimeRequirement"
+            },
+            "title": "Runtimes",
+            "type": "array"
+          },
+          "software": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SoftwareRequirement"
+            },
+            "title": "Software",
+            "type": "array"
+          }
+        },
+        "required": [
+          "executor"
+        ],
+        "title": "ExecutionRequirement",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginRef": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "archive_sha256"
+        ],
+        "title": "PluginRef",
+        "type": "object"
+      },
+      "PluginRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/VersionRange"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version"
+        ],
+        "title": "PluginRequirement",
+        "type": "object"
+      },
+      "ResourceRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_switching": {
+            "default": false,
+            "title": "Allow Switching",
+            "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "preferred_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Preferred Labels",
+            "type": "object"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "required_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Labels",
+            "type": "object"
+          },
+          "resource_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_type"
+        ],
+        "title": "ResourceRequirement",
+        "type": "object"
+      },
+      "RetryPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "backoff_initial_s": {
+            "default": 1,
+            "minimum": 0,
+            "title": "Backoff Initial S",
+            "type": "integer"
+          },
+          "backoff_max_s": {
+            "default": 60,
+            "minimum": 0,
+            "title": "Backoff Max S",
+            "type": "integer"
+          },
+          "failover_nodes": {
+            "default": false,
+            "title": "Failover Nodes",
+            "type": "boolean"
+          },
+          "max_attempts": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "retry_failed_cases": {
+            "default": false,
+            "title": "Retry Failed Cases",
+            "type": "boolean"
+          }
+        },
+        "title": "RetryPolicy",
+        "type": "object"
+      },
+      "RunScriptSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "configuration": {
+            "$ref": "#/$defs/Configuration"
+          },
+          "executor": {
+            "$ref": "#/$defs/PluginRef"
+          },
+          "requirement": {
+            "$ref": "#/$defs/ExecutionRequirement"
+          },
+          "script_definition_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "script_revision": {
+            "minimum": 1,
+            "title": "Script Revision",
+            "type": "integer"
+          },
+          "selected_case_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Case Keys",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/$defs/ScriptRef"
+          },
+          "split_policy": {
+            "$ref": "#/$defs/SplitPolicy"
+          }
+        },
+        "required": [
+          "binding_id",
+          "script_definition_id",
+          "script_revision",
+          "executor",
+          "source",
+          "configuration",
+          "requirement",
+          "selected_case_keys",
+          "split_policy"
+        ],
+        "title": "RunScriptSnapshot",
+        "type": "object"
+      },
+      "RuntimeRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "runtime_type"
+        ],
+        "title": "RuntimeRequirement",
+        "type": "object"
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SoftwareRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "license_required": {
+            "default": false,
+            "title": "License Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SoftwareRequirement",
+        "type": "object"
+      },
+      "SplitPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "target_count": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Count"
+          },
+          "target_duration_s": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Duration S"
+          },
+          "type": {
+            "enum": [
+              "none",
+              "by_time",
+              "by_case_count",
+              "custom"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "SplitPolicy",
+        "type": "object"
+      },
+      "TriggerType": {
+        "enum": [
+          "manual_web",
+          "api",
+          "schedule",
+          "ci_webhook",
+          "retry",
+          "recovery"
+        ],
+        "title": "TriggerType",
+        "type": "string"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      },
+      "VersionConstraint": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionConstraint",
+        "type": "object"
+      },
+      "VersionRange": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionRange",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "execution_mode": {
+        "enum": [
+          "parallel",
+          "sequence"
+        ],
+        "title": "Execution Mode",
+        "type": "string"
+      },
+      "node_ids": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/BusinessId"
+        },
+        "title": "Node Ids",
+        "type": "array"
+      },
+      "original_run_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BusinessId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "retry_policy": {
+        "$ref": "#/$defs/RetryPolicy"
+      },
+      "scripts": {
+        "items": {
+          "$ref": "#/$defs/RunScriptSnapshot"
+        },
+        "title": "Scripts",
+        "type": "array"
+      },
+      "stop_on_failure": {
+        "title": "Stop On Failure",
+        "type": "boolean"
+      },
+      "task_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "task_revision": {
+        "minimum": 1,
+        "title": "Task Revision",
+        "type": "integer"
+      },
+      "trigger_type": {
+        "$ref": "#/$defs/TriggerType"
+      }
+    },
+    "required": [
+      "task_id",
+      "task_revision",
+      "scripts",
+      "execution_mode",
+      "stop_on_failure",
+      "retry_policy",
+      "trigger_type"
+    ],
+    "title": "RunSnapshot",
+    "type": "object"
+  },
   "script.parse": {
     "$defs": {
       "BusinessId": {
@@ -8477,6 +9690,550 @@
     "title": "ScriptVerifyRequest",
     "type": "object"
   },
+  "script_definition": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "ExecutionRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "executor": {
+            "$ref": "#/$defs/PluginRequirement"
+          },
+          "required_tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Tags",
+            "type": "array"
+          },
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ResourceRequirement"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "runtimes": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RuntimeRequirement"
+            },
+            "title": "Runtimes",
+            "type": "array"
+          },
+          "software": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SoftwareRequirement"
+            },
+            "title": "Software",
+            "type": "array"
+          }
+        },
+        "required": [
+          "executor"
+        ],
+        "title": "ExecutionRequirement",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginRef": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "archive_sha256"
+        ],
+        "title": "PluginRef",
+        "type": "object"
+      },
+      "PluginRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/VersionRange"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version"
+        ],
+        "title": "PluginRequirement",
+        "type": "object"
+      },
+      "ResourceRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_switching": {
+            "default": false,
+            "title": "Allow Switching",
+            "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "preferred_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Preferred Labels",
+            "type": "object"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "required_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Labels",
+            "type": "object"
+          },
+          "resource_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_type"
+        ],
+        "title": "ResourceRequirement",
+        "type": "object"
+      },
+      "RuntimeRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "runtime_type"
+        ],
+        "title": "RuntimeRequirement",
+        "type": "object"
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SoftwareRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "license_required": {
+            "default": false,
+            "title": "License Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SoftwareRequirement",
+        "type": "object"
+      },
+      "TestCase": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated_duration_s": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Estimated Duration S"
+          },
+          "name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_path": {
+            "default": "",
+            "title": "Parent Path",
+            "type": "string"
+          },
+          "stable_key": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Stable Key",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stable_key",
+          "name"
+        ],
+        "title": "TestCase",
+        "type": "object"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      },
+      "VersionConstraint": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionConstraint",
+        "type": "object"
+      },
+      "VersionRange": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionRange",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "cases": {
+        "items": {
+          "$ref": "#/$defs/TestCase"
+        },
+        "title": "Cases",
+        "type": "array"
+      },
+      "configuration": {
+        "$ref": "#/$defs/Configuration"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "executor": {
+        "$ref": "#/$defs/PluginRef"
+      },
+      "name": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "requirement": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExecutionRequirement"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "script_definition_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "source": {
+        "$ref": "#/$defs/ScriptRef"
+      }
+    },
+    "required": [
+      "script_definition_id",
+      "project_id",
+      "revision",
+      "name",
+      "executor",
+      "source",
+      "configuration",
+      "cases"
+    ],
+    "title": "ScriptDefinition",
+    "type": "object"
+  },
   "script_ref": {
     "$defs": {
       "BusinessId": {
@@ -8536,6 +10293,1212 @@
       "sha256"
     ],
     "title": "ScriptRef",
+    "type": "object"
+  },
+  "task_script_ref": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CaseSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "include_all": {
+            "default": false,
+            "title": "Include All",
+            "type": "boolean"
+          },
+          "selected_keys": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Keys",
+            "type": "array"
+          }
+        },
+        "title": "CaseSelection",
+        "type": "object"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SplitPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "target_count": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Count"
+          },
+          "target_duration_s": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Duration S"
+          },
+          "type": {
+            "enum": [
+              "none",
+              "by_time",
+              "by_case_count",
+              "custom"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "SplitPolicy",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "binding_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "case_selection": {
+        "$ref": "#/$defs/CaseSelection"
+      },
+      "configuration": {
+        "$ref": "#/$defs/Configuration"
+      },
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "order_index": {
+        "minimum": 0,
+        "title": "Order Index",
+        "type": "integer"
+      },
+      "script_definition_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "script_revision": {
+        "minimum": 1,
+        "title": "Script Revision",
+        "type": "integer"
+      },
+      "split_policy": {
+        "$ref": "#/$defs/SplitPolicy"
+      }
+    },
+    "required": [
+      "binding_id",
+      "script_definition_id",
+      "script_revision",
+      "case_selection",
+      "configuration",
+      "split_policy",
+      "order_index"
+    ],
+    "title": "TaskScriptRef",
+    "type": "object"
+  },
+  "test_run": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "ExecutionRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "executor": {
+            "$ref": "#/$defs/PluginRequirement"
+          },
+          "required_tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Tags",
+            "type": "array"
+          },
+          "resources": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ResourceRequirement"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "runtimes": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/RuntimeRequirement"
+            },
+            "title": "Runtimes",
+            "type": "array"
+          },
+          "software": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SoftwareRequirement"
+            },
+            "title": "Software",
+            "type": "array"
+          }
+        },
+        "required": [
+          "executor"
+        ],
+        "title": "ExecutionRequirement",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "PluginRef": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/SemVer"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "archive_sha256"
+        ],
+        "title": "PluginRef",
+        "type": "object"
+      },
+      "PluginRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "$ref": "#/$defs/PluginId"
+          },
+          "version": {
+            "$ref": "#/$defs/VersionRange"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version"
+        ],
+        "title": "PluginRequirement",
+        "type": "object"
+      },
+      "ResourceRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_switching": {
+            "default": false,
+            "title": "Allow Switching",
+            "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "preferred_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Preferred Labels",
+            "type": "object"
+          },
+          "properties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Properties",
+            "type": "object"
+          },
+          "quantity": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "required_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Required Labels",
+            "type": "object"
+          },
+          "resource_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vendor"
+          }
+        },
+        "required": [
+          "resource_type"
+        ],
+        "title": "ResourceRequirement",
+        "type": "object"
+      },
+      "RetryPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "backoff_initial_s": {
+            "default": 1,
+            "minimum": 0,
+            "title": "Backoff Initial S",
+            "type": "integer"
+          },
+          "backoff_max_s": {
+            "default": 60,
+            "minimum": 0,
+            "title": "Backoff Max S",
+            "type": "integer"
+          },
+          "failover_nodes": {
+            "default": false,
+            "title": "Failover Nodes",
+            "type": "boolean"
+          },
+          "max_attempts": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "retry_failed_cases": {
+            "default": false,
+            "title": "Retry Failed Cases",
+            "type": "boolean"
+          }
+        },
+        "title": "RetryPolicy",
+        "type": "object"
+      },
+      "RunScriptSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "configuration": {
+            "$ref": "#/$defs/Configuration"
+          },
+          "executor": {
+            "$ref": "#/$defs/PluginRef"
+          },
+          "requirement": {
+            "$ref": "#/$defs/ExecutionRequirement"
+          },
+          "script_definition_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "script_revision": {
+            "minimum": 1,
+            "title": "Script Revision",
+            "type": "integer"
+          },
+          "selected_case_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Case Keys",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/$defs/ScriptRef"
+          },
+          "split_policy": {
+            "$ref": "#/$defs/SplitPolicy"
+          }
+        },
+        "required": [
+          "binding_id",
+          "script_definition_id",
+          "script_revision",
+          "executor",
+          "source",
+          "configuration",
+          "requirement",
+          "selected_case_keys",
+          "split_policy"
+        ],
+        "title": "RunScriptSnapshot",
+        "type": "object"
+      },
+      "RunSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_mode": {
+            "enum": [
+              "parallel",
+              "sequence"
+            ],
+            "title": "Execution Mode",
+            "type": "string"
+          },
+          "node_ids": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/BusinessId"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "original_run_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/BusinessId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "retry_policy": {
+            "$ref": "#/$defs/RetryPolicy"
+          },
+          "scripts": {
+            "items": {
+              "$ref": "#/$defs/RunScriptSnapshot"
+            },
+            "title": "Scripts",
+            "type": "array"
+          },
+          "stop_on_failure": {
+            "title": "Stop On Failure",
+            "type": "boolean"
+          },
+          "task_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "task_revision": {
+            "minimum": 1,
+            "title": "Task Revision",
+            "type": "integer"
+          },
+          "trigger_type": {
+            "$ref": "#/$defs/TriggerType"
+          }
+        },
+        "required": [
+          "task_id",
+          "task_revision",
+          "scripts",
+          "execution_mode",
+          "stop_on_failure",
+          "retry_policy",
+          "trigger_type"
+        ],
+        "title": "RunSnapshot",
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "created",
+          "dispatched",
+          "acked",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "timed_out",
+          "lost"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "RuntimeRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "runtime_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Runtime Type",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "runtime_type"
+        ],
+        "title": "RuntimeRequirement",
+        "type": "object"
+      },
+      "ScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Download Url"
+          },
+          "filename": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "script_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "sha256": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "size": {
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "filename",
+          "size",
+          "sha256"
+        ],
+        "title": "ScriptRef",
+        "type": "object"
+      },
+      "SemVer": {
+        "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+        "title": "SemVer",
+        "type": "string"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SoftwareRequirement": {
+        "additionalProperties": false,
+        "properties": {
+          "license_required": {
+            "default": false,
+            "title": "License Required",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/VersionConstraint"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SoftwareRequirement",
+        "type": "object"
+      },
+      "SplitPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "target_count": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Count"
+          },
+          "target_duration_s": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Duration S"
+          },
+          "type": {
+            "enum": [
+              "none",
+              "by_time",
+              "by_case_count",
+              "custom"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "SplitPolicy",
+        "type": "object"
+      },
+      "TriggerType": {
+        "enum": [
+          "manual_web",
+          "api",
+          "schedule",
+          "ci_webhook",
+          "retry",
+          "recovery"
+        ],
+        "title": "TriggerType",
+        "type": "string"
+      },
+      "Version": {
+        "pattern": "^v?\\d+(?:\\.\\d+)*$",
+        "title": "Version",
+        "type": "string"
+      },
+      "VersionConstraint": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Version"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionConstraint",
+        "type": "object"
+      },
+      "VersionRange": {
+        "additionalProperties": false,
+        "properties": {
+          "exact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/SemVer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "title": "VersionRange",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "run_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "snapshot": {
+        "$ref": "#/$defs/RunSnapshot"
+      },
+      "status": {
+        "$ref": "#/$defs/RunStatus"
+      }
+    },
+    "required": [
+      "run_id",
+      "project_id",
+      "snapshot",
+      "status",
+      "created_at"
+    ],
+    "title": "TestRun",
+    "type": "object"
+  },
+  "test_task": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "CaseSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "include_all": {
+            "default": false,
+            "title": "Include All",
+            "type": "boolean"
+          },
+          "selected_keys": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Keys",
+            "type": "array"
+          }
+        },
+        "title": "CaseSelection",
+        "type": "object"
+      },
+      "Configuration": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_hash": {
+            "$ref": "#/$defs/Sha256"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "values": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "values"
+        ],
+        "title": "Configuration",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "RetryPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "backoff_initial_s": {
+            "default": 1,
+            "minimum": 0,
+            "title": "Backoff Initial S",
+            "type": "integer"
+          },
+          "backoff_max_s": {
+            "default": 60,
+            "minimum": 0,
+            "title": "Backoff Max S",
+            "type": "integer"
+          },
+          "failover_nodes": {
+            "default": false,
+            "title": "Failover Nodes",
+            "type": "boolean"
+          },
+          "max_attempts": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "retry_failed_cases": {
+            "default": false,
+            "title": "Retry Failed Cases",
+            "type": "boolean"
+          }
+        },
+        "title": "RetryPolicy",
+        "type": "object"
+      },
+      "Sha256": {
+        "pattern": "^[a-fA-F0-9]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      },
+      "SplitPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "plugin_id": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PluginId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "target_count": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Count"
+          },
+          "target_duration_s": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Duration S"
+          },
+          "type": {
+            "enum": [
+              "none",
+              "by_time",
+              "by_case_count",
+              "custom"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "SplitPolicy",
+        "type": "object"
+      },
+      "TaskScriptRef": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "case_selection": {
+            "$ref": "#/$defs/CaseSelection"
+          },
+          "configuration": {
+            "$ref": "#/$defs/Configuration"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "order_index": {
+            "minimum": 0,
+            "title": "Order Index",
+            "type": "integer"
+          },
+          "script_definition_id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "script_revision": {
+            "minimum": 1,
+            "title": "Script Revision",
+            "type": "integer"
+          },
+          "split_policy": {
+            "$ref": "#/$defs/SplitPolicy"
+          }
+        },
+        "required": [
+          "binding_id",
+          "script_definition_id",
+          "script_revision",
+          "case_selection",
+          "configuration",
+          "split_policy",
+          "order_index"
+        ],
+        "title": "TaskScriptRef",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": true,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "execution_mode": {
+        "default": "parallel",
+        "enum": [
+          "parallel",
+          "sequence"
+        ],
+        "title": "Execution Mode",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "node_ids": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/BusinessId"
+        },
+        "title": "Node Ids",
+        "type": "array"
+      },
+      "priority": {
+        "default": 0,
+        "title": "Priority",
+        "type": "integer"
+      },
+      "project_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "retry_policy": {
+        "$ref": "#/$defs/RetryPolicy"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "scripts": {
+        "items": {
+          "$ref": "#/$defs/TaskScriptRef"
+        },
+        "title": "Scripts",
+        "type": "array"
+      },
+      "stop_on_failure": {
+        "default": false,
+        "title": "Stop On Failure",
+        "type": "boolean"
+      },
+      "task_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "task_id",
+      "project_id",
+      "revision",
+      "name",
+      "scripts"
+    ],
+    "title": "TestTask",
     "type": "object"
   }
 }

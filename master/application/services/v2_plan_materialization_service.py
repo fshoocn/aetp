@@ -74,8 +74,27 @@ class V2PlanMaterializationService:
                     attempt.status = ShardAttemptStatus.DISPATCHED
                     uow.shard_attempts.update(attempt)
             else:
-                if shard.status not in {ShardStatus.PENDING, ShardStatus.WAITING_RECOVERY}:
+                if shard.status not in {ShardStatus.PENDING, ShardStatus.WAITING_RECOVERY, ShardStatus.DISPATCHING}:
                     raise PlanRejected("Shard 当前状态不允许物化 V2 Plan")
+                existing_attempt = uow.shard_attempts.get_by_shard_attempt(
+                    plan.shard_id.root,
+                    plan.attempt_no,
+                )
+                if existing_attempt is not None:
+                    raise PlanRejected("同一 Shard/Attempt 序号已存在其它 Attempt")
+                previous_attempts = uow.shard_attempts.list_by_shard(plan.shard_id.root)
+                if shard.status is ShardStatus.DISPATCHING and any(
+                    attempt.status
+                    not in {
+                        ShardAttemptStatus.SUCCEEDED,
+                        ShardAttemptStatus.FAILED,
+                        ShardAttemptStatus.CANCELLED,
+                        ShardAttemptStatus.TIMED_OUT,
+                        ShardAttemptStatus.LOST,
+                    }
+                    for attempt in previous_attempts
+                ):
+                    raise PlanRejected("Shard 仍有未终态 Attempt")
                 attempt = uow.shard_attempts.add(
                     ShardAttempt(
                         attempt_id=plan.attempt_id.root,

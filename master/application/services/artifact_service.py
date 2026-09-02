@@ -50,6 +50,9 @@ class ArtifactService:
         filename: str,
         data: bytes,
         shard_id: str | None = None,
+        attempt_id: str | None = None,
+        content_type: str = "application/octet-stream",
+        derived_from: str | None = None,
     ) -> RunArtifact:
         """上传并登记一个产物（写文件 + 写引用，同一业务操作）。"""
         artifact_kind = ArtifactKind(kind)
@@ -57,18 +60,55 @@ class ArtifactService:
             run = uow.task_runs.get_by_run_id(run_id, project_id)
             if run is None:
                 raise RunNotFoundError(f"Run 不存在或不属于当前项目: {run_id}")
+            if attempt_id is not None:
+                attempt = uow.shard_attempts.get_by_attempt_id(attempt_id)
+                if (
+                    attempt is None
+                    or attempt.shard_id != shard_id
+                    or attempt.node_id != node_id
+                ):
+                    raise ValueError("Artifact Attempt 与 Run/Shard/Node 不一致")
 
-            file_ref = self._storage.store(run_id, filename, data)
             digest = hashlib.sha256(data).hexdigest()
+            file_ref = self._storage.artifact_key(
+                run_id,
+                filename,
+                shard_id=shard_id,
+                attempt_id=attempt_id,
+            )
+            existing = uow.run_artifacts.get_by_file_ref(file_ref)
+            if isinstance(existing, RunArtifact):
+                if (
+                    existing.sha256 != digest
+                    or existing.size != len(data)
+                    or existing.kind is not artifact_kind
+                    or existing.attempt_id != attempt_id
+                ):
+                    raise ValueError("ARTIFACT_UPLOAD_CONFLICT: 产物引用已存在但内容不同")
+                return existing
+            if shard_id is None and attempt_id is None:
+                file_ref = self._storage.store(run_id, filename, data)
+            else:
+                file_ref = self._storage.store(
+                    run_id,
+                    filename,
+                    data,
+                    shard_id=shard_id,
+                    attempt_id=attempt_id,
+                )
             artifact = RunArtifact(
                 artifact_id=new_id(),
                 run_id=run_id,
                 shard_id=shard_id,
                 node_id=node_id,
+                attempt_id=attempt_id,
                 kind=artifact_kind,
                 file_ref=file_ref,
+                filename=filename,
+                content_type=content_type,
                 size=len(data),
                 sha256=digest,
+                derived_from=derived_from,
                 uploaded_at=utcnow(),
             )
             try:

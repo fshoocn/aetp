@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import quote, urlencode
 
 from dependency_injector import containers, providers
 
@@ -32,6 +31,7 @@ from master.adapters.sse.event_bus import EventBus
 from master.adapters.storage.local_storage import LocalStorage
 from master.application.services.artifact_service import ArtifactService
 from master.application.services.artifact_storage_service import ArtifactStorageService
+from master.application.services.artifact_upload_signing_service import ArtifactUploadSigningService
 from master.application.services.auth_service import AuthService
 from master.application.services.capability_service import CapabilityService
 from master.application.services.capability_snapshot_service import (
@@ -81,6 +81,8 @@ from master.application.services.storage_cleanup_service import StorageCleanupSe
 from master.application.services.test_task_service import TestTaskService
 from master.application.services.v2_execution_service import V2ExecutionService
 from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
+from master.application.services.v2_scheduler_service import V2SchedulerService
+from master.application.services.v2_task_service import V2TaskService
 from master.config import get_settings, runtime_dir
 from master.domain.node_matcher import NodeMatcher
 from master.plugins.manager import PluginManager
@@ -123,19 +125,19 @@ def _plugin_ref_from_registry(task_type: str, version: str):
     return Container.plugin_registry().agent_package_ref(task_type)
 
 
-def _artifact_upload_url(run_id: str, project_id: str, node_id: str, shard_id: str) -> str:
-    """构造 Agent 上传 Run 产物的内部地址。"""
-    base_url = get_settings().public_base_url.rstrip("/")
-    if not base_url:
-        return ""
-    query = urlencode(
-        {
-            "project_id": project_id,
-            "node_id": node_id,
-            "shard_id": shard_id,
-        }
-    )
-    return f"{base_url}/api/v1/internal/runs/{quote(run_id, safe='')}/artifacts?{query}"
+def _artifact_upload_url(
+    run_id: str,
+    project_id: str,
+    node_id: str,
+    shard_id: str,
+    attempt_id: str | None = None,
+) -> str:
+    """构造绑定 Run/Node/Shard/Attempt 的限时 Artifact 上传地址。"""
+    return ArtifactUploadSigningService(
+        _internal_signing_secret(),
+        base_url=get_settings().public_base_url,
+        ttl_s=get_settings().internal_download_ttl_s,
+    ).build_url(run_id, project_id, node_id, shard_id, attempt_id)
 
 
 class Container(containers.DeclarativeContainer):
@@ -204,6 +206,12 @@ class Container(containers.DeclarativeContainer):
     # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据
     plugin_download_service = providers.Factory(
         PluginDownloadService,
+        secret=providers.Callable(_internal_signing_secret),
+        base_url=providers.Callable(lambda: get_settings().public_base_url),
+        ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
+    )
+    artifact_upload_signing_service = providers.Factory(
+        ArtifactUploadSigningService,
         secret=providers.Callable(_internal_signing_secret),
         base_url=providers.Callable(lambda: get_settings().public_base_url),
         ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
@@ -355,6 +363,15 @@ class Container(containers.DeclarativeContainer):
         base_url=providers.Callable(lambda: get_settings().public_base_url),
         ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
     )
+    v2_scheduler_service = providers.Factory(
+        V2SchedulerService,
+        uow_factory=uow_factory,
+        node_matching=node_matching_service,
+        materializer=v2_plan_materialization_service,
+        script_url_builder=script_download_service.provided.build_download_url,
+        plugin_url_builder=plugin_download_service.provided.build_versioned_download_url,
+        artifact_url_builder=_artifact_upload_url,
+    )
 
     # Agent 脚本验证下发服务（P7.2：复用脚本签名下载和 Agent script.verify）
     script_verification_service = providers.Factory(
@@ -369,6 +386,10 @@ class Container(containers.DeclarativeContainer):
         TestTaskService,
         uow_factory=uow_factory,
         capability_service=capability_service,
+    )
+    v2_task_service = providers.Factory(
+        V2TaskService,
+        uow_factory=uow_factory,
     )
 
     # Shard 调度服务（P4.6：项目绑定、能力、三层并发、failover、run.assign outbox）

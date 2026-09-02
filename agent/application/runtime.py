@@ -41,6 +41,7 @@ from agent.application.services.registration_service import (
     RegistrationService,
     RegistrationTimeoutError,
 )
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.run_orchestrator import RunOrchestrator
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.script_preflight_service import (
@@ -51,6 +52,7 @@ from agent.application.services.v2_execution_plan_controller import AgentV2Execu
 from agent.application.services.v2_execution_runner import V2ExecutionRunner
 from agent.application.services.v2_lease_renewal_service import AgentV2LeaseRenewalService
 from agent.application.services.v2_plugin_sync_controller import AgentV2PluginSyncController
+from agent.application.services.v2_reconcile_service import AgentV2ReconcileService
 from agent.config import AgentSettings
 from agent.domain.enums import AgentOutboxStatus
 from agent.domain.ledger import Ledger
@@ -92,6 +94,8 @@ class AgentRuntime:
         v2_execution_runner: V2ExecutionRunner | None = None,
         v2_executor_resolver: Callable[[ExecutionPlan], object] | None = None,
         v2_lease_renewal_service: AgentV2LeaseRenewalService | None = None,
+        v2_reconcile_service: AgentV2ReconcileService | None = None,
+        resource_providers: ResourceProviderRegistry | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -107,6 +111,8 @@ class AgentRuntime:
         self._v2_execution_runner = v2_execution_runner
         self._v2_executor_resolver = v2_executor_resolver
         self._v2_lease_renewal_service = v2_lease_renewal_service
+        self._v2_reconcile_service = v2_reconcile_service
+        self._resource_providers = resource_providers
         self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
@@ -184,6 +190,15 @@ class AgentRuntime:
                 self._v2_capability_publisher,
                 master_id=self._settings.master_id,
             )
+        if self._v2_reconcile_service is None and self._v2_capability_publisher is not None:
+            from aetp_protocol.ids import BusinessId
+
+            self._v2_reconcile_service = AgentV2ReconcileService(
+                BusinessId(self._settings.node_id),
+                self._ledger,
+                self._v2_capability_publisher,
+                master_id=self._settings.master_id,
+            )
         if (
             self._v2_execution_runner is None
             and self._v2_capability_publisher is not None
@@ -197,6 +212,8 @@ class AgentRuntime:
                 self._v2_capability_publisher,
                 self._v2_executor_resolver,
                 script_cache=self._script_cache,
+                resource_providers=self._resource_providers,
+                artifact_uploader=self._artifact_uploader,
             )
         if (
             self._v2_execution_plan_controller is None
@@ -250,6 +267,8 @@ class AgentRuntime:
             subscriptions.append(self._v2_execution_plan_controller.cancel_command_topic())
         if self._v2_lease_renewal_service is not None:
             subscriptions.append(v2_command_topic(self._settings.node_id, "lease.renewed"))
+        if self._v2_reconcile_service is not None:
+            subscriptions.append(v2_command_topic(self._settings.node_id, "execution.reconcile_result"))
         await self._transport.subscribe(subscriptions)
         self._outbox_task = asyncio.create_task(self._outbox_loop())
         if self._v2_lease_renewal_service is not None:
@@ -323,6 +342,8 @@ class AgentRuntime:
                 self._v2_plugin_sync_controller.reset_session()
             if self._v2_lease_renewal_service is not None:
                 self._v2_lease_renewal_service.reset_session()
+            if self._v2_reconcile_service is not None:
+                self._v2_reconcile_service.reset_session()
 
     async def _wait_for_registration(self) -> None:
         """等待 ACK；超时后按指数退避重发注册（保持 broker 连接）。
@@ -347,6 +368,11 @@ class AgentRuntime:
                         )
                     except Exception:
                         logger.exception("V2 能力快照发布失败")
+                if self._v2_reconcile_service is not None:
+                    try:
+                        self._v2_reconcile_service.enqueue(self._v2_session_id())
+                    except Exception:
+                        logger.exception("V2 execution.reconcile 写入 outbox 失败")
                 return
             except asyncio.CancelledError:
                 raise
@@ -419,6 +445,12 @@ class AgentRuntime:
             and message.topic == v2_command_topic(self._settings.node_id, "lease.renewed")
         ):
             self._v2_lease_renewal_service.handle_renewed(message, self._v2_session_id())
+            return
+        if (
+            self._v2_reconcile_service is not None
+            and message.topic == v2_command_topic(self._settings.node_id, "execution.reconcile_result")
+        ):
+            self._v2_reconcile_service.handle_result(message, self._v2_session_id())
             return
         if (
             self._v2_capability_publisher is not None

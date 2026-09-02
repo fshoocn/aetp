@@ -21,11 +21,16 @@ from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     ActiveAttemptInfo,
     AgentSystemInfo,
+    CaseStatusEvent,
     DiagnosticsRequest,
     DiagnosticsSnapshot,
     ExecutionAck,
     ExecutionFinished,
+    ExecutionLogBatch,
+    ExecutionProgress,
+    ExecutionReconcile,
     LeaseRenewRequest,
+    LogComplete,
     MaintenanceStatus,
     MqttConnectionInfo,
     NodeRegister,
@@ -160,6 +165,103 @@ class AgentV2CapabilityPublisher:
         ledger.replace_outbox(
             outbox_id,
             v2_event_topic(self._node_id().root, "execution.finished"),
+            envelope.model_dump(mode="json"),
+        )
+        return outbox_id
+
+    def enqueue_execution_reconcile(
+        self,
+        ledger: Ledger,
+        reconcile: ExecutionReconcile,
+        session_id: SessionId,
+    ) -> str:
+        """将重连对账事件写入可靠 Agent outbox。"""
+        envelope = self._build_envelope(
+            MessageType.EXECUTION_RECONCILE,
+            reconcile,
+            session_id,
+        )
+        outbox_id = f"v2-execution-reconcile:{self._node_id().root}:{session_id.root}"
+        ledger.replace_outbox(
+            outbox_id,
+            v2_event_topic(self._node_id().root, "execution.reconcile"),
+            envelope.model_dump(mode="json"),
+        )
+        return outbox_id
+
+    def enqueue_execution_progress(
+        self,
+        ledger: Ledger,
+        progress: ExecutionProgress,
+        session_id: SessionId,
+    ) -> str:
+        """将 V2 execution.progress 写入可靠 Agent outbox。"""
+        return self._enqueue_execution_event(
+            ledger,
+            MessageType.EXECUTION_PROGRESS,
+            progress,
+            session_id,
+            f"execution-progress:{progress.attempt_id.root}:{progress.sequence}",
+        )
+
+    def enqueue_execution_log(
+        self,
+        ledger: Ledger,
+        batch: ExecutionLogBatch,
+        session_id: SessionId,
+    ) -> str:
+        """将 V2 execution.log 写入可靠 Agent outbox。"""
+        return self._enqueue_execution_event(
+            ledger,
+            MessageType.EXECUTION_LOG,
+            batch,
+            session_id,
+            f"execution-log:{batch.attempt_id.root}:{batch.first_sequence}",
+        )
+
+    def enqueue_execution_case_status(
+        self,
+        ledger: Ledger,
+        event: CaseStatusEvent,
+        session_id: SessionId,
+    ) -> str:
+        """将 V2 execution.case_status 写入可靠 Agent outbox。"""
+        return self._enqueue_execution_event(
+            ledger,
+            MessageType.EXECUTION_CASE_STATUS,
+            event,
+            session_id,
+            f"execution-case:{event.attempt_id.root}:{event.case_key}:{event.sequence}",
+        )
+
+    def enqueue_execution_log_complete(
+        self,
+        ledger: Ledger,
+        complete: LogComplete,
+        session_id: SessionId,
+    ) -> str:
+        """将 V2 execution.log_complete 写入可靠 Agent outbox。"""
+        return self._enqueue_execution_event(
+            ledger,
+            MessageType.EXECUTION_LOG_COMPLETE,
+            complete,
+            session_id,
+            f"execution-log-complete:{complete.attempt_id.root}",
+        )
+
+    def _enqueue_execution_event(
+        self,
+        ledger: Ledger,
+        message_type: MessageType,
+        payload: ExecutionProgress | ExecutionLogBatch | CaseStatusEvent | LogComplete,
+        session_id: SessionId,
+        logical_key: str,
+    ) -> str:
+        envelope = self._build_envelope(message_type, payload, session_id)
+        outbox_id = stable_id(logical_key).root
+        ledger.replace_outbox(
+            outbox_id,
+            v2_event_topic(self._node_id().root, self._message_segment(message_type)),
             envelope.model_dump(mode="json"),
         )
         return outbox_id
@@ -390,6 +492,11 @@ class AgentV2CapabilityPublisher:
             | DiagnosticsSnapshot
             | ExecutionAck
             | ExecutionFinished
+            | ExecutionLogBatch
+            | ExecutionProgress
+            | CaseStatusEvent
+            | ExecutionReconcile
+            | LogComplete
             | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
@@ -419,6 +526,11 @@ class AgentV2CapabilityPublisher:
             | DiagnosticsSnapshot
             | ExecutionAck
             | ExecutionFinished
+            | ExecutionReconcile
+            | ExecutionLogBatch
+            | ExecutionProgress
+            | CaseStatusEvent
+            | LogComplete
             | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
@@ -449,6 +561,11 @@ class AgentV2CapabilityPublisher:
             MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: "agent.diagnostics.snapshot",
             MessageType.EXECUTION_ACK: "execution.ack",
             MessageType.EXECUTION_FINISHED: "execution.finished",
+            MessageType.EXECUTION_RECONCILE: "execution.reconcile",
+            MessageType.EXECUTION_PROGRESS: "execution.progress",
+            MessageType.EXECUTION_LOG: "execution.log",
+            MessageType.EXECUTION_CASE_STATUS: "execution.case_status",
+            MessageType.EXECUTION_LOG_COMPLETE: "execution.log_complete",
             MessageType.LEASE_RENEW: "lease.renew",
             MessageType.AGENT_PLUGIN_SYNC_RESULT: "agent.plugin.sync.result",
             MessageType.AGENT_MAINTENANCE_STATUS: "agent.maintenance.status",

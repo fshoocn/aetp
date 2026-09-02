@@ -115,6 +115,12 @@
             ><el-button v-if="['installed', 'disabled', 'enabled'].includes(row.status)" link type="primary" @click="toggle(row)">{{
               row.status === "enabled" ? "停用" : "启用"
             }}</el-button
+            ><el-button
+              v-if="['installed', 'disabled'].includes(row.status)"
+              link
+              type="warning"
+              @click="rollback(row)"
+              >回滚</el-button
             ><el-button link type="danger" @click="remove(row)" :disabled="!['disabled', 'error'].includes(row.status)"
               >删除</el-button
             ></template
@@ -241,6 +247,15 @@ async function toggle(row: V2PluginVersion) {
       await aetpApi.plugins.v2Enable(row.plugin_id, row.version);
     }
     ElMessage.success("V2 插件状态已更新，重启后生效");
+    refresh();
+  } catch (e) {
+    ElMessage.error((e as Error).message);
+  }
+}
+async function rollback(row: V2PluginVersion) {
+  try {
+    await aetpApi.plugins.v2Rollback(row.plugin_id, row.version);
+    ElMessage.success("V2 插件活动版本已切换，重启后生效");
     refresh();
   } catch (e) {
     ElMessage.error((e as Error).message);

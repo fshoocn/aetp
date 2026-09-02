@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import inspect
 import logging
+import mimetypes
 import shutil
 import tempfile
 import zipfile
@@ -12,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from aetp_protocol.artifacts import ArtifactKind, ArtifactRef
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import (
     CaseResult,
@@ -24,23 +28,38 @@ from aetp_protocol.execution import (
 from aetp_protocol.execution import (
     ExecutionResult as ProtocolExecutionResult,
 )
-from aetp_protocol.ids import MessageId, SessionId
+from aetp_protocol.ids import BusinessId, MessageId, SessionId, Sha256
 from aetp_protocol.payloads import ExecutionFinished
 
+from agent.application.services.artifact_upload_service import ArtifactUploadError, ArtifactUploadService
 from agent.application.services.execution_service import (
     ExecutionResult as AgentExecutionResult,
 )
 from agent.application.services.execution_service import (
     ExecutionService,
 )
+from agent.application.services.resource_provider import (
+    ResourceActivationError,
+    ResourceProviderRegistry,
+)
 from agent.application.services.script_archive import extract_zip_safely
 from agent.application.services.script_cache_service import ScriptCacheService
-from agent.application.services.task_context import TaskContext
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.v2_task_context import V2TaskContext
 from agent.config import AgentSettings
 from agent.domain.ledger import Ledger
 
 logger = logging.getLogger(__name__)
+
+
+class _NoopResourceProviderRegistry:
+    """仅用于未注入资源注册表的纯执行测试，不代表生产硬件 Provider。"""
+
+    async def activate(self, bindings):
+        return tuple(bindings)
+
+    async def deactivate(self, bindings) -> None:
+        del bindings
 
 
 class V2ExecutionRunner:
@@ -55,6 +74,8 @@ class V2ExecutionRunner:
         executor_resolver: Callable[[ExecutionPlan], Any],
         *,
         script_cache: ScriptCacheService | None = None,
+        resource_providers: ResourceProviderRegistry | None = None,
+        artifact_uploader: ArtifactUploadService | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._settings = settings
@@ -63,6 +84,8 @@ class V2ExecutionRunner:
         self._publisher = publisher
         self._executor_resolver = executor_resolver
         self._script_cache = script_cache
+        self._resource_providers = resource_providers or _NoopResourceProviderRegistry()
+        self._artifact_uploader = artifact_uploader
         self._now = now or (lambda: datetime.now(UTC))
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._completed: set[str] = set()
@@ -101,6 +124,8 @@ class V2ExecutionRunner:
         session_id: SessionId,
         correlation_id: MessageId | None,
     ) -> None:
+        context: V2TaskContext | None = None
+        activated_resources = ()
         try:
             plugin = self._executor_resolver(plan)
             script_ref = plan.script.model_dump(mode="json")
@@ -111,21 +136,20 @@ class V2ExecutionRunner:
                     cached.path,
                     plan.run_id.root,
                 )
-            context = TaskContext(
+            context = V2TaskContext(
                 self._settings,
                 self._ledger,
-                project_id=plan.project_id.root,
-                task_id=plan.task_id.root,
-                shard_id=plan.shard_id.root,
-                run_id=plan.run_id.root,
-                node_id=plan.node_id.root,
-                params={**plan.configuration.values, **plan.execution_parameters},
-                script_ref=script_ref,
-                case_keys=list(plan.case_keys),
+                self._publisher,
+                plan,
+                session_id=lambda: session_id,
                 is_cancelled=lambda: self._execution_service.is_cancelled(plan.run_id.root),
-                session_id=lambda: session_id.root,
+                script_ref=script_ref,
                 now=self._now,
             )
+            if plan.resource_bindings:
+                if self._resource_providers is None:
+                    raise ResourceActivationError("V2 Plan 包含资源但未配置 ResourceProvider")
+                activated_resources = await self._resource_providers.activate(plan.resource_bindings)
             timeout_s = max(1, int((plan.deadline_at - self._now()).total_seconds()))
             result = await self._execution_service.execute(
                 plan.run_id.root,
@@ -133,7 +157,31 @@ class V2ExecutionRunner:
                 context,
                 timeout_s=timeout_s,
             )
+            await self._cleanup_plugin(plugin, context)
             finished_result = await self._to_protocol_result(result, plugin, context)
+            artifact_refs = await self._upload_artifacts(plan, result.summary)
+            if artifact_refs:
+                finished_result = finished_result.model_copy(update={"artifacts": tuple(artifact_refs)})
+        except ArtifactUploadError as exc:
+            logger.exception("V2 Plan Artifact 上传失败: plan=%s", plan.plan_id.root)
+            finished_result = ProtocolExecutionResult(
+                status=ExecutionStatus.FAILED,
+                passed=False,
+                error=ProtocolExecutionError(
+                    code=ErrorCode("ARTIFACT_UPLOAD_CONFLICT"),
+                    message=str(exc),
+                ),
+            )
+        except ResourceActivationError as exc:
+            logger.exception("V2 Plan 资源生命周期失败: plan=%s", plan.plan_id.root)
+            finished_result = ProtocolExecutionResult(
+                status=ExecutionStatus.FAILED,
+                passed=False,
+                error=ProtocolExecutionError(
+                    code=ErrorCode("RESOURCE_ACTIVATION_FAILED"),
+                    message=str(exc),
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 - execution.finished 统一失败事实
             logger.exception("V2 Plan 执行桥接失败: plan=%s", plan.plan_id.root)
             finished_result = ProtocolExecutionResult(
@@ -144,6 +192,16 @@ class V2ExecutionRunner:
                     message=f"{type(exc).__name__}: {exc}",
                 ),
             )
+        if context is not None:
+            try:
+                await context.complete_logs()
+            except Exception:
+                logger.exception("V2 execution.log_complete 发布失败: plan=%s", plan.plan_id.root)
+        if activated_resources and self._resource_providers is not None:
+            try:
+                await self._resource_providers.deactivate(reversed(activated_resources))
+            except Exception as exc:  # noqa: BLE001 - cleanup 失败记录但不吞终态
+                logger.exception("V2 Plan 资源释放失败: plan=%s error=%s", plan.plan_id.root, exc)
         finished = ExecutionFinished(
             run_id=plan.run_id,
             shard_id=plan.shard_id,
@@ -189,7 +247,7 @@ class V2ExecutionRunner:
         self,
         result: AgentExecutionResult,
         plugin,
-        context: TaskContext,
+        context: V2TaskContext,
     ) -> ProtocolExecutionResult:
         status = {
             "succeeded": ExecutionStatus.SUCCEEDED,
@@ -237,6 +295,82 @@ class V2ExecutionRunner:
             data=dict(summary.get("data") or {}),
             error=error,
         )
+
+    async def _upload_artifacts(
+        self,
+        plan: ExecutionPlan,
+        summary: Mapping[str, Any],
+    ) -> tuple[ArtifactRef, ...]:
+        """上传 executor 声明的本地产物，并转换为强类型引用。"""
+        if self._artifact_uploader is None or not plan.artifact_upload_url:
+            return ()
+        raw_artifacts = summary.get("artifact_paths") or []
+        if not isinstance(raw_artifacts, list):
+            raise ArtifactUploadError("artifact_paths 必须是数组")
+        references: list[ArtifactRef] = []
+        for raw in raw_artifacts:
+            if not isinstance(raw, Mapping):
+                raise ArtifactUploadError("artifact_paths 条目必须是对象")
+            raw_path = raw.get("path")
+            raw_kind = raw.get("kind", "data")
+            if not isinstance(raw_path, str) or not raw_path:
+                raise ArtifactUploadError("artifact_paths 条目缺少 path")
+            if not isinstance(raw_kind, str):
+                raise ArtifactUploadError("artifact_paths 条目 kind 无效")
+            try:
+                kind = ArtifactKind(raw_kind)
+            except ValueError as exc:
+                raise ArtifactUploadError(f"非法产物类型: {raw_kind}") from exc
+            path = Path(raw_path)
+            if not path.is_file():
+                raise ArtifactUploadError(f"产物文件不存在: {path}")
+            content = path.read_bytes()
+            response = await self._artifact_uploader.upload(
+                plan.artifact_upload_url,
+                path,
+                kind=kind.value,
+                filename=path.name,
+            )
+            try:
+                artifact_id = BusinessId(str(response["artifact_id"]))
+                size = int(response.get("size", len(content)))
+                digest = Sha256(str(response.get("sha256") or hashlib.sha256(content).hexdigest()))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ArtifactUploadError("Master 返回的 ArtifactRef 无效") from exc
+            references.append(
+                ArtifactRef(
+                    artifact_id=artifact_id,
+                    project_id=plan.project_id,
+                    run_id=plan.run_id,
+                    shard_id=plan.shard_id,
+                    attempt_id=plan.attempt_id,
+                    node_id=plan.node_id,
+                    kind=kind,
+                    filename=str(response.get("filename") or path.name),
+                    content_type=str(
+                        response.get("content_type")
+                        or mimetypes.guess_type(path.name)[0]
+                        or "application/octet-stream"
+                    ),
+                    size=size,
+                    sha256=digest,
+                    derived_from=(
+                        BusinessId(str(response["derived_from"]))
+                        if response.get("derived_from")
+                        else None
+                    ),
+                )
+            )
+        return tuple(references)
+
+    @staticmethod
+    async def _cleanup_plugin(plugin: Any, context: V2TaskContext) -> None:
+        cleanup = getattr(plugin, "cleanup", None)
+        if cleanup is None:
+            return
+        value = cleanup(context)
+        if inspect.isawaitable(value):
+            await value
 
 
 __all__ = ["V2ExecutionRunner"]

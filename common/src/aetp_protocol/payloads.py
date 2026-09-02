@@ -523,6 +523,12 @@ class ExecutionReconcileResult(_Strict):
     attempts: tuple[ReconcileAttempt, ...] = ()
     message: str = ""
 
+    @model_validator(mode="after")
+    def validate_rejection_code(self) -> ExecutionReconcileResult:
+        if not self.accepted and self.code is None:
+            raise ValueError("rejected execution reconcile result must contain code")
+        return self
+
 
 class MaintenanceStatus(_Strict):
     node_id: BusinessId

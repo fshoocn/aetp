@@ -31,6 +31,7 @@ from .secret_value import SecretValueRecord
 from .test_script import TestScript
 from .test_task import TestTask
 from .user import User
+from .v2_task import ScriptDefinitionRecord, V2TestTaskRecord
 
 __all__ = [
     "AuditLog",
@@ -65,5 +66,7 @@ __all__ = [
     "TaskRun",
     "TestScript",
     "TestTask",
+    "ScriptDefinitionRecord",
+    "V2TestTaskRecord",
     "User",
 ]

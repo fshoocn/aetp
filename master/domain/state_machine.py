@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TypeVar
 
 from master.domain.enums import (
     RunStatus,
@@ -27,7 +26,6 @@ from master.domain.enums import (
 )
 
 _Status = RunStatus | ShardStatus | ShardAttemptStatus
-_StatusT = TypeVar("_StatusT", bound=_Status)
 
 
 class InvalidStateTransitionError(ValueError):
@@ -86,6 +84,7 @@ _SHARD_TRANSITIONS: dict[ShardStatus, frozenset[ShardStatus]] = {
     ShardStatus.WAITING_RECOVERY: frozenset(
         {
             ShardStatus.RUNNING,
+            ShardStatus.SUCCEEDED,
             ShardStatus.DISPATCHING,
             ShardStatus.FAILED,
             ShardStatus.CANCELLED,
@@ -178,26 +177,26 @@ _TRANSITIONS: dict[type, dict] = {
 # ---------------------------------------------------------------------------
 
 
-def transitions_for(status: _StatusT) -> frozenset[_StatusT]:
+def transitions_for(status: _Status) -> frozenset[_Status]:
     """返回某状态可合法迁移到的目标状态集合。"""
     table = _TRANSITIONS[type(status)]
     return frozenset(table.get(status, frozenset()))
 
 
-def can_transition(status: _StatusT, target: _StatusT) -> bool:
+def can_transition(status: _Status, target: _Status) -> bool:
     """纯函数：判断 status -> target 是否为合法迁移。"""
     if type(status) is not type(target):
         return False
     return target in transitions_for(status)
 
 
-def assert_transition(status: _StatusT, target: _StatusT) -> None:
+def assert_transition(status: _Status, target: _Status) -> None:
     """校验迁移合法性，非法抛出 InvalidStateTransitionError。"""
     if not can_transition(status, target):
         raise InvalidStateTransitionError(f"非法状态迁移: {type(status).__name__} {status.value} -> {target.value}")
 
 
-def is_terminal(status: _StatusT) -> bool:
+def is_terminal(status: _Status) -> bool:
     """判断状态是否为终态（终态不可再迁移）。"""
     return status in _TERMINAL[type(status)]
 

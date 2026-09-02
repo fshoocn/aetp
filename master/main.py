@@ -28,6 +28,7 @@ from .api.v1.errors import register_application_error_handlers
 from .api.v1.router import router as v1_router
 from .api.v2.nodes import router as v2_nodes_router
 from .api.v2.router import router as v2_router
+from .api.v2.tasks import router as v2_tasks_router
 from .bootstrap.container import Container
 
 logger = logging.getLogger(__name__)
@@ -255,6 +256,7 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(v1_router)
 app.include_router(v2_router)
 app.include_router(v2_nodes_router)
+app.include_router(v2_tasks_router)
 
 
 @app.get("/api/v1/health", tags=["system"])

@@ -18,7 +18,12 @@ from master.domain.enums import (
     ScriptParseStatus,
 )
 from master.domain.models import Project, TestScript, User
-from master.domain.signed_url import build_signed_path, verify_signed_path
+from master.domain.signed_url import (
+    build_artifact_upload_path,
+    build_signed_path,
+    verify_artifact_upload_path,
+    verify_signed_path,
+)
 from master.domain.time import utcnow
 
 
@@ -54,6 +59,55 @@ def test_signed_path_rejects_tampered_signature() -> None:
     path = build_signed_path("S-1", secret, 300)
     qs = _query(path)
     assert not verify_signed_path("S-1", int(qs["expires"]), "0" * 64, secret)
+
+
+def test_artifact_upload_signature_binds_scope_and_expiry() -> None:
+    secret = "artifact-test-secret"
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    path = build_artifact_upload_path(
+        "R-1",
+        "P-1",
+        "N-1",
+        "S-1",
+        secret,
+        300,
+        attempt_id="A-1",
+        now=now,
+    )
+    qs = _query(path)
+    assert verify_artifact_upload_path(
+        "R-1",
+        "P-1",
+        "N-1",
+        "S-1",
+        "A-1",
+        int(qs["expires"]),
+        qs["signature"],
+        secret,
+        now=now,
+    )
+    assert not verify_artifact_upload_path(
+        "R-1",
+        "P-2",
+        "N-1",
+        "S-1",
+        "A-1",
+        int(qs["expires"]),
+        qs["signature"],
+        secret,
+        now=now,
+    )
+    assert not verify_artifact_upload_path(
+        "R-1",
+        "P-1",
+        "N-1",
+        "S-1",
+        "A-1",
+        int(qs["expires"]),
+        qs["signature"],
+        secret,
+        now=now + timedelta(seconds=301),
+    )
 
 
 def _seed_script(client, tmp_path) -> tuple[str, str]:

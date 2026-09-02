@@ -62,6 +62,7 @@ from master.domain.models.notification import (
     NotificationEndpoint,
 )
 from master.domain.models.task_schedule import TaskSchedule
+from master.domain.models.v2_task import ScriptDefinitionRecord, V2TestTaskRecord
 
 
 class UserRepository(ABC):
@@ -185,6 +186,34 @@ class TestTaskRepository(ABC):
     def update(self, task: TestTask) -> TestTask: ...
 
 
+class ScriptDefinitionRepository(ABC):
+    """V2 ScriptDefinition revision 仓储。"""
+
+    @abstractmethod
+    def get(self, script_definition_id: BusinessId, revision: int) -> ScriptDefinitionRecord | None: ...
+
+    @abstractmethod
+    def list_by_project(
+        self,
+        project_id: BusinessId,
+        *,
+        enabled: bool | None = None,
+    ) -> list[ScriptDefinitionRecord]: ...
+
+    @abstractmethod
+    def add(self, record: ScriptDefinitionRecord) -> ScriptDefinitionRecord: ...
+
+
+class V2TestTaskRepository(ABC):
+    """V2 多脚本 TestTask revision 仓储。"""
+
+    @abstractmethod
+    def get(self, task_id: BusinessId, revision: int | None = None) -> V2TestTaskRecord | None: ...
+
+    @abstractmethod
+    def add(self, record: V2TestTaskRecord) -> V2TestTaskRecord: ...
+
+
 class TaskRunRepository(ABC):
     """Run 执行仓储（P3.4，task_runs 表）。"""
 
@@ -292,6 +321,9 @@ class RunArtifactRepository(ABC):
     def get_by_artifact_id(self, artifact_id: str) -> RunArtifact | None: ...
 
     @abstractmethod
+    def get_by_file_ref(self, file_ref: str) -> RunArtifact | None: ...
+
+    @abstractmethod
     def list_by_run(self, run_id: str) -> list[RunArtifact]: ...
 
     @abstractmethod
@@ -312,6 +344,14 @@ class RunLogRepository(ABC):
 
     @abstractmethod
     def existing_sequences(self, run_id: str, sequences: list[int]) -> set[int]: ...
+
+    @abstractmethod
+    def existing_attempt_sequences(
+        self,
+        run_id: str,
+        attempt_id: str,
+        sequences: list[int],
+    ) -> set[int]: ...
 
     @abstractmethod
     def list_by_run(self, run_id: str, *, after_sequence: int = 0) -> list[RunLog]: ...
@@ -688,6 +728,8 @@ class UnitOfWork(ABC):
     script_cases: ScriptCaseRepository
     secret_values: SecretValueRepository
     test_tasks: TestTaskRepository
+    script_definitions: ScriptDefinitionRepository
+    v2_test_tasks: V2TestTaskRepository
     task_runs: TaskRunRepository
     run_shards: RunShardRepository
     shard_attempts: ShardAttemptRepository

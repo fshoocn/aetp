@@ -16,10 +16,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 from datetime import UTC, datetime
+from urllib.parse import quote, urlencode
 
 _SCRIPT_URL_PATH = "/api/v1/internal/scripts/{script_id}/download"
 _PLUGIN_URL_PATH = "/api/v1/internal/plugins/{plugin_id}/download"
 _PLUGIN_VERSION_URL_PATH = "/api/v1/internal/plugins/{plugin_id}/{version}/download"
+_ARTIFACT_UPLOAD_URL_PATH = "/api/v1/internal/runs/{run_id}/artifacts"
 
 
 def _signature(resource_id: str, expires: int, secret: str) -> str:
@@ -63,3 +65,60 @@ def verify_signed_path(
         return False
     expected = _signature(resource_id, expires, secret)
     return hmac.compare_digest(signature, expected)
+
+
+def build_artifact_upload_path(
+    run_id: str,
+    project_id: str,
+    node_id: str,
+    shard_id: str,
+    secret: str,
+    ttl_s: int,
+    *,
+    attempt_id: str | None = None,
+    now: datetime | None = None,
+) -> str:
+    """生成绑定上传范围的 Artifact HMAC URL。"""
+    current = now or datetime.now(UTC)
+    expires = int(current.timestamp()) + int(ttl_s)
+    resource_id = _artifact_resource_id(run_id, project_id, node_id, shard_id, attempt_id)
+    signature = _signature(resource_id, expires, secret)
+    query: dict[str, str] = {
+        "project_id": project_id,
+        "node_id": node_id,
+        "shard_id": shard_id,
+        "expires": str(expires),
+        "signature": signature,
+    }
+    if attempt_id is not None:
+        query["attempt_id"] = attempt_id
+    return f"{_ARTIFACT_UPLOAD_URL_PATH.format(run_id=quote(run_id, safe=''))}?{urlencode(query)}"
+
+
+def verify_artifact_upload_path(
+    run_id: str,
+    project_id: str,
+    node_id: str,
+    shard_id: str,
+    attempt_id: str | None,
+    expires: int,
+    signature: str,
+    secret: str,
+    now: datetime | None = None,
+) -> bool:
+    """校验 Artifact 上传 URL 的过期时间和完整范围签名。"""
+    current = now or datetime.now(UTC)
+    if expires <= int(current.timestamp()):
+        return False
+    resource_id = _artifact_resource_id(run_id, project_id, node_id, shard_id, attempt_id)
+    return hmac.compare_digest(signature, _signature(resource_id, expires, secret))
+
+
+def _artifact_resource_id(
+    run_id: str,
+    project_id: str,
+    node_id: str,
+    shard_id: str,
+    attempt_id: str | None,
+) -> str:
+    return "|".join((run_id, project_id, node_id, shard_id, attempt_id or ""))

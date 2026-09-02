@@ -77,6 +77,7 @@ def test_master_projects_finished_and_releases_v2_leases(client) -> None:
         run = uow.task_runs.get_by_run_id(plan.run_id.root)
         lease = uow.resource_leases.get_by_lease_id(plan.resource_bindings[0].lease_id)
         case_results = uow.run_case_results.list_by_shard(plan.run_id.root, plan.shard_id.root)
+        result = uow.run_results.get_by_run_id(plan.run_id.root)
         assert attempt is not None and attempt.status is ShardAttemptStatus.SUCCEEDED
         assert shard is not None and shard.status is ShardStatus.SUCCEEDED
         assert run is not None and run.status is RunStatus.SUCCEEDED
@@ -84,3 +85,6 @@ def test_master_projects_finished_and_releases_v2_leases(client) -> None:
         assert len(case_results) == 1
         assert case_results[0].case_key == plan.case_keys[0]
         assert case_results[0].status.value == CaseStatus.PASSED.value
+        assert result is not None and result.status is RunStatus.SUCCEEDED
+        assert result.passed is True
+        assert result.metrics == {"total": 1, "passed": 1, "failed": 0, "skipped": 0}

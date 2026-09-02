@@ -17,6 +17,7 @@ def _to_domain(orm: RunShardORM) -> RunShard:
         id=orm.id,
         shard_id=orm.shard_id,
         run_id=orm.run.run_id if orm.run is not None else "",
+        script_binding_id=orm.script_binding_id,
         shard_index=orm.shard_index,
         case_keys=list(orm.case_keys or []),
         execution_params=dict(orm.execution_params or {}),
@@ -48,6 +49,7 @@ class RunShardRepositoryImpl(RunShardRepository):
             orm = RunShardORM(
                 shard_id=shard.shard_id,
                 run_pk=run_pk,
+                script_binding_id=shard.script_binding_id,
                 shard_index=shard.shard_index,
                 case_keys=shard.case_keys,
                 execution_params=shard.execution_params,
@@ -83,6 +85,7 @@ class RunShardRepositoryImpl(RunShardRepository):
         if orm is None:
             raise ValueError(f"Shard 不存在: id={shard.id}")
         orm.case_keys = shard.case_keys
+        orm.script_binding_id = shard.script_binding_id
         orm.execution_params = shard.execution_params
         orm.estimated_duration_s = shard.estimated_duration_s
         orm.status = shard.status.value

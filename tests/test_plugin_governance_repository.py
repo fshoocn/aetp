@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,9 +33,11 @@ from master.application.services.plugin_sync_service import (
     InvalidPluginSyncTransition,
     PluginSyncService,
 )
+from master.domain.enums import NodeStatus
 from master.domain.models import (
     AgentPluginDesiredVersionRecord,
     AgentPluginSyncOperationRecord,
+    Node,
     PluginSyncOperationState,
     PluginVersionRecord,
 )
@@ -277,3 +282,140 @@ def test_v2_plugin_list_api_uses_governance_service(client, auth_header) -> None
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def _versioned_archive(version: str) -> bytes:
+    files = {
+        "plugin.json": json.dumps(
+            {
+                "schema_version": 2,
+                "id": "org.example.executor",
+                "version": version,
+                "api_version": "2.0.0",
+                "point": "executor",
+                "display_name": "Example Executor",
+                "entrypoints": {
+                    "master": "plugin:create_plugin",
+                    "agent": "plugin:create_plugin",
+                },
+            }
+        ).encode(),
+        "master/plugin.py": b"def create_plugin(): pass",
+        "agent/plugin.py": b"def create_plugin(): pass",
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+def test_plugin_governance_auto_disables_previous_and_rolls_back(client, tmp_path) -> None:
+    container = client.app.state.container
+    service = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+    first = service.register_archive("first.zip", _versioned_archive("2.0.0"))
+    second = service.register_archive("second.zip", _versioned_archive("2.1.0"))
+
+    service.install(first.plugin_id, first.version)
+    service.request_enabled(first.plugin_id, first.version)
+    enabled_first = service.complete_restart(first.plugin_id, first.version, enabled=True)
+    service.install(second.plugin_id, second.version)
+    service.request_enabled(second.plugin_id, second.version)
+    enabled_second = service.complete_restart(second.plugin_id, second.version, enabled=True)
+    rolled_back = service.rollback(first.plugin_id, first.version)
+
+    assert enabled_first.status is PluginStatus.ENABLED
+    assert enabled_second.status is PluginStatus.ENABLED
+    assert rolled_back.status is PluginStatus.ENABLED
+    with container.uow_factory()() as uow:
+        first_record = uow.plugin_versions.get(first.plugin_id, first.version)
+        second_record = uow.plugin_versions.get(second.plugin_id, second.version)
+        assert first_record is not None and first_record.status is PluginStatus.ENABLED
+        assert second_record is not None and second_record.status is PluginStatus.DISABLED
+    pointer = (tmp_path / "plugins" / "active" / first.plugin_id.root / "active.json").read_text(encoding="utf-8")
+    assert '"version":"2.0.0"' in pointer
+
+
+def test_plugin_sync_service_sets_desired_version_for_node_group(client, tmp_path) -> None:
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+    registered = governance.register_archive("group.zip", _versioned_archive("2.0.0"))
+    nodes = (
+        "01J00000000000000000000080",
+        "01J00000000000000000000081",
+        "01J00000000000000000000082",
+    )
+    with container.uow_factory()() as uow:
+        for index, node_id in enumerate(nodes):
+            uow.nodes.save(
+                Node(
+                    id=None,
+                    node_id=node_id,
+                    name=f"bench-{index}",
+                    hostname=f"bench-{index}",
+                    status=NodeStatus.OFFLINE,
+                    online=False,
+                    enabled=True,
+                    tags=["bench", "nightly"] if index < 2 else ["bench"],
+                )
+            )
+    desired = DesiredPluginVersion(
+        plugin_id=registered.plugin_id,
+        point=registered.point,
+        version=registered.version,
+    )
+    service = PluginSyncService(container.uow_factory())
+    grouped = service.set_desired_version_for_tag("nightly", desired)
+    selected = service.set_desired_version_for_nodes(
+        (BusinessId(nodes[0]), BusinessId(nodes[0]), BusinessId(nodes[2])),
+        desired,
+    )
+
+    assert len(grouped) == 2
+    assert len(selected) == 2
+    assert {item.node_id.root for item in grouped} == {nodes[0], nodes[1]}
+    assert {item.node_id.root for item in selected} == {nodes[0], nodes[2]}
+
+
+def test_v2_node_group_desired_plugin_api(client) -> None:
+    container = client.app.state.container
+    auth = container.auth_service()
+    assert auth.bootstrap_admin("desired-api-admin", "admin-pass-123", "Desired API Admin")
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "desired-api-admin", "password": "admin-pass-123"},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    registered = container.plugin_governance_service().register_archive(
+        "desired-api.zip",
+        _versioned_archive("2.0.0"),
+    )
+    with container.uow_factory()() as uow:
+        for index, node_id in enumerate(("01J00000000000000000000083", "01J00000000000000000000084")):
+            uow.nodes.save(
+                Node(
+                    id=None,
+                    node_id=node_id,
+                    name=f"api-bench-{index}",
+                    hostname=f"api-bench-{index}",
+                    status=NodeStatus.OFFLINE,
+                    online=False,
+                    enabled=True,
+                    tags=["nightly"],
+                )
+            )
+
+    response = client.put(
+        "/api/v2/nodes/groups/nightly/desired-plugin",
+        headers=headers,
+        json={
+            "plugin_id": registered.plugin_id.root,
+            "point": registered.point.value,
+            "version": registered.version.root,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == 2
+    assert {item["desired"]["version"] for item in response.json()} == {"2.0.0"}

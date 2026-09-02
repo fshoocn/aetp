@@ -10,18 +10,24 @@ from aetp_protocol.execution import CancelRequest, ExecutionStatus
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
+    CaseStatusEvent,
     ExecutionAck,
     ExecutionCancel,
     ExecutionFinished,
+    ExecutionLogBatch,
+    ExecutionProgress,
+    ExecutionReconcile,
+    ExecutionReconcileResult,
     LeaseRenewed,
     LeaseRenewRequest,
+    LogComplete,
 )
 from aetp_protocol.topics import v2_command_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 
 from master.application.services.plan_lease_service import PlanLeaseService
-from master.domain.enums import CaseStatus, OutboxStatus, RunStatus, ShardAttemptStatus, ShardStatus
-from master.domain.models import OutboxMessage, RunCaseResult
+from master.domain.enums import CaseStatus, OutboxStatus, RunLogLevel, RunStatus, ShardAttemptStatus, ShardStatus
+from master.domain.models import OutboxMessage, RunCaseResult, RunLog, RunResult
 from master.domain.repositories import UnitOfWork
 from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
@@ -94,6 +100,203 @@ class V2ExecutionService:
                 assert_transition(run.status, RunStatus.ACKED)
                 run.status = RunStatus.ACKED
                 uow.task_runs.update(run)
+            return True
+
+    def handle_execution_progress(
+        self,
+        progress: ExecutionProgress,
+        *,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        """投影 V2 progress；低于已确认序号的消息幂等丢弃。"""
+        with self._uow_factory() as uow:
+            plan_record = uow.execution_plans.get_by_plan_id(progress.plan_id)
+            if plan_record is None or not self._matches_runtime_identity(
+                plan_record.plan,
+                run_id=progress.run_id,
+                shard_id=progress.shard_id,
+                attempt_id=progress.attempt_id,
+                sender_node_id=sender_node_id,
+                sender_session_id=sender_session_id,
+            ):
+                return False
+            attempt = uow.shard_attempts.get_by_attempt_id(progress.attempt_id.root)
+            if attempt is None or attempt.shard_id != progress.shard_id.root:
+                return False
+            if self._is_terminal_attempt(attempt.status):
+                return True
+            if attempt.status is ShardAttemptStatus.UNKNOWN:
+                return False
+            if progress.sequence <= attempt.last_progress_sequence:
+                return True
+            self._mark_attempt_running(uow, attempt)
+            attempt.last_progress_sequence = progress.sequence
+            uow.shard_attempts.update(attempt)
+            shard = uow.run_shards.get_by_shard_id(progress.shard_id.root)
+            if shard is not None and shard.status is ShardStatus.DISPATCHING:
+                assert_transition(shard.status, ShardStatus.RUNNING)
+                shard.status = ShardStatus.RUNNING
+                uow.run_shards.update(shard)
+            run = uow.task_runs.get_by_run_id(progress.run_id.root)
+            if run is not None and run.status in {RunStatus.CREATED, RunStatus.DISPATCHED, RunStatus.ACKED}:
+                if run.status is RunStatus.CREATED:
+                    assert_transition(run.status, RunStatus.DISPATCHED)
+                    run.status = RunStatus.DISPATCHED
+                assert_transition(run.status, RunStatus.RUNNING)
+                run.status = RunStatus.RUNNING
+                run.started_at = run.started_at or self._now()
+                uow.task_runs.update(run)
+            return True
+
+    def handle_execution_log(
+        self,
+        batch: ExecutionLogBatch,
+        *,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        """投影 V2 execution.log，按 Attempt 和 sequence 幂等。"""
+        with self._uow_factory() as uow:
+            plan_record = uow.execution_plans.get_by_plan_id(batch.plan_id)
+            if plan_record is None or not self._matches_runtime_identity(
+                plan_record.plan,
+                run_id=batch.run_id,
+                shard_id=batch.shard_id,
+                attempt_id=batch.attempt_id,
+                sender_node_id=sender_node_id,
+                sender_session_id=sender_session_id,
+            ):
+                return False
+            attempt = uow.shard_attempts.get_by_attempt_id(batch.attempt_id.root)
+            if attempt is None or attempt.shard_id != batch.shard_id.root or attempt.log_complete:
+                return False
+            sequences = [entry.sequence for entry in batch.entries]
+            existing = uow.run_logs.existing_attempt_sequences(
+                batch.run_id.root,
+                batch.attempt_id.root,
+                sequences,
+            )
+            entries = [
+                entry
+                for entry in batch.entries
+                if entry.sequence not in existing and entry.sequence > attempt.last_log_sequence
+            ]
+            if not entries:
+                return True
+            uow.run_logs.add_many(
+                [
+                    RunLog(
+                        run_id=batch.run_id.root,
+                        shard_id=batch.shard_id.root,
+                        node_id=sender_node_id.root,
+                        attempt_id=batch.attempt_id.root,
+                        plan_id=batch.plan_id.root,
+                        sequence=entry.sequence,
+                        level=RunLogLevel(entry.level.value),
+                        message=entry.message,
+                        detail=dict(entry.detail),
+                        occurred_at=entry.occurred_at,
+                    )
+                    for entry in entries
+                ]
+            )
+            attempt.last_log_sequence = max(attempt.last_log_sequence, max(sequences))
+            uow.shard_attempts.update(attempt)
+            return True
+
+    def handle_execution_case_status(
+        self,
+        event: CaseStatusEvent,
+        *,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        """投影 V2 case status，按 case sequence 防止旧状态覆盖新状态。"""
+        with self._uow_factory() as uow:
+            plan_record = uow.execution_plans.get_by_plan_id(event.plan_id)
+            if plan_record is None or not self._matches_runtime_identity(
+                plan_record.plan,
+                run_id=event.run_id,
+                shard_id=event.shard_id,
+                attempt_id=event.attempt_id,
+                sender_node_id=sender_node_id,
+                sender_session_id=sender_session_id,
+            ):
+                return False
+            if event.case_key not in plan_record.plan.case_keys:
+                return False
+            attempt = uow.shard_attempts.get_by_attempt_id(event.attempt_id.root)
+            if attempt is None or attempt.shard_id != event.shard_id.root:
+                return False
+            existing = uow.run_case_results.get_by_key(
+                event.run_id.root,
+                event.shard_id.root,
+                event.case_key,
+                attempt.attempt_no,
+            )
+            if existing is not None and event.sequence <= existing.sequence:
+                return True
+            target_status = CaseStatus(event.status.value)
+            if existing is not None:
+                if existing.status in {
+                    CaseStatus.PASSED,
+                    CaseStatus.FAILED,
+                    CaseStatus.SKIPPED,
+                    CaseStatus.ERROR,
+                } and target_status in {CaseStatus.PENDING, CaseStatus.RUNNING}:
+                    return False
+                existing.status = target_status
+                existing.sequence = event.sequence
+                uow.run_case_results.update(existing)
+            else:
+                uow.run_case_results.add_many(
+                    [
+                        RunCaseResult(
+                            run_id=event.run_id.root,
+                            shard_id=event.shard_id.root,
+                            case_key=event.case_key,
+                            attempt_no=attempt.attempt_no,
+                            status=target_status,
+                            sequence=event.sequence,
+                        )
+                    ]
+                )
+            return True
+
+    def handle_execution_log_complete(
+        self,
+        complete: LogComplete,
+        *,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        """关闭 V2 Attempt 日志围栏；相同声明幂等，倒退声明拒绝。"""
+        with self._uow_factory() as uow:
+            plan_record = uow.execution_plans.get_by_plan_id(complete.plan_id)
+            if plan_record is None or not self._matches_runtime_identity(
+                plan_record.plan,
+                run_id=complete.run_id,
+                shard_id=complete.shard_id,
+                attempt_id=complete.attempt_id,
+                sender_node_id=sender_node_id,
+                sender_session_id=sender_session_id,
+            ):
+                return False
+            attempt = uow.shard_attempts.get_by_attempt_id(complete.attempt_id.root)
+            if attempt is None or attempt.shard_id != complete.shard_id.root:
+                return False
+            if attempt.log_complete:
+                return (
+                    attempt.last_log_sequence == complete.last_sequence
+                    and attempt.log_entry_count == complete.entry_count
+                )
+            if complete.last_sequence < attempt.last_log_sequence:
+                return False
+            attempt.log_complete = True
+            attempt.last_log_sequence = complete.last_sequence
+            attempt.log_entry_count = complete.entry_count
+            uow.shard_attempts.update(attempt)
             return True
 
     def request_cancel(self, plan_id: BusinessId, *, reason: str = "") -> OutboxMessage:
@@ -213,6 +416,7 @@ class V2ExecutionService:
         *,
         sender_node_id: BusinessId,
         sender_session_id: SessionId,
+        allow_reconciled_session: bool = False,
     ) -> bool:
         """校验并投影 execution.finished，同时释放 Attempt 的全部 Lease。"""
         with self._uow_factory() as uow:
@@ -220,15 +424,26 @@ class V2ExecutionService:
             if plan_record is None:
                 return False
             plan = plan_record.plan
-            if not self._matches_plan_identity(
-                plan,
-                run_id=finished.run_id,
-                shard_id=finished.shard_id,
-                attempt_id=finished.attempt_id,
-                plan_hash=finished.plan_hash,
-                sender_node_id=sender_node_id,
-                sender_session_id=sender_session_id,
-            ):
+            matches = (
+                self._matches_reconciled_identity(
+                    plan,
+                    run_id=finished.run_id,
+                    shard_id=finished.shard_id,
+                    attempt_id=finished.attempt_id,
+                    sender_node_id=sender_node_id,
+                )
+                if allow_reconciled_session
+                else self._matches_plan_identity(
+                    plan,
+                    run_id=finished.run_id,
+                    shard_id=finished.shard_id,
+                    attempt_id=finished.attempt_id,
+                    plan_hash=finished.plan_hash,
+                    sender_node_id=sender_node_id,
+                    sender_session_id=sender_session_id,
+                )
+            )
+            if not matches or plan.plan_hash != finished.plan_hash:
                 return False
             attempt = uow.shard_attempts.get_by_attempt_id(finished.attempt_id.root)
             if attempt is None:
@@ -242,6 +457,20 @@ class V2ExecutionService:
             }
             if attempt.status in terminal_attempts:
                 return True
+            for artifact in finished.result.artifacts:
+                stored_artifact = uow.run_artifacts.get_by_artifact_id(artifact.artifact_id.root)
+                if (
+                    stored_artifact is None
+                    or stored_artifact.run_id != finished.run_id.root
+                    or stored_artifact.shard_id != finished.shard_id.root
+                    or stored_artifact.attempt_id != finished.attempt_id.root
+                    or artifact.project_id != plan.project_id
+                    or artifact.node_id != plan.node_id
+                    or artifact.kind.value != stored_artifact.kind.value
+                    or stored_artifact.size != artifact.size
+                    or stored_artifact.sha256 != artifact.sha256.root
+                ):
+                    return False
             target_attempt = {
                 ExecutionStatus.SUCCEEDED: ShardAttemptStatus.SUCCEEDED,
                 ExecutionStatus.FAILED: ShardAttemptStatus.FAILED,
@@ -308,7 +537,207 @@ class V2ExecutionService:
                     expected_revision=lease_record.lease.revision,
                 )
             self._project_run_if_terminal(uow, finished.run_id)
+            self._project_v2_run_result(uow, finished, sender_node_id)
             return True
+
+    def handle_execution_reconcile(
+        self,
+        reconcile: ExecutionReconcile,
+        *,
+        message_id: MessageId,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        """处理 Agent 重连对账并发布 execution.reconcile_result。"""
+        response_outbox_id = stable_id(f"execution-reconcile-result:{message_id.root}").root
+        with self._uow_factory() as uow:
+            if uow.outbox_messages.get_by_outbox_id(response_outbox_id) is not None:
+                return True
+            current = uow.nodes.get_by_id(sender_node_id.root)
+            current_session = (
+                uow.node_sessions.get_current(current.id)
+                if current is not None and current.id is not None
+                else None
+            )
+            current_session_matches = (
+                current_session is not None
+                and current_session.session_id == sender_session_id.root
+            )
+        if reconcile.node_id != sender_node_id or not current_session_matches:
+            response = ExecutionReconcileResult(
+                node_id=sender_node_id,
+                accepted=False,
+                code=ErrorCode("STALE_SESSION"),
+                message="对账来自非当前 Agent session",
+            )
+            self._enqueue_reconcile_result(response_outbox_id, message_id, sender_node_id, response)
+            return True
+
+        for reported in reconcile.attempts:
+            validation = self._validate_reconcile_attempt(
+                reported,
+                sender_node_id=sender_node_id,
+            )
+            if validation is not None:
+                response = ExecutionReconcileResult(
+                    node_id=sender_node_id,
+                    accepted=False,
+                    code=validation[0],
+                    message=validation[1],
+                )
+                self._enqueue_reconcile_result(response_outbox_id, message_id, sender_node_id, response)
+                return True
+            if reported.state == "running":
+                self._recover_running_attempt(reported, sender_node_id)
+                continue
+            assert reported.result is not None
+            finished = ExecutionFinished(
+                run_id=self._plan_identities(reported)[0],
+                shard_id=self._plan_identities(reported)[1],
+                attempt_id=reported.attempt_id,
+                plan_id=reported.plan_id,
+                plan_hash=reported.plan_hash,
+                result=reported.result,
+                finished_at=self._now(),
+            )
+            if not self.handle_execution_finished(
+                finished,
+                sender_node_id=sender_node_id,
+                sender_session_id=sender_session_id,
+                allow_reconciled_session=True,
+            ):
+                response = ExecutionReconcileResult(
+                    node_id=sender_node_id,
+                    accepted=False,
+                    code=ErrorCode("STALE_ATTEMPT"),
+                    message="对账终态无法投影到当前 Attempt",
+                )
+                self._enqueue_reconcile_result(response_outbox_id, message_id, sender_node_id, response)
+                return True
+
+        response = ExecutionReconcileResult(
+            node_id=sender_node_id,
+            accepted=True,
+            attempts=reconcile.attempts,
+        )
+        self._enqueue_reconcile_result(response_outbox_id, message_id, sender_node_id, response)
+        return True
+
+    def _validate_reconcile_attempt(
+        self,
+        reported,
+        *,
+        sender_node_id: BusinessId,
+    ) -> tuple[ErrorCode, str] | None:
+        with self._uow_factory() as uow:
+            plan_record = uow.execution_plans.get_by_plan_id(reported.plan_id)
+            if plan_record is None:
+                return ErrorCode("STALE_ATTEMPT"), "对账 Plan 不存在"
+            plan = plan_record.plan
+            if (
+                plan.node_id != sender_node_id
+                or plan.attempt_id != reported.attempt_id
+                or plan.plan_hash != reported.plan_hash
+            ):
+                return ErrorCode("STALE_ATTEMPT"), "对账 Plan 身份不一致"
+            attempt = uow.shard_attempts.get_by_attempt_id(reported.attempt_id.root)
+            if attempt is None or attempt.node_id != sender_node_id.root:
+                return ErrorCode("STALE_ATTEMPT"), "对账 Attempt 不存在或节点不一致"
+            if reported.state == "running":
+                if self._is_terminal_attempt(attempt.status):
+                    return ErrorCode("STALE_ATTEMPT"), "已终态 Attempt 不能恢复运行"
+                return None
+            expected = {
+                "succeeded": ExecutionStatus.SUCCEEDED,
+                "failed": ExecutionStatus.FAILED,
+                "cancelled": ExecutionStatus.CANCELLED,
+                "timed_out": ExecutionStatus.TIMED_OUT,
+            }[reported.state]
+            if reported.result is None or reported.result.status is not expected:
+                return ErrorCode("EXECUTION_FAILED"), "对账终态缺少匹配的执行结果"
+            return None
+
+    def _recover_running_attempt(self, reported, sender_node_id: BusinessId) -> None:
+        with self._uow_factory() as uow:
+            attempt = uow.shard_attempts.get_by_attempt_id(reported.attempt_id.root)
+            if attempt is None:
+                return
+            if attempt.status in {ShardAttemptStatus.DISPATCHED, ShardAttemptStatus.ACKED}:
+                self._mark_attempt_running(uow, attempt)
+            elif attempt.status is ShardAttemptStatus.UNKNOWN:
+                assert_transition(attempt.status, ShardAttemptStatus.RUNNING)
+                attempt.status = ShardAttemptStatus.RUNNING
+                attempt.started_at = attempt.started_at or self._now()
+            elif attempt.status is not ShardAttemptStatus.RUNNING:
+                return
+            attempt.last_progress_sequence = max(
+                attempt.last_progress_sequence,
+                reported.last_progress_sequence,
+            )
+            uow.shard_attempts.update(attempt)
+            shard = uow.run_shards.get_by_shard_id(attempt.shard_id)
+            if shard is not None and shard.status in {ShardStatus.DISPATCHING, ShardStatus.WAITING_RECOVERY}:
+                assert_transition(shard.status, ShardStatus.RUNNING)
+                shard.status = ShardStatus.RUNNING
+                shard.final_node = sender_node_id.root
+                uow.run_shards.update(shard)
+            plan_record = uow.execution_plans.get_by_plan_id(reported.plan_id)
+            run = (
+                uow.task_runs.get_by_run_id(plan_record.plan.run_id.root)
+                if plan_record is not None
+                else None
+            )
+            if run is not None and run.status in {RunStatus.CREATED, RunStatus.DISPATCHED, RunStatus.ACKED}:
+                if run.status is RunStatus.CREATED:
+                    assert_transition(run.status, RunStatus.DISPATCHED)
+                    run.status = RunStatus.DISPATCHED
+                assert_transition(run.status, RunStatus.RUNNING)
+                run.status = RunStatus.RUNNING
+                run.started_at = run.started_at or self._now()
+                uow.task_runs.update(run)
+
+    def _enqueue_reconcile_result(
+        self,
+        outbox_id: str,
+        message_id: MessageId,
+        node_id: BusinessId,
+        result: ExecutionReconcileResult,
+    ) -> None:
+        envelope = V2Envelope(
+            message_id=MessageId(new_id()),
+            correlation_id=message_id,
+            sent_at=self._now(),
+            sender=V2Sender(
+                kind="master",
+                id=stable_id(self._master_id),
+                session_id=SessionId(stable_id(f"{self._master_id}:session").root),
+            ),
+            message_type=MessageType.EXECUTION_RECONCILE_RESULT.value,
+            trace_id=TraceId(new_id()),
+            payload=result.model_dump(mode="json"),
+        )
+        with self._uow_factory() as uow:
+            if uow.outbox_messages.get_by_outbox_id(outbox_id) is None:
+                uow.outbox_messages.enqueue(
+                    OutboxMessage(
+                        outbox_id=outbox_id,
+                        aggregate_type="execution_reconcile",
+                        aggregate_id=node_id.root,
+                        topic=v2_command_topic(node_id.root, "execution.reconcile_result"),
+                        payload=envelope.model_dump(mode="json"),
+                        qos=1,
+                        status=OutboxStatus.PENDING,
+                        attempts=0,
+                        next_attempt_at=None,
+                    )
+                )
+
+    def _plan_identities(self, reported):
+        with self._uow_factory() as uow:
+            record = uow.execution_plans.get_by_plan_id(reported.plan_id)
+            if record is None:
+                raise ValueError("对账 Plan 不存在")
+            return record.plan.run_id, record.plan.shard_id
 
     def _project_rejected_ack(self, uow: UnitOfWork, ack: ExecutionAck, attempt) -> None:
         if attempt is not None and attempt.status not in {
@@ -353,6 +782,62 @@ class V2ExecutionService:
         )
 
     @staticmethod
+    def _matches_runtime_identity(
+        plan,
+        *,
+        run_id: BusinessId,
+        shard_id: BusinessId,
+        attempt_id: BusinessId,
+        sender_node_id: BusinessId,
+        sender_session_id: SessionId,
+    ) -> bool:
+        """校验运行期事件的 Plan、节点和当前 session 身份。"""
+        return (
+            plan.run_id == run_id
+            and plan.shard_id == shard_id
+            and plan.attempt_id == attempt_id
+            and plan.node_id == sender_node_id
+            and plan.target_session_id == sender_session_id
+        )
+
+    @staticmethod
+    def _matches_reconciled_identity(
+        plan,
+        *,
+        run_id: BusinessId,
+        shard_id: BusinessId,
+        attempt_id: BusinessId,
+        sender_node_id: BusinessId,
+    ) -> bool:
+        """校验重连对账身份；对账允许使用新 session。"""
+        return (
+            plan.run_id == run_id
+            and plan.shard_id == shard_id
+            and plan.attempt_id == attempt_id
+            and plan.node_id == sender_node_id
+        )
+
+    @staticmethod
+    def _is_terminal_attempt(status: ShardAttemptStatus) -> bool:
+        return status in {
+            ShardAttemptStatus.SUCCEEDED,
+            ShardAttemptStatus.FAILED,
+            ShardAttemptStatus.CANCELLED,
+            ShardAttemptStatus.TIMED_OUT,
+            ShardAttemptStatus.LOST,
+        }
+
+    @staticmethod
+    def _mark_attempt_running(uow: UnitOfWork, attempt) -> None:
+        if attempt.status is ShardAttemptStatus.DISPATCHED:
+            assert_transition(attempt.status, ShardAttemptStatus.ACKED)
+            attempt.status = ShardAttemptStatus.ACKED
+        if attempt.status is ShardAttemptStatus.ACKED:
+            assert_transition(attempt.status, ShardAttemptStatus.RUNNING)
+            attempt.status = ShardAttemptStatus.RUNNING
+            attempt.started_at = attempt.started_at or utcnow()
+
+    @staticmethod
     def _project_run_if_terminal(uow: UnitOfWork, run_id: BusinessId) -> None:
         run = uow.task_runs.get_by_run_id(run_id.root)
         if run is None or run.status in {
@@ -384,6 +869,61 @@ class V2ExecutionService:
         run.status = target
         run.finished_at = utcnow()
         uow.task_runs.update(run)
+
+    def _project_v2_run_result(
+        self,
+        uow: UnitOfWork,
+        finished: ExecutionFinished,
+        sender_node_id: BusinessId,
+    ) -> None:
+        """将所有 V2 Shard 收敛后的结果写入统一 RunResult 投影。"""
+        run = uow.task_runs.get_by_run_id(finished.run_id.root)
+        if run is None or run.status not in {
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.TIMED_OUT,
+            RunStatus.LOST,
+        }:
+            return
+        case_results = uow.run_case_results.list_by_run(run.run_id)
+        metrics = {
+            "total": len(case_results),
+            "passed": sum(item.status is CaseStatus.PASSED for item in case_results),
+            "failed": sum(item.status in {CaseStatus.FAILED, CaseStatus.ERROR} for item in case_results),
+            "skipped": sum(item.status is CaseStatus.SKIPPED for item in case_results),
+        }
+        data = dict(finished.result.data)
+        data["artifact_ids"] = [
+            artifact.artifact_id
+            for artifact in uow.run_artifacts.list_by_run(run.run_id)
+        ]
+        result = uow.run_results.get_by_run_id(run.run_id)
+        if result is None:
+            uow.run_results.add(
+                RunResult(
+                    result_id=new_id(),
+                    run_id=run.run_id,
+                    project_id=run.project_id,
+                    task_id=run.task_id,
+                    node_id=sender_node_id.root,
+                    passed=run.status is RunStatus.SUCCEEDED,
+                    status=run.status,
+                    metrics=metrics,
+                    data=data,
+                    started_at=run.started_at,
+                    finished_at=run.finished_at,
+                )
+            )
+            return
+        result.node_id = sender_node_id.root
+        result.passed = run.status is RunStatus.SUCCEEDED
+        result.status = run.status
+        result.metrics = metrics
+        result.data = data
+        result.started_at = run.started_at
+        result.finished_at = run.finished_at
+        uow.run_results.update(result)
     def _is_current_session(self, node_id: BusinessId, session_id: SessionId) -> bool:
         with self._uow_factory() as uow:
             node = uow.nodes.get_by_id(node_id.root)

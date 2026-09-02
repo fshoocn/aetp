@@ -20,16 +20,37 @@ class ArtifactStorageService:
         self._storage = storage
 
     @staticmethod
-    def artifact_key(run_id: str, filename: str) -> str:
+    def artifact_key(
+        run_id: str,
+        filename: str,
+        *,
+        shard_id: str | None = None,
+        attempt_id: str | None = None,
+    ) -> str:
         """生成产物存储键（上传时写入 file_ref）。"""
         path = Path(filename)
         if not filename or filename in {".", ".."} or path.is_absolute() or path.name != filename:
             raise ValueError("产物文件名必须是存储根目录下的单个文件名")
+        if attempt_id is not None and shard_id is None:
+            raise ValueError("attempt_id 必须同时提供 shard_id")
+        if shard_id is not None:
+            prefix = f"artifacts/{run_id}/shards/{shard_id}"
+            if attempt_id is not None:
+                prefix += f"/attempts/{attempt_id}"
+            return f"{prefix}/{filename}"
         return f"artifacts/{run_id}/{filename}"
 
-    def store(self, run_id: str, filename: str, data: bytes) -> str:
+    def store(
+        self,
+        run_id: str,
+        filename: str,
+        data: bytes,
+        *,
+        shard_id: str | None = None,
+        attempt_id: str | None = None,
+    ) -> str:
         """写入产物文件并返回存储键（file_ref）。"""
-        key = self.artifact_key(run_id, filename)
+        key = self.artifact_key(run_id, filename, shard_id=shard_id, attempt_id=attempt_id)
         self._storage.put(key, data)
         return key
 

@@ -20,6 +20,7 @@ def _to_domain(orm: RunCaseResultORM) -> RunCaseResult:
         shard_id=orm.shard.shard_id if orm.shard is not None else "",
         case_key=orm.case_key,
         attempt_no=orm.attempt_no,
+        sequence=orm.sequence,
         status=CaseStatus(orm.status),
         duration_ms=orm.duration_ms,
         error_summary=orm.error_summary,
@@ -54,6 +55,7 @@ class RunCaseResultRepositoryImpl(RunCaseResultRepository):
                 shard_pk=shard_pk,
                 case_key=result.case_key,
                 attempt_no=result.attempt_no,
+                sequence=result.sequence,
                 status=result.status.value,
                 duration_ms=result.duration_ms,
                 error_summary=result.error_summary,
@@ -120,6 +122,7 @@ class RunCaseResultRepositoryImpl(RunCaseResultRepository):
         if orm is None:
             raise ValueError(f"case 结果不存在: id={result.id}")
         orm.status = result.status.value
+        orm.sequence = result.sequence
         orm.duration_ms = result.duration_ms
         orm.error_summary = result.error_summary
         orm.detail = result.detail

@@ -47,14 +47,22 @@ class RunArtifact(Base, TimestampMixin):
     shard_pk: Mapped[int | None] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True)
     # sym:node_id 上传节点业务 ID
     node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # sym:attempt_id V2 Attempt 来源
+    attempt_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:kind 产物类型（report/log_archive/data）
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default=ArtifactKind.REPORT.value)
     # sym:file_ref 文件引用路径（data/artifacts/{run_id}/...）
     file_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    # sym:filename 原始文件名
+    filename: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # sym:content_type MIME 类型
+    content_type: Mapped[str] = mapped_column(String(255), nullable=False, default="application/octet-stream")
     # sym:size 文件字节数
     size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     # sym:sha256 内容哈希（下载校验）
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # sym:derived_from 来源 Artifact
+    derived_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:uploaded_at 上传时间（UTC）
     uploaded_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=datetime.utcnow)
 

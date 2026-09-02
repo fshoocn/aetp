@@ -77,6 +77,7 @@ class PluginRequirement(_Strict):
 
 class PluginSyncItem(_Strict):
     plugin_id: PluginId
+    point: PluginPoint = PluginPoint.EXECUTOR
     version: SemVer
     action: PluginSyncAction
     package: PluginDistributionRef | None = None

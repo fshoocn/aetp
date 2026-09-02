@@ -9,6 +9,10 @@ import type {
   LoginResponse,
   ManagedPlugin,
   V2PluginVersion,
+  V2ScriptDefinition,
+  V2TestTask,
+  V2RunView,
+  V2TriggerType,
   V2CapabilitySnapshotView,
   V2DiagnosticsSnapshotView,
   V2DiagnosticsCollectResponse,
@@ -253,8 +257,23 @@ export const aetpApi = {
     v2Disable(pluginId: string, version: string) {
       return api.post<V2PluginVersion>(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/disable`);
     },
+    v2Rollback(pluginId: string, version: string) {
+      return api.post<V2PluginVersion>(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/rollback`);
+    },
     v2Remove(pluginId: string, version: string) {
       return api.delete(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}`);
+    },
+  },
+
+  v2Tasks: {
+    createScriptDefinition(projectId: string, definition: V2ScriptDefinition) {
+      return api.post<V2ScriptDefinition>(`/api/v2/projects/${encodeURIComponent(projectId)}/script-definitions`, { definition });
+    },
+    createTask(projectId: string, task: V2TestTask) {
+      return api.post<{ task: V2TestTask; created_by: number }>(`/api/v2/projects/${encodeURIComponent(projectId)}/test-tasks`, { task });
+    },
+    createRun(projectId: string, body: { task_id: string; task_revision?: number; run_id?: string; trigger_type?: V2TriggerType; original_run_id?: string }) {
+      return api.post<V2RunView>(`/api/v2/projects/${encodeURIComponent(projectId)}/runs`, body);
     },
   },
 

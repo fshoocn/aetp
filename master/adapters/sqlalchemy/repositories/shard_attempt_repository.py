@@ -23,6 +23,10 @@ def _to_domain(orm: ShardAttemptORM) -> ShardAttempt:
         status=ShardAttemptStatus(orm.status),
         error_code=orm.error_code,
         error_message=orm.error_message,
+        last_progress_sequence=orm.last_progress_sequence,
+        log_complete=orm.log_complete,
+        last_log_sequence=orm.last_log_sequence,
+        log_entry_count=orm.log_entry_count,
         started_at=orm.started_at,
         finished_at=orm.finished_at,
         created_at=orm.created_at,
@@ -49,6 +53,10 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
             status=attempt.status.value,
             error_code=attempt.error_code,
             error_message=attempt.error_message,
+            last_progress_sequence=attempt.last_progress_sequence,
+            log_complete=attempt.log_complete,
+            last_log_sequence=attempt.last_log_sequence,
+            log_entry_count=attempt.log_entry_count,
             started_at=attempt.started_at,
             finished_at=attempt.finished_at,
         )
@@ -120,6 +128,10 @@ class ShardAttemptRepositoryImpl(ShardAttemptRepository):
         orm.status = attempt.status.value
         orm.error_code = attempt.error_code
         orm.error_message = attempt.error_message
+        orm.last_progress_sequence = attempt.last_progress_sequence
+        orm.log_complete = attempt.log_complete
+        orm.last_log_sequence = attempt.last_log_sequence
+        orm.log_entry_count = attempt.log_entry_count
         orm.started_at = attempt.started_at
         orm.finished_at = attempt.finished_at
         self._s.flush()

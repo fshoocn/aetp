@@ -46,6 +46,7 @@ from .task_schedule_repository import TaskScheduleRepositoryImpl
 from .test_script_repository import TestScriptRepositoryImpl
 from .test_task_repository import TestTaskRepositoryImpl
 from .user_repository import UserRepositoryImpl
+from .v2_task_repository import ScriptDefinitionRepositoryImpl, V2TestTaskRepositoryImpl
 
 __all__ = [
     "AuditLogRepositoryImpl",
@@ -86,4 +87,6 @@ __all__ = [
     "TestScriptRepositoryImpl",
     "TestTaskRepositoryImpl",
     "UserRepositoryImpl",
+    "ScriptDefinitionRepositoryImpl",
+    "V2TestTaskRepositoryImpl",
 ]

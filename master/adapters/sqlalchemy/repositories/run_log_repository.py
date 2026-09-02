@@ -18,6 +18,8 @@ def _to_domain(orm: RunLogORM) -> RunLog:
         id=orm.id,
         run_id=orm.run.run_id if orm.run is not None else "",
         shard_id=orm.shard.shard_id if orm.shard is not None else None,
+        attempt_id=orm.attempt_id,
+        plan_id=orm.plan_id or "",
         node_id=orm.node_id,
         sequence=orm.sequence,
         level=RunLogLevel(orm.level),
@@ -46,6 +48,8 @@ class RunLogRepositoryImpl(RunLogRepository):
             run_pk=run_pk,
             shard_pk=shard_pk,
             node_id=log.node_id,
+            attempt_id=log.attempt_id,
+            plan_id=log.plan_id or None,
             sequence=log.sequence,
             level=log.level.value,
             message=log.message,
@@ -82,6 +86,23 @@ class RunLogRepositoryImpl(RunLogRepository):
             self._s.execute(
                 select(RunLogORM.sequence).where(
                     RunLogORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery(),
+                    RunLogORM.sequence.in_(sequences),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return set(rows)
+
+    def existing_attempt_sequences(self, run_id: str, attempt_id: str, sequences: list[int]) -> set[int]:
+        """按 (run_id, attempt_id, sequence) 查询 V2 日志幂等键。"""
+        if not sequences:
+            return set()
+        rows = (
+            self._s.execute(
+                select(RunLogORM.sequence).where(
+                    RunLogORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery(),
+                    RunLogORM.attempt_id == attempt_id,
                     RunLogORM.sequence.in_(sequences),
                 )
             )

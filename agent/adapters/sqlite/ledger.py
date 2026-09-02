@@ -71,10 +71,14 @@ class AgentRunORM(_Base):
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
     plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    shard_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attempt_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    plan_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     cancelled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     result_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     device_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    last_progress_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     claimed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 
@@ -170,7 +174,11 @@ class SQLiteLedger:
         additions: tuple[tuple[str, str, str], ...] = (
             # (表名, 列名, 列定义)
             ("agent_runs", "plan_id", "VARCHAR(64)"),
+            ("agent_runs", "shard_id", "VARCHAR(64)"),
+            ("agent_runs", "attempt_id", "VARCHAR(64)"),
+            ("agent_runs", "plan_hash", "VARCHAR(64)"),
             ("agent_runs", "device_ids", "JSON NOT NULL DEFAULT '[]'"),
+            ("agent_runs", "last_progress_sequence", "INTEGER NOT NULL DEFAULT 0"),
         )
         with self._engine.begin() as conn:
             for table, column, ddl in additions:
@@ -188,6 +196,9 @@ class SQLiteLedger:
         attempt_no: int,
         device_ids: list[str] | None = None,
         plan_id: str | None = None,
+        shard_id: str | None = None,
+        attempt_id: str | None = None,
+        plan_hash: str | None = None,
     ) -> bool:
         """原子 claim：新 run 或新 attempt 返回 True；重复派发返回 False。
 
@@ -206,10 +217,14 @@ class SQLiteLedger:
                         run_id=run_id,
                         attempt_no=attempt_no,
                         plan_id=plan_id,
+                        shard_id=shard_id,
+                        attempt_id=attempt_id,
+                        plan_hash=plan_hash,
                         status=AgentRunStatus.CLAIMED.value,
                         cancelled=False,
                         result_summary={},
                         device_ids=device_ids,
+                        last_progress_sequence=0,
                         claimed_at=now,
                         updated_at=now,
                     )
@@ -238,9 +253,13 @@ class SQLiteLedger:
                 .values(
                     attempt_no=attempt_no,
                     plan_id=plan_id,
+                    shard_id=shard_id,
+                    attempt_id=attempt_id,
+                    plan_hash=plan_hash,
                     status=AgentRunStatus.CLAIMED.value,
                     cancelled=False,
                     device_ids=device_ids,
+                    last_progress_sequence=0,
                     updated_at=now,
                 )
             )
@@ -261,10 +280,14 @@ class SQLiteLedger:
                 .values(
                     attempt_no=run.attempt_no,
                     plan_id=run.plan_id,
+                    shard_id=run.shard_id,
+                    attempt_id=run.attempt_id,
+                    plan_hash=run.plan_hash,
                     status=run.status.value,
                     cancelled=run.cancelled,
                     result_summary=run.result_summary,
                     device_ids=run.device_ids,
+                    last_progress_sequence=run.last_progress_sequence,
                     updated_at=_utcnow(),
                 )
             )
@@ -278,6 +301,20 @@ class SQLiteLedger:
         with self._session_factory.begin() as session:
             rows = (
                 session.execute(select(AgentRunORM).where(AgentRunORM.status.in_(active)).order_by(AgentRunORM.run_id))
+                .scalars()
+                .all()
+            )
+        return [_to_run(row) for row in rows]
+
+    def list_reconcile_runs(self) -> list[AgentRun]:
+        """返回含 V2 Plan 身份的本地记录，包含活动和已完成状态。"""
+        with self._session_factory.begin() as session:
+            rows = (
+                session.execute(
+                    select(AgentRunORM)
+                    .where(AgentRunORM.plan_id.is_not(None))
+                    .order_by(AgentRunORM.updated_at, AgentRunORM.run_id)
+                )
                 .scalars()
                 .all()
             )
@@ -320,6 +357,14 @@ class SQLiteLedger:
                 )
                 .on_conflict_do_nothing(index_elements=["outbox_id"])
             )
+
+    def get_outbox(self, outbox_id: str) -> AgentOutboxEntry | None:
+        """读取一条出站消息，不改变发送状态。"""
+        with self._session_factory.begin() as session:
+            row = session.execute(
+                select(AgentOutboxORM).where(AgentOutboxORM.outbox_id == outbox_id)
+            ).scalar_one_or_none()
+        return _to_outbox(row) if row is not None else None
 
     def replace_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:
         """替换一条可重放消息，并重置发送状态与租约。"""
@@ -567,10 +612,14 @@ def _to_run(row: AgentRunORM) -> AgentRun:
         run_id=row.run_id,
         attempt_no=row.attempt_no,
         plan_id=row.plan_id,
+        shard_id=row.shard_id,
+        attempt_id=row.attempt_id,
+        plan_hash=row.plan_hash,
         status=AgentRunStatus(row.status),
         cancelled=row.cancelled,
         result_summary=dict(row.result_summary or {}),
         device_ids=list(row.device_ids or []),
+        last_progress_sequence=row.last_progress_sequence,
         claimed_at=row.claimed_at,
         updated_at=row.updated_at,
     )

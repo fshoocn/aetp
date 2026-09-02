@@ -13,6 +13,7 @@ from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.artifact_service import ArtifactService
+from master.application.services.artifact_upload_signing_service import ArtifactUploadSigningService
 from master.application.services.auth_service import AuthService
 from master.application.services.ci_integration_service import CiIntegrationService
 from master.application.services.device_service import DeviceService
@@ -38,6 +39,8 @@ from master.application.services.script_verification_service import (
     ScriptVerificationService,
 )
 from master.application.services.test_task_service import TestTaskService
+from master.application.services.v2_scheduler_service import V2SchedulerService
+from master.application.services.v2_task_service import V2TaskService
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
 from master.domain.models import User
@@ -142,6 +145,13 @@ def get_artifact_service(
     return container.artifact_service()
 
 
+def get_artifact_upload_signing_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> ArtifactUploadSigningService:
+    """获取 Agent Artifact 上传 URL 签名服务。"""
+    return container.artifact_upload_signing_service()
+
+
 def get_device_service(
     container: Annotated[Container, Depends(get_container)],
 ) -> DeviceService:
@@ -219,6 +229,20 @@ def get_test_task_service(
     return container.test_task_service()
 
 
+def get_v2_task_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> V2TaskService:
+    """获取 V2 多脚本任务与 Run Snapshot 服务。"""
+    return container.v2_task_service()
+
+
+def get_v2_scheduler_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> V2SchedulerService:
+    """获取 V2 Snapshot 调度服务。"""
+    return container.v2_scheduler_service()
+
+
 def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     uow_factory: Annotated[Callable[[], UnitOfWork], Depends(get_uow_factory)],
@@ -264,6 +288,10 @@ PluginManagerDep = Annotated[PluginManager, Depends(get_plugin_manager)]
 RunRetryServiceDep = Annotated[RunRetryService, Depends(get_run_retry_service)]
 RunCancelServiceDep = Annotated[RunCancelService, Depends(get_run_cancel_service)]
 ArtifactServiceDep = Annotated[ArtifactService, Depends(get_artifact_service)]
+ArtifactUploadSigningServiceDep = Annotated[
+    ArtifactUploadSigningService,
+    Depends(get_artifact_upload_signing_service),
+]
 DeviceServiceDep = Annotated[DeviceService, Depends(get_device_service)]
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]
 ProjectMemberServiceDep = Annotated[ProjectMemberService, Depends(get_project_member_service)]
@@ -275,6 +303,8 @@ ScriptStorageServiceDep = Annotated[ScriptStorageService, Depends(get_script_sto
 ScriptServiceDep = Annotated[ScriptService, Depends(get_script_service)]
 ScriptVerificationServiceDep = Annotated[ScriptVerificationService, Depends(get_script_verification_service)]
 TestTaskServiceDep = Annotated[TestTaskService, Depends(get_test_task_service)]
+V2TaskServiceDep = Annotated[V2TaskService, Depends(get_v2_task_service)]
+V2SchedulerServiceDep = Annotated[V2SchedulerService, Depends(get_v2_scheduler_service)]
 
 
 def get_notification_service(

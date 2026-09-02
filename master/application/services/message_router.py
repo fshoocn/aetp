@@ -21,10 +21,15 @@ from aetp_protocol.envelope import Envelope
 from aetp_protocol.logs import RunLogBatch
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
+    CaseStatusEvent,
     DiagnosticsSnapshot,
     ExecutionAck,
     ExecutionFinished,
+    ExecutionLogBatch,
+    ExecutionProgress,
+    ExecutionReconcile,
     LeaseRenewRequest,
+    LogComplete,
     MaintenanceStatus,
     NodeHeartbeatPayload,
     NodeRegister,
@@ -260,6 +265,47 @@ class MasterMessageRouter:
                     sender_node_id=envelope.sender.id,
                     sender_session_id=envelope.sender.session_id,
                 )
+            if isinstance(payload, ExecutionProgress):
+                if self._v2_execution is None:
+                    return False
+                return self._v2_execution.handle_execution_progress(
+                    payload,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
+            if isinstance(payload, ExecutionLogBatch):
+                if self._v2_execution is None:
+                    return False
+                return self._v2_execution.handle_execution_log(
+                    payload,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
+            if isinstance(payload, CaseStatusEvent):
+                if self._v2_execution is None:
+                    return False
+                return self._v2_execution.handle_execution_case_status(
+                    payload,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
+            if isinstance(payload, LogComplete):
+                if self._v2_execution is None:
+                    return False
+                return self._v2_execution.handle_execution_log_complete(
+                    payload,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
+            if isinstance(payload, ExecutionReconcile):
+                if self._v2_execution is None:
+                    return False
+                return self._v2_execution.handle_execution_reconcile(
+                    payload,
+                    message_id=envelope.message_id,
+                    sender_node_id=envelope.sender.id,
+                    sender_session_id=envelope.sender.session_id,
+                )
             if isinstance(payload, LeaseRenewRequest):
                 if self._v2_execution is None:
                     return False
@@ -270,7 +316,16 @@ class MasterMessageRouter:
                     sender_session_id=envelope.sender.session_id,
                 )
             if (
-                isinstance(payload, (NodeCapabilitySnapshot, DiagnosticsSnapshot, PluginSyncResult, MaintenanceStatus))
+                isinstance(
+                    payload,
+                    (
+                        NodeCapabilitySnapshot,
+                        DiagnosticsSnapshot,
+                        PluginSyncResult,
+                        MaintenanceStatus,
+                        ExecutionReconcile,
+                    ),
+                )
                 and payload.node_id != envelope.sender.id
             ):
                 raise ValueError("V2 payload node_id 与 sender.id 不一致")

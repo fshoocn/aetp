@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from aetp_protocol.capabilities import NodeCapabilitySnapshot
 from aetp_protocol.ids import BusinessId, RequestId, SessionId, Sha256
 from aetp_protocol.payloads import DiagnosticsSnapshot
+from aetp_protocol.plugin_types import DesiredPluginVersion
 from aetp_protocol.plugins import PluginSyncItem, PluginSyncItemResult
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -92,6 +93,13 @@ class PluginSyncView(BaseModel):
     updated_at: datetime | None
 
 
+class DesiredPluginVersionView(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    node_id: BusinessId
+    desired: DesiredPluginVersion
+
+
 def get_capability_service(request: Request) -> CapabilitySnapshotProjectionService:
     return request.app.state.container.capability_snapshot_service()
 
@@ -152,6 +160,10 @@ def _plugin_sync_view(record: AgentPluginSyncOperationRecord) -> PluginSyncView:
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
+
+
+def _desired_view(record) -> DesiredPluginVersionView:
+    return DesiredPluginVersionView(node_id=record.node_id, desired=record.desired)
 
 
 @router.get(
@@ -249,3 +261,39 @@ def request_plugin_sync(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _plugin_sync_view(record)
+
+
+@router.put(
+    "/{node_id}/desired-plugin",
+    response_model=DesiredPluginVersionView,
+)
+def set_node_desired_plugin(
+    node_id: str,
+    desired: DesiredPluginVersion,
+    _admin: PlatformAdminDep,
+    service: Annotated[PluginSyncService, Depends(get_plugin_sync_service)],
+) -> DesiredPluginVersionView:
+    try:
+        record = service.set_desired_version(_node_id(node_id), desired)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _desired_view(record)
+
+
+@router.put(
+    "/groups/{tag}/desired-plugin",
+    response_model=list[DesiredPluginVersionView],
+)
+def set_group_desired_plugin(
+    tag: str,
+    desired: DesiredPluginVersion,
+    _admin: PlatformAdminDep,
+    service: Annotated[PluginSyncService, Depends(get_plugin_sync_service)],
+) -> list[DesiredPluginVersionView]:
+    try:
+        records = service.set_desired_version_for_tag(tag, desired)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return [_desired_view(record) for record in records]
