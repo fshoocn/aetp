@@ -29,6 +29,7 @@ from .api.v1.errors import register_application_error_handlers
 from .api.v1.router import router as v1_router
 from .api.v2.nodes import router as v2_nodes_router
 from .api.v2.auth import router as v2_auth_router
+from .api.v2.internal import router as v2_internal_router
 from .api.v2.projects import router as v2_projects_router
 from .api.v2.router import router as v2_router
 from .api.v2.tasks import router as v2_tasks_router
@@ -288,6 +289,7 @@ app.add_middleware(V2OnlyApiGuard)
 app.include_router(v1_router)
 app.include_router(v2_router)
 app.include_router(v2_auth_router)
+app.include_router(v2_internal_router)
 app.include_router(v2_projects_router)
 app.include_router(v2_nodes_router)
 app.include_router(v2_tasks_router)

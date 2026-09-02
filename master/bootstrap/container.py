@@ -89,6 +89,8 @@ from master.application.services.test_task_service import TestTaskService
 from master.application.services.v2_execution_service import V2ExecutionService
 from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
 from master.application.services.v2_scheduler_service import V2SchedulerService
+from master.application.services.v2_script_definition_service import V2ScriptDefinitionService
+from master.application.services.v2_script_download_service import V2ScriptDownloadService
 from master.application.services.v2_task_service import V2TaskService
 from master.config import get_settings, runtime_dir
 from master.domain.node_matcher import NodeMatcher
@@ -416,12 +418,25 @@ class Container(containers.DeclarativeContainer):
         base_url=providers.Callable(lambda: get_settings().public_base_url),
         ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
     )
+    v2_script_download_service = providers.Factory(
+        V2ScriptDownloadService,
+        secret=providers.Callable(_internal_signing_secret),
+        base_url=providers.Callable(lambda: get_settings().public_base_url),
+        ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
+    )
+    v2_script_definition_service = providers.Factory(
+        V2ScriptDefinitionService,
+        uow_factory=uow_factory,
+        storage=script_storage_service,
+        plugin_registry=v2_plugin_registry,
+        executor_resolver=v2_master_extension_resolver,
+    )
     v2_scheduler_service = providers.Factory(
         V2SchedulerService,
         uow_factory=uow_factory,
         node_matching=node_matching_service,
         materializer=v2_plan_materialization_service,
-        script_url_builder=script_download_service.provided.build_download_url,
+        script_url_builder=v2_script_download_service.provided.build_download_url,
         plugin_url_builder=plugin_download_service.provided.build_versioned_download_url,
         artifact_url_builder=_artifact_upload_url,
     )

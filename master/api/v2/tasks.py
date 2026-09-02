@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Any
 
+from aetp_protocol.artifacts import Configuration
 from aetp_protocol.execution import TriggerType as V2TriggerType
-from aetp_protocol.ids import BusinessId, new_id
+from aetp_protocol.ids import BusinessId, PluginId, SemVer, Sha256, new_id
 from aetp_protocol.task import RunSnapshot, ScriptDefinition
 from aetp_protocol.task import TestTask as ProtocolTestTask
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,10 +21,12 @@ from master.api.v1.dependencies import (
     EventPublisherDep,
     UowFactoryDep,
     V2SchedulerServiceDep,
+    V2ScriptDefinitionServiceDep,
     V2TaskServiceDep,
 )
 from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep, ProjectOperatorDep
 from master.application.services.v2_scheduler_service import V2ScheduleResult
+from master.application.services.v2_script_definition_service import V2ScriptDefinitionError
 from master.application.services.v2_task_service import V2RunCreated
 from master.domain.models import ScriptDefinitionRecord, V2TestTaskRecord
 
@@ -310,6 +315,60 @@ def create_script_definition(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{project_id}/script-definitions/upload",
+    response_model=ScriptDefinition,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_script_definition(
+    project_id: str,
+    access: ProjectManagerDep,
+    service: V2ScriptDefinitionServiceDep,
+    name: str = Form(...),
+    executor_plugin_id: str = Form(...),
+    executor_version: str = Form(...),
+    configuration: str = Form("{}"),
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI 文件参数
+) -> ScriptDefinition:
+    typed_project_id = _project_id(project_id)
+    try:
+        plugin_id = PluginId(executor_plugin_id)
+        version = SemVer(executor_version)
+        raw_configuration = json.loads(configuration)
+        if not isinstance(raw_configuration, dict):
+            raise ValueError("configuration 必须是 JSON 对象")
+        if {"schema_version", "schema_hash", "values"} <= raw_configuration.keys():
+            typed_configuration = Configuration.model_validate(raw_configuration)
+        else:
+            values_json = json.dumps(
+                raw_configuration,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            typed_configuration = Configuration(
+                schema_version=1,
+                schema_hash=Sha256(hashlib.sha256(values_json).hexdigest()),
+                values=raw_configuration,
+            )
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=f"V2 ScriptDefinition 参数无效: {exc}") from exc
+    try:
+        record = await service.upload(
+            project_id=typed_project_id,
+            name=name,
+            executor_plugin_id=plugin_id,
+            executor_version=version,
+            configuration=typed_configuration,
+            filename=file.filename or "script.zip",
+            file_data=await file.read(),
+            created_by=access.user.persisted_id,
+        )
+    except V2ScriptDefinitionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return record.definition
 
 
 @router.get(

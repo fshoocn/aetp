@@ -41,6 +41,7 @@ from master.application.services.script_verification_service import (
 )
 from master.application.services.test_task_service import TestTaskService
 from master.application.services.v2_scheduler_service import V2SchedulerService
+from master.application.services.v2_script_definition_service import V2ScriptDefinitionService
 from master.application.services.v2_task_service import V2TaskService
 from master.bootstrap.container import Container
 from master.domain.enums import AccountStatus
@@ -314,6 +315,19 @@ ScriptVerificationServiceDep = Annotated[ScriptVerificationService, Depends(get_
 TestTaskServiceDep = Annotated[TestTaskService, Depends(get_test_task_service)]
 V2TaskServiceDep = Annotated[V2TaskService, Depends(get_v2_task_service)]
 V2SchedulerServiceDep = Annotated[V2SchedulerService, Depends(get_v2_scheduler_service)]
+
+
+def get_v2_script_definition_service(
+    container: Annotated[Container, Depends(get_container)],
+) -> V2ScriptDefinitionService:
+    """获取 V2 ScriptDefinition 上传/解析服务。"""
+    return container.v2_script_definition_service()
+
+
+V2ScriptDefinitionServiceDep = Annotated[
+    V2ScriptDefinitionService,
+    Depends(get_v2_script_definition_service),
+]
 
 
 def get_notification_service(

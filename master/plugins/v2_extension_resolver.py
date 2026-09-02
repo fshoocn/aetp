@@ -51,7 +51,13 @@ class MasterV2ExtensionResolver:
                 )
         return tuple(extensions)
 
-    def resolve(self, record: PluginVersionRecord, point: PluginPoint) -> ResolvedMasterExtension:
+    def resolve(
+        self,
+        record: PluginVersionRecord,
+        point: PluginPoint,
+        *,
+        required_method: str | None = None,
+    ) -> ResolvedMasterExtension:
         key = (record.plugin_id.root, record.version.root, point)
         existing = self._loaded.get(key)
         if existing is not None:
@@ -77,7 +83,7 @@ class MasterV2ExtensionResolver:
         if not callable(factory):
             raise TypeError(f"V2 Master entrypoint 不可调用: {entrypoint.root}")
         plugin = factory()
-        method = {PluginPoint.REPORTER: "report", PluginPoint.ANALYZER: "analyze"}.get(point)
+        method = required_method or {PluginPoint.REPORTER: "report", PluginPoint.ANALYZER: "analyze"}.get(point)
         if method is None or not callable(getattr(plugin, method, None)):
             raise TypeError(f"V2 {point.value} 入口未提供 {method}()")
         resolved = ResolvedMasterExtension(record.plugin_id.root, record.version.root, plugin)
