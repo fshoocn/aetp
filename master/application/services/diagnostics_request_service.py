@@ -8,12 +8,12 @@ from datetime import UTC, datetime
 
 from aetp_protocol.ids import BusinessId, MessageId, RequestId, SessionId, TraceId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.payloads import DiagnosticsRequest
+from aetp_protocol.payloads import DiagnosticsRequest, RemoteOperationStatus
 from aetp_protocol.topics import v2_command_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 
 from master.domain.enums import OutboxStatus
-from master.domain.models import OutboxMessage
+from master.domain.models import OutboxMessage, RemoteOperationRecord
 from master.domain.repositories import UnitOfWork
 
 
@@ -33,8 +33,9 @@ class AgentOfflineForDiagnostics(ValueError):
 class DiagnosticsRequestService:
     """创建并可靠下发 Agent 诊断请求。"""
 
-    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(self, uow_factory: Callable[[], UnitOfWork], *, master_id: str = "aetp-master") -> None:
         self._uow_factory = uow_factory
+        self._master_id = master_id
 
     def request(
         self,
@@ -57,13 +58,30 @@ class DiagnosticsRequestService:
             session = uow.node_sessions.get_current(node.id)
             if session is None or not node.online:
                 raise AgentOfflineForDiagnostics(f"节点当前离线: {node_id.root}")
+            operation_id = BusinessId(request_id.root)
+            now = datetime.now(UTC)
+            uow.remote_operations.add(
+                RemoteOperationRecord(
+                    id=None,
+                    operation_id=operation_id,
+                    node_id=node_id,
+                    kind="diagnostics",
+                    status=RemoteOperationStatus.PENDING,
+                    expected_session_id=SessionId(session.session_id),
+                    request=diagnostics_request.model_dump(mode="json"),
+                    error_code=None,
+                    message="",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
             envelope = V2Envelope(
                 message_id=MessageId(new_id()),
-                sent_at=datetime.now(UTC),
+                sent_at=now,
                 sender=V2Sender(
                     kind="master",
-                    id=stable_id("aetp-master"),
-                    session_id=SessionId(stable_id("aetp-master-session").root),
+                    id=stable_id(self._master_id),
+                    session_id=SessionId(stable_id(f"{self._master_id}:session").root),
                 ),
                 message_type=MessageType.AGENT_DIAGNOSTICS_REQUEST.value,
                 trace_id=TraceId(new_id()),

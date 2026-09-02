@@ -37,6 +37,13 @@ class NodeMatchingService:
         allowed = {node_id.root for node_id in node_ids}
         with self._uow_factory() as uow:
             nodes = uow.nodes.list_all()
+            maintenance_locks = getattr(uow, "maintenance_locks", None)
+            locked_node_ids = {
+                node.node_id
+                for node in nodes
+                if maintenance_locks is not None
+                and _is_locked(maintenance_locks, node.node_id)
+            }
 
         candidates: list[NodeCapabilityCandidate] = []
         missing_snapshots: list[NodeMatch] = []
@@ -52,6 +59,8 @@ class NodeMatchingService:
                 failures = [ErrorCode("NODE_CAPABILITY_MISMATCH")]
                 if not node.online:
                     failures.append(ErrorCode("AGENT_OFFLINE"))
+                if node.node_id in locked_node_ids:
+                    failures.append(ErrorCode("AGENT_MAINTENANCE"))
                 missing_snapshots.append(
                     NodeMatch(
                         node_id=node_id,
@@ -65,6 +74,14 @@ class NodeMatchingService:
                     snapshot=snapshot.snapshot,
                     online=node.online,
                     enabled=node.enabled,
+                    maintenance_locked=node.node_id in locked_node_ids,
                 )
             )
         return self._matcher.match(tuple(candidates), requirement) + tuple(missing_snapshots)
+
+
+def _is_locked(repository, node_id: str) -> bool:
+    try:
+        return repository.is_locked(BusinessId(node_id))
+    except ValueError:
+        return False

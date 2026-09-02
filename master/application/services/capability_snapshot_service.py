@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from aetp_protocol.capabilities import NodeCapabilitySnapshot
 from aetp_protocol.ids import BusinessId, SessionId, Sha256
-from aetp_protocol.payloads import DiagnosticsSnapshot
+from aetp_protocol.payloads import DiagnosticsSnapshot, RemoteOperationStatus
 
 from master.domain.models import (
     AgentDiagnosticsSnapshotRecord,
@@ -170,6 +171,32 @@ class DiagnosticsSnapshotProjectionService:
                     created_at=datetime.now(UTC),
                 )
             )
+            try:
+                operation_id = BusinessId(snapshot.request_id.root)
+            except ValueError:
+                operation_id = None
+            if operation_id is not None:
+                operation = uow.remote_operations.get(operation_id)
+                if operation is not None:
+                    if (
+                        operation.kind != "diagnostics"
+                        or operation.node_id != snapshot.node_id
+                        or operation.expected_session_id != sender_session_id
+                    ):
+                        raise DiagnosticsSnapshotRejected("诊断操作节点或 session 不一致")
+                    if operation.status not in {
+                        RemoteOperationStatus.SUCCEEDED,
+                        RemoteOperationStatus.FAILED,
+                        RemoteOperationStatus.CANCELLED,
+                    }:
+                        uow.remote_operations.update(
+                            replace(
+                                operation,
+                                status=RemoteOperationStatus.SUCCEEDED,
+                                error_code=None,
+                                message="诊断快照已采集",
+                            )
+                        )
             node.online = True
             node.last_seen_at = datetime.now(UTC)
             uow.nodes.save(node)

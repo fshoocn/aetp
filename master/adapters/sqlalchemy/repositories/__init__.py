@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .agent_log_repository import AgentLogRepositoryImpl
 from .audit_log_repository import AuditLogRepositoryImpl
 from .capability_snapshot_repository import (
     AgentDiagnosticsSnapshotRepositoryImpl,
@@ -19,6 +20,7 @@ from .event_subscription_repository import EventSubscriptionRepositoryImpl
 from .execution_plan_repository import ExecutionPlanRepositoryImpl
 from .hook_execution_repository import HookExecutionRepositoryImpl
 from .inbox_message_repository import InboxMessageRepositoryImpl
+from .maintenance_repository import NodeMaintenanceLockRepositoryImpl, RemoteOperationRepositoryImpl
 from .node_repository import NodeRepositoryImpl
 from .node_session_repository import NodeSessionRepositoryImpl
 from .notification_endpoint_repository import NotificationEndpointRepositoryImpl
@@ -50,6 +52,7 @@ from .v2_task_repository import ScriptDefinitionRepositoryImpl, V2TestTaskReposi
 
 __all__ = [
     "AuditLogRepositoryImpl",
+    "AgentLogRepositoryImpl",
     "CiTriggerBindingRepositoryImpl",
     "CiWebhookDeliveryRepositoryImpl",
     "AgentDiagnosticsSnapshotRepositoryImpl",
@@ -60,6 +63,8 @@ __all__ = [
     "EventSubscriptionRepositoryImpl",
     "HookExecutionRepositoryImpl",
     "InboxMessageRepositoryImpl",
+    "NodeMaintenanceLockRepositoryImpl",
+    "RemoteOperationRepositoryImpl",
     "NodeRepositoryImpl",
     "NodeCapabilitySnapshotRepositoryImpl",
     "NodeSessionRepositoryImpl",

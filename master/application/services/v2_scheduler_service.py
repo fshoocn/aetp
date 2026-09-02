@@ -140,6 +140,9 @@ class V2SchedulerService:
         node = uow.nodes.get_by_id(selected.node_id.root)
         if node is None or node.id is None:
             return None
+        maintenance_locks = getattr(uow, "maintenance_locks", None)
+        if maintenance_locks is not None and maintenance_locks.is_locked(selected.node_id):
+            return None
         session = uow.node_sessions.get_current(node.id)
         if session is None or not node.online or not node.enabled:
             return None

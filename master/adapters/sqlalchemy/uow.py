@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.repositories import (
     AgentDiagnosticsSnapshotRepositoryImpl,
+    AgentLogRepositoryImpl,
     AgentPluginDesiredVersionRepositoryImpl,
     AgentPluginSyncOperationRepositoryImpl,
     AuditLogRepositoryImpl,
@@ -30,6 +31,7 @@ from master.adapters.sqlalchemy.repositories import (
     HookExecutionRepositoryImpl,
     InboxMessageRepositoryImpl,
     NodeCapabilitySnapshotRepositoryImpl,
+    NodeMaintenanceLockRepositoryImpl,
     NodeRepositoryImpl,
     NodeSessionRepositoryImpl,
     NotificationEndpointRepositoryImpl,
@@ -40,6 +42,7 @@ from master.adapters.sqlalchemy.repositories import (
     ProjectNodeBindingRepositoryImpl,
     ProjectRepositoryImpl,
     RefreshTokenRepositoryImpl,
+    RemoteOperationRepositoryImpl,
     ResourceLeaseRepositoryImpl,
     RunArtifactRepositoryImpl,
     RunCaseResultRepositoryImpl,
@@ -82,8 +85,11 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.run_case_results = RunCaseResultRepositoryImpl(session)
         self.run_artifacts = RunArtifactRepositoryImpl(session)
         self.run_logs = RunLogRepositoryImpl(session)
+        self.agent_logs = AgentLogRepositoryImpl(session)
         self.run_results = RunResultRepositoryImpl(session)
         self.inbox_messages = InboxMessageRepositoryImpl(session)
+        self.remote_operations = RemoteOperationRepositoryImpl(session)
+        self.maintenance_locks = NodeMaintenanceLockRepositoryImpl(session)
         self.outbox_messages = OutboxMessageRepositoryImpl(session)
         self.domain_events = DomainEventRepositoryImpl(session)
         self.audit_logs = AuditLogRepositoryImpl(session)

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from aetp_protocol.capabilities import DeviceAllocation, SwitchRouteAllocation
 from aetp_protocol.envelope import PROTOCOL_VERSION, Envelope, Sender, SenderKind
-from aetp_protocol.ids import new_id
+from aetp_protocol.ids import BusinessId, new_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import PluginPackageRef, RunAssignPayload
 from aetp_protocol.topics import command_topic
@@ -123,7 +123,11 @@ class ShardSchedulerService:
 
         with self._uow_factory() as uow:
             run, task, script = self._load_context(uow, run_id)
-            target_nodes = self._target_nodes(uow, task)
+            target_nodes = [
+                node
+                for node in self._target_nodes(uow, task)
+                if not self._is_maintenance_locked(uow, node.node_id)
+            ]
             states = self._states(target_nodes)
             self._raise_if_capabilities_unavailable(target_nodes, script, task)
 
@@ -234,6 +238,16 @@ class ShardSchedulerService:
             for node_id in sorted(selected_ids & enabled_binding_ids)
             if (node := uow.nodes.get_by_id(node_id)) is not None
         ]
+
+    @staticmethod
+    def _is_maintenance_locked(uow: UnitOfWork, node_id: str) -> bool:
+        repository = getattr(uow, "maintenance_locks", None)
+        if repository is None:
+            return False
+        try:
+            return repository.is_locked(BusinessId(node_id))
+        except ValueError:
+            return False
 
     def _states(
         self,

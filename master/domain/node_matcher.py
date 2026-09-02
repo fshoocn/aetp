@@ -35,6 +35,7 @@ class NodeCapabilityCandidate:
     snapshot: NodeCapabilitySnapshot
     online: bool = True
     enabled: bool = True
+    maintenance_locked: bool = False
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ class NodeMatcher:
             failures.append(ErrorCode("NODE_CAPABILITY_MISMATCH"))
         if not candidate.online:
             failures.append(ErrorCode("AGENT_OFFLINE"))
+        if candidate.maintenance_locked:
+            failures.append(ErrorCode("AGENT_MAINTENANCE"))
         failures.extend(self._match_executor(candidate.snapshot, requirement))
         failures.extend(self._match_runtimes(candidate.snapshot.runtimes, requirement.runtimes))
         failures.extend(self._match_software(candidate.snapshot.software, requirement.software))

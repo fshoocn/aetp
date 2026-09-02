@@ -11,7 +11,7 @@ from aetp_protocol.ids import new_id
 
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.notification_dispatcher import NotificationDispatcher
-from master.domain.models import DomainEvent
+from master.domain.models import AgentLogEventRecord, DomainEvent
 from master.domain.repositories import UnitOfWork
 from master.workers.event_hook_worker import EventHookWorker
 
@@ -81,6 +81,17 @@ class EventPublisher:
             sequence=event.sequence,
             project_id=event.project_id,
             occurred_at=event.occurred_at,
+        )
+
+    async def broadcast_agent_log(self, record: AgentLogEventRecord) -> None:
+        """广播已持久化的 Agent 日志事件；节点 ID 作为流范围键。"""
+        await self._event_bus.publish(
+            "agent.log",
+            record.event.model_dump(mode="json"),
+            event_id=record.event.event_id.root,
+            sequence=record.sequence,
+            project_id=record.node_id.root,
+            occurred_at=record.event.occurred_at,
         )
 
     async def _dispatch_to_notifications(self, event: DomainEvent) -> None:

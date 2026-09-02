@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from .agent_log import AgentLogEventRecord
 from .capability_snapshot import AgentDiagnosticsSnapshotRecord, NodeCapabilitySnapshotRecord
 from .device import Device
+from .maintenance import NodeMaintenanceLockRecord, RemoteOperationRecord
 from .messaging import AuditLog, DomainEvent, InboxMessage, OutboxMessage
 from .node import Node, NodeSession
 from .plan_lease import ExecutionPlanRecord, ResourceLeaseRecord
@@ -41,6 +43,9 @@ __all__ = [
     "Node",
     "NodeSession",
     "AgentDiagnosticsSnapshotRecord",
+    "AgentLogEventRecord",
+    "NodeMaintenanceLockRecord",
+    "RemoteOperationRecord",
     "NodeCapabilitySnapshotRecord",
     "AgentPluginDesiredVersionRecord",
     "AgentPluginSyncOperationRecord",

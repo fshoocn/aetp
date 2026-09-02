@@ -29,6 +29,8 @@ from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
 from master.adapters.storage.local_storage import LocalStorage
+from master.application.services.agent_log_service import AgentLogService
+from master.application.services.agent_maintenance_service import AgentMaintenanceService
 from master.application.services.artifact_service import ArtifactService
 from master.application.services.artifact_storage_service import ArtifactStorageService
 from master.application.services.artifact_upload_signing_service import ArtifactUploadSigningService
@@ -202,6 +204,16 @@ class Container(containers.DeclarativeContainer):
         notification_dispatcher=notification_dispatcher,
         event_hook_worker=event_hook_worker,
     )
+    agent_log_service = providers.Singleton(
+        AgentLogService,
+        uow_factory=uow_factory,
+        master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
+    )
+    agent_maintenance_service = providers.Singleton(
+        AgentMaintenanceService,
+        uow_factory=uow_factory,
+        master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
+    )
 
     # Master 任务类型插件注册表：解析、验证、分片、硬件需求和 Agent 包元数据
     plugin_download_service = providers.Factory(
@@ -348,6 +360,7 @@ class Container(containers.DeclarativeContainer):
     diagnostics_request_service = providers.Factory(
         DiagnosticsRequestService,
         uow_factory=uow_factory,
+        master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
     )
     node_matching_service = providers.Factory(
         NodeMatchingService,
@@ -463,6 +476,8 @@ class Container(containers.DeclarativeContainer):
         diagnostics_snapshot=diagnostics_snapshot_service,
         plugin_sync=plugin_sync_service,
         v2_execution=v2_execution_service,
+        agent_logs=agent_log_service,
+        maintenance=agent_maintenance_service,
     )
 
     # Master MQTT 传输（P4.2；未配置 mqtt_host 时延后由 runtime 决定是否启动）

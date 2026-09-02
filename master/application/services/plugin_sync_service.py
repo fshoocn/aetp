@@ -14,10 +14,13 @@ from aetp_protocol.plugins import PluginSyncItem, PluginSyncRequest, PluginSyncR
 from aetp_protocol.topics import v2_command_topic
 from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 
+from master.application.services.agent_maintenance_service import MaintenanceLockConflict
 from master.domain.enums import OutboxStatus
 from master.domain.models import (
     AgentPluginDesiredVersionRecord,
     AgentPluginSyncOperationRecord,
+    AuditLog,
+    NodeMaintenanceLockRecord,
     OutboxMessage,
     PluginSyncOperationState,
 )
@@ -80,6 +83,7 @@ class PluginSyncService:
         *,
         drain_timeout_s: int = 1800,
         restart_after: bool = True,
+        actor_id: int | None = None,
     ) -> AgentPluginSyncOperationRecord:
         """根据当前节点 session 创建并下发一次插件同步请求。"""
         with self._uow_factory() as uow:
@@ -98,10 +102,15 @@ class PluginSyncService:
                 items=items,
                 drain_timeout_s=drain_timeout_s,
                 restart_after=restart_after,
-            )
+            ),
+            actor_id=actor_id,
         )
-
-    def dispatch(self, request: PluginSyncRequest) -> AgentPluginSyncOperationRecord:
+    def dispatch(
+        self,
+        request: PluginSyncRequest,
+        *,
+        actor_id: int | None = None,
+    ) -> AgentPluginSyncOperationRecord:
         """原子写入同步操作和 V2 command outbox。"""
         normalized = self._with_package_urls(request)
         now = datetime.now(UTC)
@@ -120,6 +129,18 @@ class PluginSyncService:
             if session.session_id != request.expected_session_id.root:
                 raise AgentOfflineForPluginSync("节点 session 已变化，请重新生成同步请求")
             self._validate_items(uow, normalized.items)
+            try:
+                uow.maintenance_locks.acquire(
+                    NodeMaintenanceLockRecord(
+                        id=None,
+                        node_id=normalized.node_id,
+                        operation_id=normalized.sync_id,
+                        kind="plugin_sync",
+                        acquired_at=now,
+                    )
+                )
+            except ValueError as exc:
+                raise MaintenanceLockConflict(str(exc)) from exc
             record = uow.agent_plugin_sync_operations.add(
                 AgentPluginSyncOperationRecord(
                     id=None,
@@ -150,6 +171,29 @@ class PluginSyncService:
                     status=OutboxStatus.PENDING,
                     attempts=0,
                     next_attempt_at=None,
+                )
+            )
+            uow.audit_logs.add(
+                AuditLog(
+                    audit_id=new_id(),
+                    actor_id=actor_id,
+                    action="agent.maintenance.plugin_sync",
+                    resource_type="node",
+                    resource_id=normalized.node_id.root,
+                    detail={
+                        "sync_id": normalized.sync_id.root,
+                        "items": [
+                            {
+                                "plugin_id": item.plugin_id.root,
+                                "version": item.version.root,
+                                "action": item.action.value,
+                            }
+                            for item in normalized.items
+                        ],
+                        "drain_timeout_s": normalized.drain_timeout_s,
+                        "restart_after": normalized.restart_after,
+                    },
+                    occurred_at=now,
                 )
             )
             return uow.agent_plugin_sync_operations.update(
@@ -322,7 +366,7 @@ class PluginSyncService:
                 raise InvalidPluginSyncTransition(
                     f"非法同步结果状态迁移: {record.state.value} -> {target.value}"
                 )
-            return uow.agent_plugin_sync_operations.update(
+            updated = uow.agent_plugin_sync_operations.update(
                 replace(
                     record,
                     state=target,
@@ -333,6 +377,9 @@ class PluginSyncService:
                     completed_at=datetime.now(UTC),
                 )
             )
+            if not result.accepted or not result.restart_required:
+                uow.maintenance_locks.release(result.node_id, result.sync_id)
+            return updated
 
     def record_maintenance_status(
         self,

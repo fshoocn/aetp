@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from .agent_log import AgentLogEvent
 from .audit_log import AuditLog
 from .base import (
     NAMING_CONVENTION,
@@ -24,6 +25,7 @@ from .event_subscription import EventSubscription
 from .execution_plan import ExecutionPlan
 from .hook_execution import HookExecution
 from .inbox_message import InboxMessage
+from .maintenance import NodeMaintenanceLock, RemoteOperation
 from .node import Node
 from .node_session import NodeSession
 from .notification_endpoint import NotificationEndpoint
@@ -53,6 +55,7 @@ from .v2_task import ScriptDefinition, TestTaskScript, V2TestTask
 __all__ = [
     "NAMING_CONVENTION",
     "AuditLog",
+    "AgentLogEvent",
     "Base",
     "CiTriggerBinding",
     "CiWebhookDelivery",
@@ -64,6 +67,8 @@ __all__ = [
     "EventSubscription",
     "HookExecution",
     "InboxMessage",
+    "RemoteOperation",
+    "NodeMaintenanceLock",
     "JSONType",
     "Node",
     "NodeCapabilitySnapshot",

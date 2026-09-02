@@ -18,6 +18,7 @@ from aetp_protocol.plugin_types import PluginPoint, PluginStatus
 from master.domain.enums import DisconnectReason, ShardStatus
 from master.domain.models import (
     AgentDiagnosticsSnapshotRecord,
+    AgentLogEventRecord,
     AgentPluginDesiredVersionRecord,
     AgentPluginSyncOperationRecord,
     AuditLog,
@@ -56,6 +57,7 @@ from master.domain.models.ci_integration import (
     ProjectIntegration,
 )
 from master.domain.models.hook_execution import HookExecution
+from master.domain.models.maintenance import NodeMaintenanceLockRecord, RemoteOperationRecord
 from master.domain.models.notification import (
     EventDelivery,
     EventSubscription,
@@ -358,6 +360,72 @@ class RunLogRepository(ABC):
 
     @abstractmethod
     def get_max_sequence(self, run_id: str) -> int: ...
+
+
+class AgentLogRepository(ABC):
+    """Agent 结构化日志索引仓储。"""
+
+    @abstractmethod
+    def existing_sequences(
+        self,
+        node_id: BusinessId,
+        session_id: str,
+        sequences: list[int],
+    ) -> set[int]: ...
+
+    @abstractmethod
+    def add_many(self, records: list[AgentLogEventRecord]) -> list[AgentLogEventRecord]: ...
+
+    @abstractmethod
+    def list(
+        self,
+        node_id: BusinessId,
+        *,
+        session_id: str | None = None,
+        after_sequence: int = 0,
+        limit: int = 100,
+        level: str | None = None,
+        component: str | None = None,
+        event_code: str | None = None,
+        run_id: str | None = None,
+        attempt_id: str | None = None,
+        plugin_id: str | None = None,
+        keyword: str | None = None,
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
+    ) -> list[AgentLogEventRecord]: ...
+
+
+class RemoteOperationRepository(ABC):
+    """Agent 远程运维操作仓储。"""
+
+    @abstractmethod
+    def get(self, operation_id: BusinessId) -> RemoteOperationRecord | None: ...
+
+    @abstractmethod
+    def add(self, operation: RemoteOperationRecord) -> RemoteOperationRecord: ...
+
+    @abstractmethod
+    def update(self, operation: RemoteOperationRecord) -> RemoteOperationRecord: ...
+
+    @abstractmethod
+    def list_by_node(self, node_id: BusinessId, *, limit: int = 100) -> list[RemoteOperationRecord]: ...
+
+
+class NodeMaintenanceLockRepository(ABC):
+    """节点维护锁仓储；同一节点最多一个活动锁。"""
+
+    @abstractmethod
+    def get(self, node_id: BusinessId) -> NodeMaintenanceLockRecord | None: ...
+
+    @abstractmethod
+    def acquire(self, lock: NodeMaintenanceLockRecord) -> NodeMaintenanceLockRecord: ...
+
+    @abstractmethod
+    def release(self, node_id: BusinessId, operation_id: BusinessId | None = None) -> bool: ...
+
+    @abstractmethod
+    def is_locked(self, node_id: BusinessId) -> bool: ...
 
 
 class RunResultRepository(ABC):
@@ -736,6 +804,9 @@ class UnitOfWork(ABC):
     run_case_results: RunCaseResultRepository
     run_artifacts: RunArtifactRepository
     run_logs: RunLogRepository
+    agent_logs: AgentLogRepository
+    remote_operations: RemoteOperationRepository
+    maintenance_locks: NodeMaintenanceLockRepository
     run_results: RunResultRepository
     inbox_messages: InboxMessageRepository
     outbox_messages: OutboxMessageRepository

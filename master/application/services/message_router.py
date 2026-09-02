@@ -18,7 +18,7 @@ from collections.abc import Callable
 
 from aetp_protocol.capabilities import NodeCapabilitySnapshot
 from aetp_protocol.envelope import Envelope
-from aetp_protocol.logs import RunLogBatch
+from aetp_protocol.logs import AgentLogBatch, RunLogBatch
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     CaseStatusEvent,
@@ -30,6 +30,9 @@ from aetp_protocol.payloads import (
     ExecutionReconcile,
     LeaseRenewRequest,
     LogComplete,
+    LogLevelUpdateResult,
+    MaintenanceDrainResult,
+    MaintenanceRestartResult,
     MaintenanceStatus,
     NodeHeartbeatPayload,
     NodeRegister,
@@ -52,6 +55,8 @@ from aetp_protocol.topics import (
 from aetp_protocol.v2_envelope import parse_v2_message
 
 from common.transport import MqttMessage
+from master.application.services.agent_log_service import AgentLogService
+from master.application.services.agent_maintenance_service import AgentMaintenanceService
 from master.application.services.capability_snapshot_service import (
     CapabilitySnapshotProjectionService,
     DiagnosticsSnapshotProjectionService,
@@ -91,6 +96,8 @@ class MasterMessageRouter:
         diagnostics_snapshot: DiagnosticsSnapshotProjectionService | None = None,
         plugin_sync: PluginSyncService | None = None,
         v2_execution: V2ExecutionService | None = None,
+        agent_logs: AgentLogService | None = None,
+        maintenance: AgentMaintenanceService | None = None,
     ) -> None:
         self._node_presence = node_presence
         self._projection = projection
@@ -102,6 +109,8 @@ class MasterMessageRouter:
         self._diagnostics_snapshot = diagnostics_snapshot
         self._plugin_sync = plugin_sync
         self._v2_execution = v2_execution
+        self._agent_logs = agent_logs
+        self._maintenance = maintenance
         # 路由表：MessageType → (Payload 类型, 处理函数)
         # Node 事件返回 OutboxMessage；Run 事件返回 ProjectionResult
         self._handlers: dict[
@@ -240,6 +249,11 @@ class MasterMessageRouter:
                         payload.capability_snapshot,
                         sender_session_id=envelope.sender.session_id,
                     )
+                if self._maintenance is not None:
+                    self._maintenance.on_session_registered(
+                        envelope.sender.id,
+                        envelope.sender.session_id,
+                    )
                 if self._scheduler is not None:
                     try:
                         self._scheduler.reschedule_pending_runs(node_id=envelope.sender.id.root)
@@ -306,6 +320,18 @@ class MasterMessageRouter:
                     sender_node_id=envelope.sender.id,
                     sender_session_id=envelope.sender.session_id,
                 )
+            if isinstance(payload, AgentLogBatch):
+                if self._agent_logs is None:
+                    return False
+                result = self._agent_logs.ingest(
+                    payload,
+                    message_id=envelope.message_id,
+                    sender_session_id=envelope.sender.session_id,
+                    sender_node_id=envelope.sender.id,
+                )
+                for record in result.records:
+                    await self._event_publisher.broadcast_agent_log(record)
+                return True
             if isinstance(payload, LeaseRenewRequest):
                 if self._v2_execution is None:
                     return False
@@ -323,6 +349,9 @@ class MasterMessageRouter:
                         DiagnosticsSnapshot,
                         PluginSyncResult,
                         MaintenanceStatus,
+                        LogLevelUpdateResult,
+                        MaintenanceDrainResult,
+                        MaintenanceRestartResult,
                         ExecutionReconcile,
                     ),
                 )
@@ -341,6 +370,30 @@ class MasterMessageRouter:
                 if self._plugin_sync is None:
                     return False
                 self._plugin_sync.record_maintenance_status(
+                    payload,
+                    sender_session_id=envelope.sender.session_id,
+                )
+                return True
+            if isinstance(payload, LogLevelUpdateResult):
+                if self._maintenance is None:
+                    return False
+                self._maintenance.handle_log_level_result(
+                    payload,
+                    sender_session_id=envelope.sender.session_id,
+                )
+                return True
+            if isinstance(payload, MaintenanceDrainResult):
+                if self._maintenance is None:
+                    return False
+                self._maintenance.handle_drain_result(
+                    payload,
+                    sender_session_id=envelope.sender.session_id,
+                )
+                return True
+            if isinstance(payload, MaintenanceRestartResult):
+                if self._maintenance is None:
+                    return False
+                self._maintenance.handle_restart_result(
                     payload,
                     sender_session_id=envelope.sender.session_id,
                 )
