@@ -35,12 +35,14 @@ class MasterMqttRuntime:
         *,
         events_topic_filter: str = EVENTS_TOPIC_FILTER,
         v2_events_topic_filter: str = V2_EVENTS_TOPIC_FILTER,
+        v2_only: bool = False,
     ) -> None:
         self._transport = transport
         self._router = router
         self._outbox_worker = outbox_worker
         self._events_topic_filter = events_topic_filter
         self._v2_events_topic_filter = v2_events_topic_filter
+        self._v2_only = v2_only
         self._started = False
 
     async def start(self) -> None:
@@ -49,10 +51,14 @@ class MasterMqttRuntime:
             return
         self._started = True
         self._transport.on_message(self._router.handle)
-        await self._transport.subscribe([self._events_topic_filter, self._v2_events_topic_filter])
+        topics = [self._v2_events_topic_filter] if self._v2_only else [
+            self._events_topic_filter,
+            self._v2_events_topic_filter,
+        ]
+        await self._transport.subscribe(topics)
         await self._outbox_worker.start()
         await self._transport.connect()
-        logger.info("Master MQTT runtime 已启动（订阅 %s）", self._events_topic_filter)
+        logger.info("Master MQTT runtime 已启动（订阅 %s）", topics)
 
     async def stop(self) -> None:
         """停止：outbox worker → 断开连接（幂等）。"""

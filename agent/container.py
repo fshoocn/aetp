@@ -68,6 +68,18 @@ def _build_resource_provider_registry(
     )
 
 
+def _build_legacy_plugin_registry(settings: AgentSettings, plugin_dir) -> object | None:
+    if settings.v2_only:
+        return None
+    return create_default_registry(plugin_dir)
+
+
+def _build_registration_capabilities(settings: AgentSettings, cache: CapabilityCache):
+    if settings.v2_only:
+        return None
+    return cache.scan()
+
+
 class Container(containers.DeclarativeContainer):
     """Agent 应用容器。"""
 
@@ -89,7 +101,8 @@ class Container(containers.DeclarativeContainer):
 
     # 插件注册表单例（P5.5：自动注册内置插件，上报 plugin_versions）
     plugin_registry = providers.Singleton(
-        create_default_registry,
+        _build_legacy_plugin_registry,
+        settings=settings,
         plugin_dir=providers.Callable(lambda: get_settings().plugin_dir),
     )
 
@@ -164,7 +177,9 @@ class Container(containers.DeclarativeContainer):
         ledger=ledger,
         settings=settings,
         capabilities=providers.Callable(
-            lambda cache=capability_cache: cache().scan()
+            _build_registration_capabilities,
+            settings=settings,
+            cache=capability_cache,
         ),
         plugin_registry=plugin_registry,
     )

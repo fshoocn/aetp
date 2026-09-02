@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import json
 import os
@@ -30,6 +31,7 @@ from aetp_protocol.payloads import (
     ExecutionLogBatch,
     ExecutionProgress,
     ExecutionReconcile,
+    Heartbeat,
     LeaseRenewRequest,
     LogComplete,
     LogLevelUpdateResult,
@@ -37,8 +39,10 @@ from aetp_protocol.payloads import (
     MaintenanceRestartResult,
     MaintenanceStatus,
     MqttConnectionInfo,
+    NodeLoad,
     NodeRegister,
     NodeRegisterAck,
+    Presence,
 )
 from aetp_protocol.plugins import PluginSyncResult
 from aetp_protocol.topics import (
@@ -95,6 +99,8 @@ class AgentV2CapabilityPublisher:
         self._v2_registered = False
         self._pending_register_message_id: MessageId | None = None
         self._maintenance_sequence = 0
+        self._register_ack_event = asyncio.Event()
+        self._last_capability_revision = 1
 
     async def publish_execution_ack(
         self,
@@ -347,6 +353,7 @@ class AgentV2CapabilityPublisher:
         """切换 MQTT session 时清除旧的 V2 注册状态。"""
         self._v2_registered = False
         self._pending_register_message_id = None
+        self._register_ack_event.clear()
 
     def set_maintenance_state(self, state: AgentMaintenanceState) -> None:
         """更新后续能力快照和诊断中的维护状态。"""
@@ -369,6 +376,7 @@ class AgentV2CapabilityPublisher:
         envelope = self._build_envelope(MessageType.NODE_REGISTER, payload, session_id)
         self._pending_register_message_id = envelope.message_id
         self._v2_registered = False
+        self._register_ack_event.clear()
         ledger.replace_outbox(
             f"v2-register:{self._node_id().root}",
             v2_event_topic(self._node_id().root, "register"),
@@ -399,6 +407,7 @@ class AgentV2CapabilityPublisher:
             if payload.node_id != self._node_id() or payload.session_id != session_id:
                 return False
             self._v2_registered = payload.accepted
+            self._register_ack_event.set()
             return True
         except Exception:
             return False
@@ -415,7 +424,50 @@ class AgentV2CapabilityPublisher:
             resource_providers=self._resource_providers,
             revision_cache=self._revision_cache,
         )
-        return service.build_snapshot()
+        snapshot = service.build_snapshot()
+        self._last_capability_revision = snapshot.revision
+        return snapshot
+
+    async def wait_for_register_ack(self, timeout_s: float) -> bool:
+        """等待当前 V2 注册回执；返回 Master 是否接受。"""
+        await asyncio.wait_for(self._register_ack_event.wait(), timeout=timeout_s)
+        return self._v2_registered
+
+    def build_heartbeat(self, session_id: SessionId) -> Heartbeat:
+        """构造当前 V2 会话心跳，不重新扫描硬件。"""
+        del session_id
+        active = self._active_attempts()
+        running = sum(item.state.value in {"running", "acked"} for item in active)
+        return Heartbeat(
+            node_id=self._node_id(),
+            maintenance_state=self._maintenance_state,
+            load=NodeLoad(
+                running_attempts=running,
+                queued_attempts=max(0, len(active) - running),
+            ),
+            active_attempt_ids=tuple(item.attempt_id for item in active),
+            capability_revision=max(1, self._last_capability_revision),
+        )
+
+    async def publish_heartbeat(self, session_id: SessionId) -> None:
+        """发布 V2 node.heartbeat。"""
+        await self._publish(
+            MessageType.NODE_HEARTBEAT,
+            self.build_heartbeat(session_id),
+            session_id,
+        )
+
+    async def publish_presence(self, session_id: SessionId, reason: str) -> None:
+        """发布 V2 presence；非正常断开依赖 Transport LWT。"""
+        await self._publish(
+            MessageType.PRESENCE,
+            Presence(
+                node_id=self._node_id(),
+                reason=reason,
+                occurred_at=datetime.now(UTC),
+            ),
+            session_id,
+        )
 
     async def publish_snapshot(self, session_id: SessionId) -> NodeCapabilitySnapshot:
         """发布 node.capability.snapshot 事件并返回快照。"""
@@ -601,6 +653,8 @@ class AgentV2CapabilityPublisher:
         message_type: MessageType,
         payload: (
             NodeRegister
+            | Heartbeat
+            | Presence
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
             | ExecutionAck
@@ -639,6 +693,8 @@ class AgentV2CapabilityPublisher:
         message_type: MessageType,
         payload: (
             NodeRegister
+            | Heartbeat
+            | Presence
             | NodeCapabilitySnapshot
             | DiagnosticsSnapshot
             | ExecutionAck
@@ -678,6 +734,8 @@ class AgentV2CapabilityPublisher:
     def _message_segment(message_type: MessageType) -> str:
         return {
             MessageType.NODE_REGISTER: "register",
+            MessageType.NODE_HEARTBEAT: "heartbeat",
+            MessageType.PRESENCE: "presence",
             MessageType.NODE_CAPABILITY_SNAPSHOT: "capability.snapshot",
             MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: "agent.diagnostics.snapshot",
             MessageType.EXECUTION_ACK: "execution.ack",

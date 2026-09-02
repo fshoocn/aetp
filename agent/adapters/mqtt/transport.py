@@ -18,8 +18,11 @@ from typing import Any
 
 import aiomqtt
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
+from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, new_id
 from aetp_protocol.message_types import MessageType
-from aetp_protocol.payloads import PresencePayload
+from aetp_protocol.payloads import Presence, PresencePayload
+from aetp_protocol.topics import v2_event_topic
+from aetp_protocol.v2_envelope import V2Envelope, V2Sender
 
 from agent.config import AgentSettings
 from common.backoff import ExponentialBackoff
@@ -116,6 +119,24 @@ class AgentMqttTransport(Transport):
         from datetime import datetime
 
         now = datetime.now(UTC)
+        if self._settings.v2_only:
+            envelope = V2Envelope(
+                message_id=MessageId(new_id()),
+                sent_at=now,
+                sender=V2Sender(
+                    kind="agent",
+                    id=BusinessId(self._settings.node_id),
+                    session_id=SessionId(self._session_id),
+                ),
+                message_type=MessageType.PRESENCE.value,
+                trace_id=TraceId(new_id()),
+                payload=Presence(
+                    node_id=BusinessId(self._settings.node_id),
+                    reason="unexpected_disconnect",
+                    occurred_at=now,
+                ).model_dump(mode="json"),
+            )
+            return json.dumps(envelope.model_dump(mode="json")).encode("utf-8")
         payload = PresencePayload(
             node_id=self._settings.node_id,
             reason="unexpected_disconnect",
@@ -146,7 +167,11 @@ class AgentMqttTransport(Transport):
             "identifier": s.mqtt_client_id,
             "keepalive": 30,
             "will": aiomqtt.Will(
-                topic=f"aetp/v1/agents/{s.node_id}/events/presence",
+                topic=(
+                    v2_event_topic(s.node_id, "presence")
+                    if s.v2_only
+                    else f"aetp/v1/agents/{s.node_id}/events/presence"
+                ),
                 payload=self._lwt_payload(),
                 qos=1,
             ),

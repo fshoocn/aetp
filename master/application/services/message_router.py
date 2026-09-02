@@ -28,6 +28,7 @@ from aetp_protocol.payloads import (
     ExecutionLogBatch,
     ExecutionProgress,
     ExecutionReconcile,
+    Heartbeat,
     LeaseRenewRequest,
     LogComplete,
     LogLevelUpdateResult,
@@ -37,6 +38,7 @@ from aetp_protocol.payloads import (
     NodeHeartbeatPayload,
     NodeRegister,
     NodeRegisterPayload,
+    Presence,
     PresencePayload,
     RunAckPayload,
     RunCaseStatusPayload,
@@ -262,6 +264,18 @@ class MasterMessageRouter:
                             "V2 节点上线后的补偿调度失败（不阻塞注册）: node=%s",
                             envelope.sender.id.root,
                         )
+                return True
+            if isinstance(payload, Heartbeat):
+                self._node_presence.handle_v2_heartbeat(
+                    envelope=envelope,
+                    payload=payload,
+                )
+                return True
+            if isinstance(payload, Presence):
+                self._node_presence.handle_v2_presence(
+                    envelope=envelope,
+                    payload=payload,
+                )
                 return True
             if isinstance(payload, ExecutionAck):
                 if self._v2_execution is None or envelope.correlation_id is None:

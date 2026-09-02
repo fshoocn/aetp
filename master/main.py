@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
+from starlette.responses import JSONResponse
 
 from master.config import get_settings
 
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
     from master.api.v1.security import validate_security_settings
 
     validate_security_settings()
+    settings = get_settings()
     # 首次解析 database 单例 — 触发 _init_database() → create_database().connect() → Alembic upgrade head
     logger.info("开始初始化数据库和执行迁移")
     container.database()
@@ -106,13 +108,15 @@ async def lifespan(app: FastAPI):
         container.v2_plugin_registry().load(
             uow.plugin_versions.list(status=PluginStatus.ENABLED)
         )
-    # Master 插件注册表在应用启动时加载：脚本解析、验证、分片和硬件需求
-    # 均由 Master 侧插件提供；Agent 只加载对应执行包。
-    plugins = container.plugin_registry()
-    logger.info(
-        "Master 插件注册表已加载: task_types=%s",
-        [package.metadata.task_type for package in plugins.list()],
-    )
+    if settings.v2_only:
+        logger.info("V2-only profile 已启用：跳过 legacy task_type Registry")
+    else:
+        # 迁移期兼容：legacy profile 才装配旧 task_type Registry。
+        plugins = container.plugin_registry()
+        logger.info(
+            "Master 插件注册表已加载: task_types=%s",
+            [package.metadata.task_type for package in plugins.list()],
+        )
     app.state.container = container
 
     # 平台管理员 bootstrap：若 users 表为空且配置了管理员凭据，自动创建首个 admin
@@ -120,7 +124,6 @@ async def lifespan(app: FastAPI):
 
     # P6.4：Master MQTT 运行时（订阅 Agent 事件 → 路由投影 + outbox 发送）。
     # 仅在显式配置了 MQTT broker 时才启动；否则跳过（纯 HTTP/单测模式）。
-    settings = get_settings()
     if settings.mqtt_host:
         runtime = container.mqtt_runtime()
         await runtime.start()
@@ -251,12 +254,51 @@ class RequestLoggingMiddleware:
             )
 
 
+class V2OnlyApiGuard:
+    """V2-only profile 拒绝 legacy API，避免新部署静默落回 V1。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith("/api/v1"):
+            try:
+                v2_only = get_settings().v2_only
+            except RuntimeError:
+                v2_only = False
+            if v2_only:
+                response = JSONResponse(
+                    {
+                        "code": "V2_ONLY",
+                        "message": "V2-only profile 已停用 legacy API，请使用 /api/v2",
+                        "data": None,
+                    },
+                    status_code=410,
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(V2OnlyApiGuard)
 
 app.include_router(v1_router)
 app.include_router(v2_router)
 app.include_router(v2_nodes_router)
 app.include_router(v2_tasks_router)
+
+
+@app.get("/api/v2/health", tags=["system"])
+def health_v2(db: DbDep) -> dict[str, str]:
+    """V2 健康检查：探活独立 V2 数据库连接。"""
+    try:
+        with db.session_scope() as session:
+            session.execute(sa_text("SELECT 1"))
+    except Exception:
+        logger.exception("V2 健康检查失败：数据库不可用")
+        return {"status": "degraded", "database": "unreachable", "profile": "v2"}
+    return {"status": "ok", "database": "ok", "profile": "v2"}
 
 
 @app.get("/api/v1/health", tags=["system"])

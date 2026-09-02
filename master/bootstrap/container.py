@@ -155,7 +155,11 @@ class Container(containers.DeclarativeContainer):
     database_url = providers.Callable(lambda: get_settings().database_url)
 
     # 数据库：进程级单例
-    database = providers.Singleton(_init_database, database_url)
+    database = providers.Singleton(
+        _init_database,
+        database_url,
+        v2_only=providers.Callable(lambda: get_settings().v2_only),
+    )
 
     # 工作单元工厂：进程级单例（工厂本身无状态，仅持有 database；
     # 每次调用返回一个新 UoW = 一个新事务）
@@ -307,6 +311,7 @@ class Container(containers.DeclarativeContainer):
         StorageCleanupService,
         uow_factory=uow_factory,
         storage=storage,
+        include_legacy_scripts=providers.Callable(lambda: not get_settings().v2_only),
     )
 
     # 产物登记/查询服务（P6.6：写引用 + 项目范围查询）
@@ -532,6 +537,7 @@ class Container(containers.DeclarativeContainer):
         transport=mqtt_transport,
         router=message_router,
         outbox_worker=outbox_worker,
+        v2_only=providers.Callable(lambda: get_settings().v2_only),
     )
 
     # 后台维护 worker（P8.2/P8.5：Schedule tick + Stale Run 检测 + 孤儿清理）
@@ -542,5 +548,6 @@ class Container(containers.DeclarativeContainer):
         plan_lease_service=plan_lease_service,
         storage_cleanup_service=storage_cleanup_service,
         notification_dispatcher=notification_dispatcher,
+        enable_schedules=providers.Callable(lambda: not get_settings().v2_only),
         interval_s=providers.Callable(lambda: get_settings().maintenance_interval_s),
     )

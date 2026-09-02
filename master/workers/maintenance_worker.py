@@ -37,12 +37,14 @@ class MaintenanceWorker:
         plan_lease_service: PlanLeaseService | None = None,
         interval_s: float = 30.0,
         notification_dispatcher: NotificationDispatcher | None = None,
+        enable_schedules: bool = True,
     ) -> None:
         self._schedule = schedule_service
         self._recovery = recovery_service
         self._storage_cleanup = storage_cleanup_service
         self._plan_leases = plan_lease_service
         self._notification_dispatcher = notification_dispatcher
+        self._enable_schedules = enable_schedules
         self._interval_s = interval_s
         self._running = False
         self._task: asyncio.Task[None] | None = None
@@ -78,10 +80,11 @@ class MaintenanceWorker:
         stats: dict[str, int] = {"schedules_triggered": 0, "stale_runs": 0, "orphans_removed": 0}
         if self._plan_leases is not None:
             stats["leases_expired"] = 0
-        try:
-            stats["schedules_triggered"] = await self._schedule.tick()
-        except Exception:
-            logger.exception("Schedule tick 失败")
+        if self._enable_schedules:
+            try:
+                stats["schedules_triggered"] = await self._schedule.tick()
+            except Exception:
+                logger.exception("Schedule tick 失败")
         try:
             stats["stale_runs"] = self._recovery.detect_stale_runs()
         except Exception:

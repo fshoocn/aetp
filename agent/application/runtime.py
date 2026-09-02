@@ -106,6 +106,7 @@ class AgentRuntime:
         self._transport = transport
         self._ledger = ledger
         self._registration = registration
+        self._session_id = registration.session_id
         self._capability_cache = capability_cache
         self._v2_capability_publisher = v2_capability_publisher
         self._v2_plugin_installer = v2_plugin_installer
@@ -123,6 +124,7 @@ class AgentRuntime:
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
         self._lease_renewal_task: asyncio.Task[None] | None = None
+        self._v2_heartbeat_task: asyncio.Task[None] | None = None
         self._agent_log_task: asyncio.Task[None] | None = None
         self._agent_log_handler_installed = False
         self._stop_event = asyncio.Event()
@@ -142,7 +144,7 @@ class AgentRuntime:
         """延迟构建子组件（首次使用时调用）。"""
         if self._execution_service is None:
             self._execution_service = ExecutionService(settings=self._settings, ledger=self._ledger)
-        if self._orchestrator is None:
+        if not self._settings.v2_only and self._orchestrator is None:
             self._orchestrator = RunOrchestrator(
                 settings=self._settings,
                 ledger=self._ledger,
@@ -152,7 +154,7 @@ class AgentRuntime:
                 artifact_uploader=self._artifact_uploader,
                 session_id=lambda: self._registration.session_id,
             )
-        if self._dispatcher_obj is None:
+        if not self._settings.v2_only and self._dispatcher_obj is None:
             self._dispatcher_obj = CommandDispatcher(
                 settings=self._settings,
                 ledger=self._ledger,
@@ -164,7 +166,7 @@ class AgentRuntime:
                 orchestrator=self._orchestrator,
                 session_id=lambda: self._registration.session_id,
             )
-        if self._script_preflight_obj is None and self._script_cache is not None:
+        if not self._settings.v2_only and self._script_preflight_obj is None and self._script_cache is not None:
             self._script_preflight_obj = ScriptPreflightService(
                 settings=self._settings,
                 ledger=self._ledger,
@@ -261,6 +263,10 @@ class AgentRuntime:
                 is_registered=lambda: publisher.v2_registered,
                 master_id=self._settings.master_id,
             )
+        if self._settings.v2_only:
+            if self._v2_capability_publisher is None or self._v2_execution_plan_controller is None:
+                raise RuntimeError("V2 profile 缺少 V2 执行组件")
+            return
         assert self._dispatcher_obj is not None
         assert self._orchestrator is not None
 
@@ -277,13 +283,17 @@ class AgentRuntime:
         self._stop_event.clear()
         self._transport.on_message(self._handle_message)
         self._transport.on_connection_change(self._handle_connection_change)
-        subscriptions = [
-            command_topic(self._settings.node_id, "register-ack"),
-            command_topic(self._settings.node_id, "assign"),
-            command_topic(self._settings.node_id, "cancel"),
-            command_topic(self._settings.node_id, "verify"),
-            command_topic(self._settings.node_id, "parse"),
-        ]
+        subscriptions: list[str] = []
+        if not self._settings.v2_only:
+            subscriptions.extend(
+                [
+                    command_topic(self._settings.node_id, "register-ack"),
+                    command_topic(self._settings.node_id, "assign"),
+                    command_topic(self._settings.node_id, "cancel"),
+                    command_topic(self._settings.node_id, "verify"),
+                    command_topic(self._settings.node_id, "parse"),
+                ]
+            )
         if self._v2_capability_publisher is not None:
             subscriptions.extend(
                 [
@@ -316,7 +326,7 @@ class AgentRuntime:
             self._lease_renewal_task = asyncio.create_task(self._lease_renewal_loop())
         await self._transport.connect()
         # 启动 USB 插拔监听（可选，usb-monitor 未安装/失败时静默降级为指纹兜底）
-        if self._capability_cache is not None:
+        if not self._settings.v2_only and self._capability_cache is not None:
             try:
                 self._capability_cache.start_usb_monitoring()
             except Exception:
@@ -326,11 +336,12 @@ class AgentRuntime:
     async def stop(self) -> None:
         """停止 Agent 主生命周期（幂等，每步容错不阻塞后续清理）。"""
         self._stop_event.set()
-        try:
-            await self._registration.stop_heartbeat()
-        except Exception:
-            logger.debug("停止心跳异常（已忽略）", exc_info=True)
-        if self._capability_cache is not None:
+        if not self._settings.v2_only:
+            try:
+                await self._registration.stop_heartbeat()
+            except Exception:
+                logger.debug("停止心跳异常（已忽略）", exc_info=True)
+        if not self._settings.v2_only and self._capability_cache is not None:
             try:
                 self._capability_cache.stop_usb_monitoring()
             except Exception:
@@ -343,6 +354,23 @@ class AgentRuntime:
             self._lease_renewal_task = None
         if self._v2_execution_runner is not None:
             await self._v2_execution_runner.stop()
+        if self._v2_heartbeat_task is not None:
+            self._v2_heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._v2_heartbeat_task
+            self._v2_heartbeat_task = None
+        if (
+            self._settings.v2_only
+            and self._v2_capability_publisher is not None
+            and self._v2_capability_publisher.v2_registered
+        ):
+            try:
+                await self._v2_capability_publisher.publish_presence(
+                    self._v2_session_id(),
+                    "shutdown",
+                )
+            except Exception:
+                logger.debug("发送 V2 graceful Presence 失败（已忽略）", exc_info=True)
         if self._agent_log_task is not None:
             self._agent_log_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -368,7 +396,10 @@ class AgentRuntime:
 
     async def _handle_connection_change(self, connected: bool, session_id: str | None = None) -> None:
         """连接成功触发重新注册，断开撤销注册状态。"""
-        await self._registration.handle_connection_change(connected, session_id)
+        if session_id:
+            self._session_id = session_id
+        if not self._settings.v2_only:
+            await self._registration.handle_connection_change(connected, session_id)
         if connected:
             if self._v2_capability_publisher is not None:
                 try:
@@ -385,6 +416,11 @@ class AgentRuntime:
             self._registration_task = asyncio.create_task(self._wait_for_registration())
         else:
             self._cancel_registration_waiter()
+            if self._v2_heartbeat_task is not None:
+                self._v2_heartbeat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._v2_heartbeat_task
+                self._v2_heartbeat_task = None
             if self._v2_capability_publisher is not None:
                 self._v2_capability_publisher.reset_session()
             if self._v2_plugin_sync_controller is not None:
@@ -402,6 +438,10 @@ class AgentRuntime:
         再重连，而应保持连接、按退避间隔重发注册消息并继续等待 ACK，
         避免 Master 长时间离线时以固定频率高频重发（惊群/浪费带宽）。
         """
+        if self._settings.v2_only:
+            await self._wait_for_v2_registration()
+            return
+
         registration_backoff = ExponentialBackoff(
             base_delay_s=max(1.0, float(self._settings.registration_timeout_s)),
             max_delay_s=60.0,
@@ -455,6 +495,44 @@ class AgentRuntime:
                     await self._transport.connect()
                 return
 
+    async def _wait_for_v2_registration(self) -> None:
+        """V2-only 注册等待、能力快照发布和心跳启动。"""
+        publisher = self._v2_capability_publisher
+        if publisher is None:
+            raise RuntimeError("V2 profile 缺少能力发布器")
+        registration_backoff = ExponentialBackoff(
+            base_delay_s=max(1.0, float(self._settings.registration_timeout_s)),
+            max_delay_s=60.0,
+        )
+        while not self._stop_event.is_set():
+            try:
+                accepted = await publisher.wait_for_register_ack(
+                    float(self._settings.registration_timeout_s)
+                )
+                if not accepted:
+                    raise RegistrationRejectedError("V2 注册被 Master 拒绝")
+                await publisher.publish_snapshot(self._v2_session_id())
+                if self._v2_reconcile_service is not None:
+                    self._v2_reconcile_service.enqueue(self._v2_session_id())
+                if self._v2_heartbeat_task is None or self._v2_heartbeat_task.done():
+                    self._v2_heartbeat_task = asyncio.create_task(self._v2_heartbeat_loop())
+                return
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                delay = registration_backoff.next()
+                logger.warning("V2 Agent 注册超时，%.1fs 后重发", delay)
+                await self._sleep(delay)
+                if self._stop_event.is_set():
+                    return
+                publisher.enqueue_register(self._ledger, self._v2_session_id())
+            except RegistrationRejectedError as exc:
+                logger.warning("V2 Agent 注册被拒绝: %s", exc)
+                return
+            except Exception:
+                logger.exception("V2 Agent 注册等待异常")
+                return
+
     def _cancel_registration_waiter(self) -> None:
         """取消旧 session 的 ACK 等待任务。"""
         if self._registration_task is not None:
@@ -463,8 +541,7 @@ class AgentRuntime:
 
     async def _handle_message(self, message: MqttMessage) -> None:
         """路由入站消息到 register-ack / 命令分发器 / 脚本预检（P5.4/P5.7）。"""
-        assert self._dispatcher_obj is not None, "组件未初始化，请先调用 start()"
-        if self._registration.handle_register_ack(message):
+        if not self._settings.v2_only and self._registration.handle_register_ack(message):
             return
         if self._v2_capability_publisher is not None and self._v2_capability_publisher.handle_register_ack(
             message,
@@ -533,15 +610,29 @@ class AgentRuntime:
             )
             return
         # P5.7：script.verify / script.parse 命令路由到脚本预检服务
-        if self._route_script_preflight(message):
+        if not self._settings.v2_only and self._route_script_preflight(message):
             return
         # P5.4：run.assign / run.cancel 命令路由
-        self._dispatcher_obj.handle_command(message)
+        if self._dispatcher_obj is not None:
+            self._dispatcher_obj.handle_command(message)
 
     def _v2_session_id(self):
         from aetp_protocol.ids import SessionId
 
-        return SessionId(self._registration.session_id)
+        return SessionId(self._session_id)
+
+    async def _v2_heartbeat_loop(self) -> None:
+        """V2-only 心跳循环。"""
+        publisher = self._v2_capability_publisher
+        if publisher is None:
+            return
+        while not self._stop_event.is_set():
+            if publisher.v2_registered:
+                try:
+                    await publisher.publish_heartbeat(self._v2_session_id())
+                except Exception:
+                    logger.exception("V2 Agent 心跳发布失败")
+            await self._sleep(max(1.0, float(self._settings.heartbeat_interval_s)))
 
     async def _lease_renewal_loop(self) -> None:
         """周期性为已接受 V2 Plan 生成 Lease 续租请求。"""

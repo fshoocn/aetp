@@ -15,12 +15,15 @@ from master.domain.models import TaskRun
 from master.domain.repositories import TaskRunRepository
 
 
-def _to_domain(orm: TaskRunORM) -> TaskRun:
+def _to_domain(orm: TaskRunORM, *, include_legacy_task: bool = True) -> TaskRun:
+    task_id = orm.task_id or ""
+    if include_legacy_task and orm.task is not None:
+        task_id = orm.task.task_id
     return TaskRun(
         id=orm.id,
         run_id=orm.run_id,
         project_id=orm.project.project_id if orm.project is not None else "",
-        task_id=orm.task.task_id if orm.task is not None else (orm.task_id or ""),
+        task_id=task_id,
         task_revision=orm.task_revision,
         script_ref=dict(orm.script_ref or {}),
         case_selection=list(orm.case_selection or []),
@@ -41,8 +44,15 @@ def _to_domain(orm: TaskRunORM) -> TaskRun:
 
 
 class TaskRunRepositoryImpl(TaskRunRepository):
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, include_legacy_task: bool = True) -> None:
         self._s = session
+        self._include_legacy_task = include_legacy_task
+
+    def _options(self):
+        options = [joinedload(TaskRunORM.project)]
+        if self._include_legacy_task:
+            options.append(joinedload(TaskRunORM.task))
+        return options
 
     def add(self, run: TaskRun) -> TaskRun:
         # Resolve project_pk
@@ -53,9 +63,11 @@ class TaskRunRepositoryImpl(TaskRunRepository):
             raise ValueError(f"Project not found: {run.project_id}")
 
         # Resolve task_pk
-        task_pk = self._s.execute(
-            select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)
-        ).scalar_one_or_none()
+        task_pk = None
+        if self._include_legacy_task:
+            task_pk = self._s.execute(
+                select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)
+            ).scalar_one_or_none()
         if task_pk is None and run.snapshot is None:
             raise ValueError(f"Task not found: {run.task_id}")
 
@@ -91,15 +103,12 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         self._s.add(orm)
         self._s.flush()
         self._s.refresh(orm)
-        return _to_domain(orm)
+        return _to_domain(orm, include_legacy_task=self._include_legacy_task)
 
     def get_by_run_id(self, run_id: str, project_id: str | None = None) -> TaskRun | None:
         stmt = (
             select(TaskRunORM)
-            .options(
-                joinedload(TaskRunORM.project),
-                joinedload(TaskRunORM.task),
-            )
+            .options(*self._options())
             .where(TaskRunORM.run_id == run_id)
         )
         if project_id is not None:
@@ -108,7 +117,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
                 == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         orm = self._s.execute(stmt).scalars().one_or_none()
-        return _to_domain(orm) if orm is not None else None
+        return _to_domain(orm, include_legacy_task=self._include_legacy_task) if orm is not None else None
 
     def list(
         self,
@@ -122,10 +131,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
     ) -> list[TaskRun]:
         stmt = (
             select(TaskRunORM)
-            .options(
-                joinedload(TaskRunORM.project),
-                joinedload(TaskRunORM.task),
-            )
+            .options(*self._options())
             .order_by(TaskRunORM.created_at.desc(), TaskRunORM.id.desc())
             .limit(limit)
             .offset(offset)
@@ -136,15 +142,26 @@ class TaskRunRepositoryImpl(TaskRunRepository):
                 == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         if task_id is not None:
-            stmt = stmt.where(
-                (TaskRunORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery())
-                | (TaskRunORM.task_id == task_id)
-            )
+            if self._include_legacy_task:
+                stmt = stmt.where(
+                    (
+                        TaskRunORM.task_pk
+                        == select(TestTaskORM.id)
+                        .where(TestTaskORM.task_id == task_id)
+                        .scalar_subquery()
+                    )
+                    | (TaskRunORM.task_id == task_id)
+                )
+            else:
+                stmt = stmt.where(TaskRunORM.task_id == task_id)
         if status is not None:
             stmt = stmt.where(TaskRunORM.status == status)
         if trigger_type is not None:
             stmt = stmt.where(TaskRunORM.trigger_type == trigger_type)
-        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+        return [
+            _to_domain(o, include_legacy_task=self._include_legacy_task)
+            for o in self._s.execute(stmt).scalars().all()
+        ]
 
     def update(self, run: TaskRun) -> TaskRun:
         orm = self._s.get(TaskRunORM, run.id)
@@ -168,10 +185,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         """查询所有非终态的 Run（启动恢复/超时检测用）。"""
         stmt = (
             select(TaskRunORM)
-            .options(
-                joinedload(TaskRunORM.project),
-                joinedload(TaskRunORM.task),
-            )
+            .options(*self._options())
             .where(
                 TaskRunORM.status.in_(
                     [
@@ -185,7 +199,10 @@ class TaskRunRepositoryImpl(TaskRunRepository):
             .order_by(TaskRunORM.id)
             .limit(limit)
         )
-        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+        return [
+            _to_domain(o, include_legacy_task=self._include_legacy_task)
+            for o in self._s.execute(stmt).scalars().all()
+        ]
 
     def nullify_task_for_runs(self, task_id: str) -> int:
         """把引用指定任务定义的所有 Run 的 task_pk 置空（保留历史）。

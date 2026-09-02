@@ -21,10 +21,12 @@ from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.ids import MessageId, SessionId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
+    Heartbeat,
     NodeHeartbeatPayload,
     NodeRegister,
     NodeRegisterAck,
     NodeRegisterPayload,
+    Presence,
     PresencePayload,
     RegisterAckPayload,
 )
@@ -266,6 +268,64 @@ class NodePresenceService:
                 len(payload.resource_occupancy),
             )
 
+    def handle_v2_heartbeat(self, *, envelope: V2Envelope, payload: Heartbeat) -> None:
+        """V2 心跳：按 sender session 刷新节点在线投影。"""
+        self._validate_v2_sender(envelope, payload.node_id)
+        now = utcnow()
+        with self._uow_factory() as uow:
+            node = uow.nodes.get_by_id(payload.node_id.root)
+            if node is None:
+                raise NodePresenceError(f"未注册节点心跳被拒: {payload.node_id.root}")
+            assert node.id is not None
+            current = uow.node_sessions.get_current(node.id)
+            if current is None or current.session_id != envelope.sender.session_id.root:
+                raise NodePresenceError(
+                    f"旧 V2 session 消息被拒绝: node={payload.node_id.root} "
+                    f"session={envelope.sender.session_id.root}"
+                )
+            node.online = payload.status.value == "online"
+            node.status = NodeStatus.ONLINE if node.online and node.enabled else NodeStatus.OFFLINE
+            node.last_seen_at = now
+            node.load = {
+                "running_attempts": payload.load.running_attempts,
+                "queued_attempts": payload.load.queued_attempts,
+                "maintenance_state": payload.maintenance_state.value,
+                "capability_revision": payload.capability_revision,
+            }
+            uow.nodes.save(node)
+
+    def handle_v2_presence(self, *, envelope: V2Envelope, payload: Presence) -> None:
+        """V2 Presence：关闭当前 session 并触发节点离线恢复。"""
+        self._validate_v2_sender(envelope, payload.node_id)
+        now = utcnow()
+        with self._uow_factory() as uow:
+            node = uow.nodes.get_by_id(payload.node_id.root)
+            if node is None:
+                logger.warning("未知 V2 节点 Presence 忽略: %s", payload.node_id.root)
+                return
+            assert node.id is not None
+            current = uow.node_sessions.get_current(node.id)
+            if current is not None:
+                if current.session_id != envelope.sender.session_id.root:
+                    raise NodePresenceError(
+                        f"旧 V2 session 消息被拒绝: node={payload.node_id.root} "
+                        f"session={envelope.sender.session_id.root}"
+                    )
+                uow.node_sessions.close(
+                    current,
+                    reason=DisconnectReason.UNEXPECTED_DISCONNECT,
+                    at=now,
+                )
+            node.online = False
+            node.status = NodeStatus.OFFLINE
+            node.last_seen_at = now
+            uow.nodes.save(node)
+        if self._recovery is not None:
+            try:
+                self._recovery.handle_node_offline(payload.node_id.root)
+            except Exception:
+                logger.exception("V2 节点离线恢复失败: node=%s", payload.node_id.root)
+
     # -- LWT（非正常离线） ----------------------------------------------------
 
     def handle_presence(self, *, envelope: Envelope, payload: PresencePayload) -> None:
@@ -322,6 +382,13 @@ class NodePresenceService:
             raise NodePresenceError(f"sender.kind 必须为 agent: {envelope.sender.kind}")
         if envelope.sender.id != node_id:
             raise NodePresenceError(f"sender.id 与 node_id 不一致: {envelope.sender.id} != {node_id}")
+
+    @staticmethod
+    def _validate_v2_sender(envelope: V2Envelope, node_id) -> None:
+        if envelope.sender.kind != "agent":
+            raise NodePresenceError("V2 sender.kind 必须为 agent")
+        if envelope.sender.id != node_id:
+            raise NodePresenceError("V2 sender.id 与 node_id 不一致")
 
     def _build_ack_envelope(self, request: Envelope, node_id: str) -> dict:
         """构造 register-ack 的 Envelope JSON（sender=master，correlation_id=原消息）。"""

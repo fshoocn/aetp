@@ -66,8 +66,9 @@ from master.domain.repositories import UnitOfWork
 
 
 class SqlAlchemyUnitOfWork(UnitOfWork):
-    def __init__(self, database: DatabaseInterface) -> None:
+    def __init__(self, database: DatabaseInterface, *, include_legacy_relations: bool = True) -> None:
         self._database = database
+        self._include_legacy_relations = include_legacy_relations
         self._session: Session | None = None
 
     def __enter__(self) -> Self:
@@ -81,7 +82,10 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.test_tasks = TestTaskRepositoryImpl(session)
         self.script_definitions = ScriptDefinitionRepositoryImpl(session)
         self.v2_test_tasks = V2TestTaskRepositoryImpl(session)
-        self.task_runs = TaskRunRepositoryImpl(session)
+        self.task_runs = TaskRunRepositoryImpl(
+            session,
+            include_legacy_task=self._include_legacy_relations,
+        )
         self.run_shards = RunShardRepositoryImpl(session)
         self.shard_attempts = ShardAttemptRepositoryImpl(session)
         self.run_case_results = RunCaseResultRepositoryImpl(session)
@@ -149,4 +153,7 @@ class SqlAlchemyUnitOfWorkFactory:
         self._database = database
 
     def __call__(self) -> SqlAlchemyUnitOfWork:
-        return SqlAlchemyUnitOfWork(self._database)
+        return SqlAlchemyUnitOfWork(
+            self._database,
+            include_legacy_relations=not self._database.config.v2_only,
+        )
