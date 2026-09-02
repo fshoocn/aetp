@@ -23,6 +23,7 @@ from agent.application.services.resource_provider import ResourceProviderRegistr
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_executor_resolver import V2ExecutorResolver
+from agent.application.services.v2_resource_provider_resolver import V2ResourceProviderResolver
 from agent.config import AgentSettings, get_settings, resolve_sqlite_url
 from agent.plugins.installer import LocalPluginInstaller
 from agent.plugins.registry import create_default_registry
@@ -53,13 +54,17 @@ def _build_v2_capability_publisher(
     )
 
 
-def _build_resource_provider_registry(settings: AgentSettings) -> ResourceProviderRegistry:
+def _build_resource_provider_registry(
+    settings: AgentSettings,
+    resolver: V2ResourceProviderResolver,
+) -> ResourceProviderRegistry:
+    built_in = (
+        VectorCanResourceProvider(),
+        SerialResourceProvider(settings.serial_map_file),
+        PowerResourceProvider(),
+    )
     return ResourceProviderRegistry(
-        (
-            VectorCanResourceProvider(),
-            SerialResourceProvider(settings.serial_map_file),
-            PowerResourceProvider(),
-        )
+        (*built_in, *resolver.resolve_all())
     )
 
 
@@ -103,6 +108,10 @@ class Container(containers.DeclarativeContainer):
         V2ExecutorResolver,
         registry=v2_plugin_registry,
     )
+    v2_resource_provider_resolver = providers.Singleton(
+        V2ResourceProviderResolver,
+        registry=v2_plugin_registry,
+    )
     v2_plugin_installer = providers.Singleton(
         V2PluginInstaller,
         root=providers.Callable(lambda: get_settings().plugin_dir),
@@ -110,6 +119,7 @@ class Container(containers.DeclarativeContainer):
     resource_provider_registry = providers.Singleton(
         _build_resource_provider_registry,
         settings=settings,
+        resolver=v2_resource_provider_resolver,
     )
     v2_capability_publisher = providers.Factory(
         _build_v2_capability_publisher,

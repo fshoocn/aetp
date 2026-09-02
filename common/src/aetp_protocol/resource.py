@@ -24,6 +24,7 @@ class ResourceProvider(Protocol):
     """Agent 侧资源插件必须实现的生命周期接口。"""
 
     resource_type: str
+    provider_id: str
 
     def discover(self) -> tuple[ResourceCapability, ...]: ...
 
