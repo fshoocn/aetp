@@ -14,6 +14,7 @@ from dependency_injector import containers, providers
 from agent.adapters.mqtt.transport import AgentMqttTransport
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
+from agent.application.services.agent_log_facade import AgentLogFacade
 from agent.application.services.artifact_upload_service import ArtifactUploadService
 from agent.application.services.capability_loader import CapabilityCache
 from agent.application.services.execution_service import ExecutionService
@@ -106,6 +107,11 @@ class Container(containers.DeclarativeContainer):
 
     # Run 产物上传器（P6.6：JUnit XML/插件声明附件上传到 Master）
     artifact_uploader = providers.Singleton(ArtifactUploadService)
+    agent_log_facade = providers.Singleton(
+        AgentLogFacade,
+        settings=settings,
+        ledger=ledger,
+    )
 
     # 执行服务单例（P6.1：并发上限 + timeout + cancel token + 异常映射）
     execution_service = providers.Singleton(
@@ -152,4 +158,5 @@ class Container(containers.DeclarativeContainer):
         v2_plugin_registry=v2_plugin_registry,
         v2_executor_resolver=v2_executor_resolver.provided.resolve,
         resource_providers=resource_provider_registry,
+        agent_log_facade=agent_log_facade,
     )

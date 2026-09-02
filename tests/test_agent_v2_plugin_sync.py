@@ -138,6 +138,7 @@ def test_agent_v2_sync_checks_session_and_returns_typed_result(tmp_path) -> None
 def test_v2_sync_controller_completes_command_result_and_snapshot_loop(tmp_path) -> None:
     content = _archive()
     transport = SyncTransport()
+    restart_called: list[bool] = []
     settings = AgentSettings(
         node_id=NODE_ID.root,
         name="Bench 01",
@@ -159,6 +160,7 @@ def test_v2_sync_controller_completes_command_result_and_snapshot_loop(tmp_path)
         V2PluginInstaller(settings.plugin_dir, fetcher=lambda _: content),
         registry,
         publisher,
+        restart=lambda: restart_called.append(True),
     )
     request = PluginSyncRequest(
         sync_id=SYNC_ID,
@@ -207,6 +209,7 @@ def test_v2_sync_controller_completes_command_result_and_snapshot_loop(tmp_path)
     assert parsed[2][1].accepted is True
     assert isinstance(parsed[4][1], NodeCapabilitySnapshot)
     assert parsed[4][1].plugin_inventory[0].availability.value == "available"
+    assert restart_called == [True]
 
     assert asyncio.run(controller.handle(message, SESSION_ID)) is True
     assert len(transport.published) == 6

@@ -33,9 +33,11 @@ from aetp_protocol.topics import (
     validate_sender_for_topic,
 )
 
+from agent.application.services.agent_log_facade import AgentLogFacade
 from agent.application.services.artifact_upload_service import ArtifactUploadService
 from agent.application.services.command_dispatcher import CommandDispatcher
 from agent.application.services.execution_service import ExecutionService
+from agent.application.services.maintenance_controller import AgentMaintenanceController, restart_process
 from agent.application.services.registration_service import (
     RegistrationRejectedError,
     RegistrationService,
@@ -96,6 +98,8 @@ class AgentRuntime:
         v2_lease_renewal_service: AgentV2LeaseRenewalService | None = None,
         v2_reconcile_service: AgentV2ReconcileService | None = None,
         resource_providers: ResourceProviderRegistry | None = None,
+        agent_log_facade: AgentLogFacade | None = None,
+        maintenance_controller: AgentMaintenanceController | None = None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -113,10 +117,14 @@ class AgentRuntime:
         self._v2_lease_renewal_service = v2_lease_renewal_service
         self._v2_reconcile_service = v2_reconcile_service
         self._resource_providers = resource_providers
+        self._agent_log_facade = agent_log_facade
+        self._maintenance_controller = maintenance_controller
         self._sleep = sleep or asyncio.sleep
         self._outbox_task: asyncio.Task[None] | None = None
         self._registration_task: asyncio.Task[None] | None = None
         self._lease_renewal_task: asyncio.Task[None] | None = None
+        self._agent_log_task: asyncio.Task[None] | None = None
+        self._agent_log_handler_installed = False
         self._stop_event = asyncio.Event()
         self._outbox_backoff = ExponentialBackoff()
 
@@ -180,6 +188,7 @@ class AgentRuntime:
                 self._v2_plugin_registry,
                 self._v2_capability_publisher,
                 master_id=self._settings.master_id,
+                restart=restart_process,
             )
         if self._v2_lease_renewal_service is None and self._v2_capability_publisher is not None:
             from aetp_protocol.ids import BusinessId
@@ -235,6 +244,23 @@ class AgentRuntime:
                 execution_runner=self._v2_execution_runner,
                 execution_service=self._execution_service,
             )
+        if (
+            self._maintenance_controller is None
+            and self._v2_capability_publisher is not None
+            and self._agent_log_facade is not None
+        ):
+            from aetp_protocol.ids import BusinessId
+
+            publisher = self._v2_capability_publisher
+            assert publisher is not None
+            self._maintenance_controller = AgentMaintenanceController(
+                BusinessId(self._settings.node_id),
+                self._ledger,
+                publisher,
+                self._agent_log_facade,
+                is_registered=lambda: publisher.v2_registered,
+                master_id=self._settings.master_id,
+            )
         assert self._dispatcher_obj is not None
         assert self._orchestrator is not None
 
@@ -243,6 +269,11 @@ class AgentRuntime:
         if self._outbox_task is not None:
             return
         self._ensure_components()
+        if self._agent_log_facade is not None:
+            root_logger = logging.getLogger()
+            if self._agent_log_facade not in root_logger.handlers:
+                root_logger.addHandler(self._agent_log_facade)
+            self._agent_log_handler_installed = True
         self._stop_event.clear()
         self._transport.on_message(self._handle_message)
         self._transport.on_connection_change(self._handle_connection_change)
@@ -269,8 +300,18 @@ class AgentRuntime:
             subscriptions.append(v2_command_topic(self._settings.node_id, "lease.renewed"))
         if self._v2_reconcile_service is not None:
             subscriptions.append(v2_command_topic(self._settings.node_id, "execution.reconcile_result"))
+        if self._maintenance_controller is not None:
+            subscriptions.extend(
+                [
+                    self._maintenance_controller.log_level_topic(),
+                    self._maintenance_controller.drain_topic(),
+                    self._maintenance_controller.restart_topic(),
+                ]
+            )
         await self._transport.subscribe(subscriptions)
         self._outbox_task = asyncio.create_task(self._outbox_loop())
+        if self._agent_log_facade is not None and self._v2_capability_publisher is not None:
+            self._agent_log_task = asyncio.create_task(self._agent_log_loop())
         if self._v2_lease_renewal_service is not None:
             self._lease_renewal_task = asyncio.create_task(self._lease_renewal_loop())
         await self._transport.connect()
@@ -302,6 +343,11 @@ class AgentRuntime:
             self._lease_renewal_task = None
         if self._v2_execution_runner is not None:
             await self._v2_execution_runner.stop()
+        if self._agent_log_task is not None:
+            self._agent_log_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._agent_log_task
+            self._agent_log_task = None
         if self._outbox_task is not None:
             self._outbox_task.cancel()
             try:
@@ -315,6 +361,9 @@ class AgentRuntime:
             await self._transport.disconnect()
         except Exception:
             logger.debug("断开 MQTT 异常（已忽略）", exc_info=True)
+        if self._agent_log_handler_installed and self._agent_log_facade is not None:
+            logging.getLogger().removeHandler(self._agent_log_facade)
+            self._agent_log_handler_installed = False
         logger.info("Agent runtime 已停止: node=%s", self._settings.node_id)
 
     async def _handle_connection_change(self, connected: bool, session_id: str | None = None) -> None:
@@ -453,6 +502,28 @@ class AgentRuntime:
             self._v2_reconcile_service.handle_result(message, self._v2_session_id())
             return
         if (
+            self._maintenance_controller is not None
+            and message.topic
+            in {
+                self._maintenance_controller.log_level_topic(),
+                self._maintenance_controller.drain_topic(),
+                self._maintenance_controller.restart_topic(),
+            }
+        ):
+            await self._maintenance_controller.handle(message, self._v2_session_id())
+            return
+        if (
+            self._agent_log_facade is not None
+            and self._v2_capability_publisher is not None
+            and message.topic == v2_command_topic(self._settings.node_id, "agent.log.received")
+        ):
+            self._v2_capability_publisher.handle_agent_log_received(
+                message,
+                self._v2_session_id(),
+                self._agent_log_facade,
+            )
+            return
+        if (
             self._v2_capability_publisher is not None
             and message.topic == self._v2_capability_publisher.diagnostics_command_topic()
         ):
@@ -485,6 +556,30 @@ class AgentRuntime:
                 except Exception:
                     logger.exception("V2 Lease 续租轮询失败")
             await self._sleep(max(1.0, min(float(self._settings.heartbeat_interval_s), 5.0)))
+
+    async def _agent_log_loop(self) -> None:
+        """周期把本地 Agent 日志 spool 组装为 V2 批次。"""
+        while not self._stop_event.is_set():
+            if (
+                self._agent_log_facade is not None
+                and self._v2_capability_publisher is not None
+                and self._v2_capability_publisher.v2_registered
+            ):
+                try:
+                    session_id = self._v2_session_id()
+                    batch = self._agent_log_facade.build_batch(
+                        session_id,
+                        limit=min(100, self._settings.task_log_batch_size),
+                    )
+                    if batch is not None:
+                        self._v2_capability_publisher.enqueue_agent_log_batch(
+                            self._ledger,
+                            batch,
+                            session_id,
+                        )
+                except Exception:
+                    logger.exception("Agent 结构化日志批次生成失败")
+            await self._sleep(max(0.5, float(self._settings.task_log_flush_s)))
 
     def _route_script_preflight(self, message: MqttMessage) -> bool:
         """解析入站命令；若为 script.verify/script.parse 则交给预检服务。"""

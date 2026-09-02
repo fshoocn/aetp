@@ -16,10 +16,11 @@ from pathlib import Path
 from aetp_protocol.capabilities import AgentMaintenanceState, NodeCapabilities, NodeCapabilitySnapshot
 from aetp_protocol.envelope import SenderKind
 from aetp_protocol.ids import BusinessId, MessageId, SemVer, SessionId, TraceId, Version, new_id, stable_id
-from aetp_protocol.logs import LogEvent
+from aetp_protocol.logs import AgentLogBatch, LogEvent
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import (
     ActiveAttemptInfo,
+    AgentLogReceived,
     AgentSystemInfo,
     CaseStatusEvent,
     DiagnosticsRequest,
@@ -31,6 +32,9 @@ from aetp_protocol.payloads import (
     ExecutionReconcile,
     LeaseRenewRequest,
     LogComplete,
+    LogLevelUpdateResult,
+    MaintenanceDrainResult,
+    MaintenanceRestartResult,
     MaintenanceStatus,
     MqttConnectionInfo,
     NodeRegister,
@@ -189,6 +193,61 @@ class AgentV2CapabilityPublisher:
         )
         return outbox_id
 
+    def enqueue_agent_log_batch(
+        self,
+        ledger: Ledger,
+        batch: AgentLogBatch,
+        session_id: SessionId,
+    ) -> str:
+        """将 AgentLogBatch 写入可靠 outbox；Master ACK 前保留本地 spool。"""
+        envelope = self._build_envelope(
+            MessageType.AGENT_LOG_BATCH,
+            batch,
+            session_id,
+        )
+        outbox_id = stable_id(
+            f"agent-log-batch:{batch.node_id.root}:{batch.session_id.root}:"
+            f"{batch.first_sequence}:{batch.events[-1].sequence}"
+        ).root
+        existing = ledger.get_outbox(outbox_id)
+        if existing is None or existing.status.value in {"exhausted", "cancelled"}:
+            ledger.replace_outbox(
+                outbox_id,
+                v2_event_topic(self._node_id().root, "agent.log.batch"),
+                envelope.model_dump(mode="json"),
+            )
+        return outbox_id
+
+    def handle_agent_log_received(
+        self,
+        message: MqttMessage,
+        session_id: SessionId,
+        facade,
+    ) -> bool:
+        """校验 Master 日志 ACK 并清理已确认的本地 spool。"""
+        try:
+            topic = parse_v2_topic(message.topic)
+            if (
+                topic.direction != "commands"
+                or topic.node_id != self._node_id().root
+                or topic.segment != "agent.log.received"
+            ):
+                return False
+            envelope = V2Envelope.model_validate(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_v2_topic(message.topic, envelope.sender)
+            validate_message_type_for_v2_topic(message.topic, MessageType(envelope.message_type))
+            if envelope.sender.id != stable_id(self._settings.master_id):
+                return False
+            payload = envelope.parse_payload()
+            if not isinstance(payload, AgentLogReceived):
+                return False
+            if payload.node_id != self._node_id() or payload.session_id != session_id:
+                return False
+            facade.acknowledge(payload)
+            return True
+        except Exception:
+            return False
+
     def enqueue_execution_progress(
         self,
         ledger: Ledger,
@@ -270,6 +329,11 @@ class AgentV2CapabilityPublisher:
     def v2_registered(self) -> bool:
         """是否收到当前 session 的 V2 注册 ACK。"""
         return self._v2_registered
+
+    @property
+    def maintenance_state(self) -> AgentMaintenanceState:
+        """当前 Agent 维护状态。"""
+        return self._maintenance_state
 
     @property
     def pending_register_message_id(self) -> MessageId | None:
@@ -398,6 +462,51 @@ class AgentV2CapabilityPublisher:
         )
         return snapshot
 
+    async def publish_log_level_result(
+        self,
+        result: LogLevelUpdateResult,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> None:
+        """发布 Agent 日志级别更新结果。"""
+        await self._publish(
+            MessageType.AGENT_LOG_LEVEL_UPDATED,
+            result,
+            session_id,
+            correlation_id=correlation_id,
+        )
+
+    async def publish_maintenance_drain_result(
+        self,
+        result: MaintenanceDrainResult,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> None:
+        """发布 Agent 排空结果。"""
+        await self._publish(
+            MessageType.AGENT_MAINTENANCE_DRAIN_RESULT,
+            result,
+            session_id,
+            correlation_id=correlation_id,
+        )
+
+    async def publish_maintenance_restart_result(
+        self,
+        result: MaintenanceRestartResult,
+        session_id: SessionId,
+        *,
+        correlation_id: MessageId | None = None,
+    ) -> None:
+        """发布 Agent 重启结果。"""
+        await self._publish(
+            MessageType.AGENT_MAINTENANCE_RESTART_RESULT,
+            result,
+            session_id,
+            correlation_id=correlation_id,
+        )
+
     async def publish_plugin_sync_result(
         self,
         result: PluginSyncResult,
@@ -500,6 +609,10 @@ class AgentV2CapabilityPublisher:
             | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
+            | AgentLogBatch
+            | LogLevelUpdateResult
+            | MaintenanceDrainResult
+            | MaintenanceRestartResult
         ),
         session_id: SessionId,
         correlation_id: MessageId | None = None,
@@ -534,6 +647,10 @@ class AgentV2CapabilityPublisher:
             | LeaseRenewRequest
             | PluginSyncResult
             | MaintenanceStatus
+            | AgentLogBatch
+            | LogLevelUpdateResult
+            | MaintenanceDrainResult
+            | MaintenanceRestartResult
         ),
         session_id: SessionId,
         *,
@@ -569,6 +686,9 @@ class AgentV2CapabilityPublisher:
             MessageType.LEASE_RENEW: "lease.renew",
             MessageType.AGENT_PLUGIN_SYNC_RESULT: "agent.plugin.sync.result",
             MessageType.AGENT_MAINTENANCE_STATUS: "agent.maintenance.status",
+            MessageType.AGENT_LOG_LEVEL_UPDATED: "agent.log.level.updated",
+            MessageType.AGENT_MAINTENANCE_DRAIN_RESULT: "agent.maintenance.drain.result",
+            MessageType.AGENT_MAINTENANCE_RESTART_RESULT: "agent.maintenance.restart.result",
         }[message_type]
 
     def _system_info(self, snapshot: NodeCapabilitySnapshot) -> AgentSystemInfo:

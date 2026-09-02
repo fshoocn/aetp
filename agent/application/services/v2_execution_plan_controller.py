@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from aetp_protocol.capabilities import AgentMaintenanceState
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ExecutionPlan
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, stable_id
@@ -37,6 +38,7 @@ _SCRIPT_INVALID = ErrorCode("SCRIPT_CHECKSUM_MISMATCH")
 _LEASE_EXPIRED = ErrorCode("RESOURCE_LEASE_EXPIRED")
 _STALE_SESSION = ErrorCode("STALE_SESSION")
 _STALE_ATTEMPT = ErrorCode("STALE_ATTEMPT")
+_AGENT_MAINTENANCE = ErrorCode("AGENT_MAINTENANCE")
 
 
 class AgentV2ExecutionPlanController:
@@ -128,6 +130,19 @@ class AgentV2ExecutionPlanController:
             return True
         if plan.node_id != self._node_id or plan.target_session_id != session_id:
             await self._reject(plan, session_id, envelope.message_id, _STALE_SESSION, "Plan 目标 session 不匹配")
+            return True
+        if self._publisher.maintenance_state in {
+            AgentMaintenanceState.DRAINING,
+            AgentMaintenanceState.UPDATING,
+            AgentMaintenanceState.RESTARTING,
+        }:
+            await self._reject(
+                plan,
+                session_id,
+                envelope.message_id,
+                _AGENT_MAINTENANCE,
+                "Agent 正在维护，暂不接受新的 execution.plan",
+            )
             return True
 
         existing = self._ledger.get_run(plan.run_id.root)

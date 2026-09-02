@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from aetp_protocol.capabilities import AgentMaintenanceState
 from aetp_protocol.errors import ErrorCode
@@ -41,6 +42,8 @@ class AgentV2PluginSyncController:
         *,
         active_attempt_count: Callable[[], int] | None = None,
         master_id: str = "aetp-master",
+        restart: Callable[[], Awaitable[None] | None] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         self._node_id = node_id
         self._ledger = ledger
@@ -48,6 +51,8 @@ class AgentV2PluginSyncController:
         self._registry = registry
         self._publisher = publisher
         self._master_id = master_id
+        self._restart = restart
+        self._sleep = sleep or asyncio.sleep
         self._active_attempt_count = active_attempt_count or (lambda: len(ledger.list_active_runs()))
         self._results: dict[str, PluginSyncResult] = {}
 
@@ -90,15 +95,15 @@ class AgentV2PluginSyncController:
                 )
                 return True
 
-        active_count = self._active_attempt_count()
         await self._publisher.publish_maintenance_status(
             AgentMaintenanceState.DRAINING,
             session_id,
             sync_id=request.sync_id,
-            active_attempt_count=active_count,
+            active_attempt_count=self._active_attempt_count(),
             message="等待插件同步窗口",
             correlation_id=envelope.message_id,
         )
+        active_count = await self._wait_for_idle(request.drain_timeout_s)
         if active_count:
             result = self._skipped_result(request, active_count)
         else:
@@ -125,17 +130,61 @@ class AgentV2PluginSyncController:
             session_id,
             correlation_id=envelope.message_id,
         )
-        final_state = AgentMaintenanceState.IDLE if result.accepted else AgentMaintenanceState.DEGRADED
+        final_state = (
+            AgentMaintenanceState.RESTARTING
+            if result.accepted and result.restart_required
+            else AgentMaintenanceState.IDLE
+            if result.accepted
+            else AgentMaintenanceState.DEGRADED
+        )
         await self._publisher.publish_maintenance_status(
             final_state,
             session_id,
             sync_id=request.sync_id,
             active_attempt_count=self._active_attempt_count(),
-            message="插件同步完成" if result.accepted else "插件同步失败",
+            message=(
+                "插件同步完成，准备重启"
+                if result.accepted and result.restart_required
+                else "插件同步完成"
+                if result.accepted
+                else "插件同步失败"
+            ),
             correlation_id=envelope.message_id,
         )
         await self._publisher.publish_snapshot(session_id)
+        restart = self._restart
+        if result.accepted and result.restart_required and restart is not None:
+            try:
+                await self._restart_if_needed(restart)
+            except Exception as exc:  # noqa: BLE001 - 自重启失败转为降级状态
+                await self._publisher.publish_maintenance_status(
+                    AgentMaintenanceState.DEGRADED,
+                    session_id,
+                    sync_id=request.sync_id,
+                    active_attempt_count=self._active_attempt_count(),
+                    message=f"Agent 自重启失败: {exc}",
+                    correlation_id=envelope.message_id,
+                )
         return True
+
+    async def _wait_for_idle(self, timeout_s: int) -> int:
+        active_count = self._active_attempt_count()
+        if active_count == 0 or timeout_s == 0:
+            return active_count
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while active_count:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await self._sleep(min(0.5, remaining))
+            active_count = self._active_attempt_count()
+        return active_count
+
+    async def _restart_if_needed(self, restart: Callable[[], Awaitable[None] | None]) -> None:
+        result = restart()
+        if result is not None:
+            await result
 
     def _parse_request(self, message: MqttMessage) -> tuple[V2Envelope, PluginSyncRequest] | None:
         try:
