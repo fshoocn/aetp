@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from master.api.v1.dependencies import (
     ArtifactServiceDep,
     EventPublisherDep,
+    IdempotencyServiceDep,
     RunCancelServiceDep,
     RunRetryServiceDep,
     RunTriggerServiceDep,
@@ -24,6 +25,10 @@ from master.api.v1.schemas import (
     RunTriggerRequest,
     ShardOut,
 )
+from master.application.services.idempotency_service import (
+    IdempotencyConflict,
+    IdempotencyReservation,
+)
 
 router = APIRouter(
     prefix="/projects/{project_id}/runs",
@@ -38,18 +43,49 @@ async def trigger_run(
     access: ProjectOperatorDep,
     trigger_service: RunTriggerServiceDep,
     event_publisher: EventPublisherDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunOut:
     """触发一次任务定义执行（Run）。
 
     需要项目 operator/maintainer/owner 或平台管理员。触发成功后通过 SSE
     广播 run.created 事件；Agent 执行进度/结果经 SSE run.* 事件推送。
     """
-    result = await trigger_service.trigger(
-        body.task_id,
-        project_id=project_id,
-        triggered_by_user_id=access.user.persisted_id,
-        case_filter=body.case_filter,
+    reservation, replay = _reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"run.create:{project_id}:{access.user.persisted_id}",
+        payload=body.model_dump(mode="json"),
     )
+    if replay is not None:
+        return replay
+    try:
+        result = await trigger_service.trigger(
+            body.task_id,
+            project_id=project_id,
+            triggered_by_user_id=access.user.persisted_id,
+            case_filter=body.case_filter,
+        )
+    except Exception:
+        if reservation is not None:
+            idempotency.release(reservation)
+        raise
+    response = RunOut(
+        run_id=result.run_id,
+        project_id=result.project_id,
+        task_id=result.task_id,
+        status="created",
+        trigger_type="manual_web",
+        created_at=_now(),
+        scheduled=result.scheduled,
+        pending_shard_ids=list(result.pending_shard_ids),
+    )
+    if reservation is not None:
+        idempotency.complete(
+            reservation,
+            response_status=status.HTTP_201_CREATED,
+            response_body=response.model_dump(mode="json"),
+        )
     await event_publisher.publish(
         "run.created",
         {
@@ -60,16 +96,7 @@ async def trigger_run(
         project_id=result.project_id,
         aggregate_id=result.run_id,
     )
-    return RunOut(
-        run_id=result.run_id,
-        project_id=result.project_id,
-        task_id=result.task_id,
-        status="created",
-        trigger_type="manual_web",
-        created_at=_now(),
-        scheduled=result.scheduled,
-        pending_shard_ids=list(result.pending_shard_ids),
-    )
+    return response
 
 
 @router.get("", response_model=list[RunOut])
@@ -258,6 +285,30 @@ def _now():
     return utcnow()
 
 
+def _reserve_or_replay(
+    service,
+    key: str | None,
+    *,
+    scope: str,
+    payload: dict,
+) -> tuple[IdempotencyReservation | None, RunOut | None]:
+    try:
+        record = service.reserve(key, scope, payload)
+    except IdempotencyConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    if record is None:
+        return None, None
+    if not record.is_new:
+        if record.record.status == "completed":
+            if record.record.response_body is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="幂等响应已损坏")
+            return None, RunOut.model_validate(record.record.response_body)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="相同请求正在处理中")
+    return record, None
+
+
 @router.post("/{run_id}/retry", response_model=RunOut, status_code=status.HTTP_201_CREATED)
 async def retry_run(
     project_id: str,
@@ -265,13 +316,42 @@ async def retry_run(
     access: ProjectOperatorDep,
     retry_service: RunRetryServiceDep,
     event_publisher: EventPublisherDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunOut:
     """基于失败 Run 完整重跑（新 Run，trigger_type=retry，D-20）。"""
-    result = await retry_service.retry(
-        run_id,
-        project_id=project_id,
-        triggered_by_user_id=access.user.persisted_id,
+    reservation, replay = _reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"run.retry:{project_id}:{access.user.persisted_id}:{run_id}",
+        payload={"run_id": run_id, "operation": "retry"},
     )
+    if replay is not None:
+        return replay
+    try:
+        result = await retry_service.retry(
+            run_id,
+            project_id=project_id,
+            triggered_by_user_id=access.user.persisted_id,
+        )
+    except Exception:
+        if reservation is not None:
+            idempotency.release(reservation)
+        raise
+    response = RunOut(
+        run_id=result.new_run_id,
+        project_id=result.project_id,
+        task_id=result.task_id,
+        status="created",
+        trigger_type="retry",
+        created_at=_now(),
+    )
+    if reservation is not None:
+        idempotency.complete(
+            reservation,
+            response_status=status.HTTP_201_CREATED,
+            response_body=response.model_dump(mode="json"),
+        )
     await event_publisher.publish(
         "run.created",
         {
@@ -283,14 +363,7 @@ async def retry_run(
         project_id=result.project_id,
         aggregate_id=result.new_run_id,
     )
-    return RunOut(
-        run_id=result.new_run_id,
-        project_id=result.project_id,
-        task_id=result.task_id,
-        status="created",
-        trigger_type="retry",
-        created_at=_now(),
-    )
+    return response
 
 
 @router.post(
@@ -304,13 +377,42 @@ async def retry_failed_run(
     access: ProjectOperatorDep,
     retry_service: RunRetryServiceDep,
     event_publisher: EventPublisherDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunOut:
     """仅重跑失败 case（新 Run，case 集合=原 Run 失败 case，D-20）。"""
-    result = await retry_service.retry_failed(
-        run_id,
-        project_id=project_id,
-        triggered_by_user_id=access.user.persisted_id,
+    reservation, replay = _reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"run.retry-failed:{project_id}:{access.user.persisted_id}:{run_id}",
+        payload={"run_id": run_id, "operation": "retry-failed"},
     )
+    if replay is not None:
+        return replay
+    try:
+        result = await retry_service.retry_failed(
+            run_id,
+            project_id=project_id,
+            triggered_by_user_id=access.user.persisted_id,
+        )
+    except Exception:
+        if reservation is not None:
+            idempotency.release(reservation)
+        raise
+    response = RunOut(
+        run_id=result.new_run_id,
+        project_id=result.project_id,
+        task_id=result.task_id,
+        status="created",
+        trigger_type="retry",
+        created_at=_now(),
+    )
+    if reservation is not None:
+        idempotency.complete(
+            reservation,
+            response_status=status.HTTP_201_CREATED,
+            response_body=response.model_dump(mode="json"),
+        )
     await event_publisher.publish(
         "run.created",
         {
@@ -323,14 +425,7 @@ async def retry_failed_run(
         project_id=result.project_id,
         aggregate_id=result.new_run_id,
     )
-    return RunOut(
-        run_id=result.new_run_id,
-        project_id=result.project_id,
-        task_id=result.task_id,
-        status="created",
-        trigger_type="retry",
-        created_at=_now(),
-    )
+    return response
 
 
 @router.post("/{run_id}/cancel", response_model=RunOut)
@@ -339,15 +434,27 @@ def cancel_run(
     run_id: str,
     access: ProjectOperatorDep,
     cancel_service: RunCancelServiceDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunOut:
     """取消一个正在执行的 Run（向活跃 Shard 节点发 run.cancel）。
 
     Agent 收到取消命令后在安全点释放硬件并报告 cancelled 结果，
     Run 状态由 Agent 结果投影决定（§5.4：Run 无 cancelling 中间态）。
     """
+    reservation, replay = _reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"run.cancel:{project_id}:{access.user.persisted_id}:{run_id}",
+        payload={"run_id": run_id, "operation": "cancel"},
+    )
+    if replay is not None:
+        return replay
     try:
         cancel_service.cancel(run_id, project_id=project_id)
     except Exception as exc:
+        if reservation is not None:
+            idempotency.release(reservation)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
@@ -355,8 +462,10 @@ def cancel_run(
 
     run = cancel_service.get_run(run_id, project_id)
     if run is None:
+        if reservation is not None:
+            idempotency.release(reservation)
         raise HTTPException(status_code=404, detail="Run 不存在")
-    return RunOut(
+    response = RunOut(
         run_id=run.run_id,
         project_id=run.project_id,
         task_id=run.task_id,
@@ -366,3 +475,10 @@ def cancel_run(
         started_at=run.started_at,
         finished_at=run.finished_at,
     )
+    if reservation is not None:
+        idempotency.complete(
+            reservation,
+            response_status=status.HTTP_200_OK,
+            response_body=response.model_dump(mode="json"),
+        )
+    return response

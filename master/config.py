@@ -111,6 +111,7 @@ class RunConfig:
     stale_timeout_s: int = 1800
     maintenance_interval_s: float = 30.0
     outbox_max_attempts: int = 5
+    idempotency_ttl_s: int = 86400
 
 
 @dataclass(frozen=True)
@@ -260,6 +261,10 @@ class MasterSettings:
         return self.run.outbox_max_attempts
 
     @property
+    def idempotency_ttl_s(self) -> int:
+        return self.run.idempotency_ttl_s
+
+    @property
     def bootstrap_admin_username(self) -> str:
         return self.bootstrap.admin_username
 
@@ -314,6 +319,7 @@ class MasterSettings:
         raw_stale_timeout = values.get("AETP_MASTER_RUN_STALE_TIMEOUT_S")
         raw_maintenance_interval = values.get("AETP_MASTER_MAINTENANCE_INTERVAL_S")
         raw_outbox_max_attempts = values.get("AETP_MASTER_OUTBOX_MAX_ATTEMPTS")
+        raw_idempotency_ttl = values.get("AETP_MASTER_IDEMPOTENCY_TTL_S")
         raw_data_dir = values.get("AETP_MASTER_DATA_DIR")
         data_dir = Path(raw_data_dir) if raw_data_dir else None
 
@@ -372,6 +378,7 @@ class MasterSettings:
                     else RunConfig.maintenance_interval_s
                 ),
                 outbox_max_attempts=parse_int(raw_outbox_max_attempts, RunConfig.outbox_max_attempts),
+                idempotency_ttl_s=parse_int(raw_idempotency_ttl, RunConfig.idempotency_ttl_s),
             ),
             bootstrap=BootstrapConfig(
                 admin_username=values.get("AETP_MASTER_BOOTSTRAP_ADMIN_USERNAME", BootstrapConfig.admin_username),
