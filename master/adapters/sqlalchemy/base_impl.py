@@ -16,6 +16,7 @@ import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -75,6 +76,23 @@ class BaseDatabase(DatabaseInterface):
         return self._run_migrations()
 
     def _run_migrations(self) -> list[str]:
+        if self.config.v2_only:
+            from master.adapters.sqlalchemy.v2_schema import V2_METADATA, V2_SCHEMA_VERSION
+
+            with self.engine.begin() as connection:
+                V2_METADATA.create_all(connection)
+                connection.exec_driver_sql(
+                    "CREATE TABLE IF NOT EXISTS aetp_v2_schema_version "
+                    "(version VARCHAR(32) NOT NULL)"
+                )
+                connection.exec_driver_sql("DELETE FROM aetp_v2_schema_version")
+                connection.execute(
+                    text("INSERT INTO aetp_v2_schema_version (version) VALUES (:version)"),
+                    {"version": V2_SCHEMA_VERSION},
+                )
+            logger.info("V2-only 数据库基线初始化完成")
+            return [f"v2 schema baseline {V2_SCHEMA_VERSION}"]
+
         from master.config import get_settings
 
         try:

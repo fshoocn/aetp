@@ -46,6 +46,7 @@ class DatabaseConfig:
     # 透传给 SQLAlchemy
     connect_args: dict[str, Any] = field(default_factory=dict)
     engine_kwargs: dict[str, Any] = field(default_factory=dict)
+    v2_only: bool = False
 
     def build_url(self) -> str:
         """返回最终连接串；url 为空时由拆分字段拼接。"""

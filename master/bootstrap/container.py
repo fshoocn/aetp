@@ -101,9 +101,9 @@ from master.workers.maintenance_worker import MaintenanceWorker
 from master.workers.outbox_worker import OutboxWorker
 
 
-def _init_database(url: str) -> DatabaseInterface:
+def _init_database(url: str, v2_only: bool = False) -> DatabaseInterface:
     """创建数据库实例并完成建表 + 迁移。"""
-    db = create_database(url)
+    db = create_database({"url": url, "v2_only": v2_only})
     db.connect()
     return db
 
@@ -121,11 +121,11 @@ def _internal_signing_secret() -> str:
 
 
 def _data_dir() -> Path:
-    """外部数据目录：优先配置 data_dir，缺省运行目录下 data/。"""
+    """外部数据目录：V2 profile 与 legacy 运行目录物理隔离。"""
     settings = get_settings()
     if settings.data_dir is not None:
         return settings.data_dir
-    return runtime_dir() / "data"
+    return runtime_dir() / ("data-v2" if settings.v2_only else "data")
 
 
 def _plugin_ref_from_registry(task_type: str, version: str):

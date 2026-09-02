@@ -2,6 +2,7 @@
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from common.config_utils import (
     load_env_file,
@@ -137,6 +138,8 @@ class MasterSettings:
 
     # 外部数据目录（脚本/产物/插件存储根，默认运行目录下 data/）
     data_dir: Path | None = None
+    # 部署 profile：legacy 仅用于迁移期兼容，v2 使用独立数据库和运行目录。
+    profile: Literal["legacy", "v2"] = "legacy"
     # 实际使用的 env 文件路径（便于排查与传递）
     env_file: Path | None = None
 
@@ -155,6 +158,10 @@ class MasterSettings:
     @property
     def database_url(self) -> str:
         return self.database.url
+
+    @property
+    def v2_only(self) -> bool:
+        return self.profile == "v2"
 
     @property
     def auto_migrate(self) -> bool:
@@ -294,6 +301,9 @@ class MasterSettings:
 
         values = load_env_file(path)
         base_dir = path.parent
+        profile = values.get("AETP_MASTER_PROFILE", "legacy").strip().lower()
+        if profile not in {"legacy", "v2"}:
+            raise ValueError("AETP_MASTER_PROFILE 必须是 legacy 或 v2")
 
         # CA 证书路径：相对路径以 .env 所在目录为基准解析
         ca_cert = values.get("AETP_MASTER_MQTT_CA_CERT_PATH")
@@ -322,12 +332,21 @@ class MasterSettings:
         raw_idempotency_ttl = values.get("AETP_MASTER_IDEMPOTENCY_TTL_S")
         raw_data_dir = values.get("AETP_MASTER_DATA_DIR")
         data_dir = Path(raw_data_dir) if raw_data_dir else None
+        if data_dir is not None and not data_dir.is_absolute():
+            data_dir = base_dir / data_dir
+        if profile == "v2" and data_dir is None:
+            data_dir = base_dir / "data-v2"
+        raw_database_url = values.get("AETP_MASTER_DATABASE_URL")
+        database_url = raw_database_url or (
+            "sqlite:///data-v2/aetp-v2.db" if profile == "v2" else DatabaseConfig.url
+        )
 
         result = cls(
             data_dir=data_dir,
+            profile=profile,  # type: ignore[arg-type]
             env_file=path,
             database=DatabaseConfig(
-                url=values.get("AETP_MASTER_DATABASE_URL", DatabaseConfig.url),
+                url=database_url,
                 auto_migrate=parse_bool(values.get("AETP_MASTER_AUTO_MIGRATE"), DatabaseConfig.auto_migrate),
             ),
             mqtt=MqttConfig(
