@@ -92,7 +92,10 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.run_artifacts = RunArtifactRepositoryImpl(session)
         self.run_logs = RunLogRepositoryImpl(session)
         self.agent_logs = AgentLogRepositoryImpl(session)
-        self.run_results = RunResultRepositoryImpl(session)
+        self.run_results = RunResultRepositoryImpl(
+            session,
+            include_legacy_task=self._include_legacy_relations,
+        )
         self.run_extension_results = RunExtensionResultRepositoryImpl(session)
         self.inbox_messages = InboxMessageRepositoryImpl(session)
         self.remote_operations = RemoteOperationRepositoryImpl(session)
@@ -111,7 +114,10 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.devices = DeviceRepositoryImpl(session)
         self.bindings = ProjectNodeBindingRepositoryImpl(session)
         self.notification_endpoints = NotificationEndpointRepositoryImpl(session)
-        self.event_subscriptions = EventSubscriptionRepositoryImpl(session)
+        self.event_subscriptions = EventSubscriptionRepositoryImpl(
+            session,
+            include_legacy_task=self._include_legacy_relations,
+        )
         self.event_deliveries = EventDeliveryRepositoryImpl(session)
         self.task_schedules = TaskScheduleRepositoryImpl(session)
         self.project_integrations = ProjectIntegrationRepositoryImpl(session)

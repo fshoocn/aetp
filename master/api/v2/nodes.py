@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
 from master.adapters.sse.event_bus import EventBus
-from master.api.v1.dependencies import CurrentUser
+from master.api.v1.dependencies import CurrentUser, UowFactoryDep
 from master.api.v1.permissions import PlatformAdminDep
 from master.application.services.agent_log_service import AgentLogService
 from master.application.services.agent_maintenance_service import (
@@ -159,6 +159,22 @@ class DesiredPluginVersionView(BaseModel):
     desired: DesiredPluginVersion
 
 
+class V2NodeView(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    node_id: BusinessId
+    name: str
+    hostname: str
+    status: str
+    online: bool
+    enabled: bool
+    tags: tuple[str, ...]
+    protocol_version: str
+    last_seen_at: datetime | None
+    load: dict[str, object]
+    resource_occupancy: dict[str, str]
+
+
 def get_capability_service(request: Request) -> CapabilitySnapshotProjectionService:
     return request.app.state.container.capability_snapshot_service()
 
@@ -265,6 +281,22 @@ def _desired_view(record) -> DesiredPluginVersionView:
     return DesiredPluginVersionView(node_id=record.node_id, desired=record.desired)
 
 
+def _node_view(node) -> V2NodeView:
+    return V2NodeView(
+        node_id=BusinessId(node.node_id),
+        name=node.name,
+        hostname=node.hostname,
+        status=node.status.value,
+        online=node.online,
+        enabled=node.enabled,
+        tags=tuple(node.tags or ()),
+        protocol_version=node.protocol_version,
+        last_seen_at=node.last_seen_at,
+        load=dict(node.load or {}),
+        resource_occupancy=dict(node.resource_occupancy or {}),
+    )
+
+
 def _format_agent_log_sse(
     event_id: str,
     sequence: int | None,
@@ -283,6 +315,21 @@ def _format_agent_log_sse(
         ensure_ascii=False,
     )
     return f"id: {sequence or event_id}\nevent: agent.log\ndata: {payload}\n\n"
+
+
+@router.get(
+    "",
+    response_model=list[V2NodeView],
+)
+def list_v2_nodes(
+    _current_user: CurrentUser,
+    uow_factory: UowFactoryDep,
+    online: bool | None = None,
+    enabled: bool | None = None,
+) -> list[V2NodeView]:
+    with uow_factory() as uow:
+        nodes = uow.nodes.list_all(online=online, enabled=enabled)
+    return [_node_view(node) for node in nodes]
 
 
 @router.get(

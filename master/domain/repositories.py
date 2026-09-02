@@ -215,6 +215,14 @@ class V2TestTaskRepository(ABC):
     def get(self, task_id: BusinessId, revision: int | None = None) -> V2TestTaskRecord | None: ...
 
     @abstractmethod
+    def list_by_project(
+        self,
+        project_id: BusinessId,
+        *,
+        enabled: bool | None = None,
+    ) -> list[V2TestTaskRecord]: ...
+
+    @abstractmethod
     def add(self, record: V2TestTaskRecord) -> V2TestTaskRecord: ...
 
 

@@ -13,13 +13,14 @@ from master.domain.models.notification import EventSubscription
 from master.domain.repositories import EventSubscriptionRepository
 
 
-def _to_domain(orm: SubORM) -> EventSubscription:
+def _to_domain(orm: SubORM, *, include_legacy_task: bool = True) -> EventSubscription:
+    task_id = orm.task.task_id if include_legacy_task and orm.task is not None else None
     return EventSubscription(
         id=orm.id,
         subscription_id=orm.subscription_id,
         project_id=orm.project.project_id if orm.project is not None else "",
         endpoint_id=orm.endpoint.endpoint_id if orm.endpoint is not None else "",
-        task_id=orm.task.task_id if orm.task is not None else None,
+        task_id=task_id,
         event_types=list(orm.event_types or []),
         filter_json=dict(orm.filter_json or {}),
         throttle_policy=dict(orm.throttle_policy or {}),
@@ -31,25 +32,32 @@ def _to_domain(orm: SubORM) -> EventSubscription:
 
 
 class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, include_legacy_task: bool = True) -> None:
         self._s = session
+        self._include_legacy_task = include_legacy_task
+
+    def _options(self):
+        options = [joinedload(SubORM.project), joinedload(SubORM.endpoint)]
+        if self._include_legacy_task:
+            options.append(joinedload(SubORM.task))
+        return options
 
     def get_by_subscription_id(self, subscription_id: str) -> EventSubscription | None:
         orm = (
             self._s.execute(
                 select(SubORM)
-                .options(joinedload(SubORM.project), joinedload(SubORM.endpoint))
+                .options(*self._options())
                 .where(SubORM.subscription_id == subscription_id)
             )
             .scalars()
             .one_or_none()
         )
-        return _to_domain(orm) if orm is not None else None
+        return _to_domain(orm, include_legacy_task=self._include_legacy_task) if orm is not None else None
 
     def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[EventSubscription]:
         stmt = (
             select(SubORM)
-            .options(joinedload(SubORM.project), joinedload(SubORM.endpoint))
+            .options(*self._options())
             .where(
                 SubORM.project_pk == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
@@ -57,7 +65,10 @@ class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
             .limit(limit)
             .offset(offset)
         )
-        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+        return [
+            _to_domain(o, include_legacy_task=self._include_legacy_task)
+            for o in self._s.execute(stmt).scalars().all()
+        ]
 
     def add(self, subscription: EventSubscription) -> EventSubscription:
         project_pk = self._s.execute(
@@ -71,7 +82,7 @@ class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
         if endpoint_pk is None:
             raise ValueError(f"通知端点不存在: {subscription.endpoint_id}")
         task_pk = None
-        if subscription.task_id:
+        if subscription.task_id and self._include_legacy_task:
             task_pk = self._s.execute(
                 select(TestTaskORM.id).where(
                     TestTaskORM.task_id == subscription.task_id,
@@ -101,7 +112,7 @@ class EventSubscriptionRepositoryImpl(EventSubscriptionRepository):
         if orm is None:
             raise ValueError(f"事件订阅不存在: id={subscription.id}")
         task_pk = None
-        if subscription.task_id:
+        if subscription.task_id and self._include_legacy_task:
             task_pk = self._s.execute(
                 select(TestTaskORM.id).where(
                     TestTaskORM.task_id == subscription.task_id,

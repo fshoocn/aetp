@@ -14,13 +14,16 @@ from master.domain.models import RunResult
 from master.domain.repositories import RunResultRepository
 
 
-def _to_domain(orm: RunResultORM) -> RunResult:
+def _to_domain(orm: RunResultORM, *, include_legacy_task: bool = True) -> RunResult:
+    task_id = orm.task.task_id if include_legacy_task and orm.task is not None else ""
+    if not task_id and orm.run is not None:
+        task_id = orm.run.task_id or ""
     return RunResult(
         id=orm.id,
         result_id=orm.result_id,
         run_id=orm.run.run_id if orm.run is not None else "",
         project_id=orm.project.project_id if orm.project is not None else "",
-        task_id=orm.task.task_id if orm.task is not None else "",
+        task_id=task_id,
         node_id=orm.node_id,
         passed=orm.passed,
         status=RunStatus(orm.status),
@@ -34,8 +37,9 @@ def _to_domain(orm: RunResultORM) -> RunResult:
 
 
 class RunResultRepositoryImpl(RunResultRepository):
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, *, include_legacy_task: bool = True) -> None:
         self._s = session
+        self._include_legacy_task = include_legacy_task
 
     def add(self, result: RunResult) -> RunResult:
         run_pk = self._s.execute(select(TaskRunORM.id).where(TaskRunORM.run_id == result.run_id)).scalar_one_or_none()
@@ -46,10 +50,12 @@ class RunResultRepositoryImpl(RunResultRepository):
         ).scalar_one_or_none()
         if project_pk is None:
             raise ValueError(f"Project not found: {result.project_id}")
-        task_pk = self._s.execute(
-            select(TestTaskORM.id).where(TestTaskORM.task_id == result.task_id)
-        ).scalar_one_or_none()
-        if task_pk is None:
+        task_pk = None
+        if self._include_legacy_task:
+            task_pk = self._s.execute(
+                select(TestTaskORM.id).where(TestTaskORM.task_id == result.task_id)
+            ).scalar_one_or_none()
+        if task_pk is None and self._include_legacy_task:
             raise ValueError(f"任务定义不存在: {result.task_id}")
         orm = RunResultORM(
             result_id=result.result_id,
@@ -76,7 +82,7 @@ class RunResultRepositoryImpl(RunResultRepository):
                 .options(
                     joinedload(RunResultORM.run),
                     joinedload(RunResultORM.project),
-                    joinedload(RunResultORM.task),
+                    *(() if not self._include_legacy_task else (joinedload(RunResultORM.task),)),
                 )
                 .where(
                     RunResultORM.run_pk == select(TaskRunORM.id).where(TaskRunORM.run_id == run_id).scalar_subquery()
@@ -85,7 +91,7 @@ class RunResultRepositoryImpl(RunResultRepository):
             .scalars()
             .one_or_none()
         )
-        return _to_domain(orm) if orm is not None else None
+        return _to_domain(orm, include_legacy_task=self._include_legacy_task) if orm is not None else None
 
     def update(self, result: RunResult) -> RunResult:
         orm = self._s.get(RunResultORM, result.id)

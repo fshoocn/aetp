@@ -154,6 +154,25 @@ class V2TestTaskRepositoryImpl(V2TestTaskRepository):
         orm = self._s.execute(statement).scalars().first()
         return _task_to_domain(orm) if orm is not None else None
 
+    def list_by_project(
+        self,
+        project_id: BusinessId,
+        *,
+        enabled: bool | None = None,
+    ) -> list[V2TestTaskRecord]:
+        statement = (
+            select(V2TestTask)
+            .options(selectinload(V2TestTask.scripts))
+            .where(V2TestTask.project_id == project_id.root)
+            .order_by(V2TestTask.task_id, V2TestTask.revision.desc())
+        )
+        if enabled is not None:
+            statement = statement.where(V2TestTask.enabled.is_(enabled))
+        return [
+            _task_to_domain(orm)
+            for orm in self._s.execute(statement).scalars().all()
+        ]
+
     def add(self, record: V2TestTaskRecord) -> V2TestTaskRecord:
         task = record.task
         definition_keys = {
