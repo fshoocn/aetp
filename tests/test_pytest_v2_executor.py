@@ -19,6 +19,7 @@ from aetp_protocol.v2_envelope import parse_v2_message
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.services.execution_service import ExecutionService
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_execution_runner import V2ExecutionRunner
@@ -29,6 +30,20 @@ from agent.plugins.v2_registry import AgentV2PluginRegistry
 from common.transport import Transport
 from tests.test_agent_v2_capability_publisher import FakeTransport
 from tests.test_m3_plan_lease import NOW, SESSION_ID, _plan
+
+
+class _TestResourceProvider:
+    provider_id = "org.test.resource"
+    resource_type = "can"
+
+    def discover(self):
+        return ()
+
+    async def activate(self, binding) -> None:
+        del binding
+
+    async def deactivate(self, binding) -> None:
+        del binding
 
 
 class _ArtifactUploader:
@@ -112,6 +127,7 @@ def test_pytest_v2_archive_installs_and_executes_with_artifact(tmp_path) -> None
         ExecutionService(settings, ledger),
         publisher,
         resolver.resolve,
+        resource_providers=ResourceProviderRegistry((_TestResourceProvider(),)),
         script_cache=ScriptCacheService(
             settings.script_cache_dir,
             ledger,

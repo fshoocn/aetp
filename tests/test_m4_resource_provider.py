@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from aetp_protocol.execution import PlanResourceBinding
 from aetp_protocol.ids import BusinessId
@@ -144,3 +144,34 @@ def test_v2_runner_maps_activation_failure_to_stable_error(tmp_path) -> None:
     assert payload.result.error is not None
     assert payload.result.error.code.root == "RESOURCE_ACTIVATION_FAILED"
     assert provider.deactivated == []
+
+
+def test_v2_runner_rejects_resource_without_provider(tmp_path) -> None:
+    runner, ledger = _runner(tmp_path, ResourceProviderRegistry())
+    plan = with_plan_hash(
+        _plan().model_copy(
+            update={
+                "created_at": NOW - timedelta(seconds=1),
+            }
+        )
+    )
+    ledger.claim_run(plan.run_id.root, plan.attempt_no, plan_id=plan.plan_id.root)
+
+    async def execute_once() -> None:
+        task = runner.start(plan, SESSION_ID)
+        assert task is not None
+        await task
+
+    asyncio.run(execute_once())
+
+    entries = ledger.claim_due_outbox(
+        20,
+        datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1),
+    )
+    finished = [entry for entry in entries if entry.topic.endswith("/execution.finished")]
+    assert len(finished) == 1
+    from aetp_protocol.v2_envelope import parse_v2_message
+
+    _envelope, payload = parse_v2_message(finished[0].payload)
+    assert payload.result.error is not None
+    assert payload.result.error.code.root == "RESOURCE_ACTIVATION_FAILED"

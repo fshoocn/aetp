@@ -20,6 +20,7 @@ from aetp_protocol.v2_envelope import parse_v2_message
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.services.execution_service import ExecutionService
+from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.application.services.v2_execution_runner import V2ExecutionRunner
@@ -58,6 +59,20 @@ class FakeExecutor:
         return None
 
 
+class _TestResourceProvider:
+    provider_id = "org.test.resource"
+    resource_type = "can"
+
+    def discover(self):
+        return ()
+
+    async def activate(self, binding) -> None:
+        del binding
+
+    async def deactivate(self, binding) -> None:
+        del binding
+
+
 async def _run_once(tmp_path) -> tuple[FakeExecutor, SQLiteLedger]:
     transport = FakeTransport()
     settings = AgentSettings(
@@ -83,6 +98,7 @@ async def _run_once(tmp_path) -> tuple[FakeExecutor, SQLiteLedger]:
         execution,
         publisher,
         lambda _plan: executor,
+        resource_providers=ResourceProviderRegistry((_TestResourceProvider(),)),
         now=lambda: NOW,
     )
     plan = with_plan_hash(_plan().model_copy(update={"created_at": NOW - timedelta(seconds=1)}))
@@ -189,6 +205,7 @@ def test_v2_execution_runner_unpacks_cached_script_and_cleans_workspace(tmp_path
         execution,
         publisher,
         lambda _plan: executor,
+        resource_providers=ResourceProviderRegistry((_TestResourceProvider(),)),
         script_cache=ScriptCacheService(
             settings.script_cache_dir,
             ledger,

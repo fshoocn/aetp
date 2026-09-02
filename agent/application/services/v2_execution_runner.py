@@ -52,16 +52,6 @@ from agent.domain.ledger import Ledger
 logger = logging.getLogger(__name__)
 
 
-class _NoopResourceProviderRegistry:
-    """仅用于未注入资源注册表的纯执行测试，不代表生产硬件 Provider。"""
-
-    async def activate(self, bindings):
-        return tuple(bindings)
-
-    async def deactivate(self, bindings) -> None:
-        del bindings
-
-
 class V2ExecutionRunner:
     """把已预检的 V2 Plan 交给精确 executor 并发布 finished 事实。"""
 
@@ -84,7 +74,7 @@ class V2ExecutionRunner:
         self._publisher = publisher
         self._executor_resolver = executor_resolver
         self._script_cache = script_cache
-        self._resource_providers = resource_providers or _NoopResourceProviderRegistry()
+        self._resource_providers = resource_providers
         self._artifact_uploader = artifact_uploader
         self._now = now or (lambda: datetime.now(UTC))
         self._tasks: dict[str, asyncio.Task[None]] = {}
