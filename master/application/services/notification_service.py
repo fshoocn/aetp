@@ -10,6 +10,7 @@ import logging
 from collections.abc import Callable
 
 from aetp_protocol.ids import new_id
+from aetp_protocol.reporting import NotificationPolicy
 
 from master.domain.models.notification import (
     EventDelivery,
@@ -148,6 +149,7 @@ class NotificationService:
     ) -> EventSubscription:
         if not event_types:
             raise ValueError("event_types 不能为空")
+        policy = NotificationPolicy.model_validate(throttle_policy or {})
         with self._uow_factory() as uow:
             ep = uow.notification_endpoints.get_by_endpoint_id(endpoint_id)
             if ep is None or ep.project_id != project_id:
@@ -162,7 +164,7 @@ class NotificationService:
                 task_id=normalized_task_id,
                 event_types=event_types,
                 filter_json=filter_json or {},
-                throttle_policy=throttle_policy or {},
+                throttle_policy=policy.model_dump(mode="json"),
                 enabled=True,
                 created_by=created_by,
             )
@@ -204,7 +206,7 @@ class NotificationService:
             if filter_json is not None:
                 sub.filter_json = filter_json
             if throttle_policy is not None:
-                sub.throttle_policy = throttle_policy
+                sub.throttle_policy = NotificationPolicy.model_validate(throttle_policy).model_dump(mode="json")
             if enabled is not None:
                 sub.enabled = enabled
             return uow.event_subscriptions.update(sub)

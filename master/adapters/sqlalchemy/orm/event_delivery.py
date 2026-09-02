@@ -19,7 +19,8 @@ class EventDelivery(Base, TimestampMixin):
         UniqueConstraint(
             "event_id",
             "subscription_id",
-            name="uq_event_deliveries_event_subscription",
+            "dedupe_key",
+            name="uq_event_deliveries_event_subscription_dedupe",
         ),
         Index("ix_event_deliveries_project_status", "project_pk", "status"),
         Index("ix_event_deliveries_status_next", "status", "next_attempt_at"),
@@ -31,6 +32,10 @@ class EventDelivery(Base, TimestampMixin):
     event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     subscription_id: Mapped[str] = mapped_column(String(64), nullable=False)
     endpoint_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    aggregation_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    window_ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     content: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -25,6 +25,7 @@ from master.domain.models import (
     Device,
     DomainEvent,
     ExecutionPlanRecord,
+    IdempotencyRecord,
     InboxMessage,
     Node,
     NodeCapabilitySnapshotRecord,
@@ -40,6 +41,7 @@ from master.domain.models import (
     ResourceLeaseRecord,
     RunArtifact,
     RunCaseResult,
+    RunExtensionResult,
     RunLog,
     RunResult,
     RunShard,
@@ -444,6 +446,28 @@ class RunResultRepository(ABC):
     def nullify_task_for_results(self, task_id: str) -> int: ...
 
 
+class RunExtensionResultRepository(ABC):
+    """Reporter/Analyzer 扩展结果仓储。"""
+
+    @abstractmethod
+    def get(
+        self,
+        run_id: str,
+        extension_point: str,
+        plugin_id: str,
+        plugin_version: str,
+    ) -> RunExtensionResult | None: ...
+
+    @abstractmethod
+    def add(self, result: RunExtensionResult) -> RunExtensionResult: ...
+
+    @abstractmethod
+    def update(self, result: RunExtensionResult) -> RunExtensionResult: ...
+
+    @abstractmethod
+    def list_by_run(self, run_id: str) -> list[RunExtensionResult]: ...
+
+
 class InboxMessageRepository(ABC):
     """入站消息去重仓储（P3.5，inbox_messages 表，(origin_id, message_id) 唯一）。"""
 
@@ -458,6 +482,22 @@ class InboxMessageRepository(ABC):
 
     @abstractmethod
     def list_unprocessed(self, *, limit: int = 100) -> list[InboxMessage]: ...
+
+
+class IdempotencyRecordRepository(ABC):
+    """写 API 幂等键仓储。"""
+
+    @abstractmethod
+    def get(self, scope: str, key: str) -> IdempotencyRecord | None: ...
+
+    @abstractmethod
+    def add(self, record: IdempotencyRecord) -> IdempotencyRecord: ...
+
+    @abstractmethod
+    def update(self, record: IdempotencyRecord) -> IdempotencyRecord: ...
+
+    @abstractmethod
+    def delete(self, scope: str, key: str) -> None: ...
 
 
 class OutboxMessageRepository(ABC):
@@ -808,7 +848,9 @@ class UnitOfWork(ABC):
     remote_operations: RemoteOperationRepository
     maintenance_locks: NodeMaintenanceLockRepository
     run_results: RunResultRepository
+    run_extension_results: RunExtensionResultRepository
     inbox_messages: InboxMessageRepository
+    idempotency_records: IdempotencyRecordRepository
     outbox_messages: OutboxMessageRepository
     domain_events: DomainEventRepository
     audit_logs: AuditLogRepository
@@ -910,6 +952,28 @@ class EventDeliveryRepository(ABC):
 
     @abstractmethod
     def get_by_event_subscription(self, event_id: str, subscription_id: str) -> EventDelivery | None: ...
+
+    @abstractmethod
+    def get_by_event_subscription_dedupe(
+        self,
+        event_id: str,
+        subscription_id: str,
+        dedupe_key: str,
+    ) -> EventDelivery | None: ...
+
+    @abstractmethod
+    def list_by_subscription(
+        self,
+        project_id: str,
+        subscription_id: str,
+        *,
+        status: str | None = None,
+        aggregation_key: str | None = None,
+        limit: int = 1000,
+    ) -> list[EventDelivery]: ...
+
+    @abstractmethod
+    def list_due_aggregates(self, now: datetime, *, limit: int = 1000) -> list[EventDelivery]: ...
 
     @abstractmethod
     def add(self, delivery: EventDelivery) -> EventDelivery: ...

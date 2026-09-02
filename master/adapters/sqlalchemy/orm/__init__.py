@@ -24,6 +24,7 @@ from .event_delivery import EventDelivery
 from .event_subscription import EventSubscription
 from .execution_plan import ExecutionPlan
 from .hook_execution import HookExecution
+from .idempotency_record import IdempotencyRecord
 from .inbox_message import InboxMessage
 from .maintenance import NodeMaintenanceLock, RemoteOperation
 from .node import Node
@@ -39,6 +40,7 @@ from .refresh_token import RefreshToken
 from .resource_lease import ResourceLease
 from .run_artifact import RunArtifact
 from .run_case_result import RunCaseResult
+from .run_extension_result import RunExtensionResult
 from .run_log import RunLog
 from .run_result import RunResult
 from .run_shard import RunShard
@@ -66,6 +68,7 @@ __all__ = [
     "EventDelivery",
     "EventSubscription",
     "HookExecution",
+    "IdempotencyRecord",
     "InboxMessage",
     "RemoteOperation",
     "NodeMaintenanceLock",
@@ -87,6 +90,7 @@ __all__ = [
     "RunArtifact",
     "RunCaseResult",
     "RunLog",
+    "RunExtensionResult",
     "RunResult",
     "RunShard",
     "ScriptCase",

@@ -47,6 +47,7 @@ from master.application.services.device_service import DeviceService
 from master.application.services.diagnostics_request_service import DiagnosticsRequestService
 from master.application.services.event_publisher import EventPublisher
 from master.application.services.hook_runner import HookRunner
+from master.application.services.idempotency_service import IdempotencyService
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
 from master.application.services.node_matching_service import NodeMatchingService
@@ -64,6 +65,10 @@ from master.application.services.project_node_binding_service import (
 )
 from master.application.services.project_service import ProjectService
 from master.application.services.recovery_service import RecoveryService
+from master.application.services.reporting_pipeline import (
+    ReportPipeline,
+    build_default_reporting_registries,
+)
 from master.application.services.run_cancel_service import RunCancelService
 from master.application.services.run_projection_service import RunProjectionService
 from master.application.services.run_retry_service import RunRetryService
@@ -89,6 +94,7 @@ from master.config import get_settings, runtime_dir
 from master.domain.node_matcher import NodeMatcher
 from master.plugins.manager import PluginManager
 from master.plugins.registry import create_default_registry
+from master.plugins.v2_extension_resolver import MasterV2ExtensionResolver
 from master.plugins.v2_registry import V2PluginRegistry
 from master.workers.event_hook_worker import EventHookWorker
 from master.workers.maintenance_worker import MaintenanceWorker
@@ -196,14 +202,6 @@ class Container(containers.DeclarativeContainer):
         hook_runner=hook_runner,
     )
 
-    # P7.1：领域事件先持久化，再广播到项目范围 SSE；P8.5：分发通知
-    event_publisher = providers.Singleton(
-        EventPublisher,
-        uow_factory=uow_factory,
-        event_bus=event_bus,
-        notification_dispatcher=notification_dispatcher,
-        event_hook_worker=event_hook_worker,
-    )
     agent_log_service = providers.Singleton(
         AgentLogService,
         uow_factory=uow_factory,
@@ -236,6 +234,11 @@ class Container(containers.DeclarativeContainer):
     v2_plugin_registry = providers.Singleton(
         V2PluginRegistry,
         archive_root=providers.Callable(lambda: _data_dir() / "plugins-v2"),
+    )
+    v2_master_extension_resolver = providers.Singleton(
+        MasterV2ExtensionResolver,
+        registry=v2_plugin_registry,
+        extraction_root=providers.Callable(lambda: _data_dir() / "plugins-v2" / "runtime"),
     )
     plugin_sync_service = providers.Singleton(
         PluginSyncService,
@@ -313,8 +316,40 @@ class Container(containers.DeclarativeContainer):
         storage=artifact_storage_service,
     )
 
+    # M6：Run 事实提交后由独立 Reporter/Analyzer 插件处理。
+    reporter_registry = providers.Singleton(
+        lambda resolver: build_default_reporting_registries(resolver)[0],
+        v2_master_extension_resolver,
+    )
+    analyzer_registry = providers.Singleton(
+        lambda resolver: build_default_reporting_registries(resolver)[1],
+        v2_master_extension_resolver,
+    )
+    report_pipeline = providers.Factory(
+        ReportPipeline,
+        uow_factory=uow_factory,
+        storage=artifact_storage_service,
+        reporters=reporter_registry,
+        analyzers=analyzer_registry,
+    )
+
+    # P7.1：领域事件先持久化，再广播到项目范围 SSE；P8.5：分发通知。
+    event_publisher = providers.Singleton(
+        EventPublisher,
+        uow_factory=uow_factory,
+        event_bus=event_bus,
+        notification_dispatcher=notification_dispatcher,
+        event_hook_worker=event_hook_worker,
+        report_pipeline=report_pipeline,
+    )
+
     # 认证服务
     auth_service = providers.Factory(AuthService, uow_factory=uow_factory)
+    idempotency_service = providers.Singleton(
+        IdempotencyService,
+        uow_factory=uow_factory,
+        ttl_s=providers.Callable(lambda: get_settings().idempotency_ttl_s),
+    )
 
     # 设备服务
     device_service = providers.Factory(DeviceService, uow_factory=uow_factory)
@@ -506,5 +541,6 @@ class Container(containers.DeclarativeContainer):
         recovery_service=recovery_service,
         plan_lease_service=plan_lease_service,
         storage_cleanup_service=storage_cleanup_service,
+        notification_dispatcher=notification_dispatcher,
         interval_s=providers.Callable(lambda: get_settings().maintenance_interval_s),
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from .agent_log import AgentLogEventRecord
 from .capability_snapshot import AgentDiagnosticsSnapshotRecord, NodeCapabilitySnapshotRecord
 from .device import Device
+from .idempotency import IdempotencyRecord
 from .maintenance import NodeMaintenanceLockRecord, RemoteOperationRecord
 from .messaging import AuditLog, DomainEvent, InboxMessage, OutboxMessage
 from .node import Node, NodeSession
@@ -19,6 +20,7 @@ from .project import Project
 from .project_member import ProjectMember, ProjectMemberWithUser
 from .project_node_binding import ProjectNodeBinding, ProjectNodeBindingView
 from .refresh_token import RefreshToken
+from .reporting import RunExtensionResult
 from .run import (
     RunArtifact,
     RunCaseResult,
@@ -40,6 +42,7 @@ __all__ = [
     "Device",
     "DomainEvent",
     "InboxMessage",
+    "IdempotencyRecord",
     "Node",
     "NodeSession",
     "AgentDiagnosticsSnapshotRecord",
@@ -63,6 +66,7 @@ __all__ = [
     "RunArtifact",
     "RunCaseResult",
     "RunLog",
+    "RunExtensionResult",
     "RunResult",
     "RunShard",
     "ScriptCase",

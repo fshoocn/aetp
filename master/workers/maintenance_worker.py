@@ -16,6 +16,7 @@ import asyncio
 import logging
 from contextlib import suppress
 
+from master.application.services.notification_dispatcher import NotificationDispatcher
 from master.application.services.plan_lease_service import PlanLeaseService
 from master.application.services.recovery_service import RecoveryService
 from master.application.services.schedule_service import ScheduleService
@@ -35,11 +36,13 @@ class MaintenanceWorker:
         storage_cleanup_service: StorageCleanupService | None = None,
         plan_lease_service: PlanLeaseService | None = None,
         interval_s: float = 30.0,
+        notification_dispatcher: NotificationDispatcher | None = None,
     ) -> None:
         self._schedule = schedule_service
         self._recovery = recovery_service
         self._storage_cleanup = storage_cleanup_service
         self._plan_leases = plan_lease_service
+        self._notification_dispatcher = notification_dispatcher
         self._interval_s = interval_s
         self._running = False
         self._task: asyncio.Task[None] | None = None
@@ -93,4 +96,9 @@ class MaintenanceWorker:
                 stats["orphans_removed"] = self._storage_cleanup.cleanup_orphans()["removed"]
             except Exception:
                 logger.exception("存储孤儿清理失败")
+        if self._notification_dispatcher is not None:
+            try:
+                stats["notifications_flushed"] = await self._notification_dispatcher.flush_due()
+            except Exception:
+                logger.exception("通知 Digest 刷新失败")
         return stats

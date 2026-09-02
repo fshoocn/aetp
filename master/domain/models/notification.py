@@ -51,6 +51,10 @@ class EventDelivery:
     event_id: str = ""
     subscription_id: str = ""
     endpoint_id: str = ""
+    dedupe_key: str = ""
+    aggregation_key: str | None = None
+    window_ends_at: datetime | None = None
+    item_count: int = 1
     content: dict = field(default_factory=dict)
     status: str = "pending"
     attempts: int = 0

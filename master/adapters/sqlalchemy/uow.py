@@ -29,6 +29,7 @@ from master.adapters.sqlalchemy.repositories import (
     EventSubscriptionRepositoryImpl,
     ExecutionPlanRepositoryImpl,
     HookExecutionRepositoryImpl,
+    IdempotencyRecordRepositoryImpl,
     InboxMessageRepositoryImpl,
     NodeCapabilitySnapshotRepositoryImpl,
     NodeMaintenanceLockRepositoryImpl,
@@ -46,6 +47,7 @@ from master.adapters.sqlalchemy.repositories import (
     ResourceLeaseRepositoryImpl,
     RunArtifactRepositoryImpl,
     RunCaseResultRepositoryImpl,
+    RunExtensionResultRepositoryImpl,
     RunLogRepositoryImpl,
     RunResultRepositoryImpl,
     RunShardRepositoryImpl,
@@ -87,6 +89,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.run_logs = RunLogRepositoryImpl(session)
         self.agent_logs = AgentLogRepositoryImpl(session)
         self.run_results = RunResultRepositoryImpl(session)
+        self.run_extension_results = RunExtensionResultRepositoryImpl(session)
         self.inbox_messages = InboxMessageRepositoryImpl(session)
         self.remote_operations = RemoteOperationRepositoryImpl(session)
         self.maintenance_locks = NodeMaintenanceLockRepositoryImpl(session)
@@ -111,6 +114,7 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.ci_trigger_bindings = CiTriggerBindingRepositoryImpl(session)
         self.ci_webhook_deliveries = CiWebhookDeliveryRepositoryImpl(session)
         self.hook_executions = HookExecutionRepositoryImpl(session)
+        self.idempotency_records = IdempotencyRecordRepositoryImpl(session)
         self.plugin_versions = PluginVersionRepositoryImpl(session)
         self.agent_plugin_desired_versions = AgentPluginDesiredVersionRepositoryImpl(session)
         self.agent_plugin_sync_operations = AgentPluginSyncOperationRepositoryImpl(session)

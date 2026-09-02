@@ -19,6 +19,7 @@ from .event_delivery_repository import EventDeliveryRepositoryImpl
 from .event_subscription_repository import EventSubscriptionRepositoryImpl
 from .execution_plan_repository import ExecutionPlanRepositoryImpl
 from .hook_execution_repository import HookExecutionRepositoryImpl
+from .idempotency_repository import IdempotencyRecordRepositoryImpl
 from .inbox_message_repository import InboxMessageRepositoryImpl
 from .maintenance_repository import NodeMaintenanceLockRepositoryImpl, RemoteOperationRepositoryImpl
 from .node_repository import NodeRepositoryImpl
@@ -37,6 +38,7 @@ from .refresh_token_repository import RefreshTokenRepositoryImpl
 from .resource_lease_repository import ResourceLeaseRepositoryImpl
 from .run_artifact_repository import RunArtifactRepositoryImpl
 from .run_case_result_repository import RunCaseResultRepositoryImpl
+from .run_extension_result_repository import RunExtensionResultRepositoryImpl
 from .run_log_repository import RunLogRepositoryImpl
 from .run_result_repository import RunResultRepositoryImpl
 from .run_shard_repository import RunShardRepositoryImpl
@@ -62,6 +64,7 @@ __all__ = [
     "EventDeliveryRepositoryImpl",
     "EventSubscriptionRepositoryImpl",
     "HookExecutionRepositoryImpl",
+    "IdempotencyRecordRepositoryImpl",
     "InboxMessageRepositoryImpl",
     "NodeMaintenanceLockRepositoryImpl",
     "RemoteOperationRepositoryImpl",
@@ -82,6 +85,7 @@ __all__ = [
     "RunArtifactRepositoryImpl",
     "RunCaseResultRepositoryImpl",
     "RunLogRepositoryImpl",
+    "RunExtensionResultRepositoryImpl",
     "RunResultRepositoryImpl",
     "RunShardRepositoryImpl",
     "ScriptCaseRepositoryImpl",

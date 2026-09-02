@@ -11,6 +11,7 @@ from aetp_protocol.ids import new_id
 
 from master.adapters.sse.event_bus import EventBus
 from master.application.services.notification_dispatcher import NotificationDispatcher
+from master.application.services.reporting_pipeline import ReportPipeline
 from master.domain.models import AgentLogEventRecord, DomainEvent
 from master.domain.repositories import UnitOfWork
 from master.workers.event_hook_worker import EventHookWorker
@@ -32,11 +33,13 @@ class EventPublisher:
         *,
         notification_dispatcher: NotificationDispatcher | None = None,
         event_hook_worker: EventHookWorker | None = None,
+        report_pipeline: ReportPipeline | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._event_bus = event_bus
         self._dispatcher: NotificationDispatcher | None = notification_dispatcher
         self._event_hook_worker = event_hook_worker
+        self._report_pipeline = report_pipeline
 
     async def publish(
         self,
@@ -69,6 +72,7 @@ class EventPublisher:
 
         await self.broadcast(persisted)
         self._enqueue_event_hook(persisted)
+        await self._process_report(persisted)
         await self._dispatch_to_notifications(persisted)
         return persisted
 
@@ -102,6 +106,15 @@ class EventPublisher:
             await self._dispatcher.dispatch(event)
         except Exception:
             logger.exception("通知分发失败: event=%s", event.event_type)
+
+    async def _process_report(self, event: DomainEvent) -> None:
+        """执行 Reporter/Analyzer 旁路扩展，不影响已提交事实。"""
+        if self._report_pipeline is None:
+            return
+        try:
+            await self._report_pipeline.process(event)
+        except Exception:
+            logger.exception("Reporter/Analyzer 处理失败: event=%s", event.event_type)
 
     def _enqueue_event_hook(self, event: DomainEvent) -> None:
         """将事件非阻塞入队到事件 Hook worker（旁路增强，失败不影响主流程）。"""
