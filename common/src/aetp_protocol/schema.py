@@ -13,7 +13,7 @@ from .artifacts import ArtifactRef, Configuration, ConfigurationSchema, ScriptRe
 from .authorization import AuthorizationDecision, AuthorizationRequest, Principal, ProjectScope
 from .capabilities import NodeCapabilitySnapshot
 from .execution import ExecutionPlan, ExecutionRequirement, ExecutionResult, ResourceLease
-from .payloads import V2_PAYLOAD_MODELS
+from .payloads import V2_PAYLOAD_MODELS, RemoteOperation
 from .plugin_types import DesiredPluginVersion, PluginRef
 from .plugins import PluginManifest
 from .task import RunScriptSnapshot, RunSnapshot, ScriptDefinition, TaskScriptRef, TestRun, TestTask
@@ -39,6 +39,7 @@ V2_SCHEMA_MODELS: Mapping[str, SchemaModel] = {
     "authorization_request": AuthorizationRequest,
     "authorization_decision": AuthorizationDecision,
     "project_scope": ProjectScope,
+    "remote_operation": RemoteOperation,
     "script_definition": ScriptDefinition,
     "task_script_ref": TaskScriptRef,
     "test_task": TestTask,

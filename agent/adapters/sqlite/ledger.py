@@ -24,6 +24,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from aetp_protocol.logs import LogEvent
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -45,6 +46,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
 from agent.domain.ledger import (
+    AgentLogSpoolEntry,
     AgentOutboxEntry,
     AgentRun,
     ScriptCacheEntry,
@@ -126,6 +128,30 @@ class TaskLogSpoolORM(_Base):
     message: Mapped[str] = mapped_column(String(8192), nullable=False)
     detail: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+
+class AgentLogSequenceORM(_Base):
+    """Agent 结构化日志全局序号。"""
+
+    __tablename__ = "agent_log_sequence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    next_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class AgentLogSpoolORM(_Base):
+    """Agent 结构化日志本地 spool。"""
+
+    __tablename__ = "agent_log_spool"
+    __table_args__ = (
+        UniqueConstraint("sequence", name="uq_agent_log_spool_sequence"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    level: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    event: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
 
@@ -365,6 +391,94 @@ class SQLiteLedger:
                 select(AgentOutboxORM).where(AgentOutboxORM.outbox_id == outbox_id)
             ).scalar_one_or_none()
         return _to_outbox(row) if row is not None else None
+
+    def next_agent_log_sequence(self) -> int:
+        """在本地事务中分配单调递增的 Agent 日志序号。"""
+        with self._session_factory.begin() as session:
+            row = session.get(AgentLogSequenceORM, 1)
+            if row is None:
+                session.add(AgentLogSequenceORM(id=1, next_sequence=2))
+                return 1
+            sequence = row.next_sequence
+            row.next_sequence += 1
+            session.flush()
+            return sequence
+
+    def append_agent_log(self, event: LogEvent) -> None:
+        """追加结构化日志；容量不足时按 debug/info/warn 淘汰，保留 error。"""
+        encoded = event.model_dump_json().encode("utf-8")
+        with self._session_factory.begin() as session:
+            if session.execute(
+                select(AgentLogSpoolORM.id).where(AgentLogSpoolORM.sequence == event.sequence)
+            ).scalar_one_or_none() is not None:
+                return
+            rows = session.execute(
+                select(AgentLogSpoolORM).order_by(AgentLogSpoolORM.created_at, AgentLogSpoolORM.id)
+            ).scalars().all()
+            current_size = sum(
+                len(row.event and json.dumps(row.event, ensure_ascii=False).encode("utf-8"))
+                for row in rows
+            )
+            entry_size = len(encoded)
+            eviction_priority = {"debug": 0, "info": 1, "warn": 2}
+            candidates = sorted(
+                (row for row in rows if row.level != "error"),
+                key=lambda row: (eviction_priority.get(row.level, 1), row.created_at, row.id),
+            )
+            for row in candidates:
+                if current_size + entry_size <= self._max_spool_bytes:
+                    break
+                current_size -= len(json.dumps(row.event, ensure_ascii=False).encode("utf-8"))
+                session.delete(row)
+            if current_size + entry_size > self._max_spool_bytes and event.level.value != "error":
+                return
+            session.add(
+                AgentLogSpoolORM(
+                    sequence=event.sequence,
+                    level=event.level.value,
+                    event=event.model_dump(mode="json"),
+                )
+            )
+
+    def list_pending_agent_logs(self, limit: int = 100) -> list[AgentLogSpoolEntry]:
+        """读取未收到 Master ACK 的结构化日志。"""
+        if limit < 1:
+            raise ValueError("Agent 日志 limit 必须大于 0")
+        with self._session_factory.begin() as session:
+            rows = session.execute(
+                select(AgentLogSpoolORM)
+                .order_by(AgentLogSpoolORM.sequence)
+                .limit(limit)
+            ).scalars().all()
+        return [
+            AgentLogSpoolEntry(
+                event=LogEvent.model_validate(row.event),
+                id=row.id,
+            )
+            for row in rows
+        ]
+
+    def acknowledge_agent_logs(
+        self,
+        session_id: str,
+        first_sequence: int,
+        last_sequence: int,
+    ) -> int:
+        """删除已收到 Master ACK 的日志；session 仅用于调用方语义校验。"""
+        del session_id
+        if first_sequence > last_sequence:
+            raise ValueError("日志 ACK sequence 范围无效")
+        with self._session_factory.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    delete(AgentLogSpoolORM).where(
+                        AgentLogSpoolORM.sequence >= first_sequence,
+                        AgentLogSpoolORM.sequence <= last_sequence,
+                    )
+                ),
+            )
+            return int(result.rowcount or 0)
 
     def replace_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:
         """替换一条可重放消息，并重置发送状态与租约。"""

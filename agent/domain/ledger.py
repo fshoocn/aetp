@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
+from aetp_protocol.logs import LogEvent
+
 from agent.domain.enums import AgentOutboxStatus, AgentRunStatus
 
 
@@ -78,6 +80,14 @@ class TaskLogSpoolEntry:
 
 
 @dataclass
+class AgentLogSpoolEntry:
+    """Agent 结构化日志本地缓冲条目。"""
+
+    event: LogEvent
+    id: int | None = None
+
+
+@dataclass
 class ScriptCacheEntry:
     """脚本包本地缓存引用。"""
 
@@ -134,6 +144,27 @@ class Ledger(Protocol):
 
     def get_outbox(self, outbox_id: str) -> AgentOutboxEntry | None:
         """读取一条出站消息，不改变其发送状态。"""
+        ...
+
+    def next_agent_log_sequence(self) -> int:
+        """分配持久化的 Agent 日志全局序号。"""
+        ...
+
+    def append_agent_log(self, event: LogEvent) -> None:
+        """追加结构化 Agent 日志到本地 spool。"""
+        ...
+
+    def list_pending_agent_logs(self, limit: int = 100) -> list[AgentLogSpoolEntry]:
+        """读取未收到 Master ACK 的 Agent 日志。"""
+        ...
+
+    def acknowledge_agent_logs(
+        self,
+        session_id: str,
+        first_sequence: int,
+        last_sequence: int,
+    ) -> int:
+        """删除已收到 Master ACK 的 Agent 日志并返回数量。"""
         ...
 
     def replace_outbox(self, outbox_id: str, topic: str, payload: dict) -> None:

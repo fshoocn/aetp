@@ -1043,7 +1043,240 @@
     "title": "AgentLogBatch",
     "type": "object"
   },
+  "agent.log.level.update": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "LogLevel": {
+        "description": "任务日志等级（小写，与 Master/Agent 序列化约定一致）。",
+        "enum": [
+          "debug",
+          "info",
+          "warn",
+          "error"
+        ],
+        "title": "LogLevel",
+        "type": "string"
+      },
+      "PluginId": {
+        "description": "插件稳定标识。",
+        "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z0-9-]+)+$",
+        "title": "PluginId",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "component": {
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Component",
+        "type": "string"
+      },
+      "expected_session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "expires_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expires At"
+      },
+      "level": {
+        "$ref": "#/$defs/LogLevel"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "operation_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "plugin_id": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PluginId"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "node_id",
+      "operation_id",
+      "expected_session_id",
+      "component",
+      "level"
+    ],
+    "title": "LogLevelUpdateRequest",
+    "type": "object"
+  },
+  "agent.log.level.updated": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "LogLevel": {
+        "description": "任务日志等级（小写，与 Master/Agent 序列化约定一致）。",
+        "enum": [
+          "debug",
+          "info",
+          "warn",
+          "error"
+        ],
+        "title": "LogLevel",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "level": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LogLevel"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "operation_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "node_id",
+      "operation_id",
+      "accepted"
+    ],
+    "title": "LogLevelUpdateResult",
+    "type": "object"
+  },
   "agent.log.received": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "default": true,
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "first_sequence": {
+        "minimum": 1,
+        "title": "First Sequence",
+        "type": "integer"
+      },
+      "last_sequence": {
+        "minimum": 1,
+        "title": "Last Sequence",
+        "type": "integer"
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "session_id": {
+        "$ref": "#/$defs/SessionId"
+      }
+    },
+    "required": [
+      "node_id",
+      "session_id",
+      "first_sequence",
+      "last_sequence"
+    ],
+    "title": "AgentLogReceived",
+    "type": "object"
+  },
+  "agent.maintenance.drain": {
     "$defs": {
       "BusinessId": {
         "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
@@ -1061,30 +1294,190 @@
     },
     "additionalProperties": false,
     "properties": {
-      "first_sequence": {
-        "minimum": 1,
-        "title": "First Sequence",
+      "drain_timeout_s": {
+        "minimum": 0,
+        "title": "Drain Timeout S",
         "type": "integer"
       },
-      "last_sequence": {
-        "minimum": 1,
-        "title": "Last Sequence",
-        "type": "integer"
+      "expected_session_id": {
+        "$ref": "#/$defs/SessionId"
       },
       "node_id": {
         "$ref": "#/$defs/BusinessId"
       },
-      "session_id": {
-        "$ref": "#/$defs/SessionId"
+      "operation_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "reason": {
+        "default": "",
+        "title": "Reason",
+        "type": "string"
       }
     },
     "required": [
       "node_id",
-      "session_id",
-      "first_sequence",
-      "last_sequence"
+      "operation_id",
+      "expected_session_id",
+      "drain_timeout_s"
     ],
-    "title": "AgentLogReceived",
+    "title": "MaintenanceDrainRequest",
+    "type": "object"
+  },
+  "agent.maintenance.drain.result": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "active_attempt_count": {
+        "minimum": 0,
+        "title": "Active Attempt Count",
+        "type": "integer"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "operation_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "node_id",
+      "operation_id",
+      "accepted",
+      "active_attempt_count"
+    ],
+    "title": "MaintenanceDrainResult",
+    "type": "object"
+  },
+  "agent.maintenance.restart": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "SessionId": {
+        "maxLength": 64,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "SessionId",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "drain_timeout_s": {
+        "minimum": 0,
+        "title": "Drain Timeout S",
+        "type": "integer"
+      },
+      "expected_session_id": {
+        "$ref": "#/$defs/SessionId"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "operation_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "reason": {
+        "default": "",
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "node_id",
+      "operation_id",
+      "expected_session_id",
+      "drain_timeout_s"
+    ],
+    "title": "MaintenanceRestartRequest",
+    "type": "object"
+  },
+  "agent.maintenance.restart.result": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "accepted": {
+        "title": "Accepted",
+        "type": "boolean"
+      },
+      "code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "operation_id": {
+        "$ref": "#/$defs/BusinessId"
+      }
+    },
+    "required": [
+      "node_id",
+      "operation_id",
+      "accepted"
+    ],
+    "title": "MaintenanceRestartResult",
     "type": "object"
   },
   "agent.maintenance.status": {
@@ -8133,6 +8526,92 @@
       "role"
     ],
     "title": "ProjectScope",
+    "type": "object"
+  },
+  "remote_operation": {
+    "$defs": {
+      "BusinessId": {
+        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+        "title": "BusinessId",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "稳定错误码；业务分支不得依赖诊断 message。",
+        "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "RemoteOperationStatus": {
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ],
+        "title": "RemoteOperationStatus",
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ErrorCode"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "kind": {
+        "enum": [
+          "diagnostics",
+          "plugin_sync",
+          "log_level",
+          "drain",
+          "restart"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "message": {
+        "default": "",
+        "title": "Message",
+        "type": "string"
+      },
+      "node_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "operation_id": {
+        "$ref": "#/$defs/BusinessId"
+      },
+      "status": {
+        "$ref": "#/$defs/RemoteOperationStatus"
+      },
+      "updated_at": {
+        "format": "date-time",
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "node_id",
+      "kind",
+      "status",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "RemoteOperation",
     "type": "object"
   },
   "resource_lease": {

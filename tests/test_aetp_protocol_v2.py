@@ -8,12 +8,18 @@ from pathlib import Path
 import pytest
 from aetp_protocol import (
     V2_PROTOCOL_VERSION,
+    AgentLogReceived,
     DesiredPluginVersion,
     ExecutionAck,
     ExecutionReconcileResult,
+    LogLevelUpdateRequest,
+    MaintenanceDrainRequest,
+    MaintenanceRestartRequest,
     MessagePayloadError,
     NodeCapabilitySnapshot,
     PluginManifest,
+    RemoteOperation,
+    RemoteOperationStatus,
     RunScriptSnapshot,
     RunSnapshot,
     ScriptDefinition,
@@ -119,6 +125,48 @@ def test_v2_rejected_reconcile_requires_error_code() -> None:
     with pytest.raises(ValidationError, match="reconcile result must contain code"):
         ExecutionReconcileResult(
             node_id=BusinessId("01J00000000000000000000025"),
+            accepted=False,
+        )
+
+
+def test_m5_remote_operation_payloads_are_strict_and_typed() -> None:
+    operation = RemoteOperation(
+        operation_id=BusinessId("01J00000000000000000000026"),
+        node_id=BusinessId("01J00000000000000000000027"),
+        kind="restart",
+        status=RemoteOperationStatus.PENDING,
+        created_at="2026-09-02T08:00:00Z",
+        updated_at="2026-09-02T08:00:00Z",
+    )
+    assert operation.kind == "restart"
+    assert LogLevelUpdateRequest(
+        node_id=operation.node_id,
+        operation_id=operation.operation_id,
+        expected_session_id="session-00000026",
+        component="agent",
+        level="info",
+    ).level.value == "info"
+    assert MaintenanceDrainRequest(
+        node_id=operation.node_id,
+        operation_id=operation.operation_id,
+        expected_session_id="session-00000026",
+        drain_timeout_s=30,
+    ).drain_timeout_s == 30
+    assert MaintenanceRestartRequest(
+        node_id=operation.node_id,
+        operation_id=operation.operation_id,
+        expected_session_id="session-00000026",
+        drain_timeout_s=30,
+    ).drain_timeout_s == 30
+
+
+def test_m5_agent_log_received_rejection_requires_error_code() -> None:
+    with pytest.raises(ValidationError, match="agent log receipt must contain code"):
+        AgentLogReceived(
+            node_id=BusinessId("01J00000000000000000000028"),
+            session_id="session-00000028",
+            first_sequence=1,
+            last_sequence=1,
             accepted=False,
         )
 

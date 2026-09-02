@@ -7,7 +7,8 @@ Pydantic 模型，extra=forbid 拒绝非法字段；Master/Agent 共用同一契
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -30,7 +31,7 @@ from .execution import (
     NodePresenceState,
     ReconcileAttempt,
 )
-from .ids import BusinessId, JsonObject, RequestId, SemVer, SessionId, Sha256, Version
+from .ids import BusinessId, JsonObject, PluginId, RequestId, SemVer, SessionId, Sha256, Version
 from .logs import AgentLogBatch, LogEvent, LogLevel
 from .message_types import MessageType
 from .plugins import PluginSyncRequest, PluginSyncResult
@@ -597,6 +598,104 @@ class AgentLogReceived(_Strict):
     session_id: SessionId
     first_sequence: int = Field(ge=1)
     last_sequence: int = Field(ge=1)
+    accepted: bool = True
+    code: ErrorCode | None = None
+    message: str = ""
+
+    @model_validator(mode="after")
+    def validate_rejection_code(self) -> AgentLogReceived:
+        if not self.accepted and self.code is None:
+            raise ValueError("rejected agent log receipt must contain code")
+        return self
+
+
+class RemoteOperationStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class RemoteOperation(_Strict):
+    operation_id: BusinessId
+    node_id: BusinessId
+    kind: Literal["diagnostics", "plugin_sync", "log_level", "drain", "restart"]
+    status: RemoteOperationStatus
+    error_code: ErrorCode | None = None
+    message: str = ""
+    created_at: datetime
+    updated_at: datetime
+
+
+class LogLevelUpdateRequest(_Strict):
+    node_id: BusinessId
+    operation_id: BusinessId
+    expected_session_id: SessionId
+    component: str = Field(min_length=1, max_length=128)
+    plugin_id: PluginId | None = None
+    level: LogLevel
+    expires_at: datetime | None = None
+
+
+class LogLevelUpdateResult(_Strict):
+    node_id: BusinessId
+    operation_id: BusinessId
+    accepted: bool
+    level: LogLevel | None = None
+    code: ErrorCode | None = None
+    message: str = ""
+
+    @model_validator(mode="after")
+    def validate_rejection_code(self) -> LogLevelUpdateResult:
+        if not self.accepted and self.code is None:
+            raise ValueError("rejected log level update must contain code")
+        return self
+
+
+class MaintenanceDrainRequest(_Strict):
+    node_id: BusinessId
+    operation_id: BusinessId
+    expected_session_id: SessionId
+    drain_timeout_s: int = Field(ge=0)
+    reason: str = ""
+
+
+class MaintenanceDrainResult(_Strict):
+    node_id: BusinessId
+    operation_id: BusinessId
+    accepted: bool
+    active_attempt_count: int = Field(ge=0)
+    code: ErrorCode | None = None
+    message: str = ""
+
+    @model_validator(mode="after")
+    def validate_rejection_code(self) -> MaintenanceDrainResult:
+        if not self.accepted and self.code is None:
+            raise ValueError("rejected maintenance drain must contain code")
+        return self
+
+
+class MaintenanceRestartRequest(_Strict):
+    node_id: BusinessId
+    operation_id: BusinessId
+    expected_session_id: SessionId
+    drain_timeout_s: int = Field(ge=0)
+    reason: str = ""
+
+
+class MaintenanceRestartResult(_Strict):
+    node_id: BusinessId
+    operation_id: BusinessId
+    accepted: bool
+    code: ErrorCode | None = None
+    message: str = ""
+
+    @model_validator(mode="after")
+    def validate_rejection_code(self) -> MaintenanceRestartResult:
+        if not self.accepted and self.code is None:
+            raise ValueError("rejected maintenance restart must contain code")
+        return self
 
 
 class ScriptParseRequest(_Strict):
@@ -638,6 +737,12 @@ V2_PAYLOAD_MODELS = {
     MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: DiagnosticsSnapshot,
     MessageType.AGENT_LOG_BATCH: AgentLogBatch,
     MessageType.AGENT_LOG_RECEIVED: AgentLogReceived,
+    MessageType.AGENT_LOG_LEVEL_UPDATE: LogLevelUpdateRequest,
+    MessageType.AGENT_LOG_LEVEL_UPDATED: LogLevelUpdateResult,
+    MessageType.AGENT_MAINTENANCE_DRAIN: MaintenanceDrainRequest,
+    MessageType.AGENT_MAINTENANCE_DRAIN_RESULT: MaintenanceDrainResult,
+    MessageType.AGENT_MAINTENANCE_RESTART: MaintenanceRestartRequest,
+    MessageType.AGENT_MAINTENANCE_RESTART_RESULT: MaintenanceRestartResult,
     MessageType.SCRIPT_PARSE: ScriptParseRequest,
     MessageType.SCRIPT_VERIFY: ScriptVerifyRequest,
 }
@@ -652,5 +757,11 @@ for model in (
     DiagnosticsSnapshot,
     ScriptParseRequest,
     ScriptVerifyRequest,
+    LogLevelUpdateRequest,
+    LogLevelUpdateResult,
+    MaintenanceDrainRequest,
+    MaintenanceDrainResult,
+    MaintenanceRestartRequest,
+    MaintenanceRestartResult,
 ):
     model.model_rebuild()

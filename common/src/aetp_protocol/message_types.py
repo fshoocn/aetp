@@ -54,6 +54,12 @@ class MessageType(StrEnum):
     AGENT_DIAGNOSTICS_SNAPSHOT = "agent.diagnostics.snapshot"
     AGENT_LOG_BATCH = "agent.log.batch"
     AGENT_LOG_RECEIVED = "agent.log.received"
+    AGENT_LOG_LEVEL_UPDATE = "agent.log.level.update"
+    AGENT_LOG_LEVEL_UPDATED = "agent.log.level.updated"
+    AGENT_MAINTENANCE_DRAIN = "agent.maintenance.drain"
+    AGENT_MAINTENANCE_DRAIN_RESULT = "agent.maintenance.drain.result"
+    AGENT_MAINTENANCE_RESTART = "agent.maintenance.restart"
+    AGENT_MAINTENANCE_RESTART_RESULT = "agent.maintenance.restart.result"
 
 
 # message_type -> (方向, 段名)；方向：commands（Master→Agent）/ events（Agent→Master）
@@ -95,6 +101,12 @@ _MESSAGE_TYPE_TOPIC_SEGMENT: dict[MessageType, tuple[str, str]] = {
     MessageType.AGENT_DIAGNOSTICS_SNAPSHOT: ("events", "agent.diagnostics.snapshot"),
     MessageType.AGENT_LOG_BATCH: ("events", "agent.log.batch"),
     MessageType.AGENT_LOG_RECEIVED: ("commands", "agent.log.received"),
+    MessageType.AGENT_LOG_LEVEL_UPDATE: ("commands", "agent.log.level.update"),
+    MessageType.AGENT_LOG_LEVEL_UPDATED: ("events", "agent.log.level.updated"),
+    MessageType.AGENT_MAINTENANCE_DRAIN: ("commands", "agent.maintenance.drain"),
+    MessageType.AGENT_MAINTENANCE_DRAIN_RESULT: ("events", "agent.maintenance.drain.result"),
+    MessageType.AGENT_MAINTENANCE_RESTART: ("commands", "agent.maintenance.restart"),
+    MessageType.AGENT_MAINTENANCE_RESTART_RESULT: ("events", "agent.maintenance.restart.result"),
 }
 
 

@@ -79,8 +79,11 @@ class AgentSettings:
     registration_timeout_s: int = 10
     # ---- 运行日志 ----
     log_file: Path = Path("logs/agent.log")
+    structured_log_file: Path | None = None
     log_level: str = "INFO"
     log_console: bool = True
+    structured_log_max_bytes: int = 10 * 1024 * 1024
+    structured_log_backup_count: int = 5
     # ---- 任务日志 spool ----
     task_log_batch_size: int = 50
     task_log_flush_s: int = 1
@@ -105,10 +108,13 @@ class AgentSettings:
             ("AETP_AGENT_TASK_LOG_BATCH_SIZE", self.task_log_batch_size),
             ("AETP_AGENT_TASK_LOG_FLUSH_S", self.task_log_flush_s),
             ("AETP_AGENT_TASK_LOG_SPOOL_MAX_BYTES", self.task_log_spool_max_bytes),
+            ("AETP_AGENT_STRUCTURED_LOG_MAX_BYTES", self.structured_log_max_bytes),
         )
         for name, value in positive:
             if value <= 0:
                 raise ValueError(f"{name} 必须大于 0")
+        if self.structured_log_backup_count < 0:
+            raise ValueError("AETP_AGENT_STRUCTURED_LOG_BACKUP_COUNT 不能小于 0")
         return self
 
     @classmethod
@@ -141,6 +147,15 @@ class AgentSettings:
         log_file = Path(raw_log_file) if raw_log_file else cls.log_file
         if not log_file.is_absolute():
             log_file = base_dir / log_file
+
+        raw_structured_log_file = values.get("AETP_AGENT_STRUCTURED_LOG_FILE")
+        structured_log_file = (
+            Path(raw_structured_log_file)
+            if raw_structured_log_file
+            else base_dir / "logs" / "agent.jsonl"
+        )
+        if not structured_log_file.is_absolute():
+            structured_log_file = base_dir / structured_log_file
 
         raw_plugin_dir = values.get("AETP_AGENT_PLUGIN_DIR")
         plugin_dir = Path(raw_plugin_dir) if raw_plugin_dir else cls.plugin_dir
@@ -188,8 +203,17 @@ class AgentSettings:
                 cls.registration_timeout_s,
             ),
             log_file=log_file,
+            structured_log_file=structured_log_file,
             log_level=values.get("AETP_AGENT_LOG_LEVEL", cls.log_level),
             log_console=parse_bool(values.get("AETP_AGENT_LOG_CONSOLE"), cls.log_console),
+            structured_log_max_bytes=parse_int(
+                values.get("AETP_AGENT_STRUCTURED_LOG_MAX_BYTES"),
+                cls.structured_log_max_bytes,
+            ),
+            structured_log_backup_count=parse_int(
+                values.get("AETP_AGENT_STRUCTURED_LOG_BACKUP_COUNT"),
+                cls.structured_log_backup_count,
+            ),
             task_log_batch_size=parse_int(
                 values.get("AETP_AGENT_TASK_LOG_BATCH_SIZE"),
                 cls.task_log_batch_size,
