@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "id": "org.junit.reporter",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "reporter",
+  "display_name": "JUnit XML Reporter",
+  "entrypoints": {
+    "master": "junit_reporter:create_reporter"
+  },
+  "capabilities": ["report.junit-xml"],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}

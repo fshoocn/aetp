@@ -335,8 +335,8 @@ class ReportPipeline:
 
 
 def build_default_reporting_registries(resolver=None) -> tuple[ReporterRegistry, AnalyzerRegistry]:
-    from plugins.pytest_plugin.master.case_statistics_analyzer import CaseStatisticsAnalyzer
-    from plugins.pytest_plugin.master.junit_reporter import JUnitReporter
+    from plugins.case_statistics_analyzer.master import CaseStatisticsAnalyzer
+    from plugins.junit_reporter.master import JUnitReporter
 
     reporters = ReporterRegistry((JUnitReporter(),))
     analyzers = AnalyzerRegistry((CaseStatisticsAnalyzer(),))

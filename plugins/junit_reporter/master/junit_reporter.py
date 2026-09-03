@@ -1,4 +1,4 @@
-"""pytest JUnit XML Master Reporter。"""
+"""pytest JUnit XML Master Reporter（独立 reporter 插件包）。"""
 
 from __future__ import annotations
 

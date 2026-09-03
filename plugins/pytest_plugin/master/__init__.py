@@ -1,6 +1,2 @@
-"""pytest Master  扩展。"""
+"""pytest executor 插件 Master 面。"""
 
-from .case_statistics_analyzer import CaseStatisticsAnalyzer
-from .junit_reporter import JUnitReporter
-
-__all__ = ["CaseStatisticsAnalyzer", "JUnitReporter"]

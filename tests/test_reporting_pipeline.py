@@ -15,7 +15,8 @@ from master.application.services.reporting_pipeline import (
 )
 from master.domain.enums import ArtifactKind, CaseStatus, RunStatus
 from master.domain.models import DomainEvent, RunArtifact, RunCaseResult, RunResult
-from plugins.pytest_plugin.master import CaseStatisticsAnalyzer, JUnitReporter
+from plugins.case_statistics_analyzer.master import CaseStatisticsAnalyzer
+from plugins.junit_reporter.master import JUnitReporter
 
 RUN_ID = "01J00000000000000000000001"
 PROJECT_ID = "01J00000000000000000000002"

@@ -1,4 +1,4 @@
-"""通用 case 统计 Analyzer。"""
+"""通用 case 统计 Analyzer（独立 analyzer 插件包）。"""
 
 from __future__ import annotations
 

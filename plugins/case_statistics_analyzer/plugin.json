@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "id": "org.case-statistics.analyzer",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "analyzer",
+  "display_name": "Case Statistics Analyzer",
+  "entrypoints": {
+    "master": "case_statistics_analyzer:create_analyzer"
+  },
+  "capabilities": ["analysis.case-statistics"],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}
