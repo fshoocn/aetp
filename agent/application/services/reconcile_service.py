@@ -1,4 +1,4 @@
-"""Agent V2 重连对账发送与响应处理。"""
+"""Agent  重连对账发送与响应处理。"""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ import json
 from collections.abc import Mapping
 from typing import Literal
 
+from aetp_protocol.envelope import parse_message
 from aetp_protocol.execution import CaseResult, ExecutionResult, ExecutionStatus
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, Sha256, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ExecutionReconcile, ExecutionReconcileResult, ReconcileAttempt
-from aetp_protocol.topics import parse_v2_topic, validate_message_type_for_v2_topic, validate_sender_for_v2_topic
-from aetp_protocol.v2_envelope import parse_v2_message
+from aetp_protocol.topics import parse_topic, validate_message_type_for_topic, validate_sender_for_topic
 
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.domain.enums import AgentRunStatus
 from agent.domain.ledger import AgentRun, Ledger
 from common.transport import MqttMessage
@@ -21,14 +21,14 @@ from common.transport import MqttMessage
 ReconcileState = Literal["running", "succeeded", "failed", "cancelled", "timed_out"]
 
 
-class AgentV2ReconcileService:
+class ReconcileService:
     """根据本地账本发布对账，不在本地决定 Master 状态。"""
 
     def __init__(
         self,
         node_id: BusinessId,
         ledger: Ledger,
-        publisher: AgentV2CapabilityPublisher,
+        publisher: CapabilityPublisher,
         *,
         master_id: str = "aetp-master",
     ) -> None:
@@ -64,16 +64,16 @@ class AgentV2ReconcileService:
     def handle_result(self, message: MqttMessage, session_id: SessionId) -> bool:
         """接收 Master 对账响应；响应只确认，不直接改变本地终态。"""
         try:
-            topic = parse_v2_topic(message.topic)
+            topic = parse_topic(message.topic)
             if (
                 topic.direction != "commands"
                 or topic.node_id != self._node_id.root
                 or topic.segment != "execution.reconcile_result"
             ):
                 return False
-            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
-            validate_sender_for_v2_topic(message.topic, envelope.sender)
-            validate_message_type_for_v2_topic(message.topic, MessageType(envelope.message_type))
+            envelope, payload = parse_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(message.topic, MessageType(envelope.message_type))
             if envelope.sender.id != stable_id(self._master_id):
                 return False
             if envelope.correlation_id is None or envelope.correlation_id != self._pending_message_id:
@@ -132,4 +132,4 @@ def _result_for_run(run: AgentRun) -> ExecutionResult:
     )
 
 
-__all__ = ["AgentV2ReconcileService"]
+__all__ = ["ReconcileService"]

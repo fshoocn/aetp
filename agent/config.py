@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import logging
 import sys
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from aetp_protocol.ids import BusinessId, new_id
 
@@ -54,7 +52,6 @@ class AgentSettings:
     """Agent 组件配置（§9.7），全部来自外置 .env 的 AETP_AGENT_ 前缀。"""
 
     # ---- Agent 标识 ----
-    profile: Literal["legacy", "v2"] = "legacy"
     node_id: str = ""
     name: str = ""
     master_id: str = "aetp-master"
@@ -68,7 +65,7 @@ class AgentSettings:
     mqtt_ca_cert_path: Path | None = None
     mqtt_use_tls: bool = True
     # ---- 本地账本 ----
-    ledger_url: str = "sqlite:///data/agent.db"
+    ledger_url: str = "sqlite:///data/agent-runtime.db"
     # ---- 能力自动扫描（P5，§18.5）----
     # 串口映射文件（功能名 -> 端口号）；相对路径以 .env 所在目录为基准；
     # 未配置时尝试 Agent 运行目录下的 serial_ports.json；找不到则跳过串口能力
@@ -95,10 +92,6 @@ class AgentSettings:
     # ---- 实际使用的 env 文件路径（便于排查）----
     env_file: Path | None = None
 
-    @property
-    def v2_only(self) -> bool:
-        return self.profile == "v2"
-
     def validate(self) -> AgentSettings:
         """校验运行所需配置；组合根启动前必须调用。"""
         if not self.node_id.strip():
@@ -107,11 +100,10 @@ class AgentSettings:
             raise ValueError("AETP_AGENT_MASTER_ID 不能为空")
         if not self.mqtt_client_id.strip():
             raise ValueError("AETP_AGENT_MQTT_CLIENT_ID 不能为空")
-        if self.v2_only:
-            try:
-                BusinessId(self.node_id)
-            except ValueError as exc:
-                raise ValueError("V2 profile 的 AETP_AGENT_NODE_ID 必须是 ULID BusinessId") from exc
+        try:
+            BusinessId(self.node_id)
+        except ValueError as exc:
+            raise ValueError("AETP_AGENT_NODE_ID 必须是 ULID BusinessId") from exc
         if not 1 <= self.mqtt_port <= 65535:
             raise ValueError("AETP_AGENT_MQTT_PORT 必须在 1..65535 范围内")
         positive = (
@@ -141,13 +133,10 @@ class AgentSettings:
         path = Path(env_file).resolve() if env_file is not None else cls.default_env_file()
         values = load_env_file(path)
         base_dir = path.parent
-        profile = values.get("AETP_AGENT_PROFILE", "legacy").strip().lower()
-        if profile not in {"legacy", "v2"}:
-            raise ValueError("AETP_AGENT_PROFILE 必须是 legacy 或 v2")
 
         node_id = values.get("AETP_AGENT_NODE_ID", "").strip()
         if not node_id or (node_id.startswith("<") and node_id.endswith(">")):
-            node_id = new_id() if profile == "v2" else f"agent-{uuid.uuid4().hex}"
+            node_id = new_id()
             upsert_env_value(path, "AETP_AGENT_NODE_ID", node_id)
             logger.info("AETP_AGENT_NODE_ID 未设置，已生成并写回 %s", path)
 
@@ -174,7 +163,7 @@ class AgentSettings:
             structured_log_file = base_dir / structured_log_file
 
         raw_plugin_dir = values.get("AETP_AGENT_PLUGIN_DIR")
-        default_data_dir = Path("data-v2") if profile == "v2" else Path("data")
+        default_data_dir = Path("data")
         plugin_dir = Path(raw_plugin_dir) if raw_plugin_dir else default_data_dir / "plugins"
         if not plugin_dir.is_absolute():
             plugin_dir = base_dir / plugin_dir
@@ -193,7 +182,6 @@ class AgentSettings:
             serial_map_file = p
 
         return cls(
-            profile=profile,  # type: ignore[arg-type]
             node_id=node_id,
             name=values.get("AETP_AGENT_NAME", cls.name),
             master_id=values.get("AETP_AGENT_MASTER_ID", cls.master_id),
@@ -204,10 +192,7 @@ class AgentSettings:
             mqtt_client_id=(values.get("AETP_AGENT_MQTT_CLIENT_ID") or f"aetp-agent-{node_id}"),
             mqtt_ca_cert_path=ca_cert_path,
             mqtt_use_tls=parse_bool(values.get("AETP_AGENT_MQTT_USE_TLS"), cls.mqtt_use_tls),
-            ledger_url=values.get(
-                "AETP_AGENT_LEDGER_URL",
-                "sqlite:///data-v2/agent-v2.db" if profile == "v2" else cls.ledger_url,
-            ),
+            ledger_url=values.get("AETP_AGENT_LEDGER_URL", cls.ledger_url),
             serial_map_file=serial_map_file,
             plugin_dir=plugin_dir,
             script_cache_dir=script_cache_dir,

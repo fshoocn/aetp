@@ -1,6 +1,6 @@
 """Agent 脚本下载与本地缓存编排（P5.6，§9.3/§9.8）。
 
-``run.assign`` 通过 ``script_ref`` 携带 ``{script_id, version, sha256,
+``execution.plan`` 通过 ``script_ref`` 携带 ``{script_id, version, sha256,
 download_url}``。Agent 在 claim 前把脚本下载到本地、做完整 SHA-256 校验，
 再按 hash 组织目录写入缓存，并把引用记入 ``agent_script_cache``。
 

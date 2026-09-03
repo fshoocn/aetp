@@ -37,9 +37,6 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy import (
-    text as sqlalchemy_text,
-)
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult, Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
@@ -188,31 +185,6 @@ class SQLiteLedger:
         # 转换为领域对象而不触发 DetachedInstanceError
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         self._max_spool_bytes = max_spool_bytes
-        self._migrate_columns()
-
-    def _migrate_columns(self) -> None:
-        """轻量列迁移：create_all 只建新表，不给已存在的表加列。
-
-        Agent 本地账本无 Alembic；升级代码后旧库缺新列会导致查询报错
-        （如心跳 list_active_runs 查不到 device_ids 列）。这里对已知新增
-        列做幂等补齐（SQLite ALTER TABLE ADD COLUMN）。
-        """
-        additions: tuple[tuple[str, str, str], ...] = (
-            # (表名, 列名, 列定义)
-            ("agent_runs", "plan_id", "VARCHAR(64)"),
-            ("agent_runs", "shard_id", "VARCHAR(64)"),
-            ("agent_runs", "attempt_id", "VARCHAR(64)"),
-            ("agent_runs", "plan_hash", "VARCHAR(64)"),
-            ("agent_runs", "device_ids", "JSON NOT NULL DEFAULT '[]'"),
-            ("agent_runs", "last_progress_sequence", "INTEGER NOT NULL DEFAULT 0"),
-        )
-        with self._engine.begin() as conn:
-            for table, column, ddl in additions:
-                cols = conn.execute(sqlalchemy_text(f"PRAGMA table_info({table})")).fetchall()
-                if any(row[1] == column for row in cols):
-                    continue
-                conn.execute(sqlalchemy_text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-                logger.info("本地账本列迁移完成: %s.%s", table, column)
 
     # ---- agent_runs：原子 claim ----
 
@@ -333,7 +305,7 @@ class SQLiteLedger:
         return [_to_run(row) for row in rows]
 
     def list_reconcile_runs(self) -> list[AgentRun]:
-        """返回含 V2 Plan 身份的本地记录，包含活动和已完成状态。"""
+        """返回含  Plan 身份的本地记录，包含活动和已完成状态。"""
         with self._session_factory.begin() as session:
             rows = (
                 session.execute(

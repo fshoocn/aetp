@@ -16,37 +16,27 @@ from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.runtime import AgentRuntime
 from agent.application.services.agent_log_facade import AgentLogFacade
 from agent.application.services.artifact_upload_service import ArtifactUploadService
-from agent.application.services.capability_loader import CapabilityCache
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.application.services.execution_service import ExecutionService
-from agent.application.services.registration_service import RegistrationService
+from agent.application.services.executor_resolver import ExecutorResolver
 from agent.application.services.resource_provider import ResourceProviderRegistry
+from agent.application.services.resource_provider_resolver import ResourceProviderResolver
 from agent.application.services.script_cache_service import ScriptCacheService
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
-from agent.application.services.v2_executor_resolver import V2ExecutorResolver
-from agent.application.services.v2_resource_provider_resolver import V2ResourceProviderResolver
 from agent.config import AgentSettings, get_settings, resolve_sqlite_url
-from agent.plugins.installer import LocalPluginInstaller
-from agent.plugins.registry import create_default_registry
-from agent.plugins.v2_installer import V2PluginInstaller
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.installer import PluginInstaller
+from agent.plugins.registry import PluginRegistry
 from common.transport import Transport
 from plugins.resource_providers import PowerResourceProvider, SerialResourceProvider, VectorCanResourceProvider
 
 
-def _build_v2_capability_publisher(
+def _build_capability_publisher(
     transport: Transport,
     settings: AgentSettings,
-    registry: AgentV2PluginRegistry,
+    registry: PluginRegistry,
     resource_providers: ResourceProviderRegistry,
-) -> AgentV2CapabilityPublisher | None:
-    """仅为 V2 合法 BusinessId Agent 装配快照发布器。"""
-    from aetp_protocol.ids import BusinessId
-
-    try:
-        BusinessId(settings.node_id)
-    except ValueError:
-        return None
-    return AgentV2CapabilityPublisher(
+) -> CapabilityPublisher:
+    """装配当前协议能力快照发布器。"""
+    return CapabilityPublisher(
         transport,
         settings,
         registry,
@@ -56,7 +46,7 @@ def _build_v2_capability_publisher(
 
 def _build_resource_provider_registry(
     settings: AgentSettings,
-    resolver: V2ResourceProviderResolver,
+    resolver: ResourceProviderResolver,
 ) -> ResourceProviderRegistry:
     built_in = (
         VectorCanResourceProvider(),
@@ -66,18 +56,6 @@ def _build_resource_provider_registry(
     return ResourceProviderRegistry(
         (*built_in, *resolver.resolve_all())
     )
-
-
-def _build_legacy_plugin_registry(settings: AgentSettings, plugin_dir) -> object | None:
-    if settings.v2_only:
-        return None
-    return create_default_registry(plugin_dir)
-
-
-def _build_registration_capabilities(settings: AgentSettings, cache: CapabilityCache):
-    if settings.v2_only:
-        return None
-    return cache.scan()
 
 
 class Container(containers.DeclarativeContainer):
@@ -99,46 +77,36 @@ class Container(containers.DeclarativeContainer):
         settings=settings,
     )
 
-    # 插件注册表单例（P5.5：自动注册内置插件，上报 plugin_versions）
+    # 插件注册表单例
     plugin_registry = providers.Singleton(
-        _build_legacy_plugin_registry,
-        settings=settings,
-        plugin_dir=providers.Callable(lambda: get_settings().plugin_dir),
+        PluginRegistry,
+        root=providers.Callable(lambda: get_settings().plugin_dir),
     )
 
-    # 插件安装器单例（P5.5：按 Master plugin_ref 下载、校验并隔离安装）
+    # 插件安装器单例
     plugin_installer = providers.Singleton(
-        LocalPluginInstaller,
+        PluginInstaller,
         root=providers.Callable(lambda: get_settings().plugin_dir),
     )
 
-    # M2 V2 插件库存与能力快照（与旧 V1 task_type registry 并行保留）
-    v2_plugin_registry = providers.Singleton(
-        AgentV2PluginRegistry,
-        root=providers.Callable(lambda: get_settings().plugin_dir),
+    executor_resolver = providers.Singleton(
+        ExecutorResolver,
+        registry=plugin_registry,
     )
-    v2_executor_resolver = providers.Singleton(
-        V2ExecutorResolver,
-        registry=v2_plugin_registry,
-    )
-    v2_resource_provider_resolver = providers.Singleton(
-        V2ResourceProviderResolver,
-        registry=v2_plugin_registry,
-    )
-    v2_plugin_installer = providers.Singleton(
-        V2PluginInstaller,
-        root=providers.Callable(lambda: get_settings().plugin_dir),
+    resource_provider_resolver = providers.Singleton(
+        ResourceProviderResolver,
+        registry=plugin_registry,
     )
     resource_provider_registry = providers.Singleton(
         _build_resource_provider_registry,
         settings=settings,
-        resolver=v2_resource_provider_resolver,
+        resolver=resource_provider_resolver,
     )
-    v2_capability_publisher = providers.Factory(
-        _build_v2_capability_publisher,
+    capability_publisher = providers.Factory(
+        _build_capability_publisher,
         transport=transport,
         settings=settings,
-        registry=v2_plugin_registry,
+        registry=plugin_registry,
         resource_providers=resource_provider_registry,
     )
 
@@ -164,45 +132,19 @@ class Container(containers.DeclarativeContainer):
         ledger=ledger,
     )
 
-    # 能力扫描缓存单例（P5：仅可插拔外设变动时重扫，避免重复全量扫描）
-    capability_cache = providers.Singleton(
-        CapabilityCache,
-        serial_map_file=providers.Callable(lambda: get_settings().serial_map_file),
-    )
-
-    # 注册与心跳服务（P5.3 + P5.5：register outbox → register-ack 校验 → heartbeat）
-    registration_service = providers.Factory(
-        RegistrationService,
-        transport=transport,
-        ledger=ledger,
-        settings=settings,
-        capabilities=providers.Callable(
-            _build_registration_capabilities,
-            settings=settings,
-            cache=capability_cache,
-        ),
-        plugin_registry=plugin_registry,
-    )
-
-    # AgentRuntime：唯一生命周期组合根（P5.3 + P5.4 + P5.5 + P5.7 + P6.1）
-    # CommandDispatcher / ScriptPreflightService 由 AgentRuntime 内部创建，
-    # 避免 Container 中 is_registered 的循环依赖
+    # AgentRuntime：唯一生命周期组合根
     runtime = providers.Factory(
         AgentRuntime,
         settings=settings,
         transport=transport,
         ledger=ledger,
-        registration=registration_service,
         plugin_registry=plugin_registry,
         plugin_installer=plugin_installer,
         script_cache=script_cache,
         artifact_uploader=artifact_uploader,
         execution_service=execution_service,
-        capability_cache=capability_cache,
-        v2_capability_publisher=v2_capability_publisher,
-        v2_plugin_installer=v2_plugin_installer,
-        v2_plugin_registry=v2_plugin_registry,
-        v2_executor_resolver=v2_executor_resolver.provided.resolve,
+        capability_publisher=capability_publisher,
+        executor_resolver=executor_resolver.provided.resolve,
         resource_providers=resource_provider_registry,
         agent_log_facade=agent_log_facade,
     )

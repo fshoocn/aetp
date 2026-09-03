@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import TypeAlias
 
 from aetp_protocol.capabilities import AgentMaintenanceState
+from aetp_protocol.envelope import Envelope, parse_message
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.ids import BusinessId, SessionId, stable_id
 from aetp_protocol.message_types import MessageType
@@ -22,15 +23,14 @@ from aetp_protocol.payloads import (
     MaintenanceRestartResult,
 )
 from aetp_protocol.topics import (
-    parse_v2_topic,
-    v2_command_topic,
-    validate_message_type_for_v2_topic,
-    validate_sender_for_v2_topic,
+    command_topic,
+    parse_topic,
+    validate_message_type_for_topic,
+    validate_sender_for_topic,
 )
-from aetp_protocol.v2_envelope import V2Envelope, parse_v2_message
 
 from agent.application.services.agent_log_facade import AgentLogFacade
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.domain.ledger import Ledger
 from common.transport import MqttMessage
 
@@ -45,7 +45,7 @@ class AgentMaintenanceController:
         self,
         node_id: BusinessId,
         ledger: Ledger,
-        publisher: AgentV2CapabilityPublisher,
+        publisher: CapabilityPublisher,
         log_facade: AgentLogFacade,
         *,
         active_attempt_count: Callable[[], int] | None = None,
@@ -114,14 +114,14 @@ class AgentMaintenanceController:
             await self._restart_after_ack(request, session_id, envelope.message_id)
         return True
 
-    def _parse(self, message: MqttMessage) -> tuple[V2Envelope, MaintenanceRequest] | None:
+    def _parse(self, message: MqttMessage) -> tuple[Envelope, MaintenanceRequest] | None:
         try:
-            topic = parse_v2_topic(message.topic)
+            topic = parse_topic(message.topic)
             if topic.node_id != self._node_id.root or topic.direction != "commands":
                 return None
-            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
-            validate_sender_for_v2_topic(message.topic, envelope.sender)
-            validate_message_type_for_v2_topic(
+            envelope, payload = parse_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(
                 message.topic,
                 MessageType(envelope.message_type),
             )
@@ -289,7 +289,7 @@ class AgentMaintenanceController:
             )
 
     def _topic(self, segment: str) -> str:
-        return v2_command_topic(self._node_id.root, segment)
+        return command_topic(self._node_id.root, segment)
 
 
 def restart_process() -> None:

@@ -1,4 +1,4 @@
-"""Agent V2 ExecutionPlan 执行桥接。"""
+"""Agent  ExecutionPlan 执行桥接。"""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ from aetp_protocol.ids import BusinessId, MessageId, SessionId, Sha256
 from aetp_protocol.payloads import ExecutionFinished
 
 from agent.application.services.artifact_upload_service import ArtifactUploadError, ArtifactUploadService
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.application.services.execution_service import (
     ExecutionResult as AgentExecutionResult,
 )
@@ -44,23 +45,22 @@ from agent.application.services.resource_provider import (
 )
 from agent.application.services.script_archive import extract_zip_safely
 from agent.application.services.script_cache_service import ScriptCacheService
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
-from agent.application.services.v2_task_context import V2TaskContext
+from agent.application.services.task_context import TaskContext
 from agent.config import AgentSettings
 from agent.domain.ledger import Ledger
 
 logger = logging.getLogger(__name__)
 
 
-class V2ExecutionRunner:
-    """把已预检的 V2 Plan 交给精确 executor 并发布 finished 事实。"""
+class ExecutionRunner:
+    """把已预检的  Plan 交给精确 executor 并发布 finished 事实。"""
 
     def __init__(
         self,
         settings: AgentSettings,
         ledger: Ledger,
         execution_service: ExecutionService,
-        publisher: AgentV2CapabilityPublisher,
+        publisher: CapabilityPublisher,
         executor_resolver: Callable[[ExecutionPlan], Any],
         *,
         script_cache: ScriptCacheService | None = None,
@@ -100,7 +100,7 @@ class V2ExecutionRunner:
         return task
 
     async def stop(self) -> None:
-        """取消并等待所有 V2 Plan 执行任务。"""
+        """取消并等待所有  Plan 执行任务。"""
         tasks = tuple(self._tasks.values())
         for task in tasks:
             task.cancel()
@@ -114,7 +114,7 @@ class V2ExecutionRunner:
         session_id: SessionId,
         correlation_id: MessageId | None,
     ) -> None:
-        context: V2TaskContext | None = None
+        context: TaskContext | None = None
         activated_resources = ()
         try:
             plugin = self._executor_resolver(plan)
@@ -126,7 +126,7 @@ class V2ExecutionRunner:
                     cached.path,
                     plan.run_id.root,
                 )
-            context = V2TaskContext(
+            context = TaskContext(
                 self._settings,
                 self._ledger,
                 self._publisher,
@@ -138,7 +138,7 @@ class V2ExecutionRunner:
             )
             if plan.resource_bindings:
                 if self._resource_providers is None:
-                    raise ResourceActivationError("V2 Plan 包含资源但未配置 ResourceProvider")
+                    raise ResourceActivationError(" Plan 包含资源但未配置 ResourceProvider")
                 activated_resources = await self._resource_providers.activate(plan.resource_bindings)
             timeout_s = max(1, int((plan.deadline_at - self._now()).total_seconds()))
             result = await self._execution_service.execute(
@@ -153,7 +153,7 @@ class V2ExecutionRunner:
             if artifact_refs:
                 finished_result = finished_result.model_copy(update={"artifacts": tuple(artifact_refs)})
         except ArtifactUploadError as exc:
-            logger.exception("V2 Plan Artifact 上传失败: plan=%s", plan.plan_id.root)
+            logger.exception(" Plan Artifact 上传失败: plan=%s", plan.plan_id.root)
             finished_result = ProtocolExecutionResult(
                 status=ExecutionStatus.FAILED,
                 passed=False,
@@ -163,7 +163,7 @@ class V2ExecutionRunner:
                 ),
             )
         except ResourceActivationError as exc:
-            logger.exception("V2 Plan 资源生命周期失败: plan=%s", plan.plan_id.root)
+            logger.exception(" Plan 资源生命周期失败: plan=%s", plan.plan_id.root)
             finished_result = ProtocolExecutionResult(
                 status=ExecutionStatus.FAILED,
                 passed=False,
@@ -173,7 +173,7 @@ class V2ExecutionRunner:
                 ),
             )
         except Exception as exc:  # noqa: BLE001 - execution.finished 统一失败事实
-            logger.exception("V2 Plan 执行桥接失败: plan=%s", plan.plan_id.root)
+            logger.exception(" Plan 执行桥接失败: plan=%s", plan.plan_id.root)
             finished_result = ProtocolExecutionResult(
                 status=ExecutionStatus.FAILED,
                 passed=False,
@@ -186,12 +186,12 @@ class V2ExecutionRunner:
             try:
                 await context.complete_logs()
             except Exception:
-                logger.exception("V2 execution.log_complete 发布失败: plan=%s", plan.plan_id.root)
+                logger.exception(" execution.log_complete 发布失败: plan=%s", plan.plan_id.root)
         if activated_resources and self._resource_providers is not None:
             try:
                 await self._resource_providers.deactivate(reversed(activated_resources))
             except Exception as exc:  # noqa: BLE001 - cleanup 失败记录但不吞终态
-                logger.exception("V2 Plan 资源释放失败: plan=%s error=%s", plan.plan_id.root, exc)
+                logger.exception(" Plan 资源释放失败: plan=%s error=%s", plan.plan_id.root, exc)
         finished = ExecutionFinished(
             run_id=plan.run_id,
             shard_id=plan.shard_id,
@@ -216,7 +216,7 @@ class V2ExecutionRunner:
         source_path = Path(source)
         workspace = Path(self._settings.script_cache_dir).resolve().parent / "runs"
         workspace.mkdir(parents=True, exist_ok=True)
-        target = Path(tempfile.mkdtemp(prefix="aetp-v2-run-", dir=str(workspace)))
+        target = Path(tempfile.mkdtemp(prefix="aetp-run-", dir=str(workspace)))
         try:
             if zipfile.is_zipfile(source_path):
                 extract_zip_safely(source_path, target)
@@ -237,7 +237,7 @@ class V2ExecutionRunner:
         self,
         result: AgentExecutionResult,
         plugin,
-        context: V2TaskContext,
+        context: TaskContext,
     ) -> ProtocolExecutionResult:
         status = {
             "succeeded": ExecutionStatus.SUCCEEDED,
@@ -275,7 +275,7 @@ class V2ExecutionRunner:
             }.get(status, "EXECUTION_FAILED")
             error = ProtocolExecutionError(
                 code=ErrorCode(code),
-                message=result.error or str(summary.get("error") or "V2 executor failed"),
+                message=result.error or str(summary.get("error") or " executor failed"),
             )
         return ProtocolExecutionResult(
             status=status,
@@ -354,7 +354,7 @@ class V2ExecutionRunner:
         return tuple(references)
 
     @staticmethod
-    async def _cleanup_plugin(plugin: Any, context: V2TaskContext) -> None:
+    async def _cleanup_plugin(plugin: Any, context: TaskContext) -> None:
         cleanup = getattr(plugin, "cleanup", None)
         if cleanup is None:
             return
@@ -363,4 +363,4 @@ class V2ExecutionRunner:
             await value
 
 
-__all__ = ["V2ExecutionRunner"]
+__all__ = ["ExecutionRunner"]

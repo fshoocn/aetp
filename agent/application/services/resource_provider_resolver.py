@@ -1,4 +1,4 @@
-"""Agent V2 resource 插件入口解析器。"""
+"""Agent  resource 插件入口解析器。"""
 
 from __future__ import annotations
 
@@ -13,15 +13,15 @@ from aetp_protocol.plugin_types import PluginPoint
 from aetp_protocol.plugins import PluginManifest
 from aetp_protocol.resource import ResourceProvider
 
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
 
-class V2ResourceProviderResolver:
-    """从已校验 V2 插件目录加载 resource Provider。"""
+class ResourceProviderResolver:
+    """从已校验  插件目录加载 resource Provider。"""
 
-    def __init__(self, registry: AgentV2PluginRegistry) -> None:
+    def __init__(self, registry: PluginRegistry) -> None:
         self._registry = registry
         self._loaded: dict[tuple[str, str], ResourceProvider] = {}
 
@@ -38,7 +38,7 @@ class V2ResourceProviderResolver:
                 providers.append(self.resolve(installed.ref.plugin_id.root, installed.ref.version.root))
             except Exception:
                 logger.exception(
-                    "V2 resource 插件加载失败: plugin=%s@%s",
+                    " resource 插件加载失败: plugin=%s@%s",
                     installed.ref.plugin_id.root,
                     installed.ref.version.root,
                 )
@@ -52,34 +52,34 @@ class V2ResourceProviderResolver:
             return existing
         installed = self._registry.get(plugin_id, version)
         if installed is None:
-            raise LookupError(f"V2 resource 插件未安装: {plugin_id}@{version}")
+            raise LookupError(f" resource 插件未安装: {plugin_id}@{version}")
         manifest = PluginManifest.model_validate_json(
             installed.manifest_path.read_text(encoding="utf-8")
         )
         if manifest.point is not PluginPoint.RESOURCE:
-            raise ValueError(f"V2 插件不是 resource: {plugin_id}@{version}")
+            raise ValueError(f" 插件不是 resource: {plugin_id}@{version}")
         entrypoint = manifest.entrypoints.agent
         if entrypoint is None:
-            raise ValueError("V2 resource 插件缺少 agent entrypoint")
+            raise ValueError(" resource 插件缺少 agent entrypoint")
         module_name, attribute_name = entrypoint.root.split(":", 1)
         agent_root = installed.install_path / "agent"
         module_path = (agent_root / (module_name.replace(".", "/") + ".py")).resolve()
         try:
             module_path.relative_to(agent_root.resolve())
         except ValueError as exc:
-            raise ValueError("V2 resource entrypoint 越界") from exc
+            raise ValueError(" resource entrypoint 越界") from exc
         if not module_path.is_file():
-            raise FileNotFoundError(f"V2 resource 入口文件不存在: {module_path}")
+            raise FileNotFoundError(f" resource 入口文件不存在: {module_path}")
         module = self._load_module(module_path, key)
         factory = getattr(module, attribute_name, None)
         if not callable(factory):
-            raise TypeError(f"V2 resource entrypoint 不可调用: {entrypoint.root}")
+            raise TypeError(f" resource entrypoint 不可调用: {entrypoint.root}")
         provider = factory()
         if not _is_resource_provider(provider):
-            raise TypeError("V2 resource entrypoint 未返回 ResourceProvider")
+            raise TypeError(" resource entrypoint 未返回 ResourceProvider")
         if provider.provider_id != manifest.id.root:
             raise ValueError(
-                f"V2 resource provider_id 与 Manifest 不一致: "
+                f" resource provider_id 与 Manifest 不一致: "
                 f"{provider.provider_id} != {manifest.id.root}"
             )
         self._loaded[key] = provider
@@ -87,10 +87,10 @@ class V2ResourceProviderResolver:
 
     @staticmethod
     def _load_module(path: Path, key: tuple[str, str]) -> ModuleType:
-        module_name = f"aetp_v2_resource_{key[0].replace('.', '_')}_{key[1].replace('.', '_')}"
+        module_name = f"aetp_resource_{key[0].replace('.', '_')}_{key[1].replace('.', '_')}"
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
-            raise ImportError(f"无法加载 V2 resource: {path}")
+            raise ImportError(f"无法加载  resource: {path}")
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         try:
@@ -113,4 +113,4 @@ def _is_resource_provider(value: object) -> TypeGuard[ResourceProvider]:
     )
 
 
-__all__ = ["V2ResourceProviderResolver"]
+__all__ = ["ResourceProviderResolver"]

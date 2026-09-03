@@ -1,4 +1,4 @@
-"""Agent V2 能力快照和插件可用性计算。"""
+"""Agent  能力快照和插件可用性计算。"""
 
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ from aetp_protocol.ids import BusinessId, SessionId, Version, VersionConstraint,
 from aetp_protocol.plugin_types import PluginAvailability, PluginPoint
 from aetp_protocol.plugins import PluginManifest
 
-from agent.application.services.capability_loader import scan_base_capabilities, scan_capabilities
+from agent.application.services.capability_loader import scan_base_capabilities
 from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.software_discovery import discover_software
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +98,13 @@ def evaluate_plugin_availability(
 
 
 class AgentCapabilitySnapshotService:
-    """生成 Agent 的版本化 V2 能力快照。"""
+    """生成 Agent 的版本化  能力快照。"""
 
     def __init__(
         self,
         node_id: BusinessId,
         session_id: SessionId,
-        registry: AgentV2PluginRegistry,
+        registry: PluginRegistry,
         *,
         tags: tuple[str, ...] = (),
         maintenance_state: AgentMaintenanceState = AgentMaintenanceState.IDLE,
@@ -122,12 +122,10 @@ class AgentCapabilitySnapshotService:
         self._registry = registry
         self._tags = tags
         self._maintenance_state = maintenance_state
-        self._capability_scanner = capability_scanner or (
-            scan_base_capabilities if resource_providers is not None else scan_capabilities
-        )
-        self._runtime_discoverer = runtime_discoverer or self._legacy_runtimes
-        self._software_discoverer = software_discoverer or (lambda _legacy: discover_software())
-        self._resource_discoverer = resource_discoverer or self._legacy_resources
+        self._capability_scanner = capability_scanner or scan_base_capabilities
+        self._runtime_discoverer = runtime_discoverer or self._runtime_capabilities
+        self._software_discoverer = software_discoverer or (lambda _capabilities: discover_software())
+        self._resource_discoverer = resource_discoverer or self._resource_capabilities
         self._resource_providers = resource_providers
         self._health_checker = health_checker
         self._revision_cache = revision_cache or CapabilityRevisionCache()
@@ -136,24 +134,24 @@ class AgentCapabilitySnapshotService:
     def build_snapshot(self) -> NodeCapabilitySnapshot:
         """扫描本机并构造下一版本快照。"""
         try:
-            legacy = self._capability_scanner()
+            capabilities = self._capability_scanner()
         except Exception:
-            logger.exception("Agent V2 能力扫描失败，使用空能力快照")
-            legacy = NodeCapabilities()
+            logger.exception("Agent 能力扫描失败，使用空能力快照")
+            capabilities = NodeCapabilities()
 
-        runtimes = self._runtime_discoverer(legacy)
-        software = self._software_discoverer(legacy)
-        legacy_resources = self._resource_discoverer(legacy)
-        if self._resource_providers is None:
-            resources = legacy_resources
-        else:
+        runtimes = self._runtime_discoverer(capabilities)
+        software = self._software_discoverer(capabilities)
+        discovered_resources = self._resource_discoverer(capabilities)
+        if self._resource_providers is not None:
             discovered_resources = self._resource_providers.discover()
             provider_types = self._resource_providers.resource_types
             resources = discovered_resources + tuple(
                 resource
-                for resource in legacy_resources
+                for resource in self._resource_capabilities(capabilities)
                 if resource.resource_type not in provider_types
             )
+        else:
+            resources = discovered_resources
         inventory: list[PluginInventoryItem] = []
         executors: list[ExecutorCapability] = []
         checked_at = self._now()
@@ -172,7 +170,7 @@ class AgentCapabilitySnapshotService:
                     health_errors=health_errors,
                 )
             except Exception:
-                logger.exception("V2 插件库存检查失败: %s", installed.install_path)
+                logger.exception("插件库存检查失败: %s", installed.install_path)
                 manifest = None
                 evaluation = PluginAvailabilityEvaluation(
                     PluginAvailability.ERROR,
@@ -214,7 +212,7 @@ class AgentCapabilitySnapshotService:
             runtimes=runtimes,
             software=software,
             resources=resources,
-            system=legacy.system,
+            system=capabilities.system,
             maintenance_state=self._maintenance_state,
             plugin_inventory=tuple(inventory),
         )
@@ -225,11 +223,11 @@ class AgentCapabilitySnapshotService:
         try:
             return self._health_checker(manifest)
         except Exception:
-            logger.exception("V2 插件健康检查失败: %s@%s", manifest.id.root, manifest.version.root)
+            logger.exception("插件健康检查失败: %s@%s", manifest.id.root, manifest.version.root)
             return (ErrorCode("PLUGIN_SYNC_FAILED"),)
 
-    def _legacy_runtimes(self, legacy: NodeCapabilities) -> tuple[RuntimeCapability, ...]:
-        if legacy.language is None:
+    def _runtime_capabilities(self, capabilities: NodeCapabilities) -> tuple[RuntimeCapability, ...]:
+        if capabilities.language is None:
             return ()
         return tuple(
             RuntimeCapability(
@@ -238,13 +236,13 @@ class AgentCapabilitySnapshotService:
                 runtime_type=runtime.name,
                 version=runtime.version,
             )
-            for runtime in legacy.language.runtimes
+            for runtime in capabilities.language.runtimes
         )
 
-    def _legacy_resources(self, legacy: NodeCapabilities) -> tuple[ResourceCapability, ...]:
+    def _resource_capabilities(self, capabilities: NodeCapabilities) -> tuple[ResourceCapability, ...]:
         resources: list[ResourceCapability] = []
-        if legacy.vehicle is not None:
-            for vendor in legacy.vehicle.vendors:
+        if capabilities.vehicle is not None:
+            for vendor in capabilities.vehicle.vendors:
                 for bus in vendor.buses:
                     for channel in bus.channels:
                         resources.append(
@@ -265,8 +263,8 @@ class AgentCapabilitySnapshotService:
                                 ),
                             )
                         )
-        if legacy.serial is not None:
-            for port in legacy.serial.ports:
+        if capabilities.serial is not None:
+            for port in capabilities.serial.ports:
                 resources.append(
                     ResourceCapability(
                         resource_id=stable_id(f"{self._node_id.root}:serial:{port.function}:{port.port}"),

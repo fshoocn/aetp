@@ -35,7 +35,7 @@ class AgentRun:
     status: AgentRunStatus = AgentRunStatus.CLAIMED
     cancelled: bool = False
     result_summary: dict = field(default_factory=dict)
-    # sym:device_ids 本次 Run 占用的物理设备集合（来自 run.assign.device_allocations）
+    # sym:device_ids 本次 Run 占用的物理设备集合（来自 execution.plan.resource_bindings）
     # 用于心跳汇总「谁占了哪个口」并上报给 Master（§9.8 占用状态）。
     device_ids: list[str] = field(default_factory=list)
     last_progress_sequence: int = 0
@@ -112,9 +112,9 @@ class Ledger(Protocol):
     ) -> bool:
         """原子 claim：首次（或新 attempt）返回 True；重复派发返回 False。
 
-        ``device_ids`` 记录本次 Run 占用的物理设备集合（随 run.assign 下发），
+        ``device_ids`` 记录本次 Run 占用的物理设备集合（随 execution.plan 下发），
         供心跳汇总占用状态上报 Master。
-        ``plan_id`` 记录 V2 execution.plan 身份；旧 V1 调用可省略。
+        ``plan_id`` 记录 execution.plan 身份。
         """
         ...
 
@@ -131,7 +131,7 @@ class Ledger(Protocol):
         ...
 
     def list_reconcile_runs(self) -> list[AgentRun]:
-        """返回带 V2 Plan 身份的本地执行记录，供重连对账。"""
+        """返回带  Plan 身份的本地执行记录，供重连对账。"""
         ...
 
     def record_inbox(self, origin_id: str, message_id: str, message_type: str) -> bool:

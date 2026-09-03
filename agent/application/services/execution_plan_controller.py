@@ -1,4 +1,4 @@
-"""Agent V2 execution.plan 预检和 ACK 控制器。"""
+"""Agent  execution.plan 预检和 ACK 控制器。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from aetp_protocol.capabilities import AgentMaintenanceState
+from aetp_protocol.envelope import Envelope, parse_message
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ExecutionPlan
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, stable_id
@@ -15,21 +16,20 @@ from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ExecutionAck, ExecutionCancel
 from aetp_protocol.plan_hash import calculate_plan_hash
 from aetp_protocol.topics import (
-    parse_v2_topic,
-    v2_command_topic,
-    validate_message_type_for_v2_topic,
-    validate_sender_for_v2_topic,
+    command_topic,
+    parse_topic,
+    validate_message_type_for_topic,
+    validate_sender_for_topic,
 )
-from aetp_protocol.v2_envelope import V2Envelope, parse_v2_message
 
+from agent.application.services.capability_publisher import CapabilityPublisher
+from agent.application.services.execution_runner import ExecutionRunner
 from agent.application.services.execution_service import ExecutionService
+from agent.application.services.lease_renewal_service import LeaseRenewalService
 from agent.application.services.script_cache_service import ScriptCacheError, ScriptCacheService
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
-from agent.application.services.v2_execution_runner import V2ExecutionRunner
-from agent.application.services.v2_lease_renewal_service import AgentV2LeaseRenewalService
 from agent.domain.enums import AgentRunStatus
 from agent.domain.ledger import Ledger
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 from common.transport import MqttMessage
 
 _PLAN_INVALID = ErrorCode("EXECUTION_PLAN_INVALID")
@@ -41,22 +41,22 @@ _STALE_ATTEMPT = ErrorCode("STALE_ATTEMPT")
 _AGENT_MAINTENANCE = ErrorCode("AGENT_MAINTENANCE")
 
 
-class AgentV2ExecutionPlanController:
-    """只接受通过全部固定引用校验的 V2 Plan，不在 M3 执行插件代码。"""
+class ExecutionPlanController:
+    """只接受通过全部固定引用校验的  Plan，不在 M3 执行插件代码。"""
 
     def __init__(
         self,
         node_id: BusinessId,
         ledger: Ledger,
-        publisher: AgentV2CapabilityPublisher,
-        registry: AgentV2PluginRegistry,
+        publisher: CapabilityPublisher,
+        registry: PluginRegistry,
         *,
         script_cache: ScriptCacheService | None = None,
         is_registered: Callable[[], bool] | None = None,
         master_id: str = "aetp-master",
         now: Callable[[], datetime] | None = None,
-        lease_renewal: AgentV2LeaseRenewalService | None = None,
-        execution_runner: V2ExecutionRunner | None = None,
+        lease_renewal: LeaseRenewalService | None = None,
+        execution_runner: ExecutionRunner | None = None,
         execution_service: ExecutionService | None = None,
     ) -> None:
         self._node_id = node_id
@@ -73,25 +73,25 @@ class AgentV2ExecutionPlanController:
 
     def command_topic(self) -> str:
         """返回本节点 execution.plan 命令主题。"""
-        return v2_command_topic(self._node_id.root, "execution.plan")
+        return command_topic(self._node_id.root, "execution.plan")
 
     def cancel_command_topic(self) -> str:
         """返回本节点 execution.cancel 命令主题。"""
-        return v2_command_topic(self._node_id.root, "execution.cancel")
+        return command_topic(self._node_id.root, "execution.cancel")
 
     async def handle_cancel(self, message: MqttMessage, session_id: SessionId) -> bool:
         """校验 execution.cancel 并触发本地取消请求。"""
         try:
-            topic = parse_v2_topic(message.topic)
+            topic = parse_topic(message.topic)
             if (
                 topic.direction != "commands"
                 or topic.node_id != self._node_id.root
                 or topic.segment != "execution.cancel"
             ):
                 return False
-            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
-            validate_sender_for_v2_topic(message.topic, envelope.sender)
-            validate_message_type_for_v2_topic(
+            envelope, payload = parse_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(
                 message.topic,
                 MessageType(envelope.message_type),
             )
@@ -119,14 +119,14 @@ class AgentV2ExecutionPlanController:
             return False
 
     async def handle(self, message: MqttMessage, session_id: SessionId) -> bool:
-        """预检并 ACK 一条 execution.plan；合法 V2 消息均视为已消费。"""
+        """预检并 ACK 一条 execution.plan；合法  消息均视为已消费。"""
         parsed = self._parse_plan(message)
         if parsed is None:
             return False
         envelope, plan = parsed
 
         if not self._is_registered():
-            await self._reject(plan, session_id, envelope.message_id, _STALE_SESSION, "V2 节点尚未注册")
+            await self._reject(plan, session_id, envelope.message_id, _STALE_SESSION, " 节点尚未注册")
             return True
         if plan.node_id != self._node_id or plan.target_session_id != session_id:
             await self._reject(plan, session_id, envelope.message_id, _STALE_SESSION, "Plan 目标 session 不匹配")
@@ -212,18 +212,18 @@ class AgentV2ExecutionPlanController:
             )
         return True
 
-    def _parse_plan(self, message: MqttMessage) -> tuple[V2Envelope, ExecutionPlan] | None:
+    def _parse_plan(self, message: MqttMessage) -> tuple[Envelope, ExecutionPlan] | None:
         try:
-            topic = parse_v2_topic(message.topic)
+            topic = parse_topic(message.topic)
             if (
                 topic.direction != "commands"
                 or topic.node_id != self._node_id.root
                 or topic.segment != "execution.plan"
             ):
                 return None
-            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
-            validate_sender_for_v2_topic(message.topic, envelope.sender)
-            validate_message_type_for_v2_topic(
+            envelope, payload = parse_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(
                 message.topic,
                 MessageType(envelope.message_type),
             )
@@ -314,4 +314,4 @@ class AgentV2ExecutionPlanController:
         )
 
 
-__all__ = ["AgentV2ExecutionPlanController"]
+__all__ = ["ExecutionPlanController"]

@@ -1,4 +1,4 @@
-"""Agent V2 Lease 续租请求和回执处理。"""
+"""Agent  Lease 续租请求和回执处理。"""
 
 from __future__ import annotations
 
@@ -6,18 +6,18 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from aetp_protocol.envelope import parse_message
 from aetp_protocol.execution import ExecutionPlan
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import LeaseRenewed, LeaseRenewRequest
 from aetp_protocol.topics import (
-    parse_v2_topic,
-    validate_message_type_for_v2_topic,
-    validate_sender_for_v2_topic,
+    parse_topic,
+    validate_message_type_for_topic,
+    validate_sender_for_topic,
 )
-from aetp_protocol.v2_envelope import parse_v2_message
 
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.domain.ledger import Ledger
 from common.transport import MqttMessage
 
@@ -30,14 +30,14 @@ class _LeaseState:
     pending_message_id: MessageId | None = None
 
 
-class AgentV2LeaseRenewalService:
+class LeaseRenewalService:
     """维护已接受 Plan 的 Lease revision，并按 TTL 发送续租请求。"""
 
     def __init__(
         self,
         node_id: BusinessId,
         ledger: Ledger,
-        publisher: AgentV2CapabilityPublisher,
+        publisher: CapabilityPublisher,
         *,
         master_id: str = "aetp-master",
         renewal_lead_s: int = 15,
@@ -106,16 +106,16 @@ class AgentV2LeaseRenewalService:
     def handle_renewed(self, message: MqttMessage, session_id: SessionId) -> bool:
         """处理 Master 的 lease.renewed 命令并更新当前 revision。"""
         try:
-            topic = parse_v2_topic(message.topic)
+            topic = parse_topic(message.topic)
             if (
                 topic.direction != "commands"
                 or topic.node_id != self._node_id.root
                 or topic.segment != "lease.renewed"
             ):
                 return False
-            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
-            validate_sender_for_v2_topic(message.topic, envelope.sender)
-            validate_message_type_for_v2_topic(
+            envelope, payload = parse_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(
                 message.topic,
                 MessageType(envelope.message_type),
             )
@@ -149,4 +149,4 @@ class AgentV2LeaseRenewalService:
         return state.revision if state is not None else None
 
 
-__all__ = ["AgentV2LeaseRenewalService"]
+__all__ = ["LeaseRenewalService"]

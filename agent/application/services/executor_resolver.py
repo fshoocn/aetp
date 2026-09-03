@@ -1,4 +1,4 @@
-"""Agent V2 executor entrypoint 解析器。"""
+"""Agent  executor entrypoint 解析器。"""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ from aetp_protocol.execution import ExecutionPlan
 from aetp_protocol.plugin_types import PluginPoint
 from aetp_protocol.plugins import PluginManifest
 
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 
 
-class V2ExecutorResolver:
-    """从已校验 V2 插件目录加载精确 executor 版本。"""
+class ExecutorResolver:
+    """从已校验  插件目录加载精确 executor 版本。"""
 
-    def __init__(self, registry: AgentV2PluginRegistry) -> None:
+    def __init__(self, registry: PluginRegistry) -> None:
         self._registry = registry
         self._loaded: dict[tuple[str, str], object] = {}
 
@@ -29,39 +29,39 @@ class V2ExecutorResolver:
             return existing
         installed = self._registry.get(*key)
         if installed is None:
-            raise LookupError(f"V2 executor 未安装: {key[0]}@{key[1]}")
+            raise LookupError(f" executor 未安装: {key[0]}@{key[1]}")
         manifest = PluginManifest.model_validate_json(installed.manifest_path.read_text(encoding="utf-8"))
         if manifest.point is not PluginPoint.EXECUTOR:
-            raise ValueError(f"V2 插件不是 executor: {key[0]}@{key[1]}")
+            raise ValueError(f" 插件不是 executor: {key[0]}@{key[1]}")
         entrypoint = manifest.entrypoints.agent
         if entrypoint is None:
-            raise ValueError("V2 executor 缺少 agent entrypoint")
+            raise ValueError(" executor 缺少 agent entrypoint")
         module_name, attribute_name = entrypoint.root.split(":", 1)
         agent_root = installed.install_path / "agent"
         module_path = (agent_root / (module_name.replace(".", "/") + ".py")).resolve()
         try:
             module_path.relative_to(agent_root.resolve())
         except ValueError as exc:
-            raise ValueError("V2 executor entrypoint 越界") from exc
+            raise ValueError(" executor entrypoint 越界") from exc
         module = self._load_module(module_path, key)
         factory = getattr(module, attribute_name, None)
         if not callable(factory):
-            raise TypeError(f"V2 executor entrypoint 不可调用: {entrypoint.root}")
+            raise TypeError(f" executor entrypoint 不可调用: {entrypoint.root}")
         executor = factory()
         if executor is None or not callable(getattr(executor, "execute", None)):
-            raise TypeError("V2 executor entrypoint 未返回可执行对象")
+            raise TypeError(" executor entrypoint 未返回可执行对象")
         version = getattr(executor, "plugin_version", None)
         if version is not None and version != plan.executor.version.root:
-            raise ValueError("V2 executor 版本与 Plan 不一致")
+            raise ValueError(" executor 版本与 Plan 不一致")
         self._loaded[key] = executor
         return executor
 
     @staticmethod
     def _load_module(path: Path, key: tuple[str, str]) -> ModuleType:
-        module_name = f"aetp_v2_executor_{key[0].replace('.', '_')}_{key[1].replace('.', '_')}"
+        module_name = f"aetp_executor_{key[0].replace('.', '_')}_{key[1].replace('.', '_')}"
         spec = importlib.util.spec_from_file_location(module_name, path)
         if spec is None or spec.loader is None:
-            raise ImportError(f"无法加载 V2 executor: {path}")
+            raise ImportError(f"无法加载  executor: {path}")
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         try:
@@ -72,4 +72,4 @@ class V2ExecutorResolver:
         return module
 
 
-__all__ = ["V2ExecutorResolver"]
+__all__ = ["ExecutorResolver"]

@@ -1,4 +1,4 @@
-"""Agent V2 插件同步消息控制器。"""
+"""Agent  插件同步消息控制器。"""
 
 from __future__ import annotations
 
@@ -7,38 +7,38 @@ import json
 from collections.abc import Awaitable, Callable
 
 from aetp_protocol.capabilities import AgentMaintenanceState
+from aetp_protocol.envelope import Envelope, parse_message
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.ids import BusinessId, SessionId, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.plugins import PluginSyncItemResult, PluginSyncRequest, PluginSyncResult
 from aetp_protocol.topics import (
-    parse_v2_topic,
-    v2_command_topic,
-    validate_message_type_for_v2_topic,
-    validate_sender_for_v2_topic,
+    command_topic,
+    parse_topic,
+    validate_message_type_for_topic,
+    validate_sender_for_topic,
 )
-from aetp_protocol.v2_envelope import V2Envelope, parse_v2_message
 
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.application.services.plugin_sync_service import (
     AgentPluginSyncService,
-    V2PluginInstallPort,
+    PluginInstallPort,
 )
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.domain.ledger import Ledger
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 from common.transport import MqttMessage
 
 
-class AgentV2PluginSyncController:
-    """校验并执行 Master 下发的 V2 插件同步命令。"""
+class PluginSyncController:
+    """校验并执行 Master 下发的  插件同步命令。"""
 
     def __init__(
         self,
         node_id: BusinessId,
         ledger: Ledger,
-        installer: V2PluginInstallPort,
-        registry: AgentV2PluginRegistry,
-        publisher: AgentV2CapabilityPublisher,
+        installer: PluginInstallPort,
+        registry: PluginRegistry,
+        publisher: CapabilityPublisher,
         *,
         active_attempt_count: Callable[[], int] | None = None,
         master_id: str = "aetp-master",
@@ -58,14 +58,14 @@ class AgentV2PluginSyncController:
 
     def command_topic(self) -> str:
         """返回本节点插件同步命令主题。"""
-        return v2_command_topic(self._node_id.root, "agent.plugin.sync")
+        return command_topic(self._node_id.root, "agent.plugin.sync")
 
     def reset_session(self) -> None:
         """切换 session 时清除当前进程内的同步结果缓存。"""
         self._results.clear()
 
     async def handle(self, message: MqttMessage, session_id: SessionId) -> bool:
-        """处理一条 V2 同步命令，成功消费返回 True。"""
+        """处理一条  同步命令，成功消费返回 True。"""
         request_message = self._parse_request(message)
         if request_message is None:
             return False
@@ -186,18 +186,18 @@ class AgentV2PluginSyncController:
         if result is not None:
             await result
 
-    def _parse_request(self, message: MqttMessage) -> tuple[V2Envelope, PluginSyncRequest] | None:
+    def _parse_request(self, message: MqttMessage) -> tuple[Envelope, PluginSyncRequest] | None:
         try:
-            topic = parse_v2_topic(message.topic)
+            topic = parse_topic(message.topic)
             if (
                 topic.direction != "commands"
                 or topic.node_id != self._node_id.root
                 or topic.segment != "agent.plugin.sync"
             ):
                 return None
-            envelope, payload = parse_v2_message(json.loads(message.payload.decode("utf-8")))
-            validate_sender_for_v2_topic(message.topic, envelope.sender)
-            validate_message_type_for_v2_topic(
+            envelope, payload = parse_message(json.loads(message.payload.decode("utf-8")))
+            validate_sender_for_topic(message.topic, envelope.sender)
+            validate_message_type_for_topic(
                 message.topic,
                 MessageType(envelope.message_type),
             )
@@ -250,4 +250,4 @@ class AgentV2PluginSyncController:
         )
 
 
-__all__ = ["AgentV2PluginSyncController"]
+__all__ = ["PluginSyncController"]

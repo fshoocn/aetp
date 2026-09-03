@@ -1,4 +1,4 @@
-"""Agent V2 插件同步应用服务。"""
+"""Agent  插件同步应用服务。"""
 
 from __future__ import annotations
 
@@ -10,26 +10,26 @@ from aetp_protocol.plugin_types import PluginDistributionRef, PluginSyncAction
 from aetp_protocol.plugins import PluginSyncItem, PluginSyncItemResult, PluginSyncRequest, PluginSyncResult
 
 from agent.plugins.errors import PluginInstallError
-from agent.plugins.v2_installer import InstalledV2Plugin
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.installer import InstalledPlugin
+from agent.plugins.registry import PluginRegistry
 
 
-class V2PluginInstallPort(Protocol):
-    """Agent V2 插件安装端口。"""
+class PluginInstallPort(Protocol):
+    """Agent  插件安装端口。"""
 
-    def install(self, package: PluginDistributionRef) -> InstalledV2Plugin: ...
+    def install(self, package: PluginDistributionRef) -> InstalledPlugin: ...
 
     def remove(self, plugin_id: PluginId, version: SemVer) -> None: ...
 
 
 class AgentPluginSyncService:
-    """执行 Master 下发的 V2 插件同步请求。"""
+    """执行 Master 下发的  插件同步请求。"""
 
     def __init__(
         self,
-        installer: V2PluginInstallPort,
+        installer: PluginInstallPort,
         current_session_id: SessionId,
-        registry: AgentV2PluginRegistry | None = None,
+        registry: PluginRegistry | None = None,
     ) -> None:
         self._installer = installer
         self._current_session_id = current_session_id

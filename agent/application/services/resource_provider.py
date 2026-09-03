@@ -1,4 +1,4 @@
-"""Agent V2 ResourceProvider SPI 的注册与生命周期编排。"""
+"""Agent  ResourceProvider SPI 的注册与生命周期编排。"""
 
 from __future__ import annotations
 
