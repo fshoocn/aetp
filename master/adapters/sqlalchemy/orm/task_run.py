@@ -25,7 +25,6 @@ from .base import Base, JSONType, TimestampMixin, UTCDateTime
 
 if TYPE_CHECKING:
     from .project import Project
-    from .test_task import TestTask
     from .user import User
 
 
@@ -34,7 +33,7 @@ class TaskRun(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_task_runs_project_status_created", "project_pk", "status", "created_at"),
         Index("ix_task_runs_project_trigger_created", "project_pk", "trigger_type", "created_at"),
-        Index("ix_task_runs_task_created", "task_pk", "created_at"),
+        Index("ix_task_runs_task_created", "task_id", "created_at"),
         CheckConstraint(
             "trigger_type IN ('manual_web','api','schedule','ci_webhook','retry','recovery')",
             name="ck_task_runs_trigger_type",
@@ -49,16 +48,11 @@ class TaskRun(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # sym:run_id Run 业务标识（ULID），全局唯一，对外暴露
     run_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    # sym:task_id V2 任务业务标识；旧 Run 可由 task_pk 关系解析
-    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # sym:task_id 任务业务标识
+    task_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     # sym:project_pk 所属项目代理主键（Run 的 project 必须与任务定义一致）
     project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
-    # sym:task_pk 引用的任务定义代理主键（只引用不复制，FK RESTRICT）
-    # nullable: 任务定义删除后置空，Run 依赖自身快照仍可展示历史
-    task_pk: Mapped[int | None] = mapped_column(
-        ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=True, index=True
-    )
-    # sym:task_revision V2 任务 revision
+    # sym:task_revision 任务 revision
     task_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # sym:script_ref 脚本引用快照 {script_id, version, sha256}（§7.5）
     script_ref: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
@@ -66,8 +60,8 @@ class TaskRun(Base, TimestampMixin):
     case_selection: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # sym:split_policy 本次 Run 的分割策略快照（§18.6）
     split_policy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
-    # sym:task_snapshot V2 Run 的不可变完整 Snapshot
-    task_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSONType, nullable=True)
+    # sym:task_snapshot Run 的不可变完整 Snapshot
+    task_snapshot: Mapped[dict[str, object]] = mapped_column(JSONType, nullable=False)
     # sym:trigger_type 触发来源（manual_web/api/schedule/ci_webhook/retry/recovery）
     trigger_type: Mapped[str] = mapped_column(String(16), nullable=False, default=TriggerType.MANUAL_WEB.value)
     # sym:triggered_by_user_pk 触发用户代理主键（系统触发时为空）
@@ -89,7 +83,5 @@ class TaskRun(Base, TimestampMixin):
 
     # sym:project 所属项目 ORM 关系
     project: Mapped[Project] = relationship()
-    # sym:task 引用的任务定义 ORM 关系
-    task: Mapped[TestTask] = relationship()
     # sym:triggered_by_user 触发用户 ORM 关系
     triggered_by_user: Mapped[User | None] = relationship()

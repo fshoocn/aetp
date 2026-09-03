@@ -1,25 +1,23 @@
-"""SQLAlchemy 任务调度计划仓储实现。"""
+"""任务调度计划仓储实现。"""
 
 from __future__ import annotations
 
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from master.adapters.sqlalchemy.orm import TaskSchedule as ScheduleORM
-from master.adapters.sqlalchemy.orm import TestTask as TaskORM
 from master.domain.models.task_schedule import TaskSchedule
 from master.domain.repositories import TaskScheduleRepository
 
 
 def _to_domain(orm: ScheduleORM) -> TaskSchedule:
-    task = orm.task
     return TaskSchedule(
         id=orm.id,
         schedule_id=orm.schedule_id,
-        task_id=task.task_id if task is not None else "",
-        project_id=task.project.project_id if task is not None and task.project is not None else "",
+        task_id=orm.task_id,
+        project_id=orm.project_id,
         cron_expression=orm.cron_expression,
         interval_seconds=orm.interval_seconds,
         timezone=orm.timezone,
@@ -36,43 +34,35 @@ class TaskScheduleRepositoryImpl(TaskScheduleRepository):
         self._s = session
 
     def get_by_schedule_id(self, schedule_id: str) -> TaskSchedule | None:
-        orm = (
-            self._s.execute(
-                select(ScheduleORM).options(joinedload(ScheduleORM.task)).where(ScheduleORM.schedule_id == schedule_id)
-            )
-            .scalars()
-            .one_or_none()
-        )
+        orm = self._s.execute(
+            select(ScheduleORM).where(ScheduleORM.schedule_id == schedule_id)
+        ).scalars().one_or_none()
         return _to_domain(orm) if orm is not None else None
 
     def list_by_task(self, task_id: str) -> list[TaskSchedule]:
-        stmt = (
+        statement = (
             select(ScheduleORM)
-            .options(joinedload(ScheduleORM.task))
-            .where(ScheduleORM.task_pk == select(TaskORM.id).where(TaskORM.task_id == task_id).scalar_subquery())
+            .where(ScheduleORM.task_id == task_id)
             .order_by(ScheduleORM.id)
         )
-        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+        return [_to_domain(orm) for orm in self._s.execute(statement).scalars().all()]
 
     def list_due(self, *, now: datetime, limit: int = 100) -> list[TaskSchedule]:
-        stmt = (
+        statement = (
             select(ScheduleORM)
-            .options(joinedload(ScheduleORM.task))
             .where(ScheduleORM.enabled.is_(True))
             .where(ScheduleORM.next_run_at.is_not(None))
             .where(ScheduleORM.next_run_at <= now)
             .order_by(ScheduleORM.next_run_at)
             .limit(limit)
         )
-        return [_to_domain(o) for o in self._s.execute(stmt).scalars().all()]
+        return [_to_domain(orm) for orm in self._s.execute(statement).scalars().all()]
 
     def add(self, schedule: TaskSchedule) -> TaskSchedule:
-        task_pk = self._s.execute(select(TaskORM.id).where(TaskORM.task_id == schedule.task_id)).scalar_one_or_none()
-        if task_pk is None:
-            raise ValueError(f"任务定义不存在: {schedule.task_id}")
         orm = ScheduleORM(
             schedule_id=schedule.schedule_id,
-            task_pk=task_pk,
+            task_id=schedule.task_id,
+            project_id=schedule.project_id,
             cron_expression=schedule.cron_expression,
             interval_seconds=schedule.interval_seconds,
             timezone=schedule.timezone,
@@ -100,7 +90,9 @@ class TaskScheduleRepositoryImpl(TaskScheduleRepository):
         return _to_domain(orm)
 
     def delete(self, schedule_id: str) -> None:
-        orm = self._s.execute(select(ScheduleORM).where(ScheduleORM.schedule_id == schedule_id)).scalars().one_or_none()
+        orm = self._s.execute(
+            select(ScheduleORM).where(ScheduleORM.schedule_id == schedule_id)
+        ).scalars().one_or_none()
         if orm is None:
             raise ValueError(f"调度计划不存在: {schedule_id}")
         self._s.delete(orm)

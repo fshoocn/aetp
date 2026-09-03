@@ -1,4 +1,4 @@
-"""ORM：V2 ResourceLease 和活跃资源独占约束。"""
+"""ORM： ResourceLease 和活跃资源独占约束。"""
 
 from __future__ import annotations
 

@@ -41,7 +41,7 @@ class TaskRun:
     project_id: str = ""
     # sym:task_id 引用的任务定义业务标识（不复制定义，只引用）
     task_id: str = ""
-    # sym:task_revision V2 任务 revision；V1 Run 为空
+    # sym:task_revision 任务 revision
     task_revision: int | None = None
     # sym:script_ref 脚本引用快照 {script_id, version, sha256}（§7.5）
     script_ref: dict = field(default_factory=dict)
@@ -49,7 +49,7 @@ class TaskRun:
     case_selection: list[str] = field(default_factory=list)
     # sym:split_policy 本次 Run 的分割策略快照（§18.6）
     split_policy: dict = field(default_factory=dict)
-    # sym:snapshot V2 TestTask 的不可变完整快照；V1 Run 为空
+    # sym:snapshot TestTask 的不可变完整快照
     snapshot: RunSnapshot | None = None
     # sym:trigger_type 触发来源（manual_web/api/schedule/ci_webhook/retry/recovery，§18.7）
     trigger_type: TriggerType = TriggerType.MANUAL_WEB
@@ -90,7 +90,7 @@ class RunShard:
     shard_id: str = ""
     # sym:run_id 所属 Run 业务标识
     run_id: str = ""
-    # sym:script_binding_id V2 任务脚本绑定；V1 Shard 为空
+    # sym:script_binding_id 任务脚本绑定
     script_binding_id: str = ""
     # sym:shard_index Run 内序号；(run_pk, shard_index) 唯一
     shard_index: int = 0
@@ -137,13 +137,13 @@ class ShardAttempt:
     error_code: str | None = None
     # sym:error_message 失败描述（历史失败信息全量保留，D-20）
     error_message: str | None = None
-    # sym:last_progress_sequence V2 进度序号，低于已确认序号的消息丢弃
+    # sym:last_progress_sequence  进度序号，低于已确认序号的消息丢弃
     last_progress_sequence: int = 0
-    # sym:log_complete V2 Attempt 日志围栏
+    # sym:log_complete  Attempt 日志围栏
     log_complete: bool = False
-    # sym:last_log_sequence V2 Attempt 最后日志序号
+    # sym:last_log_sequence  Attempt 最后日志序号
     last_log_sequence: int = 0
-    # sym:log_entry_count V2 Attempt 已声明日志条数
+    # sym:log_entry_count  Attempt 已声明日志条数
     log_entry_count: int = 0
     # sym:started_at 开始执行时间
     started_at: datetime | None = None
@@ -173,7 +173,7 @@ class RunCaseResult:
     case_key: str = ""
     # sym:attempt_no 关联的派发尝试序号
     attempt_no: int = 1
-    # sym:sequence V2 case-status 序号；V1 最终结果默认为 0
+    # sym:sequence case-status 序号
     sequence: int = 0
     # sym:status case 结果状态（passed/failed/skipped/error/...）
     status: CaseStatus = CaseStatus.PENDING
@@ -206,7 +206,7 @@ class RunArtifact:
     shard_id: str | None = None
     # sym:node_id 上传节点业务 ID
     node_id: str | None = None
-    # sym:attempt_id V2 Attempt 来源
+    # sym:attempt_id  Attempt 来源
     attempt_id: str | None = None
     # sym:kind 产物类型（report/log_archive/data）
     kind: ArtifactKind = ArtifactKind.REPORT

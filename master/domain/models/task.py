@@ -1,4 +1,4 @@
-"""V2 ScriptDefinition 和 TestTask revision 持久化记录。"""
+"""ScriptDefinition 和 TestTask revision 持久化记录。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class ScriptDefinitionRecord:
 
 
 @dataclass(frozen=True)
-class V2TestTaskRecord:
+class TestTaskRecord:
     id: int | None
     task: TestTask
     created_by: int

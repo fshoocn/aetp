@@ -56,7 +56,7 @@ class RunCaseResult(Base, TimestampMixin):
     case_key: Mapped[str] = mapped_column(String(256), nullable=False)
     # sym:attempt_no 关联的派发尝试序号
     attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    # sym:sequence V2 case-status 序号；V1 最终结果为 0
+    # sym:sequence case-status 序号
     sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # sym:status case 结果状态（passed/failed/skipped/error/...）
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=CaseStatus.PENDING.value)

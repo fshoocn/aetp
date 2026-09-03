@@ -23,11 +23,7 @@ class EventSubscription(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    task_pk: Mapped[int | None] = mapped_column(
-        ForeignKey("test_tasks.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
+    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     event_types: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     filter_json: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     throttle_policy: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
@@ -36,4 +32,3 @@ class EventSubscription(Base, TimestampMixin):
 
     project = relationship("Project", lazy="joined")
     endpoint = relationship("NotificationEndpoint", lazy="joined")
-    task = relationship("TestTask", lazy="joined")

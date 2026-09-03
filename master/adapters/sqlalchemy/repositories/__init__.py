@@ -42,15 +42,12 @@ from .run_extension_result_repository import RunExtensionResultRepositoryImpl
 from .run_log_repository import RunLogRepositoryImpl
 from .run_result_repository import RunResultRepositoryImpl
 from .run_shard_repository import RunShardRepositoryImpl
-from .script_case_repository import ScriptCaseRepositoryImpl
 from .secret_value_repository import SecretValueRepositoryImpl
 from .shard_attempt_repository import ShardAttemptRepositoryImpl
+from .task_repository import ScriptDefinitionRepositoryImpl, TestTaskRepositoryImpl
 from .task_run_repository import TaskRunRepositoryImpl
 from .task_schedule_repository import TaskScheduleRepositoryImpl
-from .test_script_repository import TestScriptRepositoryImpl
-from .test_task_repository import TestTaskRepositoryImpl
 from .user_repository import UserRepositoryImpl
-from .v2_task_repository import ScriptDefinitionRepositoryImpl, V2TestTaskRepositoryImpl
 
 __all__ = [
     "AuditLogRepositoryImpl",
@@ -88,14 +85,12 @@ __all__ = [
     "RunExtensionResultRepositoryImpl",
     "RunResultRepositoryImpl",
     "RunShardRepositoryImpl",
-    "ScriptCaseRepositoryImpl",
     "SecretValueRepositoryImpl",
     "ShardAttemptRepositoryImpl",
     "TaskRunRepositoryImpl",
     "TaskScheduleRepositoryImpl",
-    "TestScriptRepositoryImpl",
     "TestTaskRepositoryImpl",
     "UserRepositoryImpl",
     "ScriptDefinitionRepositoryImpl",
-    "V2TestTaskRepositoryImpl",
+    "TestTaskRepositoryImpl",
 ]

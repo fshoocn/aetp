@@ -1,4 +1,4 @@
-"""V2 ExecutionRequirement 合并和插件版本解析。"""
+""" ExecutionRequirement 合并和插件版本解析。"""
 
 from __future__ import annotations
 

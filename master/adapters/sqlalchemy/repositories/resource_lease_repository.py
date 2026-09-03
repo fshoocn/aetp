@@ -1,4 +1,4 @@
-"""V2 ResourceLease 仓储实现和条件更新。"""
+""" ResourceLease 仓储实现和条件更新。"""
 
 from __future__ import annotations
 

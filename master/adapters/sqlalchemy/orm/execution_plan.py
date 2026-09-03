@@ -1,4 +1,4 @@
-"""ORM：V2 ExecutionPlan 不可变快照。"""
+"""ORM： ExecutionPlan 不可变快照。"""
 
 from __future__ import annotations
 

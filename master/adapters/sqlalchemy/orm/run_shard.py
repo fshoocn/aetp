@@ -43,7 +43,7 @@ class RunShard(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # sym:shard_id Shard 业务标识（ULID），全局唯一
     shard_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    # sym:script_binding_id V2 任务脚本绑定；V1 Shard 为空
+    # sym:script_binding_id 任务脚本绑定
     script_binding_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     # sym:run_pk 所属 Run 代理主键（Run 删除时级联清理）
     run_pk: Mapped[int] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True)

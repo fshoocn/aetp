@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Boolean, CheckConstraint, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin, UTCDateTime
 
@@ -27,12 +27,11 @@ class TaskSchedule(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     schedule_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    task_pk: Mapped[int] = mapped_column(ForeignKey("test_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     cron_expression: Mapped[str | None] = mapped_column(String(128), nullable=True)
     interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     next_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
-
-    task = relationship("TestTask", lazy="joined")

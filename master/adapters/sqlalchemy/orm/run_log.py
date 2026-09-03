@@ -47,9 +47,9 @@ class RunLog(Base, TimestampMixin):
     shard_pk: Mapped[int | None] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True)
     # sym:node_id 产生日志的 Agent 节点业务 ID（无 FK 保留业务键）
     node_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    # sym:attempt_id V2 日志所属 Attempt；V1 日志使用空字符串
+    # sym:attempt_id 日志所属 Attempt
     attempt_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    # sym:plan_id V2 日志所属 Plan；V1 日志为空
+    # sym:plan_id 日志所属 Plan
     plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:sequence Run 内单调递增序号；(run_pk, sequence) 唯一
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)

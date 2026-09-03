@@ -1,4 +1,4 @@
-"""SQLAlchemy Run 执行仓储实现（P3.4，task_runs 表）。"""
+"""TaskRun 仓储实现。"""
 
 from __future__ import annotations
 
@@ -8,22 +8,18 @@ from sqlalchemy.orm import Session, joinedload
 
 from master.adapters.sqlalchemy.orm import Project as ProjectORM
 from master.adapters.sqlalchemy.orm import TaskRun as TaskRunORM
-from master.adapters.sqlalchemy.orm import TestTask as TestTaskORM
 from master.adapters.sqlalchemy.orm import User as UserORM
 from master.domain.enums import RunStatus, TriggerType
 from master.domain.models import TaskRun
 from master.domain.repositories import TaskRunRepository
 
 
-def _to_domain(orm: TaskRunORM, *, include_legacy_task: bool = True) -> TaskRun:
-    task_id = orm.task_id or ""
-    if include_legacy_task and orm.task is not None:
-        task_id = orm.task.task_id
+def _to_domain(orm: TaskRunORM) -> TaskRun:
     return TaskRun(
         id=orm.id,
         run_id=orm.run_id,
         project_id=orm.project.project_id if orm.project is not None else "",
-        task_id=task_id,
+        task_id=orm.task_id or "",
         task_revision=orm.task_revision,
         script_ref=dict(orm.script_ref or {}),
         case_selection=list(orm.case_selection or []),
@@ -44,34 +40,22 @@ def _to_domain(orm: TaskRunORM, *, include_legacy_task: bool = True) -> TaskRun:
 
 
 class TaskRunRepositoryImpl(TaskRunRepository):
-    def __init__(self, session: Session, *, include_legacy_task: bool = True) -> None:
+    def __init__(self, session: Session) -> None:
         self._s = session
-        self._include_legacy_task = include_legacy_task
 
-    def _options(self):
-        options = [joinedload(TaskRunORM.project)]
-        if self._include_legacy_task:
-            options.append(joinedload(TaskRunORM.task))
-        return options
+    @staticmethod
+    def _options():
+        return [joinedload(TaskRunORM.project)]
 
     def add(self, run: TaskRun) -> TaskRun:
-        # Resolve project_pk
         project_pk = self._s.execute(
             select(ProjectORM.id).where(ProjectORM.project_id == run.project_id)
         ).scalar_one_or_none()
         if project_pk is None:
             raise ValueError(f"Project not found: {run.project_id}")
+        if run.snapshot is None:
+            raise ValueError(f"Task snapshot missing: {run.task_id}")
 
-        # Resolve task_pk
-        task_pk = None
-        if self._include_legacy_task:
-            task_pk = self._s.execute(
-                select(TestTaskORM.id).where(TestTaskORM.task_id == run.task_id)
-            ).scalar_one_or_none()
-        if task_pk is None and run.snapshot is None:
-            raise ValueError(f"Task not found: {run.task_id}")
-
-        # Resolve triggered_by_user_pk if needed
         triggered_by_user_pk = None
         if run.triggered_by_user_id is not None:
             triggered_by_user_pk = self._s.execute(
@@ -82,14 +66,13 @@ class TaskRunRepositoryImpl(TaskRunRepository):
 
         orm = TaskRunORM(
             run_id=run.run_id,
-            task_id=run.task_id or None,
+            task_id=run.task_id,
             project_pk=project_pk,
-            task_pk=task_pk,
             task_revision=run.task_revision,
             script_ref=run.script_ref,
             case_selection=run.case_selection,
             split_policy=run.split_policy,
-            task_snapshot=run.snapshot.model_dump(mode="json") if run.snapshot is not None else None,
+            task_snapshot=run.snapshot.model_dump(mode="json"),
             trigger_type=run.trigger_type.value,
             triggered_by_user_pk=triggered_by_user_pk,
             integration_id=run.integration_id,
@@ -103,21 +86,21 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         self._s.add(orm)
         self._s.flush()
         self._s.refresh(orm)
-        return _to_domain(orm, include_legacy_task=self._include_legacy_task)
+        return _to_domain(orm)
 
     def get_by_run_id(self, run_id: str, project_id: str | None = None) -> TaskRun | None:
-        stmt = (
+        statement = (
             select(TaskRunORM)
             .options(*self._options())
             .where(TaskRunORM.run_id == run_id)
         )
         if project_id is not None:
-            stmt = stmt.where(
+            statement = statement.where(
                 TaskRunORM.project_pk
                 == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
-        orm = self._s.execute(stmt).scalars().one_or_none()
-        return _to_domain(orm, include_legacy_task=self._include_legacy_task) if orm is not None else None
+        orm = self._s.execute(statement).scalars().one_or_none()
+        return _to_domain(orm) if orm is not None else None
 
     def list(
         self,
@@ -129,7 +112,7 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         limit: int = 100,
         offset: int = 0,
     ) -> list[TaskRun]:
-        stmt = (
+        statement = (
             select(TaskRunORM)
             .options(*self._options())
             .order_by(TaskRunORM.created_at.desc(), TaskRunORM.id.desc())
@@ -137,31 +120,17 @@ class TaskRunRepositoryImpl(TaskRunRepository):
             .offset(offset)
         )
         if project_id is not None:
-            stmt = stmt.where(
+            statement = statement.where(
                 TaskRunORM.project_pk
                 == select(ProjectORM.id).where(ProjectORM.project_id == project_id).scalar_subquery()
             )
         if task_id is not None:
-            if self._include_legacy_task:
-                stmt = stmt.where(
-                    (
-                        TaskRunORM.task_pk
-                        == select(TestTaskORM.id)
-                        .where(TestTaskORM.task_id == task_id)
-                        .scalar_subquery()
-                    )
-                    | (TaskRunORM.task_id == task_id)
-                )
-            else:
-                stmt = stmt.where(TaskRunORM.task_id == task_id)
+            statement = statement.where(TaskRunORM.task_id == task_id)
         if status is not None:
-            stmt = stmt.where(TaskRunORM.status == status)
+            statement = statement.where(TaskRunORM.status == status)
         if trigger_type is not None:
-            stmt = stmt.where(TaskRunORM.trigger_type == trigger_type)
-        return [
-            _to_domain(o, include_legacy_task=self._include_legacy_task)
-            for o in self._s.execute(stmt).scalars().all()
-        ]
+            statement = statement.where(TaskRunORM.trigger_type == trigger_type)
+        return [_to_domain(orm) for orm in self._s.execute(statement).scalars().all()]
 
     def update(self, run: TaskRun) -> TaskRun:
         orm = self._s.get(TaskRunORM, run.id)
@@ -174,16 +143,17 @@ class TaskRunRepositoryImpl(TaskRunRepository):
         orm.trigger_context = run.trigger_context
         orm.log_complete = run.log_complete
         orm.last_log_sequence = run.last_log_sequence
-        orm.task_id = run.task_id or None
+        orm.task_id = run.task_id
         orm.task_revision = run.task_revision
-        orm.task_snapshot = run.snapshot.model_dump(mode="json") if run.snapshot is not None else None
+        if run.snapshot is None:
+            raise ValueError(f"Task snapshot missing: {run.task_id}")
+        orm.task_snapshot = run.snapshot.model_dump(mode="json")
         self._s.flush()
         self._s.refresh(orm)
         return _to_domain(orm)
 
     def list_non_terminal(self, limit: int = 1000) -> list[TaskRun]:
-        """查询所有非终态的 Run（启动恢复/超时检测用）。"""
-        stmt = (
+        statement = (
             select(TaskRunORM)
             .options(*self._options())
             .where(
@@ -199,28 +169,4 @@ class TaskRunRepositoryImpl(TaskRunRepository):
             .order_by(TaskRunORM.id)
             .limit(limit)
         )
-        return [
-            _to_domain(o, include_legacy_task=self._include_legacy_task)
-            for o in self._s.execute(stmt).scalars().all()
-        ]
-
-    def nullify_task_for_runs(self, task_id: str) -> int:
-        """把引用指定任务定义的所有 Run 的 task_pk 置空（保留历史）。
-
-        Returns:
-            受影响的 Run 数量
-        """
-        from typing import Any
-
-        from sqlalchemy import update as sa_update
-        from sqlalchemy.engine import Result
-
-        result: Result[Any] = self._s.execute(
-            sa_update(TaskRunORM)
-            .where(TaskRunORM.task_pk == select(TestTaskORM.id).where(TestTaskORM.task_id == task_id).scalar_subquery())
-            .values(task_pk=None, task_id=None)
-        )
-        count = int(getattr(result, "rowcount", 0) or 0)
-        if count:
-            self._s.flush()
-        return count
+        return [_to_domain(orm) for orm in self._s.execute(statement).scalars().all()]

@@ -20,9 +20,9 @@ class RunLog:
     run_id: str = ""
     shard_id: str | None = None
     node_id: str = ""
-    # sym:attempt_id V2 日志所属 Attempt；V1 日志为空
+    # sym:attempt_id 日志所属 Attempt
     attempt_id: str = ""
-    # sym:plan_id V2 日志所属 Plan；V1 日志为空
+    # sym:plan_id 日志所属 Plan
     plan_id: str = ""
     sequence: int = 0
     level: RunLogLevel = RunLogLevel.INFO

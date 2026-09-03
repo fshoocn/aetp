@@ -95,7 +95,7 @@ class RunLogRepositoryImpl(RunLogRepository):
         return set(rows)
 
     def existing_attempt_sequences(self, run_id: str, attempt_id: str, sequences: list[int]) -> set[int]:
-        """按 (run_id, attempt_id, sequence) 查询 V2 日志幂等键。"""
+        """按 (run_id, attempt_id, sequence) 查询  日志幂等键。"""
         if not sequences:
             return set()
         rows = (

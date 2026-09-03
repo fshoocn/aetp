@@ -1,4 +1,4 @@
-"""V2 插件版本治理领域模型。"""
+""" 插件版本治理领域模型。"""
 
 from __future__ import annotations
 

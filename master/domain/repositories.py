@@ -45,12 +45,9 @@ from master.domain.models import (
     RunLog,
     RunResult,
     RunShard,
-    ScriptCase,
     SecretValueRecord,
     ShardAttempt,
     TaskRun,
-    TestScript,
-    TestTask,
     User,
 )
 from master.domain.models.ci_integration import (
@@ -65,8 +62,8 @@ from master.domain.models.notification import (
     EventSubscription,
     NotificationEndpoint,
 )
+from master.domain.models.task import ScriptDefinitionRecord, TestTaskRecord
 from master.domain.models.task_schedule import TaskSchedule
-from master.domain.models.v2_task import ScriptDefinitionRecord, V2TestTaskRecord
 
 
 class UserRepository(ABC):
@@ -103,95 +100,8 @@ class RefreshTokenRepository(ABC):
     def revoke_all_for_user(self, user_id: int) -> int: ...
 
 
-class TestScriptRepository(ABC):
-    @abstractmethod
-    def get_by_script_id(self, script_id: str) -> TestScript | None: ...
-
-    @abstractmethod
-    def get_by_hash(self, sha256: str, *, project_id: str) -> TestScript | None: ...
-
-    @abstractmethod
-    def find_by_name_version(self, project_id: str, name: str, version: int) -> TestScript | None: ...
-
-    @abstractmethod
-    def max_version_for_name(self, project_id: str, name: str) -> int: ...
-
-    @abstractmethod
-    def list_by_project(self, project_id: str, *, limit: int = 100, offset: int = 0) -> list[TestScript]: ...
-
-    @abstractmethod
-    def add(self, script: TestScript) -> TestScript: ...
-
-    @abstractmethod
-    def update(self, script: TestScript) -> TestScript: ...
-
-    @abstractmethod
-    def delete(self, script_id: str) -> None: ...
-
-    @abstractmethod
-    def list_all_file_refs(self) -> list[str]: ...
-
-
-class ScriptCaseRepository(ABC):
-    @abstractmethod
-    def list_by_script(self, script_id: str, *, include_deleted: bool = False) -> list[ScriptCase]: ...
-
-    @abstractmethod
-    def get_by_stable_key(self, script_id: str, stable_key: str) -> ScriptCase | None: ...
-
-    @abstractmethod
-    def add(self, case: ScriptCase) -> ScriptCase: ...
-
-    @abstractmethod
-    def add_many(self, cases: list[ScriptCase]) -> list[ScriptCase]: ...
-
-    @abstractmethod
-    def update(self, case: ScriptCase) -> ScriptCase: ...
-
-    @abstractmethod
-    def delete_by_script(self, script_id: str) -> None: ...
-
-
-class TestTaskRepository(ABC):
-    """测试任务定义仓储（P3.3，定义与执行分离）。"""
-
-    @abstractmethod
-    def get_by_task_id(self, task_id: str, project_id: str | None = None) -> TestTask | None: ...
-
-    @abstractmethod
-    def find_by_name(self, project_id: str, name: str) -> TestTask | None: ...
-
-    @abstractmethod
-    def list_by_project(
-        self,
-        project_id: str,
-        *,
-        enabled: bool | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[TestTask]: ...
-
-    @abstractmethod
-    def count_by_script(self, script_id: str) -> int: ...
-
-    @abstractmethod
-    def count_runs_by_task(self, task_pk: int) -> int: ...
-
-    @abstractmethod
-    def delete(self, task_pk: int) -> None: ...
-
-    @abstractmethod
-    def cleanup_disabled_for_script(self, script_id: str) -> dict[str, int]: ...
-
-    @abstractmethod
-    def add(self, task: TestTask) -> TestTask: ...
-
-    @abstractmethod
-    def update(self, task: TestTask) -> TestTask: ...
-
-
 class ScriptDefinitionRepository(ABC):
-    """V2 ScriptDefinition revision 仓储。"""
+    """ScriptDefinition revision 仓储。"""
 
     @abstractmethod
     def get(self, script_definition_id: BusinessId, revision: int) -> ScriptDefinitionRecord | None: ...
@@ -207,12 +117,15 @@ class ScriptDefinitionRepository(ABC):
     @abstractmethod
     def add(self, record: ScriptDefinitionRecord) -> ScriptDefinitionRecord: ...
 
+    @abstractmethod
+    def list_all_file_refs(self) -> list[str]: ...
 
-class V2TestTaskRepository(ABC):
-    """V2 多脚本 TestTask revision 仓储。"""
+
+class TestTaskRepository(ABC):
+    """多脚本 TestTask revision 仓储。"""
 
     @abstractmethod
-    def get(self, task_id: BusinessId, revision: int | None = None) -> V2TestTaskRecord | None: ...
+    def get(self, task_id: BusinessId, revision: int | None = None) -> TestTaskRecord | None: ...
 
     @abstractmethod
     def list_by_project(
@@ -220,10 +133,10 @@ class V2TestTaskRepository(ABC):
         project_id: BusinessId,
         *,
         enabled: bool | None = None,
-    ) -> list[V2TestTaskRecord]: ...
+    ) -> list[TestTaskRecord]: ...
 
     @abstractmethod
-    def add(self, record: V2TestTaskRecord) -> V2TestTaskRecord: ...
+    def add(self, record: TestTaskRecord) -> TestTaskRecord: ...
 
 
 class TaskRunRepository(ABC):
@@ -253,8 +166,6 @@ class TaskRunRepository(ABC):
     @abstractmethod
     def list_non_terminal(self, limit: int = 1000) -> list[TaskRun]: ...
 
-    @abstractmethod
-    def nullify_task_for_runs(self, task_id: str) -> int: ...
 
 
 class RunShardRepository(ABC):
@@ -372,6 +283,37 @@ class RunLogRepository(ABC):
     def get_max_sequence(self, run_id: str) -> int: ...
 
 
+class NodeCapabilitySnapshotRepository(ABC):
+    """节点能力快照仓储。"""
+
+    @abstractmethod
+    def get_latest(self, node_id: BusinessId) -> NodeCapabilitySnapshotRecord | None: ...
+
+    @abstractmethod
+    def list_by_node(
+        self,
+        node_id: BusinessId,
+        *,
+        limit: int = 100,
+    ) -> list[NodeCapabilitySnapshotRecord]: ...
+
+    @abstractmethod
+    def add_if_newer(self, record: NodeCapabilitySnapshotRecord) -> bool: ...
+
+
+class AgentDiagnosticsSnapshotRepository(ABC):
+    """Agent 诊断快照仓储。"""
+
+    @abstractmethod
+    def get_latest(self, node_id: BusinessId) -> AgentDiagnosticsSnapshotRecord | None: ...
+
+    @abstractmethod
+    def get_by_request_id(self, request_id: RequestId) -> AgentDiagnosticsSnapshotRecord | None: ...
+
+    @abstractmethod
+    def add(self, record: AgentDiagnosticsSnapshotRecord) -> AgentDiagnosticsSnapshotRecord: ...
+
+
 class AgentLogRepository(ABC):
     """Agent 结构化日志索引仓储。"""
 
@@ -450,8 +392,6 @@ class RunResultRepository(ABC):
     @abstractmethod
     def update(self, result: RunResult) -> RunResult: ...
 
-    @abstractmethod
-    def nullify_task_for_results(self, task_id: str) -> int: ...
 
 
 class RunExtensionResultRepository(ABC):
@@ -632,8 +572,33 @@ class NodeRepository(ABC):
         """把所有节点投影重置为 offline（启动恢复用）。"""
 
 
+class NodeSessionRepository(ABC):
+    """节点连接会话仓储。"""
+
+    @abstractmethod
+    def get(self, node_pk: int, session_id: str) -> NodeSession | None: ...
+
+    @abstractmethod
+    def get_current(self, node_pk: int) -> NodeSession | None: ...
+
+    @abstractmethod
+    def create(self, session: NodeSession) -> NodeSession: ...
+
+    @abstractmethod
+    def close(
+        self,
+        session: NodeSession,
+        *,
+        reason: DisconnectReason,
+        at: datetime | None = None,
+    ) -> NodeSession: ...
+
+    @abstractmethod
+    def close_all_open(self, *, reason: DisconnectReason, at: datetime | None = None) -> int: ...
+
+
 class ExecutionPlanRepository(ABC):
-    """V2 ExecutionPlan 不可变快照仓储。"""
+    """ ExecutionPlan 不可变快照仓储。"""
 
     @abstractmethod
     def get_by_plan_id(self, plan_id: BusinessId) -> ExecutionPlanRecord | None: ...
@@ -655,7 +620,7 @@ class ExecutionPlanRepository(ABC):
 
 
 class ResourceLeaseRepository(ABC):
-    """V2 ResourceLease 条件更新仓储。"""
+    """ ResourceLease 条件更新仓储。"""
 
     @abstractmethod
     def get_by_lease_id(self, lease_id: BusinessId) -> ResourceLeaseRecord | None: ...
@@ -692,59 +657,9 @@ class ResourceLeaseRepository(ABC):
     def expire_due(self, *, now: datetime) -> list[ResourceLeaseRecord]: ...
 
 
-class NodeCapabilitySnapshotRepository(ABC):
-    """节点能力快照仓储：按 session/revision 保存不可变替换快照。"""
-
-    @abstractmethod
-    def get_latest(self, node_id: BusinessId) -> NodeCapabilitySnapshotRecord | None: ...
-
-    @abstractmethod
-    def list_by_node(self, node_id: BusinessId, *, limit: int = 100) -> list[NodeCapabilitySnapshotRecord]: ...
-
-    @abstractmethod
-    def add_if_newer(self, record: NodeCapabilitySnapshotRecord) -> bool: ...
-
-
-class AgentDiagnosticsSnapshotRepository(ABC):
-    """Agent 诊断快照仓储：按 request_id 幂等、按时间不可变保存。"""
-
-    @abstractmethod
-    def get_latest(self, node_id: BusinessId) -> AgentDiagnosticsSnapshotRecord | None: ...
-
-    @abstractmethod
-    def get_by_request_id(self, request_id: RequestId) -> AgentDiagnosticsSnapshotRecord | None: ...
-
-    @abstractmethod
-    def add(self, record: AgentDiagnosticsSnapshotRecord) -> AgentDiagnosticsSnapshotRecord: ...
-
-
-class NodeSessionRepository(ABC):
-    """节点会话仓储（P4.4，node_sessions 表）。
-
-    会话用于隔离旧连接：每次进程启动一个新 session_id，新会话注册时
-    旧会话关闭（SESSION_REPLACED），旧 session 的后续消息被拒绝。
-    """
-
-    @abstractmethod
-    def get(self, node_pk: int, session_id: str) -> NodeSession | None: ...
-
-    @abstractmethod
-    def get_current(self, node_pk: int) -> NodeSession | None:
-        """返回节点当前未关闭的会话（同一时刻至多一个有效会话）。"""
-
-    @abstractmethod
-    def create(self, session: NodeSession) -> NodeSession: ...
-
-    @abstractmethod
-    def close(self, session: NodeSession, *, reason: DisconnectReason, at: datetime | None = None) -> NodeSession:
-        """关闭会话（置 disconnected_at + disconnect_reason）。"""
-
-    @abstractmethod
-    def close_all_open(self, *, reason: DisconnectReason, at: datetime | None = None) -> int:
-        """关闭所有未关闭会话（启动恢复用）。"""
-
-
 class DeviceRepository(ABC):
+    """设备资产仓储。"""
+
     @abstractmethod
     def add(self, device: Device) -> Device: ...
 
@@ -840,12 +755,9 @@ class UnitOfWork(ABC):
 
     users: UserRepository
     refresh_tokens: RefreshTokenRepository
-    test_scripts: TestScriptRepository
-    script_cases: ScriptCaseRepository
     secret_values: SecretValueRepository
     test_tasks: TestTaskRepository
     script_definitions: ScriptDefinitionRepository
-    v2_test_tasks: V2TestTaskRepository
     task_runs: TaskRunRepository
     run_shards: RunShardRepository
     shard_attempts: ShardAttemptRepository

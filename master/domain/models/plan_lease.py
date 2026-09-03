@@ -10,7 +10,7 @@ from aetp_protocol.execution import ExecutionPlan, ResourceLease
 
 @dataclass(frozen=True)
 class ExecutionPlanRecord:
-    """不可变 V2 ExecutionPlan 及其内部数据库标识。"""
+    """不可变  ExecutionPlan 及其内部数据库标识。"""
 
     id: int | None
     plan: ExecutionPlan
@@ -20,7 +20,7 @@ class ExecutionPlanRecord:
 
 @dataclass(frozen=True)
 class ResourceLeaseRecord:
-    """可条件更新的 V2 ResourceLease 及其内部数据库标识。"""
+    """可条件更新的  ResourceLease 及其内部数据库标识。"""
 
     id: int | None
     lease: ResourceLease

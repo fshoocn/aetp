@@ -47,7 +47,7 @@ class RunArtifact(Base, TimestampMixin):
     shard_pk: Mapped[int | None] = mapped_column(ForeignKey("run_shards.id", ondelete="CASCADE"), nullable=True)
     # sym:node_id 上传节点业务 ID
     node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # sym:attempt_id V2 Attempt 来源
+    # sym:attempt_id  Attempt 来源
     attempt_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:kind 产物类型（report/log_archive/data）
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default=ArtifactKind.REPORT.value)

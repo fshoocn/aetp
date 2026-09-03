@@ -1,4 +1,4 @@
-"""V2 插件版本解析策略。"""
+""" 插件版本解析策略。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from aetp_protocol.ids import SemVer, VersionRange
 from aetp_protocol.plugin_types import PluginPoint, PluginRef
 from aetp_protocol.plugins import PluginManifest
 
-from master.plugins.v2_registry import V2PluginRegistry
+from master.plugins.registry import PluginRegistry
 
 
 @dataclass(frozen=True)
@@ -27,9 +27,9 @@ class PluginVersionUnavailable(ValueError):
 
 
 class PluginResolver:
-    """只从 Master V2 Registry 解析已启用插件，不自动安装或降级。"""
+    """只从 Master  Registry 解析已启用插件，不自动安装或降级。"""
 
-    def __init__(self, registry: V2PluginRegistry) -> None:
+    def __init__(self, registry: PluginRegistry) -> None:
         self._registry = registry
 
     def resolve(self, requirement: PluginRequirement, point: PluginPoint) -> ResolvedPlugin:

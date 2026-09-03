@@ -1,4 +1,4 @@
-"""V2 NodeMatcher：根据能力快照评估 ExecutionRequirement。"""
+""" NodeMatcher：根据能力快照评估 ExecutionRequirement。"""
 
 from __future__ import annotations
 

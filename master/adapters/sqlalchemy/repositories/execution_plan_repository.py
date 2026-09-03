@@ -1,4 +1,4 @@
-"""V2 ExecutionPlan 仓储实现。"""
+""" ExecutionPlan 仓储实现。"""
 
 from __future__ import annotations
 

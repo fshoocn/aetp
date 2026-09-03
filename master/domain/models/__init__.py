@@ -30,12 +30,9 @@ from .run import (
     TaskRun,
 )
 from .run_log import RunLog
-from .script_case import ScriptCase
 from .secret_value import SecretValueRecord
-from .test_script import TestScript
-from .test_task import TestTask
+from .task import ScriptDefinitionRecord, TestTaskRecord
 from .user import User
-from .v2_task import ScriptDefinitionRecord, V2TestTaskRecord
 
 __all__ = [
     "AuditLog",
@@ -69,13 +66,10 @@ __all__ = [
     "RunExtensionResult",
     "RunResult",
     "RunShard",
-    "ScriptCase",
     "SecretValueRecord",
     "ShardAttempt",
     "TaskRun",
-    "TestScript",
-    "TestTask",
     "ScriptDefinitionRecord",
-    "V2TestTaskRecord",
+    "TestTaskRecord",
     "User",
 ]

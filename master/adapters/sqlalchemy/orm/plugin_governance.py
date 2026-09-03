@@ -1,4 +1,4 @@
-"""V2 插件版本、节点期望版本和同步操作 ORM。"""
+""" 插件版本、节点期望版本和同步操作 ORM。"""
 
 from __future__ import annotations
 

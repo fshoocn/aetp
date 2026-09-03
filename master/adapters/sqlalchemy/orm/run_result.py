@@ -26,7 +26,6 @@ from .base import Base, JSONType, TimestampMixin, UTCDateTime
 if TYPE_CHECKING:
     from .project import Project
     from .task_run import TaskRun
-    from .test_task import TestTask
 
 
 class RunResult(Base, TimestampMixin):
@@ -47,10 +46,6 @@ class RunResult(Base, TimestampMixin):
     run_pk: Mapped[int] = mapped_column(ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     # sym:project_pk 所属项目代理主键
     project_pk: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False, index=True)
-    # sym:task_pk 任务定义代理主键（任务删除后置空，Run 级汇总仍可展示）
-    task_pk: Mapped[int | None] = mapped_column(
-        ForeignKey("test_tasks.id", ondelete="RESTRICT"), nullable=True, index=True
-    )
     # sym:node_id 最终执行节点业务 ID（多 Shard 场景可为空）
     node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # sym:passed 是否全部通过（供列表快速展示）
@@ -70,5 +65,3 @@ class RunResult(Base, TimestampMixin):
     run: Mapped[TaskRun] = relationship()
     # sym:project 所属项目 ORM 关系
     project: Mapped[Project] = relationship()
-    # sym:task 任务定义 ORM 关系
-    task: Mapped[TestTask] = relationship()

@@ -1,4 +1,4 @@
-"""SQLAlchemy V2 ScriptDefinition 和 TestTask revision 仓储。"""
+"""SQLAlchemy ScriptDefinition 和 TestTask revision 仓储。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from aetp_protocol.artifacts import CaseSelection, Configuration, ScriptRef, Tes
 from aetp_protocol.execution import ExecutionRequirement, RetryPolicy, SplitPolicy
 from aetp_protocol.ids import BusinessId, PluginId, SemVer, Sha256
 from aetp_protocol.plugin_types import PluginRef
-from aetp_protocol.task import ScriptDefinition, TaskScriptRef, TestTask
+from aetp_protocol.task import ScriptDefinition, TaskScriptRef
+from aetp_protocol.task import TestTask as ProtocolTestTask
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -16,13 +17,13 @@ from master.adapters.sqlalchemy.orm import (
     ScriptDefinition as ScriptDefinitionORM,
 )
 from master.adapters.sqlalchemy.orm import (
-    TestTaskScript as TestTaskScriptORM,
+    TestTask,
 )
 from master.adapters.sqlalchemy.orm import (
-    V2TestTask,
+    TestTaskScript as TestTaskScriptORM,
 )
-from master.domain.models import ScriptDefinitionRecord, V2TestTaskRecord
-from master.domain.repositories import ScriptDefinitionRepository, V2TestTaskRepository
+from master.domain.models import ScriptDefinitionRecord, TestTaskRecord
+from master.domain.repositories import ScriptDefinitionRepository, TestTaskRepository
 
 
 def _script_to_domain(orm: ScriptDefinitionORM) -> ScriptDefinitionRecord:
@@ -54,7 +55,7 @@ def _script_to_domain(orm: ScriptDefinitionORM) -> ScriptDefinitionRecord:
     )
 
 
-def _task_to_domain(orm: V2TestTask) -> V2TestTaskRecord:
+def _task_to_domain(orm: TestTask) -> TestTaskRecord:
     scripts = tuple(
         TaskScriptRef(
             binding_id=BusinessId(item.binding_id),
@@ -68,7 +69,7 @@ def _task_to_domain(orm: V2TestTask) -> V2TestTaskRecord:
         )
         for item in sorted(orm.scripts, key=lambda script: (script.order_index, script.id))
     )
-    task = TestTask(
+    task = ProtocolTestTask(
         task_id=BusinessId(orm.task_id),
         project_id=BusinessId(orm.project_id),
         revision=orm.revision,
@@ -81,7 +82,7 @@ def _task_to_domain(orm: V2TestTask) -> V2TestTaskRecord:
         priority=orm.priority,
         enabled=orm.enabled,
     )
-    return V2TestTaskRecord(
+    return TestTaskRecord(
         id=orm.id,
         task=task,
         created_by=orm.created_by,
@@ -138,19 +139,26 @@ class ScriptDefinitionRepositoryImpl(ScriptDefinitionRepository):
         self._s.refresh(orm)
         return _script_to_domain(orm)
 
+    def list_all_file_refs(self) -> list[str]:
+        records = self._s.execute(select(ScriptDefinitionORM)).scalars().all()
+        return [
+            f"scripts/{record.script_definition_id}/{record.revision}/{record.source['filename']}"
+            for record in records
+        ]
 
-class V2TestTaskRepositoryImpl(V2TestTaskRepository):
+
+class TestTaskRepositoryImpl(TestTaskRepository):
     def __init__(self, session: Session) -> None:
         self._s = session
 
-    def get(self, task_id: BusinessId, revision: int | None = None) -> V2TestTaskRecord | None:
-        statement = select(V2TestTask).options(selectinload(V2TestTask.scripts)).where(
-            V2TestTask.task_id == task_id.root
+    def get(self, task_id: BusinessId, revision: int | None = None) -> TestTaskRecord | None:
+        statement = select(TestTask).options(selectinload(TestTask.scripts)).where(
+            TestTask.task_id == task_id.root
         )
         if revision is not None:
-            statement = statement.where(V2TestTask.revision == revision)
+            statement = statement.where(TestTask.revision == revision)
         else:
-            statement = statement.order_by(V2TestTask.revision.desc())
+            statement = statement.order_by(TestTask.revision.desc())
         orm = self._s.execute(statement).scalars().first()
         return _task_to_domain(orm) if orm is not None else None
 
@@ -159,21 +167,21 @@ class V2TestTaskRepositoryImpl(V2TestTaskRepository):
         project_id: BusinessId,
         *,
         enabled: bool | None = None,
-    ) -> list[V2TestTaskRecord]:
+    ) -> list[TestTaskRecord]:
         statement = (
-            select(V2TestTask)
-            .options(selectinload(V2TestTask.scripts))
-            .where(V2TestTask.project_id == project_id.root)
-            .order_by(V2TestTask.task_id, V2TestTask.revision.desc())
+            select(TestTask)
+            .options(selectinload(TestTask.scripts))
+            .where(TestTask.project_id == project_id.root)
+            .order_by(TestTask.task_id, TestTask.revision.desc())
         )
         if enabled is not None:
-            statement = statement.where(V2TestTask.enabled.is_(enabled))
+            statement = statement.where(TestTask.enabled.is_(enabled))
         return [
             _task_to_domain(orm)
             for orm in self._s.execute(statement).scalars().all()
         ]
 
-    def add(self, record: V2TestTaskRecord) -> V2TestTaskRecord:
+    def add(self, record: TestTaskRecord) -> TestTaskRecord:
         task = record.task
         definition_keys = {
             (script.script_definition_id.root, script.script_revision)
@@ -193,7 +201,7 @@ class V2TestTaskRepositoryImpl(V2TestTaskRepository):
             raise ValueError("TestTask 引用的 ScriptDefinition 不存在或项目范围不一致")
         if record.created_by <= 0:
             raise ValueError("缺少创建者 created_by")
-        orm = V2TestTask(
+        orm = TestTask(
             task_id=task.task_id.root,
             project_id=task.project_id.root,
             revision=task.revision,
@@ -226,4 +234,4 @@ class V2TestTaskRepositoryImpl(V2TestTaskRepository):
         return _task_to_domain(orm)
 
 
-__all__ = ["ScriptDefinitionRepositoryImpl", "V2TestTaskRepositoryImpl"]
+__all__ = ["ScriptDefinitionRepositoryImpl", "TestTaskRepositoryImpl"]

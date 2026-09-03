@@ -1,4 +1,4 @@
-"""V2 插件治理 SQLAlchemy 仓储。"""
+""" 插件治理 SQLAlchemy 仓储。"""
 
 from __future__ import annotations
 

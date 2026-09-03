@@ -7,8 +7,8 @@
 - ``build_signed_path``：生成相对路径 + ``?expires=...&signature=...``
 - ``verify_signed_path``：校验过期与签名（恒定时间比较）
 
-脚本下载路径：``/api/v1/internal/scripts/{script_id}/download``
-插件下载路径：``/api/v1/internal/plugins/{plugin_id}/download``
+脚本下载路径：``/api/v2/internal/scripts/{script_id}/download``
+插件下载路径：``/api/v2/internal/plugins/{plugin_id}/download``
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ import hmac
 from datetime import UTC, datetime
 from urllib.parse import quote, urlencode
 
-_SCRIPT_URL_PATH = "/api/v1/internal/scripts/{script_id}/download"
-_PLUGIN_URL_PATH = "/api/v1/internal/plugins/{plugin_id}/download"
-_PLUGIN_VERSION_URL_PATH = "/api/v1/internal/plugins/{plugin_id}/{version}/download"
-_ARTIFACT_UPLOAD_URL_PATH = "/api/v1/internal/runs/{run_id}/artifacts"
+_SCRIPT_URL_PATH = "/api/v2/internal/scripts/{script_id}/download"
+_PLUGIN_URL_PATH = "/api/v2/internal/plugins/{plugin_id}/download"
+_PLUGIN_VERSION_URL_PATH = "/api/v2/internal/plugins/{plugin_id}/{version}/download"
+_ARTIFACT_UPLOAD_URL_PATH = "/api/v2/internal/runs/{run_id}/artifacts"
 
 
 def _signature(resource_id: str, expires: int, secret: str) -> str:
