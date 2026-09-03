@@ -5,7 +5,9 @@
 ```text
 pytest_plugin.zip
 ├── plugin.json
-└── main.py
+├── master/executor.py
+├── agent/executor.py
+└── ui/
 ```
 
 ## 构建 ZIP
@@ -13,27 +15,26 @@ pytest_plugin.zip
 在 `plugins/pytest_plugin` 目录执行：
 
 ```powershell
-Compress-Archive -Path plugin.json,main.py,ui -DestinationPath ..\pytest_plugin.zip -Force
+Compress-Archive -Path plugin.json,master,agent,ui -DestinationPath ..\pytest_plugin.zip -Force
 ```
 
 或使用 Python：
 
 ```powershell
-..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('..\\pytest_plugin.zip','w',zipfile.ZIP_DEFLATED); z.write('plugin.json'); z.write('main.py'); z.close()"
+..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('..\\pytest_plugin.zip','w',zipfile.ZIP_DEFLATED); [z.write(path) for path in ['plugin.json','master/executor.py','agent/executor.py']]; z.close()"
 ```
 
-## 构建 V2 executor 归档
+## 构建 executor 归档
 
-V2 使用 `plugin-v2.json` 作为源码中的 Manifest 模板；打包时必须将它写入
-归档根目录的 `plugin.json`，并同时包含 `master/` 与 `agent/` 入口：
+使用 `plugin.json` 作为 Manifest；打包时必须同时包含 `master/` 与 `agent/` 入口：
 
 ```powershell
-..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('..\\pytest_executor_v2.zip','w',zipfile.ZIP_DEFLATED); z.write('plugin-v2.json','plugin.json'); z.write('master\\v2_executor.py','master/v2_executor.py'); z.write('agent\\v2_executor.py','agent/v2_executor.py'); z.close()"
+..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('..\\pytest_executor.zip','w',zipfile.ZIP_DEFLATED); z.write('plugin.json'); z.write('master\\executor.py','master/executor.py'); z.write('agent\\executor.py','agent/executor.py'); z.close()"
 ```
 
-V2 归档的插件 ID 为 `org.pytest.executor`，版本为 `2.0.0`。Master 通过
-`master/v2_executor.py:create_executor` 收集用例，Agent 通过
-`agent/v2_executor.py:create_executor` 执行精确的 pytest nodeid，并上传 JUnit
+插件 ID 为 `org.pytest.executor`，版本为 `2.0.0`。Master 通过
+`master/executor.py:create_executor` 收集用例，Agent 通过
+`agent/executor.py:create_executor` 执行精确的 pytest nodeid，并上传 JUnit
 report Artifact。
 
 ## 插件能力

@@ -1,4 +1,4 @@
-"""pytest V2 Master executor entrypoint。"""
+"""pytest  Master executor entrypoint。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 
-class PytestV2MasterExecutor:
+class PytestMasterExecutor:
     """在 Master 侧收集 pytest nodeid，供 ScriptDefinition 创建流程使用。"""
 
     plugin_version = "2.0.0"
@@ -42,8 +42,8 @@ class PytestV2MasterExecutor:
         return tuple(cases)
 
 
-def create_executor() -> PytestV2MasterExecutor:
-    return PytestV2MasterExecutor()
+def create_executor() -> PytestMasterExecutor:
+    return PytestMasterExecutor()
 
 
-__all__ = ["PytestV2MasterExecutor", "create_executor"]
+__all__ = ["PytestMasterExecutor", "create_executor"]

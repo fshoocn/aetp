@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 
 import pytest
@@ -32,7 +33,7 @@ def test_aetp_parameterized(value: int):
 
 def test_aetp_environment():
     """环境信息用例：把 Agent 运行环境写入任务日志。"""
-    print(f"AETP_LOG python={os.sys.executable}", flush=True)
+    print(f"AETP_LOG python={sys.executable}", flush=True)
     print(f"AETP_LOG cwd={os.getcwd()}", flush=True)
     assert os.getenv("AETP_E2E_EXPECTED", "1") == "1"
 

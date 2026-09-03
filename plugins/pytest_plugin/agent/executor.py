@@ -1,4 +1,4 @@
-"""pytest V2 executor entrypoint。"""
+"""pytest  executor entrypoint。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-class PytestV2Executor:
+class PytestExecutor:
     """在 Agent 工作目录执行精确 case_keys 并产出统一结果。"""
 
     plugin_version = "2.0.0"
@@ -142,8 +142,8 @@ class PytestV2Executor:
         return f"{classname}::{name}".strip(":")
 
 
-def create_executor() -> PytestV2Executor:
-    return PytestV2Executor()
+def create_executor() -> PytestExecutor:
+    return PytestExecutor()
 
 
-__all__ = ["PytestV2Executor", "create_executor"]
+__all__ = ["PytestExecutor", "create_executor"]
