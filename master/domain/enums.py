@@ -12,7 +12,9 @@ from __future__ import annotations
 from enum import StrEnum
 
 # 线上状态枚举：单一事实源在 aetp_protocol（Agent/消息/REST 共用同一类型）
-from aetp_protocol.execution import RunStatus, TriggerType
+from aetp_protocol.artifacts import ArtifactKind
+from aetp_protocol.authorization import PlatformRole, ProjectRole
+from aetp_protocol.execution import CaseStatus, RunStatus, ShardStatus, TriggerType
 
 
 class AccountStatus(StrEnum):
@@ -28,54 +30,11 @@ class AccountStatus(StrEnum):
     DISABLED = "disabled"
 
 
-class PlatformRole(StrEnum):
-    """平台全局角色。
-
-    user: 普通用户，权限受项目成员关系限制
-    admin: 平台管理员，可跨项目操作、审核账户、管理项目和节点
-    """
-
-    USER = "user"
-    ADMIN = "admin"
-
-
 class ProjectStatus(StrEnum):
     """项目生命周期状态。"""
 
     ACTIVE = "active"
     ARCHIVED = "archived"
-
-
-class ProjectRole(StrEnum):
-    """项目内角色，仅在所属项目范围内生效。
-
-    viewer: 只读任务、设备、结果、日志
-    operator: viewer 权限 + 触发、取消、重试 Run
-    maintainer: operator 权限 + 编辑任务定义、管理项目集成和普通成员
-    owner: 项目完整管理权限
-    """
-
-    VIEWER = "viewer"
-    OPERATOR = "operator"
-    MAINTAINER = "maintainer"
-    OWNER = "owner"
-
-
-class ShardStatus(StrEnum):
-    """Shard 状态（Run 内部，§5.4）。
-
-    pending → dispatching → running → succeeded / failed / cancelled / timed_out；
-    waiting_recovery 表示等待离线恢复策略。
-    """
-
-    PENDING = "pending"
-    DISPATCHING = "dispatching"
-    RUNNING = "running"
-    WAITING_RECOVERY = "waiting_recovery"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    TIMED_OUT = "timed_out"
 
 
 class ShardAttemptStatus(StrEnum):
@@ -95,33 +54,6 @@ class ShardAttemptStatus(StrEnum):
     CANCELLED = "cancelled"
     TIMED_OUT = "timed_out"
     LOST = "lost"
-
-
-class CaseStatus(StrEnum):
-    """case 级执行结果状态（§6.4）。
-
-    pytest 类插件可运行中实时上报；CANoe 类仅在结束后由插件解析报告产出（D-19）。
-    """
-
-    PENDING = "pending"
-    RUNNING = "running"
-    PASSED = "passed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    ERROR = "error"
-
-
-class ArtifactKind(StrEnum):
-    """结束产物类型（§6.4）。
-
-    report: 测试报告文件（插件 parse_results 的输入）
-    log_archive: 结束后的日志归档
-    data: 测量/数据文件
-    """
-
-    REPORT = "report"
-    LOG_ARCHIVE = "log_archive"
-    DATA = "data"
 
 
 class RunLogLevel(StrEnum):
