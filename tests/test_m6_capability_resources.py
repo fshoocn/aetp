@@ -9,7 +9,7 @@ from aetp_protocol.ids import BusinessId, SessionId
 
 from agent.application.services.capability_snapshot_service import AgentCapabilitySnapshotService
 from agent.application.services.resource_provider import ResourceProviderRegistry
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 from plugins.resource_providers import PowerResourceProvider, VectorCanResourceProvider
 
 NODE_ID = BusinessId("01J000000000000000000000A0")
@@ -42,7 +42,7 @@ def test_capability_snapshot_uses_provider_resources_without_legacy_duplicates(t
     service = AgentCapabilitySnapshotService(
         NODE_ID,
         SESSION_ID,
-        AgentV2PluginRegistry(tmp_path / "plugins"),
+        PluginRegistry(tmp_path / "plugins"),
         capability_scanner=lambda: NodeCapabilities(),
         resource_providers=providers,
     )

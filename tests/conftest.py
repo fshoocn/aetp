@@ -62,7 +62,7 @@ def auth_token(client: TestClient) -> str:
             user.account_status = AccountStatus.ACTIVE
             uow.users.update(user)
     resp = client.post(
-        "/api/v1/auth/login",
+        "/api/v2/auth/login",
         json={"username": "tester", "password": "**********"},
     )
     assert resp.status_code == 200, f"auth_token fixture login failed: {resp.text}"

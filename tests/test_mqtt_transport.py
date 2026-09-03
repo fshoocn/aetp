@@ -97,8 +97,8 @@ def test_transport_port_contract():
     """业务层通过端口形状即可工作，不依赖具体实现。"""
     transport: Transport = FakeTransport()
     asyncio.run(transport.connect())
-    asyncio.run(_business_publish(transport, "aetp/v1/test", b"hello"))
-    assert transport.published == [("aetp/v1/test", b"hello", 1)]
+    asyncio.run(_business_publish(transport, "aetp/v2/test", b"hello"))
+    assert transport.published == [("aetp/v2/test", b"hello", 1)]
 
 
 # ---------------------------------------------------------------------------
@@ -162,11 +162,11 @@ def test_mqtt_transport_connect_subscribe_publish():
     transport = MqttTransport(_SETTINGS, backoff=ExponentialBackoff(jitter_ratio=0.0))
 
     async def scenario():
-        await transport.subscribe(["aetp/v1/agents/+/events/#"])
+        await transport.subscribe(["aetp/v2/agents/+/events/#"])
         await transport.connect()
         await _wait_connected(transport)
         assert transport.connected is True
-        await transport.publish("aetp/v1/master/test", b"cmd", qos=1)
+        await transport.publish("aetp/v2/master/test", b"cmd", qos=1)
         await transport.disconnect()
 
     import master.adapters.mqtt.transport as mqtt_mod
@@ -178,8 +178,8 @@ def test_mqtt_transport_connect_subscribe_publish():
         mqtt_mod.aiomqtt = __import__("aiomqtt")
 
     client = FakeClient.instances[-1]
-    assert "aetp/v1/agents/+/events/#" in client.subscribed
-    assert client.published == [("aetp/v1/master/test", b"cmd", 1)]
+    assert "aetp/v2/agents/+/events/#" in client.subscribed
+    assert client.published == [("aetp/v2/master/test", b"cmd", 1)]
     # 端口参数正确传递（host/port/identifier）
     assert client.kwargs["hostname"] == "broker.test"
     assert client.kwargs["port"] == 1883
@@ -211,7 +211,7 @@ def test_mqtt_transport_publish_when_disconnected_raises():
 
     async def scenario():
         with pytest.raises(TransportError, match="未连接"):
-            await transport.publish("aetp/v1/x", b"x")
+            await transport.publish("aetp/v2/x", b"x")
 
     asyncio.run(scenario())
 
@@ -225,7 +225,7 @@ def test_mqtt_transport_reconnect_recovers():
     )
 
     async def scenario():
-        await transport.subscribe(["aetp/v1/agents/+/events/#"])
+        await transport.subscribe(["aetp/v2/agents/+/events/#"])
         await transport.connect()
         await _wait_connected(transport, timeout=3.0)  # 首次失败 → 退避 → 重连成功
         assert transport.connected is True
@@ -242,7 +242,7 @@ def test_mqtt_transport_reconnect_recovers():
 
     # 重连成功的实例恢复了订阅
     last = FakeClient.instances[-1]
-    assert "aetp/v1/agents/+/events/#" in last.subscribed
+    assert "aetp/v2/agents/+/events/#" in last.subscribed
 
 
 def test_mqtt_transport_dispatch_to_handler():

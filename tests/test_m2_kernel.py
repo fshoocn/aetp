@@ -47,7 +47,7 @@ from aetp_protocol.plugins import PluginEntrypoints, PluginManifest
 from master.domain.models import PluginVersionRecord
 from master.domain.node_matcher import NodeCapabilityCandidate, NodeMatcher
 from master.domain.plugin_resolver import PluginResolver, PluginVersionUnavailable
-from master.plugins.v2_registry import V2PluginRegistry
+from master.plugins.registry import PluginRegistry
 
 NODE_ID = BusinessId("01J00000000000000000000000")
 SESSION_ID = SessionId("session-00000001")
@@ -93,7 +93,7 @@ def _record(tmp_path, version: str) -> PluginVersionRecord:
 
 
 def test_plugin_resolver_selects_highest_enabled_version(tmp_path) -> None:
-    registry = V2PluginRegistry(tmp_path)
+    registry = PluginRegistry(tmp_path)
     registry.register(_record(tmp_path, "2.0.0"))
     registry.register(_record(tmp_path, "2.10.0"))
     resolver = PluginResolver(registry)
@@ -111,7 +111,7 @@ def test_plugin_resolver_selects_highest_enabled_version(tmp_path) -> None:
 
 
 def test_plugin_resolver_does_not_silently_install_or_downgrade(tmp_path) -> None:
-    registry = V2PluginRegistry(tmp_path)
+    registry = PluginRegistry(tmp_path)
     registry.register(_record(tmp_path, "2.0.0"))
     resolver = PluginResolver(registry)
 
@@ -126,7 +126,7 @@ def test_plugin_resolver_does_not_silently_install_or_downgrade(tmp_path) -> Non
 
 
 def test_v2_registry_rejects_same_version_different_archive(tmp_path) -> None:
-    registry = V2PluginRegistry(tmp_path)
+    registry = PluginRegistry(tmp_path)
     original = _record(tmp_path, "2.0.0")
     registry.register(original)
     conflicting = original

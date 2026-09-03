@@ -8,18 +8,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from aetp_protocol.envelope import Envelope, Sender, parse_message
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, stable_id
 from aetp_protocol.logs import LogLevel
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import AgentLogReceived
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender, parse_v2_message
+from aetp_protocol.topics import command_topic
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.services.agent_log_facade import AgentLogFacade
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.config import AgentSettings
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 from common.transport import MqttMessage, Transport
 
 NODE_ID = "01J000000000000000000000A0"
@@ -85,24 +85,24 @@ def test_agent_log_batch_is_kept_until_master_ack(tmp_path: Path) -> None:
     batch = facade.build_batch(SESSION_ID)
     assert batch is not None
 
-    publisher = AgentV2CapabilityPublisher(
+    publisher = CapabilityPublisher(
         cast(Transport, _Transport()),
         settings,
-        AgentV2PluginRegistry(),
+        PluginRegistry(),
     )
     outbox_id = publisher.enqueue_agent_log_batch(ledger, batch, SESSION_ID)
     entry = ledger.get_outbox(outbox_id)
     assert entry is not None
-    envelope, payload = parse_v2_message(entry.payload)
+    envelope, payload = parse_message(entry.payload)
     assert envelope.message_type == MessageType.AGENT_LOG_BATCH.value
     assert payload == batch
     assert facade.pending_count() == 1
 
-    ack = V2Envelope(
+    ack = Envelope(
         message_id=MessageId("m5-log-ack-message-01"),
         correlation_id=envelope.message_id,
         sent_at=datetime.now(UTC),
-        sender=V2Sender(
+        sender=Sender(
             kind="master",
             id=stable_id("aetp-master"),
             session_id=SessionId("master-session-0001"),
@@ -118,7 +118,7 @@ def test_agent_log_batch_is_kept_until_master_ack(tmp_path: Path) -> None:
     )
     assert publisher.handle_agent_log_received(
         MqttMessage(
-            topic=v2_command_topic(NODE_ID, "agent.log.received"),
+            topic=command_topic(NODE_ID, "agent.log.received"),
             payload=json.dumps(ack.model_dump(mode="json")).encode("utf-8"),
         ),
         SESSION_ID,

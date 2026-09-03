@@ -7,7 +7,7 @@ from typing import cast
 
 from starlette.requests import Request
 
-from master.api.v1.permissions import ProjectAccess
+from master.api.permissions import ProjectAccess
 from master.domain.enums import ProjectRole, ProjectStatus
 from master.domain.models import DomainEvent, Project, ProjectMember
 from master.domain.time import utcnow
@@ -90,12 +90,12 @@ def test_sse_replays_events_after_last_event_id(client, auth_header) -> None:
     second = asyncio.run(publisher.publish("run.updated", {"project_id": "p-events", "run_id": "R-1"}))
     assert second.sequence is not None
 
-    from master.api.v1.routes.events import stream_events
+    from master.api.events import stream_events
 
     scope = {
         "type": "http",
         "method": "GET",
-        "path": "/api/v1/events",
+        "path": "/api/v2/events",
         "headers": [(b"last-event-id", str(second.sequence - 1).encode())],
         "query_string": b"project_id=p-events",
         "scheme": "http",
@@ -136,7 +136,7 @@ def test_sse_replays_events_after_last_event_id(client, auth_header) -> None:
 
 def test_sse_requires_project_membership(client, auth_header) -> None:
     response = client.get(
-        "/api/v1/events?project_id=not-a-member",
+        "/api/v2/events?project_id=not-a-member",
         headers=auth_header,
     )
     assert response.status_code == 404

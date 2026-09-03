@@ -100,7 +100,7 @@ class FakeTransport:
 
 def _msg(
     outbox_id: str = "m1",
-    topic: str = "aetp/v1/master/agents/bench-001/commands/assign",
+    topic: str = "aetp/v2/master/agents/bench-001/commands/assign",
     status: OutboxStatus = OutboxStatus.PENDING,
     attempts: int = 0,
     next_at=None,
@@ -142,7 +142,7 @@ def test_outbox_worker_publishes_and_marks_succeeded():
 
     assert len(transport.published) == 1
     topic, payload, qos = transport.published[0]
-    assert topic == "aetp/v1/master/agents/bench-001/commands/assign"
+    assert topic == "aetp/v2/master/agents/bench-001/commands/assign"
     assert qos == 1
     assert json.loads(payload) == {"message_type": "run.assign", "run_id": "run-1"}
 
@@ -247,11 +247,11 @@ def test_outbox_worker_isolates_message_failures():
     """单条失败不影响同批其余消息（fail-open）。"""
     repo = FakeOutboxRepo(
         [
-            _msg(outbox_id="good", topic="aetp/v1/master/ok"),
-            _msg(outbox_id="bad", topic="aetp/v1/master/bad"),
+            _msg(outbox_id="good", topic="aetp/v2/master/ok"),
+            _msg(outbox_id="bad", topic="aetp/v2/master/bad"),
         ]
     )
-    transport = FakeTransport(fail_topics=("aetp/v1/master/bad",))
+    transport = FakeTransport(fail_topics=("aetp/v2/master/bad",))
     worker = _make_worker(repo, transport)
 
     async def scenario():
@@ -262,7 +262,7 @@ def test_outbox_worker_isolates_message_failures():
     by_id = {m.outbox_id: m for m in repo.updated}
     assert by_id["good"].status is OutboxStatus.SUCCEEDED
     assert by_id["bad"].status is OutboxStatus.RETRYING
-    assert [t for t, _, _ in transport.published] == ["aetp/v1/master/ok"]
+    assert [t for t, _, _ in transport.published] == ["aetp/v2/master/ok"]
 
 
 def test_outbox_worker_background_loop_polls_and_sends():
@@ -274,7 +274,7 @@ def test_outbox_worker_background_loop_polls_and_sends():
     async def scenario():
         await worker.start()
         # 入队一条待发送消息
-        repo._messages["bg-1"] = _msg(outbox_id="bg-1", topic="aetp/v1/master/bg")
+        repo._messages["bg-1"] = _msg(outbox_id="bg-1", topic="aetp/v2/master/bg")
         for _ in range(200):
             if any(m.status is OutboxStatus.SUCCEEDED for m in repo.updated):
                 break

@@ -5,17 +5,17 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 
+from aetp_protocol.envelope import Envelope, Sender
 from aetp_protocol.execution import CaseResult, CaseStatus, ExecutionResult, ExecutionStatus, LeaseState
 from aetp_protocol.ids import MessageId, TraceId, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ExecutionFinished
 from aetp_protocol.plan_hash import with_plan_hash
-from aetp_protocol.topics import v2_event_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import event_topic
 
 from common.transport import MqttMessage
 from master.application.services.plan_lease_service import PlanLeaseService
-from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
+from master.application.services.plan_materialization_service import PlanMaterializationService
 from master.domain.enums import RunStatus, ShardAttemptStatus, ShardStatus
 from tests.test_m3_plan_lease import NOW, _plan
 from tests.test_m3_plan_materialization import _seed_context
@@ -43,17 +43,17 @@ def _finished_message(plan, *, message_id: str) -> MqttMessage:
         ),
         finished_at=NOW + timedelta(minutes=1),
     )
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=MessageId(message_id),
         correlation_id=MessageId("execution-plan-0001"),
         sent_at=NOW + timedelta(minutes=1),
-        sender=V2Sender(kind="agent", id=plan.node_id, session_id=plan.target_session_id),
+        sender=Sender(kind="agent", id=plan.node_id, session_id=plan.target_session_id),
         message_type=MessageType.EXECUTION_FINISHED.value,
         trace_id=TraceId("m4-finished-trace-0001"),
         payload=finished.model_dump(mode="json"),
     )
     return MqttMessage(
-        topic=v2_event_topic(plan.node_id.root, "execution.finished"),
+        topic=event_topic(plan.node_id.root, "execution.finished"),
         payload=envelope.model_dump_json().encode("utf-8"),
     )
 
@@ -63,7 +63,7 @@ def test_master_projects_finished_and_releases_v2_leases(client) -> None:
     plan = with_plan_hash(_plan().model_copy(update={"node_id": stable_id("m4-node")}))
     _seed_context(container, plan)
     plan_leases = PlanLeaseService(container.uow_factory(), now=lambda: NOW)
-    materializer = V2PlanMaterializationService(container.uow_factory(), plan_leases)
+    materializer = PlanMaterializationService(container.uow_factory(), plan_leases)
     materializer.materialize(plan)
 
     message = _finished_message(plan, message_id="execution-finished-0001")

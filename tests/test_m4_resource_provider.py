@@ -10,13 +10,13 @@ from aetp_protocol.ids import BusinessId
 from aetp_protocol.plan_hash import with_plan_hash
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
+from agent.application.services.capability_publisher import CapabilityPublisher
+from agent.application.services.execution_runner import ExecutionRunner
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.resource_provider import ResourceProviderRegistry
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
-from agent.application.services.v2_execution_runner import V2ExecutionRunner
 from agent.config import AgentSettings
-from agent.plugins.v2_registry import AgentV2PluginRegistry
-from tests.test_agent_v2_capability_publisher import FakeTransport
+from agent.plugins.registry import PluginRegistry
+from tests.test_agent_capability_publisher import FakeTransport
 from tests.test_m3_plan_lease import NOW, SESSION_ID, _plan
 
 
@@ -47,7 +47,7 @@ class _Executor:
         return None
 
 
-def _runner(tmp_path, provider_registry: ResourceProviderRegistry) -> tuple[V2ExecutionRunner, SQLiteLedger]:
+def _runner(tmp_path, provider_registry: ResourceProviderRegistry) -> tuple[ExecutionRunner, SQLiteLedger]:
     settings = AgentSettings(
         node_id="01J00000000000000000000000",
         name="Bench",
@@ -57,9 +57,9 @@ def _runner(tmp_path, provider_registry: ResourceProviderRegistry) -> tuple[V2Ex
         plugin_dir=tmp_path / "plugins",
     )
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
-    publisher = AgentV2CapabilityPublisher(FakeTransport(), settings, AgentV2PluginRegistry())
+    publisher = CapabilityPublisher(FakeTransport(), settings, PluginRegistry())
     return (
-        V2ExecutionRunner(
+        ExecutionRunner(
             settings,
             ledger,
             ExecutionService(settings, ledger),
@@ -138,9 +138,9 @@ def test_v2_runner_maps_activation_failure_to_stable_error(tmp_path) -> None:
     entries = ledger.claim_due_outbox(20, datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1))
     finished = [entry for entry in entries if entry.topic.endswith("/execution.finished")]
     assert len(finished) == 1
-    from aetp_protocol.v2_envelope import parse_v2_message
+    from aetp_protocol.envelope import parse_message
 
-    _envelope, payload = parse_v2_message(finished[0].payload)
+    _envelope, payload = parse_message(finished[0].payload)
     assert payload.result.error is not None
     assert payload.result.error.code.root == "RESOURCE_ACTIVATION_FAILED"
     assert provider.deactivated == []
@@ -170,8 +170,8 @@ def test_v2_runner_rejects_resource_without_provider(tmp_path) -> None:
     )
     finished = [entry for entry in entries if entry.topic.endswith("/execution.finished")]
     assert len(finished) == 1
-    from aetp_protocol.v2_envelope import parse_v2_message
+    from aetp_protocol.envelope import parse_message
 
-    _envelope, payload = parse_v2_message(finished[0].payload)
+    _envelope, payload = parse_message(finished[0].payload)
     assert payload.result.error is not None
     assert payload.result.error.code.root == "RESOURCE_ACTIVATION_FAILED"

@@ -103,7 +103,7 @@ def test_storage_cleanup_removes_orphans_and_keeps_referenced(tmp_path) -> None:
     uow = MagicMock()
     uow.__enter__ = MagicMock(return_value=uow)
     uow.__exit__ = MagicMock(return_value=False)
-    uow.test_scripts.list_all_file_refs.return_value = ["scripts/S-KEEP/1/a.py"]
+    uow.script_definitions.list_all_file_refs.return_value = ["scripts/S-KEEP/1/a.py"]
     uow.run_artifacts.list_all_file_refs.return_value = []
 
     svc = StorageCleanupService(lambda: uow, storage)

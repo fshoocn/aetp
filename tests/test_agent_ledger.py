@@ -87,7 +87,7 @@ def test_inbox_dedup(tmp_path) -> None:
 
 def test_outbox_roundtrip(tmp_path) -> None:
     ledger = _ledger(tmp_path)
-    ledger.enqueue_outbox("o-1", "aetp/v1/topic", {"k": "v"})
+    ledger.enqueue_outbox("o-1", "aetp/v2/topic", {"k": "v"})
 
     due = ledger.claim_due_outbox(10, _future_utc())
     assert len(due) == 1

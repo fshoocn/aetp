@@ -1,4 +1,4 @@
-"""M3 Agent V2 execution.plan 预检测试。"""
+"""Agent execution.plan 预检测试。"""
 
 from __future__ import annotations
 
@@ -6,24 +6,24 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
+from aetp_protocol.envelope import Envelope, Sender, parse_message
 from aetp_protocol.execution import ExecutionPlan, ExecutorRef, PlanResourceBinding
 from aetp_protocol.ids import BusinessId, MessageId, PluginId, SemVer, SessionId, Sha256, TraceId, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ExecutionAck
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender, parse_v2_message
+from aetp_protocol.topics import command_topic
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
-from agent.application.services.v2_execution_plan_controller import AgentV2ExecutionPlanController
+from agent.application.services.capability_publisher import CapabilityPublisher
+from agent.application.services.execution_plan_controller import ExecutionPlanController
 from agent.config import AgentSettings
-from agent.plugins.v2_installer import V2PluginInstaller
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.installer import PluginInstaller
+from agent.plugins.registry import PluginRegistry
 from common.transport import MqttMessage, Transport
 from master.application.services.plan_lease_service import with_plan_hash
-from tests.test_agent_v2_plugin_sync import _package
+from tests.test_agent_plugin_sync import _package
 from tests.test_m3_plan_lease import NOW, _plan
-from tests.test_v2_plugin_archive import _archive
+from tests.test_plugin_archive import _archive
 
 NODE_ID = BusinessId("01J00000000000000000000000")
 SESSION_ID = SessionId("session-00000001")
@@ -37,7 +37,7 @@ class PlanTransport:
         del topic, payload, qos
 
 
-def _controller(tmp_path) -> tuple[AgentV2ExecutionPlanController, SQLiteLedger, AgentV2CapabilityPublisher]:
+def _controller(tmp_path) -> tuple[ExecutionPlanController, SQLiteLedger, CapabilityPublisher]:
     settings = AgentSettings(
         node_id=NODE_ID.root,
         name="Bench 01",
@@ -47,19 +47,19 @@ def _controller(tmp_path) -> tuple[AgentV2ExecutionPlanController, SQLiteLedger,
         plugin_dir=tmp_path / "plugins",
     )
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
-    registry = AgentV2PluginRegistry(settings.plugin_dir)
+    registry = PluginRegistry(settings.plugin_dir)
     content = _archive()
     package = _package(content)
-    installed = V2PluginInstaller(settings.plugin_dir, fetcher=lambda _: content).install(package)
+    installed = PluginInstaller(settings.plugin_dir, fetcher=lambda _: content).install(package)
     registry.register(installed)
-    publisher = AgentV2CapabilityPublisher(
+    publisher = CapabilityPublisher(
         cast(Transport, PlanTransport()),
         settings,
         registry,
         capability_scanner=lambda: None,
     )
     return (
-        AgentV2ExecutionPlanController(
+        ExecutionPlanController(
             NODE_ID,
             ledger,
             publisher,
@@ -87,16 +87,16 @@ def _valid_plan() -> ExecutionPlan:
 
 
 def _command(plan: ExecutionPlan, *, message_id: str = "plan-message-0001") -> MqttMessage:
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=MessageId(message_id),
         sent_at=NOW,
-        sender=V2Sender(kind="master", id=MASTER_ID, session_id=SessionId("master-session-01")),
+        sender=Sender(kind="master", id=MASTER_ID, session_id=SessionId("master-session-01")),
         message_type=MessageType.EXECUTION_PLAN.value,
         trace_id=TraceId("plan-trace-000001"),
         payload=plan.model_dump(mode="json"),
     )
     return MqttMessage(
-        topic=v2_command_topic(NODE_ID.root, "execution.plan"),
+        topic=command_topic(NODE_ID.root, "execution.plan"),
         payload=envelope.model_dump_json().encode("utf-8"),
     )
 
@@ -106,7 +106,7 @@ def _ack(ledger: SQLiteLedger) -> ExecutionAck:
         10,
         (datetime.now(UTC) + timedelta(seconds=1)).replace(tzinfo=None),
     )[-1]
-    _, payload = parse_v2_message(outbox.payload)
+    _, payload = parse_message(outbox.payload)
     assert isinstance(payload, ExecutionAck)
     return payload
 

@@ -6,12 +6,12 @@ import asyncio
 import json
 
 import pytest
+from aetp_protocol.envelope import Envelope, Sender
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import MaintenanceDrainResult, MaintenanceRestartResult, RemoteOperationStatus
-from aetp_protocol.topics import v2_event_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import event_topic
 
 from common.transport import MqttMessage
 from master.application.services.agent_maintenance_service import MaintenanceLockConflict
@@ -54,16 +54,16 @@ def _result_message(
         if restart
         else "agent.maintenance.drain.result"
     )
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=MessageId("m5-maintenance-result-01"),
         sent_at="2026-09-02T08:00:00Z",
-        sender=V2Sender(kind="agent", id=NODE_ID, session_id=session_id),
+        sender=Sender(kind="agent", id=NODE_ID, session_id=session_id),
         message_type=message_type.value,
         trace_id=TraceId("m5-maintenance-trace-01"),
         payload=payload.model_dump(mode="json"),
     )
     return MqttMessage(
-        topic=v2_event_topic(NODE_ID.root, topic_segment),
+        topic=event_topic(NODE_ID.root, topic_segment),
         payload=json.dumps(envelope.model_dump(mode="json")).encode("utf-8"),
     )
 

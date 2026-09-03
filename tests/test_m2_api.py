@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from aetp_protocol.capabilities import AgentMaintenanceState, NodeCapabilitySnapshot
+from aetp_protocol.envelope import parse_message
 from aetp_protocol.ids import BusinessId, RequestId, SemVer, SessionId, Version
 from aetp_protocol.payloads import AgentSystemInfo, DiagnosticsSnapshot, MqttConnectionInfo
-from aetp_protocol.v2_envelope import parse_v2_message
 
 from master.domain.enums import NodeStatus
 from master.domain.models import Node, NodeSession
@@ -135,6 +135,6 @@ def test_v2_diagnostics_collect_enqueues_typed_command(client, auth_header) -> N
     with container.uow_factory()() as uow:
         outbox = uow.outbox_messages.get_by_outbox_id(f"diagnostics:{body['request_id']}")
         assert outbox is not None
-        envelope, payload = parse_v2_message(outbox.payload)
+        envelope, payload = parse_message(outbox.payload)
         assert envelope.message_type == "agent.diagnostics.request"
         assert payload.node_id == NODE_ID

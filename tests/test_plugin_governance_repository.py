@@ -41,8 +41,8 @@ from master.domain.models import (
     PluginSyncOperationState,
     PluginVersionRecord,
 )
-from master.plugins.v2_registry import V2PluginRegistry
-from tests.test_v2_plugin_archive import _archive
+from master.plugins.registry import PluginRegistry
+from tests.test_plugin_archive import _archive
 
 NODE_ID = BusinessId("01J00000000000000000000000")
 PLUGIN_ID = PluginId("org.example.executor")
@@ -202,7 +202,7 @@ def test_plugin_governance_service_registers_immutable_archive_and_lifecycle(cli
     active_path = tmp_path / "plugins" / "active" / PLUGIN_ID.root / "active.json"
     assert '"version":"2.0.0"' in active_path.read_text(encoding="utf-8")
     with container.uow_factory()() as uow:
-        registry = V2PluginRegistry(tmp_path / "plugins")
+        registry = PluginRegistry(tmp_path / "plugins")
         registry_record = uow.plugin_versions.get(PLUGIN_ID, VERSION)
         assert registry_record is not None
         registry.load([registry_record])
@@ -382,7 +382,7 @@ def test_v2_node_group_desired_plugin_api(client) -> None:
     auth = container.auth_service()
     assert auth.bootstrap_admin("desired-api-admin", "admin-pass-123", "Desired API Admin")
     login = client.post(
-        "/api/v1/auth/login",
+        "/api/v2/auth/login",
         json={"username": "desired-api-admin", "password": "admin-pass-123"},
     )
     assert login.status_code == 200

@@ -1,4 +1,4 @@
-"""Agent V2 能力快照和插件可用性测试。"""
+"""Agent 能力快照和插件可用性测试。"""
 
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ from agent.application.services.capability_snapshot_service import (
     CapabilityRevisionCache,
     evaluate_plugin_availability,
 )
-from agent.plugins.v2_installer import InstalledV2Plugin
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.installer import InstalledPlugin
+from agent.plugins.registry import PluginRegistry
 
 NODE_ID = BusinessId("01J00000000000000000000000")
 SESSION_ID = SessionId("session-00000001")
@@ -62,13 +62,13 @@ def _manifest(
     )
 
 
-def _register(registry: AgentV2PluginRegistry, root: Path, manifest: PluginManifest, suffix: str) -> None:
+def _register(registry: PluginRegistry, root: Path, manifest: PluginManifest, suffix: str) -> None:
     directory = root / suffix
     directory.mkdir(parents=True)
     manifest_path = directory / "plugin.json"
     manifest_path.write_text(json.dumps(manifest.model_dump(mode="json")), encoding="utf-8")
     registry.register(
-        InstalledV2Plugin(
+        InstalledPlugin(
             ref=PluginRef(
                 plugin_id=manifest.id,
                 version=manifest.version,
@@ -80,7 +80,7 @@ def _register(registry: AgentV2PluginRegistry, root: Path, manifest: PluginManif
     )
 
 
-def _legacy_capabilities() -> NodeCapabilities:
+def _base_capabilities() -> NodeCapabilities:
     return NodeCapabilities(
         language=LanguageCapability(
             runtimes=(LanguageRuntime(name="python", version=Version("3.12")),)
@@ -113,7 +113,7 @@ def test_plugin_availability_reports_missing_canoe_as_blocked() -> None:
 
 
 def test_snapshot_exposes_only_available_executors_and_monotonic_revision(tmp_path) -> None:
-    registry = AgentV2PluginRegistry()
+    registry = PluginRegistry()
     available = _manifest("org.example.available")
     blocked = _manifest(
         "org.example.python",
@@ -133,7 +133,7 @@ def test_snapshot_exposes_only_available_executors_and_monotonic_revision(tmp_pa
         NODE_ID,
         SESSION_ID,
         registry,
-        capability_scanner=_legacy_capabilities,
+        capability_scanner=_base_capabilities,
         revision_cache=revision_cache,
     )
 
@@ -152,7 +152,7 @@ def test_snapshot_exposes_only_available_executors_and_monotonic_revision(tmp_pa
         NODE_ID,
         NEW_SESSION_ID,
         registry,
-        capability_scanner=_legacy_capabilities,
+        capability_scanner=_base_capabilities,
         revision_cache=revision_cache,
     )
     assert new_session_service.build_snapshot().revision == 1

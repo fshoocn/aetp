@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 
+from aetp_protocol.envelope import Envelope, Sender, parse_message
 from aetp_protocol.execution import CaseResult, CaseStatus, ExecutionResult, ExecutionStatus
 from aetp_protocol.ids import MessageId, SessionId, TraceId, stable_id
 from aetp_protocol.logs import LogLevel
@@ -20,12 +21,11 @@ from aetp_protocol.payloads import (
     ReconcileAttempt,
 )
 from aetp_protocol.plan_hash import with_plan_hash
-from aetp_protocol.topics import v2_event_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender, parse_v2_message
+from aetp_protocol.topics import event_topic
 
 from common.transport import MqttMessage
 from master.application.services.plan_lease_service import PlanLeaseService
-from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
+from master.application.services.plan_materialization_service import PlanMaterializationService
 from master.domain.enums import DisconnectReason, ShardAttemptStatus, ShardStatus
 from tests.test_m3_plan_lease import NOW, SESSION_ID, _plan
 from tests.test_m3_plan_materialization import _seed_context
@@ -34,17 +34,17 @@ NEW_SESSION = SessionId("session-00000099")
 
 
 def _message(plan, message_type: MessageType, payload, *, session_id: SessionId, suffix: str) -> MqttMessage:
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=MessageId(f"v2-event-message-{suffix}"),
         correlation_id=MessageId("v2-event-correlation-01"),
         sent_at=NOW + timedelta(seconds=1),
-        sender=V2Sender(kind="agent", id=plan.node_id, session_id=session_id),
+        sender=Sender(kind="agent", id=plan.node_id, session_id=session_id),
         message_type=message_type.value,
         trace_id=TraceId(f"v2-event-trace-{suffix}"),
         payload=payload.model_dump(mode="json"),
     )
     return MqttMessage(
-        topic=v2_event_topic(plan.node_id.root, {
+        topic=event_topic(plan.node_id.root, {
             MessageType.EXECUTION_PROGRESS: "execution.progress",
             MessageType.EXECUTION_LOG: "execution.log",
             MessageType.EXECUTION_CASE_STATUS: "execution.case_status",
@@ -75,7 +75,7 @@ def _new_session(container, plan) -> None:
 
 def _materialize(container, plan):
     _seed_context(container, plan)
-    return V2PlanMaterializationService(
+    return PlanMaterializationService(
         container.uow_factory(),
         PlanLeaseService(container.uow_factory(), now=lambda: NOW),
     ).materialize(plan)
@@ -218,6 +218,6 @@ def test_master_reconcile_accepts_new_session_and_projects_terminal_once(client)
             stable_id("execution-reconcile-result:v2-event-message-reconcile").root
         )
         assert result_message is not None
-        _envelope, result = parse_v2_message(result_message.payload)
+        _envelope, result = parse_message(result_message.payload)
         assert isinstance(result, ExecutionReconcileResult)
         assert result.accepted is True

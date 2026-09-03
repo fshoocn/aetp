@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+from aetp_protocol.envelope import Envelope, Sender, parse_message
 from aetp_protocol.ids import MessageId, SessionId, Sha256, TraceId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ExecutionAck, LeaseRenewed, LeaseRenewRequest
-from aetp_protocol.topics import v2_event_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender, parse_v2_message
+from aetp_protocol.topics import event_topic
 
 from common.transport import MqttMessage
 from master.application.services.plan_lease_service import with_plan_hash
@@ -52,17 +52,17 @@ def _agent_message(
     message_id: MessageId,
     correlation_id: MessageId | None = None,
 ) -> MqttMessage:
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=message_id,
         correlation_id=correlation_id,
         sent_at=NOW,
-        sender=V2Sender(kind="agent", id=NODE_ID, session_id=SESSION_ID),
+        sender=Sender(kind="agent", id=NODE_ID, session_id=SESSION_ID),
         message_type=message_type.value,
         trace_id=TraceId(new_id()),
         payload=payload.model_dump(mode="json"),
     )
     return MqttMessage(
-        topic=v2_event_topic(
+        topic=event_topic(
             NODE_ID.root,
             {MessageType.EXECUTION_ACK: "execution.ack", MessageType.LEASE_RENEW: "lease.renew"}[message_type],
         ),
@@ -140,7 +140,7 @@ def test_master_router_renews_lease_and_replays_duplicate_message(client) -> Non
         outbox_id = stable_id(f"lease-renewed:{message_id.root}").root
         outbox = uow.outbox_messages.get_by_outbox_id(outbox_id)
         assert outbox is not None
-        _, response = parse_v2_message(outbox.payload)
+        _, response = parse_message(outbox.payload)
         assert isinstance(response, LeaseRenewed)
         assert response.accepted is True
         assert response.revision == 2
@@ -176,10 +176,10 @@ def test_master_router_rejects_old_session_lease_renewal(client) -> None:
     )
     message = MqttMessage(
         topic=message.topic,
-        payload=V2Envelope(
+        payload=Envelope(
             message_id=MessageId("lease-renew-000002"),
             sent_at=NOW,
-            sender=V2Sender(kind="agent", id=NODE_ID, session_id=SessionId("session-00000002")),
+            sender=Sender(kind="agent", id=NODE_ID, session_id=SessionId("session-00000002")),
             message_type=MessageType.LEASE_RENEW.value,
             trace_id=TraceId(new_id()),
             payload=request.model_dump(mode="json"),
@@ -191,7 +191,7 @@ def test_master_router_rejects_old_session_lease_renewal(client) -> None:
         outbox_id = stable_id("lease-renewed:lease-renew-000002").root
         outbox = uow.outbox_messages.get_by_outbox_id(outbox_id)
         assert outbox is not None
-        _, response = parse_v2_message(outbox.payload)
+        _, response = parse_message(outbox.payload)
         assert isinstance(response, LeaseRenewed)
         assert response.accepted is False
         assert response.code is not None and response.code.root == "STALE_SESSION"

@@ -5,24 +5,24 @@ from __future__ import annotations
 import asyncio
 import json
 
+from aetp_protocol.envelope import parse_message
 from aetp_protocol.ids import stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import ExecutionCancel
 from aetp_protocol.plan_hash import with_plan_hash
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import parse_v2_message
+from aetp_protocol.topics import command_topic
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
+from agent.application.services.capability_publisher import CapabilityPublisher
+from agent.application.services.execution_plan_controller import ExecutionPlanController
 from agent.application.services.execution_service import ExecutionService
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
-from agent.application.services.v2_execution_plan_controller import AgentV2ExecutionPlanController
 from agent.config import AgentSettings
 from agent.domain.enums import AgentRunStatus
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 from common.transport import MqttMessage
 from master.application.services.plan_lease_service import PlanLeaseService
-from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
-from tests.test_agent_v2_capability_publisher import FakeTransport
+from master.application.services.plan_materialization_service import PlanMaterializationService
+from tests.test_agent_capability_publisher import FakeTransport
 from tests.test_m3_plan_lease import NOW, SESSION_ID, _plan
 from tests.test_m3_plan_materialization import _seed_context
 
@@ -33,17 +33,17 @@ def test_master_cancel_command_is_typed_and_agent_marks_cancel_requested(client,
     container = client.app.state.container
     plan = with_plan_hash(_plan().model_copy(update={"node_id": NODE_ID}))
     _seed_context(container, plan)
-    materializer = V2PlanMaterializationService(
+    materializer = PlanMaterializationService(
         container.uow_factory(),
         PlanLeaseService(container.uow_factory(), now=lambda: NOW),
     )
     materializer.materialize(plan)
-    master_outbox = container.v2_execution_service().request_cancel(plan.plan_id, reason="user requested")
-    master_envelope, master_payload = parse_v2_message(master_outbox.payload)
+    master_outbox = container.execution_service().request_cancel(plan.plan_id, reason="user requested")
+    master_envelope, master_payload = parse_message(master_outbox.payload)
     assert master_envelope.message_type == MessageType.EXECUTION_CANCEL.value
     assert isinstance(master_payload, ExecutionCancel)
     assert master_payload.request.reason == "user requested"
-    assert master_outbox.topic == v2_command_topic(NODE_ID.root, "execution.cancel")
+    assert master_outbox.topic == command_topic(NODE_ID.root, "execution.cancel")
 
     settings = AgentSettings(
         node_id=NODE_ID.root,
@@ -55,16 +55,16 @@ def test_master_cancel_command_is_typed_and_agent_marks_cancel_requested(client,
     )
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
     execution = ExecutionService(settings, ledger)
-    publisher = AgentV2CapabilityPublisher(
+    publisher = CapabilityPublisher(
         transport=FakeTransport(),
         settings=settings,
-        registry=AgentV2PluginRegistry(),
+        registry=PluginRegistry(),
     )
-    controller = AgentV2ExecutionPlanController(
+    controller = ExecutionPlanController(
         NODE_ID,
         ledger,
         publisher,
-        AgentV2PluginRegistry(),
+        PluginRegistry(),
         is_registered=lambda: True,
         execution_service=execution,
     )

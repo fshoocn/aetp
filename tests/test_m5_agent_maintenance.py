@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from aetp_protocol.capabilities import AgentMaintenanceState
-from aetp_protocol.envelope import SenderKind
+from aetp_protocol.envelope import Envelope, Sender, SenderKind, parse_message
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, stable_id
 from aetp_protocol.logs import LogLevel
 from aetp_protocol.message_types import MessageType
@@ -19,15 +19,14 @@ from aetp_protocol.payloads import (
     MaintenanceRestartRequest,
     MaintenanceRestartResult,
 )
-from aetp_protocol.topics import v2_command_topic, v2_event_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender, parse_v2_message
+from aetp_protocol.topics import command_topic, event_topic
 
 from agent.adapters.sqlite.ledger import SQLiteLedger
 from agent.application.services.agent_log_facade import AgentLogFacade
+from agent.application.services.capability_publisher import CapabilityPublisher
 from agent.application.services.maintenance_controller import AgentMaintenanceController
-from agent.application.services.v2_capability_publisher import AgentV2CapabilityPublisher
 from agent.config import AgentSettings
-from agent.plugins.v2_registry import AgentV2PluginRegistry
+from agent.plugins.registry import PluginRegistry
 from common.transport import MqttMessage
 
 NODE_ID = BusinessId("01J000000000000000000000A0")
@@ -58,10 +57,10 @@ def _settings(tmp_path: Path) -> AgentSettings:
 
 
 def _envelope(message_type: MessageType, payload: object, message_id: str) -> MqttMessage:
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=MessageId(message_id),
         sent_at="2026-09-02T08:00:00Z",
-        sender=V2Sender(
+        sender=Sender(
             kind=SenderKind.MASTER,
             id=stable_id("aetp-master"),
             session_id=MASTER_SESSION_ID,
@@ -76,7 +75,7 @@ def _envelope(message_type: MessageType, payload: object, message_id: str) -> Mq
         MessageType.AGENT_MAINTENANCE_RESTART: "agent.maintenance.restart",
     }[message_type]
     return MqttMessage(
-        topic=v2_command_topic(NODE_ID.root, segment),
+        topic=command_topic(NODE_ID.root, segment),
         payload=json.dumps(envelope.model_dump(mode="json")).encode("utf-8"),
     )
 
@@ -91,10 +90,10 @@ def _controller(
     settings = _settings(tmp_path)
     ledger = SQLiteLedger(f"sqlite:///{tmp_path / 'agent.db'}")
     transport = _Transport()
-    publisher = AgentV2CapabilityPublisher(
+    publisher = CapabilityPublisher(
         transport,
         settings,
-        AgentV2PluginRegistry(tmp_path / "plugins"),
+        PluginRegistry(tmp_path / "plugins"),
     )
     facade = AgentLogFacade(settings, ledger)
     controller = AgentMaintenanceController(
@@ -128,10 +127,10 @@ def test_log_level_update_publishes_result_and_is_idempotent(tmp_path: Path) -> 
         result_messages = [
             item
             for item in transport.published
-            if item[0] == v2_event_topic(NODE_ID.root, "agent.log.level.updated")
+            if item[0] == event_topic(NODE_ID.root, "agent.log.level.updated")
         ]
         assert len(result_messages) == 2
-        _envelope_result, result = parse_v2_message(json.loads(result_messages[-1][1].decode("utf-8")))
+        _envelope_result, result = parse_message(json.loads(result_messages[-1][1].decode("utf-8")))
         assert isinstance(result, LogLevelUpdateResult)
         assert result.accepted is True
         assert ledger.get_run("not-a-run") is None
@@ -163,9 +162,9 @@ def test_drain_waits_until_active_runs_finish(tmp_path: Path) -> None:
         result_messages = [
             item
             for item in transport.published
-            if item[0] == v2_event_topic(NODE_ID.root, "agent.maintenance.drain.result")
+            if item[0] == event_topic(NODE_ID.root, "agent.maintenance.drain.result")
         ]
-        _envelope_result, result = parse_v2_message(json.loads(result_messages[-1][1].decode("utf-8")))
+        _envelope_result, result = parse_message(json.loads(result_messages[-1][1].decode("utf-8")))
         assert isinstance(result, MaintenanceDrainResult)
         assert result.accepted is True
         assert result.active_attempt_count == 0
@@ -200,7 +199,7 @@ def test_drain_timeout_and_restart_callback(tmp_path: Path) -> None:
                 SESSION_ID,
             )
         ) is True
-        _envelope_result, drain_result = parse_v2_message(
+        _envelope_result, drain_result = parse_message(
             json.loads(transport.published[-1][1].decode("utf-8"))
         )
         assert isinstance(drain_result, MaintenanceDrainResult)
@@ -223,9 +222,9 @@ def test_drain_timeout_and_restart_callback(tmp_path: Path) -> None:
         restart_messages = [
             item
             for item in transport.published
-            if item[0] == v2_event_topic(NODE_ID.root, "agent.maintenance.restart.result")
+            if item[0] == event_topic(NODE_ID.root, "agent.maintenance.restart.result")
         ]
-        _envelope_result, restart_result = parse_v2_message(
+        _envelope_result, restart_result = parse_message(
             json.loads(restart_messages[-1][1].decode("utf-8"))
         )
         assert isinstance(restart_result, MaintenanceRestartResult)

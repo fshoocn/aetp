@@ -1,4 +1,4 @@
-"""M2 Master V2 能力与诊断事件路由测试。"""
+"""Master 能力与诊断事件路由测试。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 from aetp_protocol.capabilities import AgentMaintenanceState, NodeCapabilitySnapshot
+from aetp_protocol.envelope import Envelope, Sender
 from aetp_protocol.execution import AttemptStatus
 from aetp_protocol.ids import BusinessId, MessageId, RequestId, SemVer, SessionId, TraceId, Version, new_id, stable_id
 from aetp_protocol.message_types import MessageType
@@ -16,8 +17,7 @@ from aetp_protocol.payloads import (
     MqttConnectionInfo,
     NodeRegister,
 )
-from aetp_protocol.topics import v2_event_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import event_topic
 
 from common.transport import MqttMessage
 from master.domain.enums import NodeStatus
@@ -59,10 +59,10 @@ def _envelope(
     session_id: SessionId,
     payload: NodeCapabilitySnapshot | DiagnosticsSnapshot,
 ) -> bytes:
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=MessageId(new_id()),
         sent_at=NOW,
-        sender=V2Sender(kind="agent", id=NODE_ID, session_id=session_id),
+        sender=Sender(kind="agent", id=NODE_ID, session_id=session_id),
         message_type=message_type.value,
         trace_id=TraceId(new_id()),
         payload=payload.model_dump(mode="json"),
@@ -94,10 +94,10 @@ def _register() -> NodeRegister:
 
 def _register_envelope(payload: NodeRegister) -> tuple[MessageId, bytes]:
     message_id = MessageId(new_id())
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=message_id,
         sent_at=NOW,
-        sender=V2Sender(kind="agent", id=NODE_ID, session_id=SESSION_ID),
+        sender=Sender(kind="agent", id=NODE_ID, session_id=SESSION_ID),
         message_type=MessageType.NODE_REGISTER.value,
         trace_id=TraceId(new_id()),
         payload=payload.model_dump(mode="json"),
@@ -148,7 +148,7 @@ def test_master_router_accepts_idempotent_current_session_snapshot(client) -> No
     _seed_node(container)
     router = container.message_router()
     message = MqttMessage(
-        topic=v2_event_topic(NODE_ID.root, "capability.snapshot"),
+        topic=event_topic(NODE_ID.root, "capability.snapshot"),
         payload=_envelope(MessageType.NODE_CAPABILITY_SNAPSHOT, SESSION_ID, _capability(1)),
     )
 
@@ -161,13 +161,13 @@ def test_master_router_accepts_idempotent_current_session_snapshot(client) -> No
         assert records[0].revision == 1
 
 
-def test_master_router_accepts_v2_register_and_reuses_ack(client) -> None:
+def test_master_router_accepts_register_and_reuses_ack(client) -> None:
     container = client.app.state.container
     router = container.message_router()
     register = _register()
     message_id, payload = _register_envelope(register)
     message = MqttMessage(
-        topic=v2_event_topic(NODE_ID.root, "register"),
+        topic=event_topic(NODE_ID.root, "register"),
         payload=payload,
     )
 
@@ -185,7 +185,7 @@ def test_master_router_accepts_v2_register_and_reuses_ack(client) -> None:
         snapshot = uow.node_capability_snapshots.get_latest(NODE_ID)
         assert snapshot is not None
         assert snapshot.revision == 1
-        outbox_id = stable_id(f"v2-register-ack:{message_id.root}").root
+        outbox_id = stable_id(f"register-ack:{message_id.root}").root
         ack = uow.outbox_messages.get_by_outbox_id(outbox_id)
         assert ack is not None
         assert ack.topic == "aetp/v2/master/agents/01J00000000000000000000000/commands/register.ack"
@@ -197,7 +197,7 @@ def test_master_router_rejects_old_session_snapshot(client) -> None:
     _seed_node(container)
     router = container.message_router()
     message = MqttMessage(
-        topic=v2_event_topic(NODE_ID.root, "capability.snapshot"),
+        topic=event_topic(NODE_ID.root, "capability.snapshot"),
         payload=_envelope(MessageType.NODE_CAPABILITY_SNAPSHOT, OLD_SESSION_ID, _capability(1, OLD_SESSION_ID)),
     )
 
@@ -213,7 +213,7 @@ def test_master_router_persists_diagnostics_snapshot_by_request_id(client) -> No
     router = container.message_router()
     snapshot = _diagnostics("request-00000001")
     message = MqttMessage(
-        topic=v2_event_topic(NODE_ID.root, "agent.diagnostics.snapshot"),
+        topic=event_topic(NODE_ID.root, "agent.diagnostics.snapshot"),
         payload=_envelope(MessageType.AGENT_DIAGNOSTICS_SNAPSHOT, SESSION_ID, snapshot),
     )
 

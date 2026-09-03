@@ -6,12 +6,12 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
+from aetp_protocol.envelope import Envelope, Sender, parse_message
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, stable_id
 from aetp_protocol.logs import AgentLogBatch, LogCode, LogContext, LogEvent, LogLevel
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import AgentLogReceived
-from aetp_protocol.topics import v2_event_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender, parse_v2_message
+from aetp_protocol.topics import event_topic
 
 from common.transport import MqttMessage
 from tests.test_m3_plan_lease import NODE_ID, SESSION_ID, _seed_node
@@ -23,17 +23,17 @@ def _message(
     session_id: SessionId,
     message_id: str,
 ) -> MqttMessage:
-    envelope = V2Envelope(
+    envelope = Envelope(
         message_id=MessageId(message_id),
         correlation_id=None,
         sent_at=datetime(2026, 9, 2, 8, 0, tzinfo=UTC),
-        sender=V2Sender(kind="agent", id=batch.node_id, session_id=session_id),
+        sender=Sender(kind="agent", id=batch.node_id, session_id=session_id),
         message_type=MessageType.AGENT_LOG_BATCH.value,
         trace_id=TraceId("m5-agent-log-trace-0001"),
         payload=batch.model_dump(mode="json"),
     )
     return MqttMessage(
-        topic=v2_event_topic(batch.node_id.root, "agent.log.batch"),
+        topic=event_topic(batch.node_id.root, "agent.log.batch"),
         payload=json.dumps(envelope.model_dump(mode="json")).encode("utf-8"),
     )
 
@@ -78,7 +78,7 @@ def test_master_ingests_agent_log_and_acks_idempotently(client) -> None:
         outbox_id = stable_id("agent-log-received:01J00000000000000000000000:session-00000001:1:1").root
         outbox = uow.outbox_messages.get_by_outbox_id(outbox_id)
         assert outbox is not None
-        envelope, payload = parse_v2_message(outbox.payload)
+        envelope, payload = parse_message(outbox.payload)
         assert envelope.message_type == MessageType.AGENT_LOG_RECEIVED.value
         assert envelope.correlation_id == MessageId("m5-log-message-0001")
         assert isinstance(payload, AgentLogReceived)
@@ -103,7 +103,7 @@ def test_master_rejects_agent_log_from_old_session_with_structured_ack(client) -
         outbox_id = stable_id("agent-log-received:01J00000000000000000000000:session-00000002:1:1").root
         outbox = uow.outbox_messages.get_by_outbox_id(outbox_id)
         assert outbox is not None
-        _envelope, payload = parse_v2_message(outbox.payload)
+        _envelope, payload = parse_message(outbox.payload)
         assert isinstance(payload, AgentLogReceived)
         assert payload.accepted is False
         assert payload.code is not None and payload.code.root == "STALE_SESSION"
@@ -126,7 +126,7 @@ def test_master_rejects_agent_log_batch_session_mismatch(client) -> None:
         outbox_id = stable_id(
             "agent-log-received:01J00000000000000000000000:session-00000001:1:1"
         ).root
-        _envelope, payload = parse_v2_message(
+        _envelope, payload = parse_message(
             uow.outbox_messages.get_by_outbox_id(outbox_id).payload
         )
         assert isinstance(payload, AgentLogReceived)
@@ -151,7 +151,7 @@ def test_master_rejects_agent_log_event_from_another_node(client) -> None:
         outbox_id = stable_id(
             "agent-log-received:01J00000000000000000000000:session-00000001:1:1"
         ).root
-        _envelope, payload = parse_v2_message(
+        _envelope, payload = parse_message(
             uow.outbox_messages.get_by_outbox_id(outbox_id).payload
         )
         assert isinstance(payload, AgentLogReceived)

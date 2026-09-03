@@ -11,6 +11,9 @@ import pytest
 import agent.config as agent_config
 from agent.config import AgentSettings
 
+_NODE_ID = "01M1GNPT7TT01G8SPDKQ51TZAX"
+_NODE_ID_PATTERN = r"[0-7][0-9A-HJKMNP-TV-Z]{25}"
+
 
 @pytest.fixture(autouse=True)
 def _reset_agent_settings() -> Generator[None, None, None]:
@@ -31,7 +34,7 @@ def test_agent_settings_defaults() -> None:
     assert settings.node_id == ""
     assert settings.mqtt_port == 8883
     assert settings.mqtt_use_tls is True
-    assert settings.ledger_url == "sqlite:///data/agent.db"
+    assert settings.ledger_url == "sqlite:///data/agent-runtime.db"
     assert settings.max_concurrent_runs == 1
     assert settings.heartbeat_interval_s == 5
     assert settings.log_level == "INFO"
@@ -40,7 +43,7 @@ def test_agent_settings_defaults() -> None:
 def test_from_env_file_reads_agent_prefix(tmp_path) -> None:
     env_file = _write_env(
         tmp_path,
-        "AETP_AGENT_NODE_ID=bench-001\n"
+        f"AETP_AGENT_NODE_ID={_NODE_ID}\n"
         "AETP_AGENT_NAME=CAN 台架 01\n"
         "AETP_AGENT_MQTT_HOST=broker.local\n"
         "AETP_AGENT_MQTT_PORT=8883\n"
@@ -49,7 +52,7 @@ def test_from_env_file_reads_agent_prefix(tmp_path) -> None:
         "AETP_AGENT_MAX_CONCURRENT_RUNS=2\n",
     )
     settings = AgentSettings.from_env_file(env_file)
-    assert settings.node_id == "bench-001"
+    assert settings.node_id == _NODE_ID
     assert settings.name == "CAN 台架 01"
     assert settings.mqtt_host == "broker.local"
     assert settings.mqtt_port == 8883
@@ -63,7 +66,7 @@ def test_from_env_file_ignores_system_env(tmp_path, monkeypatch) -> None:
     env_file = _write_env(tmp_path, "AETP_AGENT_NAME=file-only\n")
     settings = AgentSettings.from_env_file(env_file)
     assert settings.node_id != "from-system-env"
-    assert settings.node_id.startswith("agent-")
+    assert re.fullmatch(_NODE_ID_PATTERN, settings.node_id)
     assert settings.name == "file-only"
 
 
@@ -78,10 +81,10 @@ def test_relative_paths_resolve_against_env_dir(tmp_path) -> None:
 
 
 def test_configure_get_settings_roundtrip(tmp_path) -> None:
-    env_file = _write_env(tmp_path, "AETP_AGENT_NODE_ID=bench-002\n")
+    env_file = _write_env(tmp_path, f"AETP_AGENT_NODE_ID={_NODE_ID}\n")
     settings = agent_config.configure(env_file)
     assert agent_config.get_settings() is settings
-    assert settings.node_id == "bench-002"
+    assert settings.node_id == _NODE_ID
 
 
 def test_get_settings_raises_before_configure() -> None:
@@ -95,16 +98,16 @@ def test_settings_validate_rejects_missing_identity() -> None:
 
 
 def test_settings_derive_client_id_and_validate(tmp_path) -> None:
-    env_file = _write_env(tmp_path, "AETP_AGENT_NODE_ID=bench-003\n")
+    env_file = _write_env(tmp_path, f"AETP_AGENT_NODE_ID={_NODE_ID}\n")
     settings = AgentSettings.from_env_file(env_file).validate()
-    assert settings.mqtt_client_id == "aetp-agent-bench-003"
+    assert settings.mqtt_client_id == f"aetp-agent-{_NODE_ID}"
 
 
 def test_missing_node_id_is_generated_and_persisted(tmp_path) -> None:
     env_file = _write_env(tmp_path, "AETP_AGENT_NAME=CAN 台架 01\n")
 
     first = AgentSettings.from_env_file(env_file).validate()
-    assert re.fullmatch(r"agent-[0-9a-f]{32}", first.node_id)
+    assert re.fullmatch(_NODE_ID_PATTERN, first.node_id)
     assert f"AETP_AGENT_NODE_ID={first.node_id}" in env_file.read_text(encoding="utf-8")
 
     second = AgentSettings.from_env_file(env_file).validate()
@@ -117,5 +120,5 @@ def test_placeholder_node_id_is_replaced(tmp_path) -> None:
 
     settings = AgentSettings.from_env_file(env_file).validate()
 
-    assert settings.node_id != "<node-id>"
+    assert re.fullmatch(_NODE_ID_PATTERN, settings.node_id)
     assert f"AETP_AGENT_NODE_ID={settings.node_id}" in env_file.read_text(encoding="utf-8")

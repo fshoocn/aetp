@@ -26,17 +26,17 @@ from aetp_protocol.plugins import PluginEntrypoints, PluginManifest, StaticRequi
 from master.domain.models import PluginVersionRecord
 from master.domain.plugin_resolver import PluginResolver
 from master.domain.requirement_resolver import RequirementConflict, RequirementResolver
-from master.plugins.v2_registry import V2PluginRegistry
+from master.plugins.registry import PluginRegistry
 
 PLUGIN_ID = PluginId("org.example.executor")
 NOW = datetime(2026, 9, 1, tzinfo=UTC)
 
 
-def _registry(tmp_path) -> V2PluginRegistry:
+def _registry(tmp_path) -> PluginRegistry:
     archive = tmp_path / "2.0.0" / "archive.zip"
     archive.parent.mkdir(parents=True)
     archive.write_bytes(b"plugin")
-    registry = V2PluginRegistry(tmp_path)
+    registry = PluginRegistry(tmp_path)
     registry.register(
         PluginVersionRecord(
             id=None,

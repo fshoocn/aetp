@@ -1,16 +1,25 @@
-"""M3 V2 Plan 物化集成测试。"""
+"""Plan 物化集成测试。"""
 
 from __future__ import annotations
 
-from aetp_protocol.execution import LeaseState
-from aetp_protocol.ids import BusinessId, stable_id
+from aetp_protocol.envelope import parse_message
+from aetp_protocol.execution import (
+    ExecutionRequirement,
+    LeaseState,
+    PluginRequirement,
+    RetryPolicy,
+    SplitPolicy,
+    TriggerType,
+)
+from aetp_protocol.ids import BusinessId, VersionRange, stable_id
 from aetp_protocol.plan_hash import with_plan_hash
-from aetp_protocol.v2_envelope import parse_v2_message
+from aetp_protocol.plugin_types import PluginRef
+from aetp_protocol.task import RunScriptSnapshot, RunSnapshot
 
 from master.application.services.plan_lease_service import PlanLeaseService
-from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
+from master.application.services.plan_materialization_service import PlanMaterializationService
 from master.domain.enums import NodeStatus, ProjectStatus, ShardAttemptStatus, ShardStatus
-from master.domain.models import Node, NodeSession, Project, RunShard, TaskRun, TestScript, TestTask
+from master.domain.models import Node, NodeSession, Project, RunShard, TaskRun
 from tests.test_m3_plan_lease import NOW, _plan
 
 NODE_ID = BusinessId("01J00000000000000000000000")
@@ -35,36 +44,44 @@ def _seed_context(container, plan) -> None:
                 updated_at=NOW,
             )
         )
-        uow.test_scripts.add(
-            TestScript(
-                project_id=plan.project_id.root,
-                script_id=plan.script.script_id.root,
-                task_type="example",
-                name="materialize-script",
-                version=plan.script.version,
-                file_ref="scripts/materialize.zip",
-                size=plan.script.size,
-                sha256=plan.script.sha256.root,
-                plugin_version="2.0.0",
-                created_by=user.id,
-            )
-        )
-        uow.test_tasks.add(
-            TestTask(
-                task_id=plan.task_id.root,
-                project_id=plan.project_id.root,
-                script_id=plan.script.script_id.root,
-                script_version=plan.script.version,
-                task_type="example",
-                name="materialize-task",
-                created_by=user.id,
-            )
+        assert plan.plugin_package is not None
+        snapshot = RunSnapshot(
+            task_id=plan.task_id,
+            task_revision=1,
+            scripts=(
+                RunScriptSnapshot(
+                    binding_id=plan.script_binding_id,
+                    script_definition_id=plan.script_definition_id,
+                    script_revision=1,
+                    executor=PluginRef(
+                        plugin_id=plan.executor.plugin_id,
+                        version=plan.executor.version,
+                        archive_sha256=plan.plugin_package.archive_sha256,
+                    ),
+                    source=plan.script,
+                    configuration=plan.configuration,
+                    requirement=ExecutionRequirement(
+                        executor=PluginRequirement(
+                            plugin_id=plan.executor.plugin_id,
+                            version=VersionRange(exact=plan.executor.version),
+                        )
+                    ),
+                    selected_case_keys=tuple(plan.case_keys),
+                    split_policy=SplitPolicy(type="none"),
+                ),
+            ),
+            execution_mode="parallel",
+            stop_on_failure=False,
+            retry_policy=RetryPolicy(),
+            node_ids=(plan.node_id,),
+            trigger_type=TriggerType.MANUAL_WEB,
         )
         uow.task_runs.add(
             TaskRun(
                 run_id=plan.run_id.root,
                 project_id=plan.project_id.root,
                 task_id=plan.task_id.root,
+                snapshot=snapshot,
             )
         )
         uow.run_shards.add(
@@ -100,12 +117,12 @@ def _seed_context(container, plan) -> None:
         )
 
 
-def test_v2_materialization_is_atomic_and_idempotent(client) -> None:
+def test_materialization_is_atomic_and_idempotent(client) -> None:
     container = client.app.state.container
     plan = with_plan_hash(_plan())
     _seed_context(container, plan)
     plan_leases = PlanLeaseService(container.uow_factory(), now=lambda: NOW)
-    service = V2PlanMaterializationService(container.uow_factory(), plan_leases)
+    service = PlanMaterializationService(container.uow_factory(), plan_leases)
 
     first = service.materialize(plan)
     repeated = service.materialize(plan)
@@ -125,16 +142,16 @@ def test_v2_materialization_is_atomic_and_idempotent(client) -> None:
         assert stored_plan is not None and stored_plan.plan == plan
         assert lease is not None and lease.lease.state is LeaseState.ACTIVE
         assert outbox is not None
-        _, payload = parse_v2_message(outbox.payload)
+        _, payload = parse_message(outbox.payload)
         assert payload == plan
 
 
-def test_v2_materialization_rejects_second_plan_for_same_attempt(client) -> None:
+def test_materialization_rejects_second_plan_for_same_attempt(client) -> None:
     container = client.app.state.container
     plan = with_plan_hash(_plan())
     _seed_context(container, plan)
     plan_leases = PlanLeaseService(container.uow_factory(), now=lambda: NOW)
-    service = V2PlanMaterializationService(container.uow_factory(), plan_leases)
+    service = PlanMaterializationService(container.uow_factory(), plan_leases)
     service.materialize(plan)
 
     conflicting = with_plan_hash(

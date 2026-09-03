@@ -37,7 +37,7 @@ def _make_outbox(outbox_id: str = "O-1", **kw) -> OutboxMessage:
         outbox_id=outbox_id,
         aggregate_type="task_run",
         aggregate_id="R-1",
-        topic="aetp/v1/master/agents/bench-001/commands/run",
+        topic="aetp/v2/master/agents/bench-001/commands/run",
         payload={"cmd": "run"},
         qos=1,
         status=OutboxStatus.PENDING,
@@ -110,7 +110,7 @@ def test_outbox_enqueue_and_get(client):
         assert created.id is not None
         fetched = uow.outbox_messages.get_by_outbox_id("O-1")
         assert fetched is not None
-        assert fetched.topic == "aetp/v1/master/agents/bench-001/commands/run"
+        assert fetched.topic == "aetp/v2/master/agents/bench-001/commands/run"
         assert fetched.payload == {"cmd": "run"}
         assert fetched.qos == 1
         assert fetched.status == OutboxStatus.PENDING
