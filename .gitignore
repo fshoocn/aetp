@@ -26,12 +26,10 @@ htmlcov/
 **/data/artifacts/
 **/data/scripts/
 
-**/plugins/
+# 运行时生成的插件安装/归档目录（源码插件在 plugins/、agent/plugins/、master/plugins/，不受影响）
+**/data/plugins/
 
-# 仓库内置 pytest 插件源码（运行时插件目录仍保持忽略）
-!/plugins/
-!/plugins/pytest_plugin/
-!/plugins/pytest_plugin/**
+# 仓库内置 pytest 插件源码；仅忽略其生成物
 /plugins/pytest_plugin/__pycache__/
 /plugins/pytest_plugin/**/*.pyc
 /plugins/pytest_plugin.zip
@@ -53,5 +51,5 @@ web/.vite/
 Thumbs.db
 *.crt
 
-# ���������ʱĿ¼
+# 代码审查临时目录
 .review-tmp/
