@@ -220,6 +220,88 @@ def test_plugin_governance_service_registers_immutable_archive_and_lifecycle(cli
     assert not active_path.exists()
 
 
+def test_finalize_pending_restarts_enables_requested_plugin(client, tmp_path) -> None:
+    """Master 重启落定：启用请求（pointer 未指向该版本）→ ENABLED。"""
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+    governance.register_archive("example.zip", _archive())
+    governance.install(PLUGIN_ID, VERSION)
+    governance.request_enabled(PLUGIN_ID, VERSION)
+    active_path = tmp_path / "plugins" / "active" / PLUGIN_ID.root / "active.json"
+    assert not active_path.exists()
+
+    finalized = governance.finalize_pending_restarts()
+
+    assert [item.plugin_id for item in finalized] == [PLUGIN_ID]
+    assert finalized[0].status is PluginStatus.ENABLED
+    assert active_path.exists()
+    assert '"version":"2.0.0"' in active_path.read_text(encoding="utf-8")
+    # 再次落定是幂等空操作
+    assert governance.finalize_pending_restarts() == ()
+
+
+def test_finalize_pending_restarts_disables_pointer_target(client, tmp_path) -> None:
+    """Master 重启落定：停用请求（pointer 指向该版本）→ DISABLED 且移除指针。"""
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+    governance.register_archive("example.zip", _archive())
+    governance.install(PLUGIN_ID, VERSION)
+    governance.request_enabled(PLUGIN_ID, VERSION)
+    governance.complete_restart(PLUGIN_ID, VERSION, enabled=True)
+    governance.request_disabled(PLUGIN_ID, VERSION)
+    active_path = tmp_path / "plugins" / "active" / PLUGIN_ID.root / "active.json"
+    assert active_path.exists()
+
+    finalized = governance.finalize_pending_restarts()
+
+    assert [item.plugin_id for item in finalized] == [PLUGIN_ID]
+    assert finalized[0].status is PluginStatus.DISABLED
+    assert not active_path.exists()
+
+
+def test_finalize_pending_restarts_upgrade_replaces_old_enabled(client, tmp_path) -> None:
+    """Master 重启落定：启用新版本会降级旧 active 版本并切换指针。"""
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+    governance.register_archive("example.zip", _archive())
+    governance.install(PLUGIN_ID, VERSION)
+    governance.request_enabled(PLUGIN_ID, VERSION)
+    governance.complete_restart(PLUGIN_ID, VERSION, enabled=True)
+
+    # 上传并安装 v2.1.0，启用它（旧版 W=2.0.0 仍 enabled + 指针）
+    new_version = SemVer("2.1.0")
+    extra_manifest = {
+        "plugin.json": json.dumps(
+            {
+                "schema_version": 2,
+                "id": "org.example.executor",
+                "version": "2.1.0",
+                "api_version": "2.0.0",
+                "point": "executor",
+                "display_name": "Example Executor",
+                "entrypoints": {
+                    "master": "plugin:create_plugin",
+                    "agent": "plugin:create_plugin",
+                },
+            }
+        ).encode()
+    }
+    governance.register_archive("example-2.1.0.zip", _archive(extra=extra_manifest))
+    governance.install(PLUGIN_ID, new_version)
+    governance.request_enabled(PLUGIN_ID, new_version)
+
+    finalized = governance.finalize_pending_restarts()
+
+    assert len(finalized) == 1
+    assert finalized[0].status is PluginStatus.ENABLED
+    assert finalized[0].version == new_version
+    active_path = tmp_path / "plugins" / "active" / PLUGIN_ID.root / "active.json"
+    assert '"version":"2.1.0"' in active_path.read_text(encoding="utf-8")
+    with container.uow_factory()() as uow:
+        old = uow.plugin_versions.get(PLUGIN_ID, VERSION)
+        assert old is not None and old.status is PluginStatus.DISABLED
+
+
 def test_plugin_sync_service_is_idempotent_and_records_result(client, tmp_path) -> None:
     container = client.app.state.container
     governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")

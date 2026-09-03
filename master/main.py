@@ -166,6 +166,18 @@ async def lifespan(app: FastAPI):
     logger.info("开始初始化数据库和执行迁移")
     container.database()
     logger.info("数据库初始化完成")
+    # Master 重启 = PENDING_RESTART 插件的"重启完成"信号：把启用/停用请求落定到
+    # ENABLED/DISABLED，随后才能被 plugin_registry 以 ENABLED 加载（不热加载）。
+    finalized = container.plugin_governance_service().finalize_pending_restarts()
+    if finalized:
+        logger.info(
+            "Master 重启落定 PENDING_RESTART 插件 %d 个: %s",
+            len(finalized),
+            ", ".join(
+                f"{item.plugin_id.root}@{item.version.root}->{item.status.value}"
+                for item in finalized
+            ),
+        )
     with container.uow_factory()() as uow:
         container.plugin_registry().load(
             uow.plugin_versions.list(status=PluginStatus.ENABLED)

@@ -246,6 +246,11 @@ class AgentRuntime:
             self._publisher.enqueue_register(self._ledger, self._session())
             self._cancel_registration_waiter()
             self._registration_task = asyncio.create_task(self._wait_for_registration())
+            logger.info(
+                "Agent MQTT 已就绪，发送注册请求: node=%s session=%s",
+                self._settings.node_id,
+                self._session_id,
+            )
             return
         self._cancel_registration_waiter()
         if self._heartbeat_task is not None:
@@ -277,6 +282,12 @@ class AgentRuntime:
                 if not accepted:
                     logger.warning("Agent 注册被 Master 拒绝")
                     return
+                logger.info(
+                    "Agent 注册成功: node=%s session=%s（能力快照 revision=%s）",
+                    self._settings.node_id,
+                    self._session_id,
+                    self._publisher.last_capability_revision,
+                )
                 await self._publisher.publish_snapshot(self._session())
                 self._reconcile.enqueue(self._session())
                 if self._heartbeat_task is None or self._heartbeat_task.done():

@@ -148,6 +148,32 @@ class PluginGovernanceService:
                 self._restore_active_pointer(pointer_path, previous_pointer)
             raise
 
+    def finalize_pending_restarts(self) -> tuple[PluginVersionRecord, ...]:
+        """Master 重启后把 PENDING_RESTART 版本落定到 ENABLED/DISABLED。
+
+        插件启用/停用/回滚只写管理状态并标记 PENDING_RESTART（不热加载）。Master
+        重启即代表"重启完成"：这里按 active pointer 推断意图并把状态推进到终态，
+        使 Master 面插件随后能被 ``plugin_registry`` 以 ENABLED 加载。
+
+        推断规则：某版本的 PENDING_RESTART 若正是指向当前 active 指针的版本，说明
+        它是被请求停用的旧版本（应落定 DISABLED）；否则是被请求启用的版本（应落定
+        ENABLED，启用会顺带降级旧 active 版本）。
+        """
+        with self._uow_factory() as uow:
+            records = tuple(
+                record
+                for record in uow.plugin_versions.list()
+                if record.status is PluginStatus.PENDING_RESTART
+            )
+        finalized: list[PluginVersionRecord] = []
+        for record in records:
+            pointer_path = self._active_path(record.plugin_id)
+            wants_enable = not self._pointer_matches(pointer_path, record.plugin_id, record.version)
+            finalized.append(
+                self.complete_restart(record.plugin_id, record.version, enabled=wants_enable)
+            )
+        return tuple(finalized)
+
     def rollback(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
         """切换 active pointer 到已安装的指定版本，并停用当前版本。"""
         pointer_path = self._active_path(plugin_id)
@@ -236,6 +262,8 @@ class PluginGovernanceService:
 
     @staticmethod
     def _pointer_matches(path: Path, plugin_id: PluginId, version: SemVer) -> bool:
+        if not path.is_file():
+            return False
         try:
             reference = PluginRef.model_validate_json(path.read_text(encoding="utf-8"))
         except ValueError:

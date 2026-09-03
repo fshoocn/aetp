@@ -344,6 +344,11 @@ class CapabilityPublisher:
         return self._registered
 
     @property
+    def last_capability_revision(self) -> int:
+        """最近一次能力快照的 revision（诊断/日志用）。"""
+        return self._last_capability_revision
+
+    @property
     def maintenance_state(self) -> AgentMaintenanceState:
         """当前 Agent 维护状态。"""
         return self._maintenance_state
