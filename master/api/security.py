@@ -1,4 +1,4 @@
-"""v1 API JWT 令牌签发与校验工具。
+"""API JWT 令牌签发与校验工具。
 
 访问令牌（Access Token）：短期 JWT，携带 iss/aud/jti，解码时严格校验
 签发方与受众（P2.9），防止令牌跨系统复用。

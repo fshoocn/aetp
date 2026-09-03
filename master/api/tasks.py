@@ -1,4 +1,4 @@
-"""AETP V2 多脚本任务、Run Snapshot 和调度 API。"""
+"""AETP  多脚本任务、Run Snapshot 和调度 API。"""
 
 from __future__ import annotations
 
@@ -8,29 +8,35 @@ from datetime import datetime
 from typing import Any
 
 from aetp_protocol.artifacts import Configuration
-from aetp_protocol.execution import TriggerType as V2TriggerType
+from aetp_protocol.execution import TriggerType as TriggerType
 from aetp_protocol.ids import BusinessId, PluginId, SemVer, Sha256, new_id
 from aetp_protocol.task import RunSnapshot, ScriptDefinition
 from aetp_protocol.task import TestTask as ProtocolTestTask
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from master.api.v1.dependencies import (
+from master.api.dependencies import (
     ArtifactServiceDep,
     EventPublisherDep,
+    ExecutionServiceDep,
+    IdempotencyServiceDep,
+    SchedulerServiceDep,
+    ScriptDefinitionServiceDep,
+    TaskServiceDep,
     UowFactoryDep,
-    V2SchedulerServiceDep,
-    V2ScriptDefinitionServiceDep,
-    V2TaskServiceDep,
 )
-from master.api.v1.permissions import ProjectAccessDep, ProjectManagerDep, ProjectOperatorDep
-from master.application.services.v2_scheduler_service import V2ScheduleResult
-from master.application.services.v2_script_definition_service import V2ScriptDefinitionError
-from master.application.services.v2_task_service import V2RunCreated
-from master.domain.models import ScriptDefinitionRecord, V2TestTaskRecord
+from master.api.permissions import ProjectAccessDep, ProjectManagerDep, ProjectOperatorDep
+from master.application.services.scheduler_service import ScheduleResult
+from master.application.services.script_definition_service import ScriptDefinitionError
+from master.application.services.task_service import RunCreated
+from master.domain.models import ScriptDefinitionRecord, TestTaskRecord
 
-router = APIRouter(prefix="/api/v2/projects", tags=["v2-tasks"])
+from .idempotency import complete as complete_idempotency
+from .idempotency import release as release_idempotency
+from .idempotency import reserve_or_replay as reserve_idempotency
+
+router = APIRouter(prefix="/api/v2/projects", tags=["tasks"])
 
 
 class ScriptDefinitionCreateRequest(BaseModel):
@@ -39,30 +45,37 @@ class ScriptDefinitionCreateRequest(BaseModel):
     definition: ScriptDefinition
 
 
-class V2TaskCreateRequest(BaseModel):
+class TaskCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task: ProtocolTestTask
 
 
-class V2TaskView(BaseModel):
+class TaskView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task: ProtocolTestTask
     created_by: int
 
 
-class V2RunCreateRequest(BaseModel):
+class RunCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task_id: BusinessId
     task_revision: int | None = Field(default=None, ge=1)
     run_id: BusinessId | None = None
-    trigger_type: V2TriggerType = V2TriggerType.MANUAL_WEB
+    trigger_type: TriggerType = TriggerType.MANUAL_WEB
     original_run_id: BusinessId | None = None
+    case_filter: tuple[str, ...] | None = None
 
 
-class V2ShardView(BaseModel):
+class RunActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: str = Field(default="", max_length=1024)
+
+
+class ShardView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     shard_id: BusinessId
@@ -72,33 +85,37 @@ class V2ShardView(BaseModel):
     status: str
 
 
-class V2RunView(BaseModel):
+class RunView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: BusinessId
     task_id: BusinessId
     snapshot: RunSnapshot
     status: str
-    shards: tuple[V2ShardView, ...]
+    trigger_type: TriggerType
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    shards: tuple[ShardView, ...]
     scheduled: int
     pending_shard_ids: tuple[BusinessId, ...]
     cancelled_shard_ids: tuple[BusinessId, ...]
 
 
-class V2RunListView(BaseModel):
+class RunListView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: BusinessId
     task_id: BusinessId
     task_revision: int
     status: str
-    trigger_type: V2TriggerType
+    trigger_type: TriggerType
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
 
 
-class V2RunResultView(BaseModel):
+class RunResultView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     result_id: BusinessId
@@ -111,7 +128,7 @@ class V2RunResultView(BaseModel):
     finished_at: datetime | None
 
 
-class V2RunCaseResultView(BaseModel):
+class RunCaseResultView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: BusinessId
@@ -124,7 +141,7 @@ class V2RunCaseResultView(BaseModel):
     detail: dict[str, Any] | None
 
 
-class V2RunArtifactView(BaseModel):
+class RunArtifactView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     artifact_id: BusinessId
@@ -141,13 +158,13 @@ class V2RunArtifactView(BaseModel):
     uploaded_at: datetime
 
 
-class V2RunDetailView(V2RunView):
-    result: V2RunResultView | None
-    case_results: tuple[V2RunCaseResultView, ...]
-    artifacts: tuple[V2RunArtifactView, ...]
+class RunDetailView(RunView):
+    result: RunResultView | None
+    case_results: tuple[RunCaseResultView, ...]
+    artifacts: tuple[RunArtifactView, ...]
 
 
-class V2RunEventView(BaseModel):
+class RunEventView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     event_id: str
@@ -158,7 +175,7 @@ class V2RunEventView(BaseModel):
     occurred_at: datetime | None
 
 
-class V2RunLogView(BaseModel):
+class RunLogView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: int
@@ -175,18 +192,22 @@ def _definition_view(record: ScriptDefinitionRecord) -> ScriptDefinition:
     return record.definition
 
 
-def _task_view(record: V2TestTaskRecord) -> V2TaskView:
-    return V2TaskView(task=record.task, created_by=record.created_by)
+def _task_view(record: TestTaskRecord) -> TaskView:
+    return TaskView(task=record.task, created_by=record.created_by)
 
 
-def _run_view(created: V2RunCreated, schedule: V2ScheduleResult) -> V2RunView:
-    return V2RunView(
+def _run_view(created: RunCreated, schedule: ScheduleResult) -> RunView:
+    return RunView(
         run_id=BusinessId(created.run.run_id),
         task_id=created.snapshot.task_id,
         snapshot=created.snapshot,
         status=created.run.status.value,
+        trigger_type=TriggerType(created.run.trigger_type.value),
+        created_at=created.run.created_at,
+        started_at=created.run.started_at,
+        finished_at=created.run.finished_at,
         shards=tuple(
-            V2ShardView(
+            ShardView(
                 shard_id=BusinessId(shard.shard_id),
                 script_binding_id=BusinessId(shard.script_binding_id),
                 shard_index=shard.shard_index,
@@ -201,31 +222,35 @@ def _run_view(created: V2RunCreated, schedule: V2ScheduleResult) -> V2RunView:
     )
 
 
-def _run_list_view(run) -> V2RunListView:
+def _run_list_view(run) -> RunListView:
     if run.snapshot is None:
-        raise ValueError("V2 Run 缺少不可变 Snapshot")
-    return V2RunListView(
+        raise ValueError(" Run 缺少不可变 Snapshot")
+    return RunListView(
         run_id=BusinessId(run.run_id),
         task_id=BusinessId(run.task_id),
         task_revision=run.task_revision or run.snapshot.task_revision,
         status=run.status.value,
-        trigger_type=V2TriggerType(run.trigger_type.value),
+        trigger_type=TriggerType(run.trigger_type.value),
         created_at=run.created_at,
         started_at=run.started_at,
         finished_at=run.finished_at,
     )
 
 
-def _run_detail_view(run, shards, result, case_results, artifacts) -> V2RunDetailView:
+def _run_detail_view(run, shards, result, case_results, artifacts) -> RunDetailView:
     if run.snapshot is None:
-        raise ValueError("V2 Run 缺少不可变 Snapshot")
-    return V2RunDetailView(
+        raise ValueError(" Run 缺少不可变 Snapshot")
+    return RunDetailView(
         run_id=BusinessId(run.run_id),
         task_id=BusinessId(run.task_id),
         snapshot=run.snapshot,
         status=run.status.value,
+        trigger_type=TriggerType(run.trigger_type.value),
+        created_at=run.created_at,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
         shards=tuple(
-            V2ShardView(
+            ShardView(
                 shard_id=BusinessId(shard.shard_id),
                 script_binding_id=BusinessId(shard.script_binding_id),
                 shard_index=shard.shard_index,
@@ -246,7 +271,7 @@ def _run_detail_view(run, shards, result, case_results, artifacts) -> V2RunDetai
             if shard.status.value == "cancelled"
         ),
         result=(
-            V2RunResultView(
+            RunResultView(
                 result_id=BusinessId(result.result_id),
                 passed=result.passed,
                 status=result.status.value,
@@ -260,7 +285,7 @@ def _run_detail_view(run, shards, result, case_results, artifacts) -> V2RunDetai
             else None
         ),
         case_results=tuple(
-            V2RunCaseResultView(
+            RunCaseResultView(
                 run_id=BusinessId(item.run_id),
                 shard_id=BusinessId(item.shard_id),
                 case_key=item.case_key,
@@ -273,7 +298,7 @@ def _run_detail_view(run, shards, result, case_results, artifacts) -> V2RunDetai
             for item in case_results
         ),
         artifacts=tuple(
-            V2RunArtifactView(
+            RunArtifactView(
                 artifact_id=BusinessId(item.artifact_id),
                 run_id=BusinessId(item.run_id),
                 shard_id=BusinessId(item.shard_id) if item.shard_id else None,
@@ -300,21 +325,45 @@ def _run_detail_view(run, shards, result, case_results, artifacts) -> V2RunDetai
 def create_script_definition(
     project_id: str,
     body: ScriptDefinitionCreateRequest,
-    _access: ProjectManagerDep,
-    service: V2TaskServiceDep,
+    access: ProjectManagerDep,
+    service: TaskServiceDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ScriptDefinition:
     try:
         typed_project_id = BusinessId(project_id)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="V2 项目 ID 不合法") from exc
+        raise HTTPException(status_code=422, detail=" 项目 ID 不合法") from exc
     if body.definition.project_id != typed_project_id:
         raise HTTPException(status_code=422, detail="ScriptDefinition 项目与路径不一致")
+    result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"script-definition.create:{typed_project_id.root}:{access.user.persisted_id}",
+        payload=body.model_dump(mode="json"),
+        response_model=ScriptDefinition,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
-        return _definition_view(service.register_script_definition(body.definition))
+        response = _definition_view(service.register_script_definition(body.definition))
+        complete_idempotency(
+            idempotency,
+            result.reservation,
+            response,
+            response_status=status.HTTP_201_CREATED,
+        )
+        return response
     except KeyError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
 
 
 @router.post(
@@ -325,7 +374,9 @@ def create_script_definition(
 async def upload_script_definition(
     project_id: str,
     access: ProjectManagerDep,
-    service: V2ScriptDefinitionServiceDep,
+    service: ScriptDefinitionServiceDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     name: str = Form(...),
     executor_plugin_id: str = Form(...),
     executor_version: str = Form(...),
@@ -354,7 +405,25 @@ async def upload_script_definition(
                 values=raw_configuration,
             )
     except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=422, detail=f"V2 ScriptDefinition 参数无效: {exc}") from exc
+        raise HTTPException(status_code=422, detail=f" ScriptDefinition 参数无效: {exc}") from exc
+    file_data = await file.read()
+    result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"script-definition.upload:{typed_project_id.root}:{access.user.persisted_id}",
+        payload={
+            "name": name,
+            "executor_plugin_id": executor_plugin_id,
+            "executor_version": executor_version,
+            "configuration": typed_configuration.model_dump(mode="json"),
+            "filename": file.filename or "script.zip",
+            "sha256": hashlib.sha256(file_data).hexdigest(),
+        },
+        response_model=ScriptDefinition,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
         record = await service.upload(
             project_id=typed_project_id,
@@ -363,12 +432,23 @@ async def upload_script_definition(
             executor_version=version,
             configuration=typed_configuration,
             filename=file.filename or "script.zip",
-            file_data=await file.read(),
+            file_data=file_data,
             created_by=access.user.persisted_id,
         )
-    except V2ScriptDefinitionError as exc:
+    except ScriptDefinitionError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return record.definition
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
+    response = record.definition
+    complete_idempotency(
+        idempotency,
+        result.reservation,
+        response,
+        response_status=status.HTTP_201_CREATED,
+    )
+    return response
 
 
 @router.get(
@@ -402,7 +482,7 @@ def get_script_definition(
     try:
         definition_id = BusinessId(script_definition_id)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="V2 ScriptDefinition ID 不合法") from exc
+        raise HTTPException(status_code=422, detail=" ScriptDefinition ID 不合法") from exc
     if revision is None or revision < 1:
         raise HTTPException(status_code=422, detail="revision 必须大于 0")
     with uow_factory() as uow:
@@ -414,87 +494,124 @@ def get_script_definition(
 
 @router.post(
     "/{project_id}/test-tasks",
-    response_model=V2TaskView,
+    response_model=TaskView,
     status_code=status.HTTP_201_CREATED,
 )
-def create_v2_task(
+def create_task(
     project_id: str,
-    body: V2TaskCreateRequest,
+    body: TaskCreateRequest,
     access: ProjectManagerDep,
-    service: V2TaskServiceDep,
-) -> V2TaskView:
+    service: TaskServiceDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TaskView:
     try:
         typed_project_id = BusinessId(project_id)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="V2 项目 ID 不合法") from exc
+        raise HTTPException(status_code=422, detail=" 项目 ID 不合法") from exc
     if body.task.project_id != typed_project_id:
         raise HTTPException(status_code=422, detail="TestTask 项目与路径不一致")
+    result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"test-task.create:{typed_project_id.root}:{access.user.persisted_id}",
+        payload=body.model_dump(mode="json"),
+        response_model=TaskView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
-        return _task_view(service.create_task(body.task, created_by=access.user.persisted_id))
+        response = _task_view(service.create_task(body.task, created_by=access.user.persisted_id))
+        complete_idempotency(
+            idempotency,
+            result.reservation,
+            response,
+            response_status=status.HTTP_201_CREATED,
+        )
+        return response
     except KeyError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
 
 
 @router.get(
     "/{project_id}/test-tasks",
-    response_model=list[V2TaskView],
+    response_model=list[TaskView],
 )
-def list_v2_tasks(
+def list_tasks(
     project_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
     enabled: bool | None = None,
-) -> list[V2TaskView]:
+) -> list[TaskView]:
     typed_project_id = _project_id(project_id)
     with uow_factory() as uow:
-        records = uow.v2_test_tasks.list_by_project(typed_project_id, enabled=enabled)
+        records = uow.test_tasks.list_by_project(typed_project_id, enabled=enabled)
     return [_task_view(record) for record in records]
 
 
 @router.get(
     "/{project_id}/test-tasks/{task_id}",
-    response_model=V2TaskView,
+    response_model=TaskView,
 )
-def get_v2_task(
+def get_task(
     project_id: str,
     task_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
     revision: int | None = None,
-) -> V2TaskView:
+) -> TaskView:
     typed_project_id = _project_id(project_id)
     try:
         typed_task_id = BusinessId(task_id)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="V2 TestTask ID 不合法") from exc
+        raise HTTPException(status_code=422, detail=" TestTask ID 不合法") from exc
     with uow_factory() as uow:
-        record = uow.v2_test_tasks.get(typed_task_id, revision)
+        record = uow.test_tasks.get(typed_task_id, revision)
     if record is None or record.task.project_id != typed_project_id:
-        raise HTTPException(status_code=404, detail="V2 TestTask 不存在")
+        raise HTTPException(status_code=404, detail=" TestTask 不存在")
     return _task_view(record)
 
 
 @router.post(
     "/{project_id}/runs",
-    response_model=V2RunView,
+    response_model=RunView,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_v2_run(
+async def create_run(
     project_id: str,
-    body: V2RunCreateRequest,
+    body: RunCreateRequest,
     _access: ProjectOperatorDep,
-    service: V2TaskServiceDep,
-    scheduler: V2SchedulerServiceDep,
+    service: TaskServiceDep,
+    scheduler: SchedulerServiceDep,
     event_publisher: EventPublisherDep,
-) -> V2RunView:
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunView:
     try:
         typed_project_id = BusinessId(project_id)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="V2 项目 ID 不合法") from exc
-    if body.trigger_type not in {V2TriggerType.MANUAL_WEB, V2TriggerType.API}:
+        raise HTTPException(status_code=422, detail=" 项目 ID 不合法") from exc
+    if body.trigger_type not in {TriggerType.MANUAL_WEB, TriggerType.API}:
         raise HTTPException(status_code=403, detail="retry/recovery Run 只能由 Master 内部服务创建")
+    idempotency_result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"run.create:{typed_project_id.root}:{_access.user.persisted_id}",
+        payload=body.model_dump(mode="json"),
+        response_model=RunView,
+    )
+    if idempotency_result.replayed:
+        assert idempotency_result.response is not None
+        return idempotency_result.response
+    reservation = idempotency_result.reservation
     try:
         created = service.create_run(
             body.task_id,
@@ -503,8 +620,16 @@ async def create_v2_run(
             trigger_type=body.trigger_type,
             run_id=body.run_id or BusinessId(new_id()),
             original_run_id=body.original_run_id,
+            case_filter=set(body.case_filter) if body.case_filter is not None else None,
         )
         schedule = scheduler.schedule_run(BusinessId(created.run.run_id))
+        response = _run_view(created, schedule)
+        complete_idempotency(
+            idempotency,
+            reservation,
+            response,
+            response_status=status.HTTP_201_CREATED,
+        )
         await event_publisher.publish(
             "run.created",
             {
@@ -515,24 +640,29 @@ async def create_v2_run(
             project_id=typed_project_id.root,
             aggregate_id=created.run.run_id,
         )
-        return _run_view(created, schedule)
+        return response
     except KeyError as exc:
+        release_idempotency(idempotency, reservation)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, reservation)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        release_idempotency(idempotency, reservation)
+        raise
 
 
 @router.get(
     "/{project_id}/runs",
-    response_model=list[V2RunListView],
+    response_model=list[RunListView],
 )
-def list_v2_runs(
+def list_runs(
     project_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
     limit: int = 100,
     offset: int = 0,
-) -> list[V2RunListView]:
+) -> list[RunListView]:
     typed_project_id = _project_id(project_id)
     if not 1 <= limit <= 1000 or offset < 0:
         raise HTTPException(status_code=422, detail="limit/offset 参数不合法")
@@ -543,26 +673,26 @@ def list_v2_runs(
 
 @router.get(
     "/{project_id}/runs/{run_id}/logs",
-    response_model=list[V2RunLogView],
+    response_model=list[RunLogView],
 )
-def list_v2_run_logs(
+def list_run_logs(
     project_id: str,
     run_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
     after_sequence: int = 0,
-) -> list[V2RunLogView]:
+) -> list[RunLogView]:
     typed_project_id = _project_id(project_id)
-    typed_run_id = _business_id(run_id, "V2 Run ID")
+    typed_run_id = _business_id(run_id, " Run ID")
     if after_sequence < 0:
         raise HTTPException(status_code=422, detail="after_sequence 不能小于 0")
     with uow_factory() as uow:
         run = uow.task_runs.get_by_run_id(typed_run_id.root, typed_project_id.root)
         if run is None:
-            raise HTTPException(status_code=404, detail="V2 Run 不存在")
+            raise HTTPException(status_code=404, detail=" Run 不存在")
         logs = uow.run_logs.list_by_run(run.run_id, after_sequence=after_sequence)
     return [
-        V2RunLogView(
+        RunLogView(
             id=item.id or 0,
             run_id=BusinessId(item.run_id),
             node_id=item.node_id,
@@ -578,23 +708,23 @@ def list_v2_run_logs(
 
 @router.get(
     "/{project_id}/runs/{run_id}/events",
-    response_model=list[V2RunEventView],
+    response_model=list[RunEventView],
 )
-def list_v2_run_events(
+def list_run_events(
     project_id: str,
     run_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
-) -> list[V2RunEventView]:
+) -> list[RunEventView]:
     typed_project_id = _project_id(project_id)
-    typed_run_id = _business_id(run_id, "V2 Run ID")
+    typed_run_id = _business_id(run_id, " Run ID")
     with uow_factory() as uow:
         run = uow.task_runs.get_by_run_id(typed_run_id.root, typed_project_id.root)
         if run is None:
-            raise HTTPException(status_code=404, detail="V2 Run 不存在")
+            raise HTTPException(status_code=404, detail=" Run 不存在")
         events = uow.domain_events.list_by_aggregate(run.run_id, project_id=typed_project_id.root)
     return [
-        V2RunEventView(
+        RunEventView(
             event_id=item.event_id,
             sequence=item.sequence,
             event_type=item.event_type,
@@ -608,23 +738,23 @@ def list_v2_run_events(
 
 @router.get(
     "/{project_id}/runs/{run_id}/artifacts",
-    response_model=list[V2RunArtifactView],
+    response_model=list[RunArtifactView],
 )
-def list_v2_run_artifacts(
+def list_run_artifacts(
     project_id: str,
     run_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
-) -> list[V2RunArtifactView]:
+) -> list[RunArtifactView]:
     typed_project_id = _project_id(project_id)
-    typed_run_id = _business_id(run_id, "V2 Run ID")
+    typed_run_id = _business_id(run_id, " Run ID")
     with uow_factory() as uow:
         run = uow.task_runs.get_by_run_id(typed_run_id.root, typed_project_id.root)
         if run is None:
-            raise HTTPException(status_code=404, detail="V2 Run 不存在")
+            raise HTTPException(status_code=404, detail=" Run 不存在")
         artifacts = uow.run_artifacts.list_by_run(run.run_id)
     return [
-        V2RunArtifactView(
+        RunArtifactView(
             artifact_id=BusinessId(item.artifact_id),
             run_id=BusinessId(item.run_id),
             shard_id=BusinessId(item.shard_id) if item.shard_id else None,
@@ -643,14 +773,14 @@ def list_v2_run_artifacts(
 
 
 @router.get("/{project_id}/runs/{run_id}/artifacts/{artifact_id}/download")
-def download_v2_run_artifact(
+def download_run_artifact(
     project_id: str,
     run_id: str,
     artifact_id: str,
     _access: ProjectAccessDep,
     artifact_service: ArtifactServiceDep,
 ) -> StreamingResponse:
-    typed_run_id = _business_id(run_id, "V2 Run ID")
+    typed_run_id = _business_id(run_id, " Run ID")
     _business_id(artifact_id, "Artifact ID")
     artifact = artifact_service.get_by_artifact_id(artifact_id, project_id)
     if artifact is None or artifact.run_id != typed_run_id.root:
@@ -667,23 +797,23 @@ def download_v2_run_artifact(
 
 @router.get(
     "/{project_id}/runs/{run_id}",
-    response_model=V2RunDetailView,
+    response_model=RunDetailView,
 )
-def get_v2_run(
+def get_run(
     project_id: str,
     run_id: str,
     _access: ProjectAccessDep,
     uow_factory: UowFactoryDep,
-) -> V2RunDetailView:
+) -> RunDetailView:
     typed_project_id = _project_id(project_id)
     try:
         typed_run_id = BusinessId(run_id)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="V2 Run ID 不合法") from exc
+        raise HTTPException(status_code=422, detail=" Run ID 不合法") from exc
     with uow_factory() as uow:
         run = uow.task_runs.get_by_run_id(typed_run_id.root, typed_project_id.root)
         if run is None:
-            raise HTTPException(status_code=404, detail="V2 Run 不存在")
+            raise HTTPException(status_code=404, detail=" Run 不存在")
         shards = uow.run_shards.list_by_run(run.run_id)
         result = uow.run_results.get_by_run_id(run.run_id)
         case_results = uow.run_case_results.list_by_run(run.run_id)
@@ -691,11 +821,203 @@ def get_v2_run(
     return _run_detail_view(run, shards, result, case_results, artifacts)
 
 
+@router.post(
+    "/{project_id}/runs/{run_id}/cancel",
+    response_model=RunListView,
+)
+def cancel_run(
+    project_id: str,
+    run_id: str,
+    body: RunActionRequest,
+    _access: ProjectOperatorDep,
+    uow_factory: UowFactoryDep,
+    execution: ExecutionServiceDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunListView:
+    typed_project_id = _project_id(project_id)
+    typed_run_id = _business_id(run_id, " Run ID")
+    with uow_factory() as uow:
+        run = uow.task_runs.get_by_run_id(typed_run_id.root, typed_project_id.root)
+        if run is None or run.snapshot is None:
+            raise HTTPException(status_code=404, detail=" Run 不存在")
+        plans = uow.execution_plans.list_by_run(typed_run_id)
+    idempotency_result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"run.cancel:{typed_project_id.root}:{_access.user.persisted_id}:{typed_run_id.root}",
+        payload={"run_id": typed_run_id.root, "reason": body.reason, "operation": "cancel"},
+        response_model=RunListView,
+    )
+    if idempotency_result.replayed:
+        assert idempotency_result.response is not None
+        return idempotency_result.response
+    reservation = idempotency_result.reservation
+    try:
+        for plan in plans:
+            try:
+                execution.request_cancel(plan.plan.plan_id, reason=body.reason)
+            except ValueError:
+                continue
+        response = _run_list_view(run)
+        complete_idempotency(idempotency, reservation, response, response_status=status.HTTP_200_OK)
+        return response
+    except Exception:
+        release_idempotency(idempotency, reservation)
+        raise
+
+
+@router.post(
+    "/{project_id}/runs/{run_id}/retry",
+    response_model=RunView,
+    status_code=status.HTTP_201_CREATED,
+)
+async def retry_run(
+    project_id: str,
+    run_id: str,
+    body: RunActionRequest,
+    access: ProjectOperatorDep,
+    service: TaskServiceDep,
+    scheduler: SchedulerServiceDep,
+    event_publisher: EventPublisherDep,
+    uow_factory: UowFactoryDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunView:
+    typed_project_id = _project_id(project_id)
+    typed_run_id = _business_id(run_id, " Run ID")
+    with uow_factory() as uow:
+        source = uow.task_runs.get_by_run_id(typed_run_id.root, typed_project_id.root)
+        if source is None or source.snapshot is None:
+            raise HTTPException(status_code=404, detail=" Run 不存在")
+    idempotency_result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"run.retry:{typed_project_id.root}:{access.user.persisted_id}:{typed_run_id.root}",
+        payload={"run_id": typed_run_id.root, "reason": body.reason, "operation": "retry"},
+        response_model=RunView,
+    )
+    if idempotency_result.replayed:
+        assert idempotency_result.response is not None
+        return idempotency_result.response
+    reservation = idempotency_result.reservation
+    try:
+        created = service.create_run(
+            BusinessId(source.task_id),
+            project_id=typed_project_id,
+            task_revision=source.task_revision,
+            trigger_type=TriggerType.RETRY,
+            run_id=BusinessId(new_id()),
+            original_run_id=typed_run_id,
+        )
+        schedule = scheduler.schedule_run(BusinessId(created.run.run_id))
+        response = _run_view(created, schedule)
+        complete_idempotency(idempotency, reservation, response, response_status=status.HTTP_201_CREATED)
+        await event_publisher.publish(
+            "run.created",
+            {
+                "run_id": created.run.run_id,
+                "task_id": created.run.task_id,
+                "project_id": typed_project_id.root,
+                "original_run_id": typed_run_id.root,
+            },
+            project_id=typed_project_id.root,
+            aggregate_id=created.run.run_id,
+        )
+        return response
+    except Exception:
+        release_idempotency(idempotency, reservation)
+        raise
+
+
+@router.post(
+    "/{project_id}/runs/{run_id}/retry-failed",
+    response_model=RunView,
+    status_code=status.HTTP_201_CREATED,
+)
+async def retry_failed_run(
+    project_id: str,
+    run_id: str,
+    body: RunActionRequest,
+    access: ProjectOperatorDep,
+    service: TaskServiceDep,
+    scheduler: SchedulerServiceDep,
+    event_publisher: EventPublisherDep,
+    uow_factory: UowFactoryDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunView:
+    typed_project_id = _project_id(project_id)
+    typed_run_id = _business_id(run_id, " Run ID")
+    with uow_factory() as uow:
+        source = uow.task_runs.get_by_run_id(typed_run_id.root, typed_project_id.root)
+        if source is None or source.snapshot is None:
+            raise HTTPException(status_code=404, detail=" Run 不存在")
+        case_results = uow.run_case_results.list_by_run(typed_run_id.root)
+    latest_case_results = {}
+    for item in case_results:
+        current = latest_case_results.get(item.case_key)
+        if current is None or item.attempt_no > current.attempt_no:
+            latest_case_results[item.case_key] = item
+    failed_case_keys = {
+        case_key
+        for case_key, item in latest_case_results.items()
+        if item.status.value in {"failed", "error"}
+    }
+    if not failed_case_keys:
+        raise HTTPException(status_code=409, detail=" Run 没有可重试的失败用例")
+    idempotency_result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"run.retry-failed:{typed_project_id.root}:{access.user.persisted_id}:{typed_run_id.root}",
+        payload={
+            "run_id": typed_run_id.root,
+            "reason": body.reason,
+            "operation": "retry-failed",
+            "case_keys": sorted(failed_case_keys),
+        },
+        response_model=RunView,
+    )
+    if idempotency_result.replayed:
+        assert idempotency_result.response is not None
+        return idempotency_result.response
+    reservation = idempotency_result.reservation
+    try:
+        created = service.create_run(
+            BusinessId(source.task_id),
+            project_id=typed_project_id,
+            task_revision=source.task_revision,
+            trigger_type=TriggerType.RETRY,
+            run_id=BusinessId(new_id()),
+            original_run_id=typed_run_id,
+            case_filter=failed_case_keys,
+        )
+        schedule = scheduler.schedule_run(BusinessId(created.run.run_id))
+        response = _run_view(created, schedule)
+        complete_idempotency(idempotency, reservation, response, response_status=status.HTTP_201_CREATED)
+        await event_publisher.publish(
+            "run.created",
+            {
+                "run_id": created.run.run_id,
+                "task_id": created.run.task_id,
+                "project_id": typed_project_id.root,
+                "original_run_id": typed_run_id.root,
+                "retried_case_keys": sorted(failed_case_keys),
+            },
+            project_id=typed_project_id.root,
+            aggregate_id=created.run.run_id,
+        )
+        return response
+    except Exception:
+        release_idempotency(idempotency, reservation)
+        raise
+
+
 def _project_id(value: str) -> BusinessId:
     try:
         return BusinessId(value)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="V2 项目 ID 不合法") from exc
+        raise HTTPException(status_code=422, detail=" 项目 ID 不合法") from exc
 
 
 def _business_id(value: str, label: str) -> BusinessId:

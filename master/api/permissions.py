@@ -1,4 +1,4 @@
-"""v1 API 项目权限策略。
+"""API 项目权限策略。
 
 技术依赖注入位于 dependencies.py；本文件只定义平台角色和项目角色校验。
 """
@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 
-from master.api.v1.dependencies import CurrentUser, ProjectMemberServiceDep
+from master.api.dependencies import CurrentUser, ProjectMemberServiceDep
 from master.domain.enums import PlatformRole, ProjectRole
 from master.domain.models import User
 

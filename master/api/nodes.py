@@ -1,4 +1,4 @@
-"""AETP V2 节点能力和诊断查询 API。"""
+"""AETP  节点能力和诊断查询 API。"""
 
 from __future__ import annotations
 
@@ -7,20 +7,20 @@ import json
 from datetime import datetime
 from typing import Annotated, Literal, cast
 
-from aetp_protocol.capabilities import NodeCapabilitySnapshot
+from aetp_protocol.capabilities import NodeCapabilities, NodeCapabilitySnapshot
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.ids import BusinessId, PluginId, RequestId, SessionId, Sha256
 from aetp_protocol.logs import LogEvent, LogLevel
 from aetp_protocol.payloads import DiagnosticsSnapshot, RemoteOperationStatus
 from aetp_protocol.plugin_types import DesiredPluginVersion
 from aetp_protocol.plugins import PluginSyncItem, PluginSyncItemResult
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
 from master.adapters.sse.event_bus import EventBus
-from master.api.v1.dependencies import CurrentUser, UowFactoryDep
-from master.api.v1.permissions import PlatformAdminDep
+from master.api.dependencies import CurrentUser, IdempotencyServiceDep, UowFactoryDep
+from master.api.permissions import PlatformAdminDep
 from master.application.services.agent_log_service import AgentLogService
 from master.application.services.agent_maintenance_service import (
     AgentMaintenanceService,
@@ -43,12 +43,17 @@ from master.domain.models import (
     AgentDiagnosticsSnapshotRecord,
     AgentLogEventRecord,
     AgentPluginSyncOperationRecord,
+    Device,
     NodeCapabilitySnapshotRecord,
     PluginSyncOperationState,
     RemoteOperationRecord,
 )
 
-router = APIRouter(prefix="/api/v2/nodes", tags=["v2-nodes"])
+from .idempotency import complete as complete_idempotency
+from .idempotency import release as release_idempotency
+from .idempotency import reserve_or_replay
+
+router = APIRouter(prefix="/api/v2/nodes", tags=["nodes"])
 
 
 class CapabilitySnapshotView(BaseModel):
@@ -159,9 +164,22 @@ class DesiredPluginVersionView(BaseModel):
     desired: DesiredPluginVersion
 
 
-class V2NodeView(BaseModel):
+class DeviceView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    id: int
+    device_id: str
+    node_id: BusinessId | None
+    name: str
+    status: str
+    online: bool
+    last_seen_at: datetime | None
+
+
+class NodeView(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: int
     node_id: BusinessId
     name: str
     hostname: str
@@ -169,10 +187,13 @@ class V2NodeView(BaseModel):
     online: bool
     enabled: bool
     tags: tuple[str, ...]
+    capabilities: NodeCapabilities
+    plugin_versions: dict[str, str]
     protocol_version: str
     last_seen_at: datetime | None
     load: dict[str, object]
     resource_occupancy: dict[str, str]
+    devices: tuple[DeviceView, ...]
 
 
 def get_capability_service(request: Request) -> CapabilitySnapshotProjectionService:
@@ -281,8 +302,9 @@ def _desired_view(record) -> DesiredPluginVersionView:
     return DesiredPluginVersionView(node_id=record.node_id, desired=record.desired)
 
 
-def _node_view(node) -> V2NodeView:
-    return V2NodeView(
+def _node_view(node) -> NodeView:
+    return NodeView(
+        id=node.id or 0,
         node_id=BusinessId(node.node_id),
         name=node.name,
         hostname=node.hostname,
@@ -290,10 +312,25 @@ def _node_view(node) -> V2NodeView:
         online=node.online,
         enabled=node.enabled,
         tags=tuple(node.tags or ()),
+        capabilities=node.capabilities,
+        plugin_versions=dict(node.plugin_versions or {}),
         protocol_version=node.protocol_version,
         last_seen_at=node.last_seen_at,
         load=dict(node.load or {}),
         resource_occupancy=dict(node.resource_occupancy or {}),
+        devices=tuple(_device_view(device) for device in node.devices),
+    )
+
+
+def _device_view(device: Device) -> DeviceView:
+    return DeviceView(
+        id=device.id or 0,
+        device_id=device.device_id,
+        node_id=BusinessId(device.node_id) if device.node_id else None,
+        name=device.name,
+        status=device.status.value,
+        online=device.online,
+        last_seen_at=device.last_seen_at,
     )
 
 
@@ -319,17 +356,64 @@ def _format_agent_log_sse(
 
 @router.get(
     "",
-    response_model=list[V2NodeView],
+    response_model=list[NodeView],
 )
-def list_v2_nodes(
+def list_nodes(
     _current_user: CurrentUser,
     uow_factory: UowFactoryDep,
     online: bool | None = None,
     enabled: bool | None = None,
-) -> list[V2NodeView]:
+) -> list[NodeView]:
     with uow_factory() as uow:
         nodes = uow.nodes.list_all(online=online, enabled=enabled)
     return [_node_view(node) for node in nodes]
+
+
+@router.get(
+    "/devices",
+    response_model=list[DeviceView],
+)
+def list_devices(
+    _current_user: CurrentUser,
+    uow_factory: UowFactoryDep,
+    online: bool | None = None,
+) -> list[DeviceView]:
+    with uow_factory() as uow:
+        devices = uow.devices.list_all(online=online)
+    return [_device_view(device) for device in devices]
+
+
+@router.get(
+    "/devices/{device_id}",
+    response_model=DeviceView,
+)
+def get_device(
+    device_id: str,
+    _current_user: CurrentUser,
+    uow_factory: UowFactoryDep,
+) -> DeviceView:
+    with uow_factory() as uow:
+        device = uow.devices.get_by_id(device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="设备不存在")
+    return _device_view(device)
+
+
+@router.get(
+    "/{node_id}",
+    response_model=NodeView,
+)
+def get_node(
+    node_id: str,
+    _current_user: CurrentUser,
+    uow_factory: UowFactoryDep,
+) -> NodeView:
+    node = _node_id(node_id)
+    with uow_factory() as uow:
+        record = uow.nodes.get_by_id(node.root)
+    if record is None:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return _node_view(record)
 
 
 @router.get(
@@ -520,21 +604,40 @@ def collect_diagnostics(
     node_id: str,
     _current_user: CurrentUser,
     service: Annotated[DiagnosticsRequestService, Depends(get_diagnostics_request_service)],
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> DiagnosticsCollectView:
+    typed_node_id = _node_id(node_id)
+    result = reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"node.diagnostics.collect:{typed_node_id.root}",
+        payload={"node_id": typed_node_id.root, "operation": "collect"},
+        response_model=DiagnosticsCollectView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
-        operation = service.request(_node_id(node_id))
+        operation = service.request(typed_node_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AgentOfflineForDiagnostics as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return DiagnosticsCollectView(
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
+    response = DiagnosticsCollectView(
         operation_id=operation.operation_id,
         request_id=operation.request.request_id,
         node_id=operation.request.node_id,
         status="pending",
     )
+    complete_idempotency(idempotency, result.reservation, response, response_status=200)
+    return response
 
 
 @router.get(
@@ -585,26 +688,45 @@ def get_maintenance_operation(
 )
 def request_log_level_update(
     node_id: str,
-    _admin: PlatformAdminDep,
+    admin: PlatformAdminDep,
     body: LogLevelUpdateCreateRequest,
     service: Annotated[AgentMaintenanceService, Depends(get_agent_maintenance_service)],
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RemoteOperationView:
+    typed_node_id = _node_id(node_id)
+    result = reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"node.log-level:{typed_node_id.root}:{admin.persisted_id}",
+        payload=body.model_dump(mode="json"),
+        response_model=RemoteOperationView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
         operation = service.request_log_level(
-            _node_id(node_id),
+            typed_node_id,
             component=body.component,
             level=body.level,
             plugin_id=body.plugin_id,
             expires_at=body.expires_at,
-            actor_id=_admin.persisted_id,
+            actor_id=admin.persisted_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AgentOfflineForMaintenance as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _remote_operation_view(operation)
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
+    response = _remote_operation_view(operation)
+    complete_idempotency(idempotency, result.reservation, response, response_status=202)
+    return response
 
 
 @router.post(
@@ -614,16 +736,29 @@ def request_log_level_update(
 )
 def request_maintenance_drain(
     node_id: str,
-    _admin: PlatformAdminDep,
+    admin: PlatformAdminDep,
     body: MaintenanceCreateRequest,
     service: Annotated[AgentMaintenanceService, Depends(get_agent_maintenance_service)],
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RemoteOperationView:
+    typed_node_id = _node_id(node_id)
+    result = reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"node.drain:{typed_node_id.root}:{admin.persisted_id}",
+        payload=body.model_dump(mode="json"),
+        response_model=RemoteOperationView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
         operation = service.request_drain(
-            _node_id(node_id),
+            typed_node_id,
             drain_timeout_s=body.drain_timeout_s,
             reason=body.reason,
-            actor_id=_admin.persisted_id,
+            actor_id=admin.persisted_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -632,8 +767,14 @@ def request_maintenance_drain(
     except MaintenanceLockConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _remote_operation_view(operation)
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
+    response = _remote_operation_view(operation)
+    complete_idempotency(idempotency, result.reservation, response, response_status=202)
+    return response
 
 
 @router.post(
@@ -643,16 +784,29 @@ def request_maintenance_drain(
 )
 def request_maintenance_restart(
     node_id: str,
-    _admin: PlatformAdminDep,
+    admin: PlatformAdminDep,
     body: MaintenanceCreateRequest,
     service: Annotated[AgentMaintenanceService, Depends(get_agent_maintenance_service)],
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RemoteOperationView:
+    typed_node_id = _node_id(node_id)
+    result = reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"node.restart:{typed_node_id.root}:{admin.persisted_id}",
+        payload=body.model_dump(mode="json"),
+        response_model=RemoteOperationView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
         operation = service.request_restart(
-            _node_id(node_id),
+            typed_node_id,
             drain_timeout_s=body.drain_timeout_s,
             reason=body.reason,
-            actor_id=_admin.persisted_id,
+            actor_id=admin.persisted_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -661,8 +815,14 @@ def request_maintenance_restart(
     except MaintenanceLockConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _remote_operation_view(operation)
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
+    response = _remote_operation_view(operation)
+    complete_idempotency(idempotency, result.reservation, response, response_status=202)
+    return response
 
 
 @router.post(
@@ -677,17 +837,30 @@ def request_maintenance_restart(
 )
 def request_plugin_sync(
     node_id: str,
-    _admin: PlatformAdminDep,
+    admin: PlatformAdminDep,
     body: PluginSyncCreateRequest,
     service: Annotated[PluginSyncService, Depends(get_plugin_sync_service)],
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> PluginSyncView:
+    typed_node_id = _node_id(node_id)
+    result = reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"node.plugin-sync:{typed_node_id.root}:{admin.persisted_id}",
+        payload=body.model_dump(mode="json"),
+        response_model=PluginSyncView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
     try:
         record = service.request(
-            _node_id(node_id),
+            typed_node_id,
             body.items,
             drain_timeout_s=body.drain_timeout_s,
             restart_after=body.restart_after,
-            actor_id=_admin.persisted_id,
+            actor_id=admin.persisted_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -696,8 +869,14 @@ def request_plugin_sync(
     except MaintenanceLockConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _plugin_sync_view(record)
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
+    response = _plugin_sync_view(record)
+    complete_idempotency(idempotency, result.reservation, response, response_status=202)
+    return response
 
 
 @router.put(

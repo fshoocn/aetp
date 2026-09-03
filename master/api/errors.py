@@ -1,4 +1,4 @@
-"""v1 API 的应用异常 HTTP 映射。"""
+"""API 的应用异常 HTTP 映射。"""
 
 from __future__ import annotations
 

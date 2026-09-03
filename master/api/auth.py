@@ -1,4 +1,4 @@
-"""V2 认证 API。"""
+""" 认证 API。"""
 
 from __future__ import annotations
 
@@ -7,16 +7,16 @@ from datetime import timedelta
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from master.api.v1.dependencies import AuthDep, CurrentUser
-from master.api.v1.rate_limit import client_ip, login_limiter, refresh_limiter, register_limiter
-from master.api.v1.security import create_access_token, generate_refresh_token, hash_refresh_token
+from master.api.dependencies import AuthDep, CurrentUser
+from master.api.rate_limit import client_ip, login_limiter, refresh_limiter, register_limiter
+from master.api.security import create_access_token, generate_refresh_token, hash_refresh_token
 from master.application.services.auth_service import AuthService
 from master.config import get_settings
 from master.domain.enums import AccountStatus
 from master.domain.models import User
 from master.domain.time import utcnow
 
-router = APIRouter(prefix="/api/v2/auth", tags=["v2-auth"])
+router = APIRouter(prefix="/api/v2/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):

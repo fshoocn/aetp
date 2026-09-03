@@ -1,33 +1,18 @@
-"""SSE 实时事件流路由。
-
-浏览器通过 fetch + ReadableStream 订阅（可携带 Authorization 头），
-收到的事件为 `data: <json>` 行，格式：
-    {"type": "task.created", "data": {...}, "ts": "..."}
-
-事件类型：
-    task.created     任务创建
-    task.updated     任务状态变更（后续执行器接入后）
-"""
+""" 项目领域事件 SSE。"""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from master.adapters.sse.event import DomainEvent
-from master.api.v1.dependencies import EventBusDep, UowFactoryDep
-from master.api.v1.permissions import ProjectAccessDep
+from master.api.dependencies import EventBusDep, UowFactoryDep
+from master.api.permissions import ProjectAccessDep
 from master.domain.models import DomainEvent as PersistedEvent
 
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/events", tags=["v1-events"])
-
-# 心跳间隔：客户端断线探测与代理超时规避
+router = APIRouter(prefix="/api/v2/events", tags=["events"])
 _KEEPALIVE_SECONDS = 15.0
 
 
@@ -39,7 +24,6 @@ async def stream_events(
     uow_factory: UowFactoryDep,
     event_bus: EventBusDep,
 ) -> StreamingResponse:
-    """订阅项目范围 SSE，并从 Last-Event-ID 之后回放历史事件。"""
     raw_last_event_id = request.headers.get("last-event-id", "0")
     try:
         last_sequence = max(0, int(raw_last_event_id or "0"))
@@ -50,7 +34,6 @@ async def stream_events(
         ) from exc
 
     async def event_stream():
-        # 先订阅再查询历史，避免回放期间漏掉新事件。
         queue = await event_bus.subscribe(project_id)
         try:
             yield ": connected\n\n"
@@ -62,7 +45,7 @@ async def stream_events(
                 )
             current_sequence = last_sequence
             for persisted in replay:
-                yield _format_event(_to_sse(persisted))
+                yield _format_event(_to_event(persisted))
                 current_sequence = max(current_sequence, persisted.sequence or 0)
 
             while True:
@@ -70,12 +53,7 @@ async def stream_events(
                     break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=_KEEPALIVE_SECONDS)
-                    if event is None:
-                        # EventBus 已关闭（Master 正在退出），正常结束流
-                        break
-                    if event.event_type == "server.shutdown":
-                        # 生命周期关闭前由 Master 主动通知 SSE 客户端结束流，
-                        # 避免 Uvicorn 只能通过取消任务强行切断长连接。
+                    if event is None or event.event_type == "server.shutdown":
                         break
                     if event.sequence is not None and event.sequence <= current_sequence:
                         continue
@@ -83,13 +61,10 @@ async def stream_events(
                     current_sequence = max(current_sequence, event.sequence or 0)
                 except TimeoutError:
                     yield ": keepalive\n\n"
-        except asyncio.CancelledError:  # noqa: TRY203 - 优雅关闭必须重新抛出取消信号
-            # Uvicorn 优雅关闭超时后会取消 SSE 生成器；必须立即退订，
-            # 不能等待下一次 keepalive 或继续持有连接。
+        except asyncio.CancelledError:
             raise
         finally:
             await event_bus.unsubscribe(queue)
-            logger.debug("SSE 连接关闭")
 
     return StreamingResponse(
         event_stream(),
@@ -102,8 +77,9 @@ async def stream_events(
     )
 
 
-def _to_sse(event: PersistedEvent) -> DomainEvent:
-    """持久化领域事件 → SSE 推送载荷。"""
+def _to_event(event: PersistedEvent):
+    from master.adapters.sse.event import DomainEvent
+
     return DomainEvent(
         event_type=event.event_type,
         data=event.payload,
@@ -114,8 +90,7 @@ def _to_sse(event: PersistedEvent) -> DomainEvent:
     )
 
 
-def _format_event(event: DomainEvent) -> str:
-    """编码标准 SSE event/id/data 字段。"""
+def _format_event(event) -> str:
     payload = json.dumps(
         {
             "event_id": event.event_id,
@@ -128,3 +103,6 @@ def _format_event(event: DomainEvent) -> str:
         ensure_ascii=False,
     )
     return f"id: {event.sequence or event.event_id!s}\nevent: {event.event_type}\ndata: {payload}\n\n"
+
+
+__all__ = ["router"]
