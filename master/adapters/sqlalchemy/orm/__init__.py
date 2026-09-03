@@ -1,6 +1,6 @@
 """SQLAlchemy ORM 模型：统一从此处导入。
 
-导入本包会注册所有表的 metadata（供 Alembic 迁移使用）。
+导入本包会注册所有表的 metadata，供当前 schema 初始化使用。
 """
 
 from __future__ import annotations
@@ -44,15 +44,12 @@ from .run_extension_result import RunExtensionResult
 from .run_log import RunLog
 from .run_result import RunResult
 from .run_shard import RunShard
-from .script_case import ScriptCase
 from .secret_value import SecretValue
 from .shard_attempt import ShardAttempt
+from .task import ScriptDefinition, TestTask, TestTaskScript
 from .task_run import TaskRun
 from .task_schedule import TaskSchedule
-from .test_script import TestScript
-from .test_task import TestTask
 from .user import User
-from .v2_task import ScriptDefinition, TestTaskScript, V2TestTask
 
 __all__ = [
     "NAMING_CONVENTION",
@@ -93,16 +90,13 @@ __all__ = [
     "RunExtensionResult",
     "RunResult",
     "RunShard",
-    "ScriptCase",
     "SecretValue",
     "ShardAttempt",
     "TaskRun",
     "TaskSchedule",
-    "TestScript",
     "TestTask",
     "ScriptDefinition",
     "TestTaskScript",
-    "V2TestTask",
     "TimestampMixin",
     "UTCDateTime",
     "User",

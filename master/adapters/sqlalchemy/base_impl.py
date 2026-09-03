@@ -2,7 +2,7 @@
 
 封装所有数据库共用的逻辑：
 - 根据连接串创建 engine（驱动补全由子类负责）；
-- 通过 Alembic 执行显式数据库迁移（线程安全，见 _MIGRATION_LOCK）；
+- 根据 ORM metadata 初始化当前 schema（线程安全，见 _SCHEMA_LOCK）；
 - Session 工厂与会话上下文。
 
 各具体数据库实现（sqlite / mysql / postgresql ...）继承本类，
@@ -20,14 +20,12 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from master.config import PROJECT_ROOT
-
 from .database_interface import DatabaseConfig, DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
-# 迁移互斥锁：防止同一进程内多个线程并发执行 Alembic 迁移
-_MIGRATION_LOCK = threading.Lock()
+# schema 初始化互斥锁：防止同一进程内重复创建基线
+_SCHEMA_LOCK = threading.Lock()
 
 
 class BaseDatabase(DatabaseInterface):
@@ -65,59 +63,28 @@ class BaseDatabase(DatabaseInterface):
 
         return create_engine(url, **config.engine_kwargs)
 
-    # ---- 自动迁移 ----
+    # ---- schema 初始化 ----
 
     def connect(self) -> list[str]:
-        """建立连接并执行自动迁移（Alembic upgrade head）。"""
-        return self._run_migrations()
+        """建立连接并初始化当前 ORM schema。"""
+        return self._initialize_schema()
 
-    def sync_schema(self) -> list[str]:
-        """同 connect()，执行 Alembic 迁移。"""
-        return self._run_migrations()
+    def _initialize_schema(self) -> list[str]:
+        from master.adapters.sqlalchemy.schema import METADATA, SCHEMA_VERSION
 
-    def _run_migrations(self) -> list[str]:
-        if self.config.v2_only:
-            from master.adapters.sqlalchemy.v2_schema import V2_METADATA, V2_SCHEMA_VERSION
-
-            with self.engine.begin() as connection:
-                V2_METADATA.create_all(connection)
-                connection.exec_driver_sql(
-                    "CREATE TABLE IF NOT EXISTS aetp_v2_schema_version "
-                    "(version VARCHAR(32) NOT NULL)"
-                )
-                connection.exec_driver_sql("DELETE FROM aetp_v2_schema_version")
-                connection.execute(
-                    text("INSERT INTO aetp_v2_schema_version (version) VALUES (:version)"),
-                    {"version": V2_SCHEMA_VERSION},
-                )
-            logger.info("V2-only 数据库基线初始化完成")
-            return [f"v2 schema baseline {V2_SCHEMA_VERSION}"]
-
-        from master.config import get_settings
-
-        try:
-            settings = get_settings()
-        except RuntimeError:
-            # 配置未初始化（如测试或命令行仅创建数据库对象），跳过自动迁移。
-            logger.debug("配置未初始化，跳过数据库自动迁移")
-            return ["(no settings, skipping auto-migrate)"]
-        if not settings.auto_migrate:
-            logger.info("auto_migrate 已关闭，跳过自动迁移")
-            return ["(auto_migrate disabled)"]
-
-        with _MIGRATION_LOCK:
-            from alembic import command
-            from alembic.config import Config as AlembicConfig
-
-            alembic_ini = PROJECT_ROOT / "alembic.ini"
-            aleb_cfg = AlembicConfig(str(alembic_ini))
-            # 复用当前应用 Engine 的连接，避免 Alembic 再创建第二个 Engine。
-            logger.info("开始数据库迁移: database_type=%s", self.db_type)
-            with self.engine.begin() as connection:
-                aleb_cfg.attributes["connection"] = connection
-                command.upgrade(aleb_cfg, "head")
-            logger.info("Alembic upgrade head 完成")
-            return ["alembic upgrade head"]
+        with _SCHEMA_LOCK, self.engine.begin() as connection:
+            METADATA.create_all(connection)
+            connection.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS aetp_schema_version "
+                "(version VARCHAR(32) NOT NULL)"
+            )
+            connection.exec_driver_sql("DELETE FROM aetp_schema_version")
+            connection.execute(
+                text("INSERT INTO aetp_schema_version (version) VALUES (:version)"),
+                {"version": SCHEMA_VERSION},
+            )
+        logger.info("数据库基线初始化完成: schema=%s", SCHEMA_VERSION)
+        return [f"schema baseline {SCHEMA_VERSION}"]
 
     # ---- Session 管理 ----
 

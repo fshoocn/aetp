@@ -1,8 +1,7 @@
-﻿import logging
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from common.config_utils import (
     load_env_file,
@@ -36,12 +35,6 @@ def runtime_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
-# 项目根目录（仓库根）：master/config.py 的上一级。
-# 集中定义一次，供 Alembic 迁移定位 alembic.ini / migrations 等仓库级资源使用，
-# 避免在各模块散落 parents[N] 魔法索引。
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
 def resolve_sqlite_url(url: str) -> str:
     """将 SQLite 相对路径基于运行目录解析为绝对连接串。"""
     return _resolve_sqlite_url(url, runtime_dir())
@@ -54,9 +47,8 @@ def resolve_sqlite_url(url: str) -> str:
 
 @dataclass(frozen=True)
 class DatabaseConfig:
-    """数据库连接与迁移。"""
-    url: str = "sqlite:///data/aetp.db"
-    auto_migrate: bool = True
+    """数据库连接配置。"""
+    url: str = "sqlite:///data/master.db"
 
 
 @dataclass(frozen=True)
@@ -132,14 +124,12 @@ class BootstrapConfig:
 class MasterSettings:
     """Master 进程配置，字段按职责分组为嵌套 dataclass。
 
-    为保持向后兼容，所有原有扁平属性名（如 ``settings.mqtt_host``）
-    通过 property 委托到嵌套子对象。
+    所有原有扁平属性名（如 ``settings.mqtt_host``）通过 property
+    委托到嵌套子对象。
     """
 
     # 外部数据目录（脚本/产物/插件存储根，默认运行目录下 data/）
     data_dir: Path | None = None
-    # 部署 profile：legacy 仅用于迁移期兼容，v2 使用独立数据库和运行目录。
-    profile: Literal["legacy", "v2"] = "legacy"
     # 实际使用的 env 文件路径（便于排查与传递）
     env_file: Path | None = None
 
@@ -153,19 +143,11 @@ class MasterSettings:
     run: RunConfig = RunConfig()
     bootstrap: BootstrapConfig = BootstrapConfig()
 
-    # ---- 向后兼容 property（扁平访问） ----
+    # ---- 扁平访问 property ----
 
     @property
     def database_url(self) -> str:
         return self.database.url
-
-    @property
-    def v2_only(self) -> bool:
-        return self.profile == "v2"
-
-    @property
-    def auto_migrate(self) -> bool:
-        return self.database.auto_migrate
 
     @property
     def mqtt_host(self) -> str | None:
@@ -301,9 +283,6 @@ class MasterSettings:
 
         values = load_env_file(path)
         base_dir = path.parent
-        profile = values.get("AETP_MASTER_PROFILE", "legacy").strip().lower()
-        if profile not in {"legacy", "v2"}:
-            raise ValueError("AETP_MASTER_PROFILE 必须是 legacy 或 v2")
 
         # CA 证书路径：相对路径以 .env 所在目录为基准解析
         ca_cert = values.get("AETP_MASTER_MQTT_CA_CERT_PATH")
@@ -334,20 +313,16 @@ class MasterSettings:
         data_dir = Path(raw_data_dir) if raw_data_dir else None
         if data_dir is not None and not data_dir.is_absolute():
             data_dir = base_dir / data_dir
-        if profile == "v2" and data_dir is None:
-            data_dir = base_dir / "data-v2"
+        if data_dir is None:
+            data_dir = base_dir / "data"
         raw_database_url = values.get("AETP_MASTER_DATABASE_URL")
-        database_url = raw_database_url or (
-            "sqlite:///data-v2/aetp-v2.db" if profile == "v2" else DatabaseConfig.url
-        )
+        database_url = raw_database_url or DatabaseConfig.url
 
         result = cls(
             data_dir=data_dir,
-            profile=profile,  # type: ignore[arg-type]
             env_file=path,
             database=DatabaseConfig(
                 url=database_url,
-                auto_migrate=parse_bool(values.get("AETP_MASTER_AUTO_MIGRATE"), DatabaseConfig.auto_migrate),
             ),
             mqtt=MqttConfig(
                 host=values.get("AETP_MASTER_MQTT_HOST"),
@@ -430,10 +405,9 @@ def configure(env_file: str | Path | None = None) -> MasterSettings:
 
     _settings = MasterSettings.from_env_file(env_file)
     logger.info(
-        "配置初始化完成: env_file=%s, database=%s, auto_migrate=%s",
+        "配置初始化完成: env_file=%s, database=%s",
         _settings.env_file,
         _settings.database_url,
-        _settings.auto_migrate,
     )
     return _settings
 

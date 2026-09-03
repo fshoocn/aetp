@@ -30,7 +30,7 @@ class DatabaseConfig:
     """数据库连接信息。
 
     两种用法：
-    1. 直接给 url（推荐）:  DatabaseConfig(url="sqlite:///data/aetp.db")
+    1. 直接给 url（推荐）:  DatabaseConfig(url="sqlite:///data/master.db")
     2. 拆分字段自动拼 url:   DatabaseConfig(db_type="mysql", host="...", ...)
     """
 
@@ -46,7 +46,6 @@ class DatabaseConfig:
     # 透传给 SQLAlchemy
     connect_args: dict[str, Any] = field(default_factory=dict)
     engine_kwargs: dict[str, Any] = field(default_factory=dict)
-    v2_only: bool = False
 
     def build_url(self) -> str:
         """返回最终连接串；url 为空时由拆分字段拼接。"""
@@ -54,7 +53,7 @@ class DatabaseConfig:
             return self.url
         t = self.db_type.lower()
         if t == "sqlite":
-            return f"sqlite:///{self.database or 'data/aetp.db'}"
+            return f"sqlite:///{self.database or 'data/master.db'}"
         if t in ("mysql", "mariadb"):
             return f"mysql+pymysql://{self.username}:{self.password}@{self.host}:{self.port or 3306}/{self.database}"
         if t in ("postgresql", "postgres"):
@@ -83,14 +82,10 @@ class DatabaseInterface(ABC):
 
     @abstractmethod
     def connect(self) -> list[str]:
-        """建立连接并执行 Alembic 迁移。
+        """建立连接并初始化当前 schema。
 
         返回执行的同步动作列表。
         """
-
-    @abstractmethod
-    def sync_schema(self) -> list[str]:
-        """显式执行 Alembic 迁移，返回迁移动作列表。"""
 
     @abstractmethod
     def session(self) -> Session:

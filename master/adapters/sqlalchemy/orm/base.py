@@ -1,7 +1,7 @@
 """SQLAlchemy ORM 基类与通用约定。
 
 ORM 模型仅负责表结构映射，不含业务逻辑；业务逻辑在 domain/models 中。
-模型定义即数据库表结构的唯一事实源（配合 Alembic 迁移）。
+模型定义即数据库表结构的唯一事实源。
 
 UTCDateTime：统一以 UTC 存储/读取 datetime。
 JSONType：结构化 JSON 列（PostgreSQL 使用 JSONB，其余方言使用 JSON）。
