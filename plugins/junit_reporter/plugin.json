@@ -5,6 +5,7 @@
   "api_version": "2.0.0",
   "point": "reporter",
   "display_name": "JUnit XML Reporter",
+  "description": "Master reporter：把 Run 的 JUnit XML report Artifact 解析为统一测试结果。输入为平台 report Artifact（*.xml，由 executor 生成）；无外部配置文件。仅在 ArtifactKind=report 且 .xml 时生效。使用说明见包 README。",
   "entrypoints": {
     "master": "junit_reporter:create_reporter"
   },

@@ -5,6 +5,7 @@
   "api_version": "2.0.0",
   "point": "resource",
   "display_name": "AETP Built-in Resource Providers",
+  "description": "Agent resource 包：一次提供串口/电源/Vector CAN 三种资源能力。串口功能名→端口映射文件：已安装插件目录下固定文件 agent/serial_ports.json（JSON {\"功能名\": \"端口\"}，如 {\"CAN_Chassis\": \"COM3\"}），编辑该文件即可自定义；端口存在才标 READY。电源默认无资源。CAN 由本机 Vector vxlapi 硬件扫描，无设备则空。使用说明见包 README。",
   "entrypoints": {
     "agent": "entry:create_providers"
   },

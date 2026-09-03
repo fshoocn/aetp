@@ -5,6 +5,7 @@
   "api_version": "2.0.0",
   "point": "analyzer",
   "display_name": "Case Statistics Analyzer",
+  "description": "Master analyzer：对统一测试结果做 case 统计（total/passed/failed/skipped/duration_ms/failure_rate）。输入为平台 UnifiedTestResult，无外部文件。使用说明见包 README。",
   "entrypoints": {
     "master": "case_statistics_analyzer:create_analyzer"
   },

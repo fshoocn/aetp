@@ -195,6 +195,7 @@ export interface PluginManifest {
   api_version: string;
   point: string;
   display_name: string;
+  description: string;
   entrypoints: {
     master?: string | null;
     agent?: string | null;

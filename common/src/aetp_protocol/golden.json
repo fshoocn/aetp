@@ -270,6 +270,7 @@
     "api_version": "2.0.0",
     "point": "executor",
     "display_name": "Pytest Executor",
+    "description": "执行 pytest 测试。",
     "entrypoints": {
       "master": "master.plugin:create_plugin",
       "agent": "agent.plugin:create_plugin"

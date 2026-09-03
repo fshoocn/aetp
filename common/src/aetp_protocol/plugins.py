@@ -40,6 +40,7 @@ class PluginManifest(_Strict):
     api_version: SemVer
     point: PluginPoint
     display_name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=4096)
     entrypoints: PluginEntrypoints
     capabilities: tuple[CapabilityName, ...] = ()
     static_requirements: StaticRequirements = Field(default_factory=StaticRequirements)

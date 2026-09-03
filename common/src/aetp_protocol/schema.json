@@ -8334,6 +8334,12 @@
         ],
         "default": null
       },
+      "description": {
+        "default": "",
+        "maxLength": 4096,
+        "title": "Description",
+        "type": "string"
+      },
       "display_name": {
         "maxLength": 255,
         "minLength": 1,

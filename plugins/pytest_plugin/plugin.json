@@ -5,6 +5,7 @@
   "api_version": "2.0.0",
   "point": "executor",
   "display_name": "pytest 执行器",
+  "description": "V2 executor：Master 用 pytest --collect-only 解析用例，Agent 按 Plan 的 case_keys 精确执行并生成 JUnit XML 上报。配置项：python_executable（解释器，缺省 Agent 当前 Python）；pytest_args（附加参数，不可覆盖 --junitxml/--rootdir）；collect_timeout_s（收集超时，默认 60）；timeout_s（执行超时，可选）；fail_fast（首个失败停止，默认 false）；artifact_paths（相对脚本根的附件 glob，作为 data 附件上传）。JUnit XML 由平台自动上传，无需配置。使用说明见包 README。",
   "entrypoints": {
     "master": "executor:create_executor",
     "agent": "executor:create_executor"
