@@ -335,11 +335,13 @@ class ReportPipeline:
 
 
 def build_default_reporting_registries(resolver=None) -> tuple[ReporterRegistry, AnalyzerRegistry]:
-    from plugins.case_statistics_analyzer.master import CaseStatisticsAnalyzer
-    from plugins.junit_reporter.master import JUnitReporter
+    """从已启用插件包构建 Reporter/Analyzer 注册表（无源码内置兜底）。
 
-    reporters = ReporterRegistry((JUnitReporter(),))
-    analyzers = AnalyzerRegistry((CaseStatisticsAnalyzer(),))
+    reporter/analyzer 完全来自插件包（``ExtensionResolver.resolve_all``）。没有
+    安装对应插件包时注册表为空：Run 结果不做扩展报告/统计，但不影响 Run 本身。
+    """
+    reporters = ReporterRegistry()
+    analyzers = AnalyzerRegistry()
     if resolver is not None:
         for extension in resolver.resolve_all(PluginPoint.REPORTER):
             reporters.register(

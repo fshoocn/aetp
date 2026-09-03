@@ -26,7 +26,6 @@ from agent.config import AgentSettings, get_settings, resolve_sqlite_url
 from agent.plugins.installer import PluginInstaller
 from agent.plugins.registry import PluginRegistry
 from common.transport import Transport
-from plugins.resource_providers import PowerResourceProvider, SerialResourceProvider, VectorCanResourceProvider
 
 
 def _build_capability_publisher(
@@ -48,14 +47,13 @@ def _build_resource_provider_registry(
     settings: AgentSettings,
     resolver: ResourceProviderResolver,
 ) -> ResourceProviderRegistry:
-    built_in = (
-        VectorCanResourceProvider(),
-        SerialResourceProvider(settings.serial_map_file),
-        PowerResourceProvider(),
-    )
-    return ResourceProviderRegistry(
-        (*built_in, *resolver.resolve_all())
-    )
+    """ResourceProvider 全部来自已安装 resource 插件包（无源码内置）。
+
+    安装 ``org.aetp.resource`` 插件包后，其入口工厂提供 serial/power/can 三个
+    Provider；未安装对应插件包时注册表为空（能力快照不含这些资源，不报错）。
+    """
+    del settings
+    return ResourceProviderRegistry((*resolver.resolve_all(),))
 
 
 class Container(containers.DeclarativeContainer):

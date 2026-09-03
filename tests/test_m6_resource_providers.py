@@ -13,11 +13,9 @@ from aetp_protocol.ids import BusinessId, stable_id
 from aetp_protocol.resource import ResourceActivationError
 
 from agent.application.services.resource_provider import ResourceProviderRegistry
-from plugins.resource_providers import (
-    PowerResourceProvider,
-    SerialResourceProvider,
-    VectorCanResourceProvider,
-)
+from plugins.aetp_resource.agent.power import PowerResourceProvider
+from plugins.aetp_resource.agent.serial import SerialResourceProvider
+from plugins.aetp_resource.agent.vector_can import VectorCanResourceProvider
 
 
 def _binding(resource_id: BusinessId, resource_type: str, *, labels: dict[str, str] | None = None):

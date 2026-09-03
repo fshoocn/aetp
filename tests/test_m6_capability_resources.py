@@ -10,7 +10,8 @@ from aetp_protocol.ids import BusinessId, SessionId
 from agent.application.services.capability_snapshot_service import AgentCapabilitySnapshotService
 from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.plugins.registry import PluginRegistry
-from plugins.resource_providers import PowerResourceProvider, VectorCanResourceProvider
+from plugins.aetp_resource.agent.power import PowerResourceProvider
+from plugins.aetp_resource.agent.vector_can import VectorCanResourceProvider
 
 NODE_ID = BusinessId("01J000000000000000000000A0")
 SESSION_ID = SessionId("session-00000100")
