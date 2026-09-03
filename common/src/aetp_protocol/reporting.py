@@ -118,6 +118,41 @@ class NotifierPlugin(Protocol):
     async def send(self, request: NotificationRequest, context: PluginContext) -> DeliveryResult: ...
 
 
+class NotificationDelivery(_Strict):
+    """通知渠道插件的一次投递载荷（协议化，不含 Kernel 内部类型）。
+
+    ``endpoint_config`` 是端点脱敏配置的 JSON 值（如 webhook url），不含密钥；
+    密钥由 Kernel 以 ``secret_value`` 单独传入。
+    """
+
+    channel_type: str
+    subject: str = ""
+    body: str = ""
+    severity: str = "info"
+    endpoint_config: JsonObject = Field(default_factory=dict)
+    event_id: str | None = None
+    event_type: str | None = None
+    project_id: str | None = None
+    payload: JsonObject = Field(default_factory=dict)
+
+
+class NotifierChannel(Protocol):
+    """通知渠道插件（point=notifier）：一个渠道对应一个 channel_type。
+
+    插件工厂返回带 ``channel_type`` 与 ``async deliver(delivery, secret_value)``
+    的对象；Kernel 用适配器桥接成内部 ``NotificationSender`` 注册进
+    ``SenderRegistry``，供 ``NotificationDispatcher`` 使用。
+    """
+
+    channel_type: str
+
+    async def deliver(
+        self,
+        delivery: NotificationDelivery,
+        secret_value: str | None = None,
+    ) -> DeliveryResult: ...
+
+
 class ShardingPlugin(Protocol):
     """自定义分片插件：把一次运行的 cases 按 policy 拆成多个 Shard。
 

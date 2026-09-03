@@ -298,8 +298,15 @@ class SenderRegistry:
         return list(self._senders.keys())
 
 
-def build_default_registry() -> SenderRegistry:
-    """构建包含所有内置 sender 的注册中心。"""
+def build_default_registry(
+    extension_resolver=None,
+) -> SenderRegistry:
+    """构建含所有内置 sender 的注册中心，并叠加已启用的 notifier 插件。
+
+    ``extension_resolver`` 传入时，从 ``ExtensionResolver.resolve_all(NOTIFIER)``
+    解析出的渠道插件经 ``PluginNotificationSender`` 桥接注册（channel_type 即插件
+    声明渠道）；不传则只含内置 sender。
+    """
     registry = SenderRegistry()
     for cls in [
         ConsoleSender,
@@ -311,4 +318,18 @@ def build_default_registry() -> SenderRegistry:
         EmailSender,
     ]:
         registry.register(cls())
+    if extension_resolver is not None:
+        from aetp_protocol.plugin_types import PluginPoint
+
+        from master.adapters.notifications.plugin_sender import PluginNotificationSender
+
+        for resolved in extension_resolver.resolve_all(PluginPoint.NOTIFIER):
+            try:
+                registry.register(PluginNotificationSender(resolved.plugin))
+            except Exception:
+                logger.exception(
+                    "notifier 插件注册失败: plugin=%s@%s",
+                    resolved.plugin_id,
+                    resolved.plugin_version,
+                )
     return registry

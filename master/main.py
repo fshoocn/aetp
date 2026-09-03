@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from aetp_protocol.plugin_types import PluginStatus
+from aetp_protocol.plugin_types import PluginPoint, PluginStatus
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text as sa_text
@@ -38,6 +38,33 @@ from .api.tasks import router as tasks_router
 from .bootstrap.container import Container
 
 logger = logging.getLogger(__name__)
+
+
+def _register_notifier_plugins(container: Container) -> None:
+    """把已启用的 notifier 渠道插件注册进 sender_registry。
+
+    plugin_registry().load() 之后调用；叠加在内置 sender 之后，channel_type 冲突时
+    插件渠道覆盖内置（后注册者胜）。单条失败记录日志，不影响启动。
+    """
+    from master.adapters.notifications.plugin_sender import PluginNotificationSender
+
+    registry = container.sender_registry()
+    resolver = container.master_extension_resolver()
+    for resolved in resolver.resolve_all(PluginPoint.NOTIFIER):
+        try:
+            registry.register(PluginNotificationSender(resolved.plugin))
+            logger.info(
+                "已注册 notifier 插件渠道: channel=%s plugin=%s@%s",
+                getattr(resolved.plugin, "channel_type", "?"),
+                resolved.plugin_id,
+                resolved.plugin_version,
+            )
+        except Exception:  # noqa: BLE001 - 单渠道失败不阻塞启动
+            logger.exception(
+                "notifier 插件注册失败: plugin=%s@%s",
+                resolved.plugin_id,
+                resolved.plugin_version,
+            )
 
 
 def _bootstrap_admin(app: FastAPI) -> None:
@@ -114,6 +141,8 @@ async def lifespan(app: FastAPI):
             uow.plugin_versions.list(status=PluginStatus.ENABLED)
         )
     logger.info("Master 插件注册表已加载")
+    # 把已启用的 notifier 渠道插件注册进 sender_registry（叠加在内置 sender 之后）
+    _register_notifier_plugins(container)
     app.state.container = container
 
     # 平台管理员 bootstrap：若 users 表为空且配置了管理员凭据，自动创建首个 admin

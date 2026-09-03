@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "org.console.notifier",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "notifier",
+  "display_name": "Console Notifier",
+  "description": "通知渠道插件：把通知打印到 Master 控制台日志（调试用）。channel_type=console_test。实现 NotifierChannel（channel_type + deliver），经 Kernel adapter 注册进 SenderRegistry。",
+  "entrypoints": {
+    "master": "console_notifier:create_notifier"
+  },
+  "capabilities": ["notify.console"],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}
