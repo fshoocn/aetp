@@ -8,7 +8,7 @@
 - ``verify_signed_path``：校验过期与签名（恒定时间比较）
 
 脚本下载路径：``/api/v2/internal/scripts/{script_id}/download``
-插件下载路径：``/api/v2/internal/plugins/{plugin_id}/download``
+插件下载路径：``/api/v2/internal/plugins/{plugin_id}/{version}/download``
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from urllib.parse import quote, urlencode
 
 _SCRIPT_URL_PATH = "/api/v2/internal/scripts/{script_id}/download"
-_PLUGIN_URL_PATH = "/api/v2/internal/plugins/{plugin_id}/download"
 _PLUGIN_VERSION_URL_PATH = "/api/v2/internal/plugins/{plugin_id}/{version}/download"
 _ARTIFACT_UPLOAD_URL_PATH = "/api/v2/internal/runs/{run_id}/artifacts"
 
@@ -42,7 +41,7 @@ def build_signed_path(
     """生成签名下载相对路径（含 query）。
 
     :param path_template: 路径模板，含 ``{script_id}``/``{plugin_id}`` 占位；
-        默认脚本路径，插件下载传 :data:`_PLUGIN_URL_PATH`。
+        默认脚本路径，插件带版本下载传 :data:`_PLUGIN_VERSION_URL_PATH`。
     """
     current = now or datetime.now(UTC)
     expires = int(current.timestamp()) + int(ttl_s)

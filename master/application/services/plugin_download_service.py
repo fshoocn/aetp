@@ -13,7 +13,6 @@ from __future__ import annotations
 from aetp_protocol.ids import PluginId, SemVer
 
 from master.domain.signed_url import (
-    _PLUGIN_URL_PATH,
     _PLUGIN_VERSION_URL_PATH,
     build_signed_path,
     verify_signed_path,
@@ -33,19 +32,6 @@ class PluginDownloadService:
         self._secret = secret
         self._base_url = (base_url or "").rstrip("/")
         self._ttl_s = ttl_s
-
-    def build_path(self, plugin_id: str) -> str:
-        """生成插件签名相对路径（测试与 base_url 为空时使用）。"""
-        return build_signed_path(
-            plugin_id,
-            self._secret,
-            self._ttl_s,
-            path_template=_PLUGIN_URL_PATH,
-        )
-
-    def build_download_url(self, plugin_id: str) -> str:
-        """生成完整插件签名下载 URL（base_url + 相对路径）。"""
-        return f"{self._base_url}{self.build_path(plugin_id)}"
 
     def build_versioned_download_url(self, plugin_id: PluginId, version: SemVer) -> str:
         """生成  指定插件版本的签名下载 URL。"""
