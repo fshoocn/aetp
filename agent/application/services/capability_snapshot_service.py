@@ -19,6 +19,12 @@ from aetp_protocol.capabilities import (
     SoftwareCapability,
 )
 from aetp_protocol.capabilities import Version as CapabilityVersion
+from aetp_protocol.discovery import (
+    RuntimeDiscoveryError,
+    RuntimeProvider,
+    SoftwareDiscoveryError,
+    SoftwareProvider,
+)
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ResourceRequirement, RuntimeRequirement
 from aetp_protocol.ids import BusinessId, SessionId, Version, VersionConstraint, stable_id
@@ -113,6 +119,8 @@ class AgentCapabilitySnapshotService:
         software_discoverer: Callable[[NodeCapabilities], tuple[SoftwareCapability, ...]] | None = None,
         resource_discoverer: Callable[[NodeCapabilities], tuple[ResourceCapability, ...]] | None = None,
         resource_providers: ResourceProviderRegistry | None = None,
+        runtime_providers: tuple[RuntimeProvider, ...] = (),
+        software_providers: tuple[SoftwareProvider, ...] = (),
         health_checker: Callable[[PluginManifest], tuple[ErrorCode, ...]] | None = None,
         revision_cache: CapabilityRevisionCache | None = None,
         now: Callable[[], datetime] | None = None,
@@ -127,6 +135,8 @@ class AgentCapabilitySnapshotService:
         self._software_discoverer = software_discoverer or (lambda _capabilities: discover_software())
         self._resource_discoverer = resource_discoverer or self._resource_capabilities
         self._resource_providers = resource_providers
+        self._runtime_providers = runtime_providers
+        self._software_providers = software_providers
         self._health_checker = health_checker
         self._revision_cache = revision_cache or CapabilityRevisionCache()
         self._now = now or (lambda: datetime.now(UTC))
@@ -139,8 +149,8 @@ class AgentCapabilitySnapshotService:
             logger.exception("Agent 能力扫描失败，使用空能力快照")
             capabilities = NodeCapabilities()
 
-        runtimes = self._runtime_discoverer(capabilities)
-        software = self._software_discoverer(capabilities)
+        runtimes = self._runtimes_with_plugins(capabilities)
+        software = self._software_with_plugins(capabilities)
         discovered_resources = self._resource_discoverer(capabilities)
         if self._resource_providers is not None:
             discovered_resources = self._resource_providers.discover()
@@ -217,6 +227,51 @@ class AgentCapabilitySnapshotService:
             plugin_inventory=tuple(inventory),
         )
 
+    def _runtimes_with_plugins(self, capabilities: NodeCapabilities) -> tuple[RuntimeCapability, ...]:
+        """合并 runtime 插件 Provider 与本机基础扫描结果。
+
+        未安装 runtime 插件时完全走 ``runtime_discoverer``（默认本机语言扫描）。
+        安装了插件时，Provider 拥有其声明的 ``runtime_type``（基础扫描同类别不再
+        重复上报），基础扫描只补充 Provider 未覆盖的类别。单个 Provider 发现失败
+        只跳过该 Provider 并记录日志，不影响其他 Provider 与基础扫描。
+        """
+        if not self._runtime_providers:
+            return self._runtime_discoverer(capabilities)
+        provider_types: set[str] = set()
+        discovered: list[RuntimeCapability] = []
+        for provider in self._runtime_providers:
+            provider_types.add(provider.runtime_type)
+            try:
+                discovered.extend(_discover_runtime_provider(provider))
+            except RuntimeDiscoveryError:
+                logger.exception("runtime Provider 契约违规，已跳过: provider=%s", provider.provider_id)
+        base = self._runtime_capabilities(capabilities)
+        return tuple(discovered) + tuple(
+            item for item in base if item.runtime_type not in provider_types
+        )
+
+    def _software_with_plugins(self, capabilities: NodeCapabilities) -> tuple[SoftwareCapability, ...]:
+        """合并 software 插件 Provider 与本机基础探测结果。
+
+        未安装 software 插件时完全走 ``software_discoverer``（默认探测 CANoe/
+        Vector Driver）。安装了插件时，Provider 拥有其声明的 ``name``（基础探测
+        同名不再重复上报），基础探测只补充 Provider 未覆盖的软件。
+        """
+        if not self._software_providers:
+            return self._software_discoverer(capabilities)
+        provider_names: set[str] = set()
+        discovered: list[SoftwareCapability] = []
+        for provider in self._software_providers:
+            provider_names.add(provider.name)
+            try:
+                discovered.extend(_discover_software_provider(provider))
+            except SoftwareDiscoveryError:
+                logger.exception("software Provider 契约违规，已跳过: provider=%s", provider.provider_id)
+        base = discover_software()
+        return tuple(discovered) + tuple(
+            item for item in base if item.name not in provider_names
+        )
+
     def _health_errors(self, manifest: PluginManifest) -> tuple[ErrorCode, ...]:
         if self._health_checker is None:
             return ()
@@ -277,6 +332,49 @@ class AgentCapabilitySnapshotService:
                     )
                 )
         return tuple(resources)
+
+
+def _discover_runtime_provider(provider: RuntimeProvider) -> tuple[RuntimeCapability, ...]:
+    """调用单个 runtime Provider 的 discover 并校验身份一致性。
+
+    Provider 契约要求返回的每个 ``RuntimeCapability`` 与 Provider 声明的
+    ``runtime_type``/``provider_id`` 一致；不一致视为契约违规抛出
+    ``RuntimeDiscoveryError``，由调用方按“单个 Provider 失败”处理。
+    """
+    try:
+        discovered = tuple(provider.discover())
+    except Exception:
+        logger.exception("runtime Provider 发现失败: provider=%s", provider.provider_id)
+        return ()
+    for item in discovered:
+        if item.runtime_type != provider.runtime_type:
+            raise RuntimeDiscoveryError(
+                f"runtime Provider 类型不一致: expected={provider.runtime_type} actual={item.runtime_type}"
+            )
+        if item.provider_id != provider.provider_id:
+            raise RuntimeDiscoveryError(
+                f"runtime Provider 身份不一致: expected={provider.provider_id} actual={item.provider_id}"
+            )
+    return discovered
+
+
+def _discover_software_provider(provider: SoftwareProvider) -> tuple[SoftwareCapability, ...]:
+    """调用单个 software Provider 的 discover 并校验身份一致性。"""
+    try:
+        discovered = tuple(provider.discover())
+    except Exception:
+        logger.exception("software Provider 发现失败: provider=%s", provider.provider_id)
+        return ()
+    for item in discovered:
+        if item.name != provider.name:
+            raise SoftwareDiscoveryError(
+                f"software Provider 名称不一致: expected={provider.name} actual={item.name}"
+            )
+        if item.provider_id != provider.provider_id:
+            raise SoftwareDiscoveryError(
+                f"software Provider 身份不一致: expected={provider.provider_id} actual={item.provider_id}"
+            )
+    return discovered
 
 
 def _runtime_satisfies(

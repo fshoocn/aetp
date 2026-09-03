@@ -9,6 +9,7 @@ Agent 各阶段依赖（本地账本、Transport、注册服务、插件 registr
 
 from __future__ import annotations
 
+from aetp_protocol.discovery import RuntimeProvider, SoftwareProvider
 from dependency_injector import containers, providers
 
 from agent.adapters.mqtt.transport import AgentMqttTransport
@@ -17,6 +18,7 @@ from agent.application.runtime import AgentRuntime
 from agent.application.services.agent_log_facade import AgentLogFacade
 from agent.application.services.artifact_upload_service import ArtifactUploadService
 from agent.application.services.capability_publisher import CapabilityPublisher
+from agent.application.services.environment_provider_resolver import EnvironmentProviderResolver
 from agent.application.services.execution_service import ExecutionService
 from agent.application.services.executor_resolver import ExecutorResolver
 from agent.application.services.resource_provider import ResourceProviderRegistry
@@ -33,6 +35,8 @@ def _build_capability_publisher(
     settings: AgentSettings,
     registry: PluginRegistry,
     resource_providers: ResourceProviderRegistry,
+    runtime_providers: tuple[RuntimeProvider, ...],
+    software_providers: tuple[SoftwareProvider, ...],
 ) -> CapabilityPublisher:
     """装配当前协议能力快照发布器。"""
     return CapabilityPublisher(
@@ -40,6 +44,8 @@ def _build_capability_publisher(
         settings,
         registry,
         resource_providers=resource_providers,
+        runtime_providers=runtime_providers,
+        software_providers=software_providers,
     )
 
 
@@ -54,6 +60,20 @@ def _build_resource_provider_registry(
     """
     del settings
     return ResourceProviderRegistry((*resolver.resolve_all(),))
+
+
+def _resolve_runtime_providers(
+    resolver: EnvironmentProviderResolver,
+) -> tuple[RuntimeProvider, ...]:
+    """runtime 发现 Provider 全部来自已安装 runtime 插件包（无源码内置）。"""
+    return resolver.runtime_providers()
+
+
+def _resolve_software_providers(
+    resolver: EnvironmentProviderResolver,
+) -> tuple[SoftwareProvider, ...]:
+    """software 发现 Provider 全部来自已安装 software 插件包（无源码内置）。"""
+    return resolver.software_providers()
 
 
 class Container(containers.DeclarativeContainer):
@@ -100,12 +120,26 @@ class Container(containers.DeclarativeContainer):
         settings=settings,
         resolver=resource_provider_resolver,
     )
+    environment_provider_resolver = providers.Singleton(
+        EnvironmentProviderResolver,
+        registry=plugin_registry,
+    )
+    runtime_providers = providers.Singleton(
+        _resolve_runtime_providers,
+        resolver=environment_provider_resolver,
+    )
+    software_providers = providers.Singleton(
+        _resolve_software_providers,
+        resolver=environment_provider_resolver,
+    )
     capability_publisher = providers.Factory(
         _build_capability_publisher,
         transport=transport,
         settings=settings,
         registry=plugin_registry,
         resource_providers=resource_provider_registry,
+        runtime_providers=runtime_providers,
+        software_providers=software_providers,
     )
 
     # 脚本下载/缓存单例（P5.6：下载 + sha256 校验 + 按 hash 本地缓存）

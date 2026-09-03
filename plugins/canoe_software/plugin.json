@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "id": "org.aetp.canoe-software",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "software",
+  "display_name": "AETP CANoe Software Discovery",
+  "description": "software 环境发现插件：上报本机 CANoe 商业软件的版本与 License 状态。Provider 拥有 name=CANoe，安装后基础 PATH 探测不再重复上报 CANoe（避免与 provider 冲突）。License 无法在进程内可靠探测，默认从已安装插件目录下固定文件 agent/canoe_software.json（JSON {\"version\": \"17.0\", \"license_available\": true}）读取，编辑该文件即可自定义；文件不存在或无效时不报能力（不伪造）。使用说明见包 README。",
+  "entrypoints": {
+    "agent": "entry:create_providers"
+  },
+  "capabilities": [
+    "software.discovery.canoe"
+  ],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}

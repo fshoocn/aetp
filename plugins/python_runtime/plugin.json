@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "id": "org.aetp.python-runtime",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "runtime",
+  "display_name": "AETP Python Runtime Discovery",
+  "description": "runtime 环境发现插件：上报当前 Agent 解释器（sys.executable）的 Python 运行时能力。Provider 拥有 runtime_type=python，安装后基础语言扫描不再重复上报 python（避免与 provider 冲突）。发现结果含 executable_ref，可被 Master 校验 static_requirements.runtimes。使用说明见包 README。",
+  "entrypoints": {
+    "agent": "entry:create_providers"
+  },
+  "capabilities": [
+    "runtime.discovery.python"
+  ],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}

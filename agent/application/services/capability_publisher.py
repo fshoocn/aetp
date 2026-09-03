@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from aetp_protocol.capabilities import AgentMaintenanceState, NodeCapabilities, NodeCapabilitySnapshot
+from aetp_protocol.discovery import RuntimeProvider, SoftwareProvider
 from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.ids import BusinessId, MessageId, SemVer, SessionId, TraceId, Version, new_id, stable_id
 from aetp_protocol.logs import AgentLogBatch, LogEvent
@@ -81,6 +82,8 @@ class CapabilityPublisher:
         agent_version: SemVer | None = None,
         started_at: datetime | None = None,
         resource_providers: ResourceProviderRegistry | None = None,
+        runtime_providers: tuple[RuntimeProvider, ...] = (),
+        software_providers: tuple[SoftwareProvider, ...] = (),
     ) -> None:
         self._transport = transport
         self._settings = settings
@@ -93,6 +96,8 @@ class CapabilityPublisher:
         self._agent_version = agent_version or SemVer("2.0.0")
         self._started_at = started_at or datetime.now(UTC)
         self._resource_providers = resource_providers
+        self._runtime_providers = runtime_providers
+        self._software_providers = software_providers
         self._revision_cache = CapabilityRevisionCache()
         self._maintenance_state = AgentMaintenanceState.IDLE
         self._registered = False
@@ -421,6 +426,8 @@ class CapabilityPublisher:
             maintenance_state=self._maintenance_state,
             capability_scanner=self._capability_scanner,
             resource_providers=self._resource_providers,
+            runtime_providers=self._runtime_providers,
+            software_providers=self._software_providers,
             revision_cache=self._revision_cache,
         )
         snapshot = service.build_snapshot()
