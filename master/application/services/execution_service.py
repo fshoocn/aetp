@@ -48,6 +48,8 @@ class ExecutionService:
         self._plan_leases = plan_leases
         self._master_id = master_id
         self._now = now or utcnow
+        # 首次进入终态的 Run（MQTT 单线程顺序消费，待 message_router 发布 run.finished）
+        self._pending_terminal_runs: list[str] = []
 
     def handle_execution_ack(
         self,
@@ -837,8 +839,8 @@ class ExecutionService:
             attempt.status = ShardAttemptStatus.RUNNING
             attempt.started_at = attempt.started_at or utcnow()
 
-    @staticmethod
-    def _project_run_if_terminal(uow: UnitOfWork, run_id: BusinessId) -> None:
+    def _project_run_if_terminal(self, uow: UnitOfWork, run_id: BusinessId) -> bool:
+        """Run 所有 Shard 终态时推进 Run 终态；返回本次是否首次进入终态。"""
         run = uow.task_runs.get_by_run_id(run_id.root)
         if run is None or run.status in {
             RunStatus.SUCCEEDED,
@@ -847,7 +849,7 @@ class ExecutionService:
             RunStatus.TIMED_OUT,
             RunStatus.LOST,
         }:
-            return
+            return False
         shards = uow.run_shards.list_by_run(run_id.root)
         terminal = {
             ShardStatus.SUCCEEDED,
@@ -856,7 +858,7 @@ class ExecutionService:
             ShardStatus.TIMED_OUT,
         }
         if not shards or not all(shard.status in terminal for shard in shards):
-            return
+            return False
         target = RunStatus.SUCCEEDED
         if any(shard.status in {ShardStatus.FAILED, ShardStatus.TIMED_OUT} for shard in shards):
             target = RunStatus.FAILED
@@ -869,6 +871,13 @@ class ExecutionService:
         run.status = target
         run.finished_at = utcnow()
         uow.task_runs.update(run)
+        self._pending_terminal_runs.append(run_id.root)
+        return True
+
+    def take_pending_terminal_runs(self) -> list[str]:
+        """取走已进入终态、等待发布 run.finished 事件的 Run ID 列表。"""
+        pending, self._pending_terminal_runs = self._pending_terminal_runs, []
+        return pending
 
     def _project_run_result(
         self,

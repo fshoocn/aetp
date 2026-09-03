@@ -88,3 +88,40 @@ def test_master_projects_finished_and_releases_v2_leases(client) -> None:
         assert result is not None and result.status is RunStatus.SUCCEEDED
         assert result.passed is True
         assert result.metrics == {"total": 1, "passed": 1, "failed": 0, "skipped": 0}
+
+
+def test_run_finished_domain_event_is_published_once(client) -> None:
+    """Run 进入终态后应发布一次 run.finished 领域事件（SSE/通知/报告由此触发）。"""
+    container = client.app.state.container
+    plan = with_plan_hash(_plan().model_copy(update={"node_id": stable_id("m4-node")}))
+    _seed_context(container, plan)
+    plan_leases = PlanLeaseService(container.uow_factory(), now=lambda: NOW)
+    materializer = PlanMaterializationService(container.uow_factory(), plan_leases)
+    materializer.materialize(plan)
+
+    message = _finished_message(plan, message_id="execution-finished-event-0001")
+    router = container.message_router()
+    assert asyncio.run(router.handle(message)) is True
+
+    with container.uow_factory()() as uow:
+        events = [
+            event
+            for event in uow.domain_events.list_by_aggregate(plan.run_id.root, limit=100)
+            if event.event_type == "run.finished"
+        ]
+        assert len(events) == 1
+        event = events[0]
+        assert event.project_id == plan.project_id.root
+        assert event.payload["run_id"] == plan.run_id.root
+        assert event.payload["task_id"] == plan.task_id.root
+        assert event.payload["status"] == "succeeded"
+
+    # 重复 execution.finished（重放）不应产生第二个 run.finished
+    assert asyncio.run(router.handle(message)) is True
+    with container.uow_factory()() as uow:
+        events = [
+            event
+            for event in uow.domain_events.list_by_aggregate(plan.run_id.root, limit=100)
+            if event.event_type == "run.finished"
+        ]
+        assert len(events) == 1

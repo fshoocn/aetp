@@ -1,11 +1,15 @@
-"""Master 入站 Agent 事件路由（P6.4，§9.6 阶段 E）。
+"""Master 入站 Agent 事件路由。
 
 接收 Agent 上报的 events 主题消息，严格校验 Envelope 与 sender 身份后，
 路由到对应的投影/在线服务：
 
 - node.register / node.heartbeat / presence（LWT）→ NodePresenceService；
-- run.ack / run.progress / run.log / run.case-status / run.result →
-  RunProjectionService。
+- execution.ack / execution.finished / execution.progress / execution.log /
+  execution.case_status / execution.log_complete / execution.reconcile /
+  lease.renew → ExecutionService；
+- agent.plugin.sync.result / agent.maintenance.status → PluginSyncService；
+- agent.log.level.* / maintenance.drain/restart.result → AgentMaintenanceService；
+- agent.log.batch → AgentLogService，并按条广播到 SSE。
 
 失败 fail-open：单条非法/未识别消息只记录，不中断 MQTT 消费循环。
 """
@@ -147,11 +151,14 @@ class MasterMessageRouter:
             if isinstance(payload, ExecutionFinished):
                 if envelope.correlation_id is None:
                     return False
-                return self._execution.handle_execution_finished(
+                handled = self._execution.handle_execution_finished(
                     payload,
                     sender_node_id=envelope.sender.id,
                     sender_session_id=envelope.sender.session_id,
                 )
+                if handled:
+                    await self._flush_pending_run_events()
+                return handled
             if isinstance(payload, ExecutionProgress):
                 return self._execution.handle_execution_progress(
                     payload,
@@ -177,12 +184,15 @@ class MasterMessageRouter:
                     sender_session_id=envelope.sender.session_id,
                 )
             if isinstance(payload, ExecutionReconcile):
-                return self._execution.handle_execution_reconcile(
+                handled = self._execution.handle_execution_reconcile(
                     payload,
                     message_id=envelope.message_id,
                     sender_node_id=envelope.sender.id,
                     sender_session_id=envelope.sender.session_id,
                 )
+                if handled:
+                    await self._flush_pending_run_events()
+                return handled
             if isinstance(payload, AgentLogBatch):
                 if self._agent_logs is None:
                     return False
@@ -279,3 +289,49 @@ class MasterMessageRouter:
         except Exception as exc:  # noqa: BLE001 - 单条  事件不能中断消费循环
             logger.warning(" 入站消息处理失败: topic=%s error=%s", message.topic, exc)
             return False
+    async def _flush_pending_run_events(self) -> None:
+        """为刚进入终态的 Run 发布 run.finished 领域事件（幂等、fail-open）。
+
+        在 ExecutionService 已提交终态投影后调用；事件会触发 SSE 广播、
+        Reporter/Analyzer 报告与 Run 终态通知。单条发布失败不阻塞其它 Run。
+        """
+        for run_id in self._execution.take_pending_terminal_runs():
+            try:
+                await self._publish_run_finished(run_id)
+            except Exception as exc:  # noqa: BLE001 - 事件旁路失败不影响 Run 事实
+                logger.exception("发布 run.finished 失败: run=%s error=%s", run_id, exc)
+
+    async def _publish_run_finished(self, run_id: str) -> None:
+        """若该 Run 尚无 run.finished 事件则发布（幂等），否则跳过。"""
+        with self._uow_factory() as uow:
+            run = uow.task_runs.get_by_run_id(run_id)
+            if run is None or run.status.value not in {
+                "succeeded",
+                "failed",
+                "cancelled",
+                "timed_out",
+                "lost",
+            }:
+                return
+            existing = [
+                event
+                for event in uow.domain_events.list_by_aggregate(run_id, limit=500)
+                if event.event_type == "run.finished"
+            ]
+            if existing:
+                return
+            project_id = run.project_id
+            task_id = run.task_id
+            status = run.status.value
+            finished_at = run.finished_at
+        await self._event_publisher.publish(
+            "run.finished",
+            {
+                "run_id": run_id,
+                "project_id": project_id,
+                "task_id": task_id,
+                "status": status,
+                "finished_at": finished_at.isoformat() if finished_at is not None else None,
+            },
+            project_id=project_id,
+        )
