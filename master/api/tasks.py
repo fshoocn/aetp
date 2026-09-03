@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from aetp_protocol.artifacts import Configuration
-from aetp_protocol.execution import TriggerType as TriggerType
+from aetp_protocol.execution import TriggerType
 from aetp_protocol.ids import BusinessId, PluginId, SemVer, Sha256, new_id
 from aetp_protocol.task import RunSnapshot, ScriptDefinition
 from aetp_protocol.task import TestTask as ProtocolTestTask
@@ -202,7 +202,7 @@ def _run_view(created: RunCreated, schedule: ScheduleResult) -> RunView:
         task_id=created.snapshot.task_id,
         snapshot=created.snapshot,
         status=created.run.status.value,
-        trigger_type=TriggerType(created.run.trigger_type.value),
+        trigger_type=created.run.trigger_type,
         created_at=created.run.created_at,
         started_at=created.run.started_at,
         finished_at=created.run.finished_at,
@@ -230,7 +230,7 @@ def _run_list_view(run) -> RunListView:
         task_id=BusinessId(run.task_id),
         task_revision=run.task_revision or run.snapshot.task_revision,
         status=run.status.value,
-        trigger_type=TriggerType(run.trigger_type.value),
+        trigger_type=run.trigger_type,
         created_at=run.created_at,
         started_at=run.started_at,
         finished_at=run.finished_at,
@@ -245,7 +245,7 @@ def _run_detail_view(run, shards, result, case_results, artifacts) -> RunDetailV
         task_id=BusinessId(run.task_id),
         snapshot=run.snapshot,
         status=run.status.value,
-        trigger_type=TriggerType(run.trigger_type.value),
+        trigger_type=run.trigger_type,
         created_at=run.created_at,
         started_at=run.started_at,
         finished_at=run.finished_at,

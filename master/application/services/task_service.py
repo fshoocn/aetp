@@ -11,12 +11,11 @@ from aetp_protocol.execution import (
     ExecutionRequirement,
     PluginRequirement,
     SplitPolicy,
+    TriggerType,
 )
-from aetp_protocol.execution import TriggerType as ProtocolTriggerType
 from aetp_protocol.ids import BusinessId, VersionRange, new_id
 from aetp_protocol.task import RunScriptSnapshot, RunSnapshot, ScriptDefinition, TestTask
 
-from master.domain.enums import TriggerType as DomainTriggerType
 from master.domain.models import RunShard, ScriptDefinitionRecord, TaskRun, TestTaskRecord
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
@@ -100,7 +99,7 @@ class TaskService:
         *,
         project_id: BusinessId,
         task_revision: int | None = None,
-        trigger_type: ProtocolTriggerType = ProtocolTriggerType.MANUAL_WEB,
+        trigger_type: TriggerType = TriggerType.MANUAL_WEB,
         run_id: BusinessId | None = None,
         original_run_id: BusinessId | None = None,
         case_filter: set[str] | None = None,
@@ -188,7 +187,7 @@ class TaskService:
                     task_id=task.task_id.root,
                     task_revision=task.revision,
                     snapshot=snapshot,
-                    trigger_type=DomainTriggerType(trigger_type.value),
+                    trigger_type=trigger_type,
                 )
             )
             shards = uow.run_shards.add_many(

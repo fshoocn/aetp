@@ -2,11 +2,17 @@
 
 所有枚举值使用小写 snake_case 字符串，方便序列化。
 ORM 与 API DTO 统一从本模块取值，杜绝魔法字符串。
+
+部分会出现在线协议（Envelope payload / REST 响应 / 跨端 DTO）的状态枚举
+以 ``aetp_protocol`` 为单一事实源，这里直接 re-export，避免双轨定义。
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
+
+# 线上状态枚举：单一事实源在 aetp_protocol（Agent/消息/REST 共用同一类型）
+from aetp_protocol.execution import RunStatus, TriggerType
 
 
 class AccountStatus(StrEnum):
@@ -53,38 +59,6 @@ class ProjectRole(StrEnum):
     OPERATOR = "operator"
     MAINTAINER = "maintainer"
     OWNER = "owner"
-
-
-class TriggerType(StrEnum):
-    """Run 触发来源（§18.7，统一 RunRequested 用例）。
-
-    手动/API/定时/CI 为外部触发；retry/recovery 为服务端触发，
-    必须引用原 Run 与原因，浏览器不能伪造。
-    """
-
-    MANUAL_WEB = "manual_web"
-    API = "api"
-    SCHEDULE = "schedule"
-    CI_WEBHOOK = "ci_webhook"
-    RETRY = "retry"
-    RECOVERY = "recovery"
-
-
-class RunStatus(StrEnum):
-    """Run 总体状态（§6.4）。
-
-    created → dispatched → acked → running → succeeded / failed / cancelled / timed_out / lost
-    """
-
-    CREATED = "created"
-    DISPATCHED = "dispatched"
-    ACKED = "acked"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    TIMED_OUT = "timed_out"
-    LOST = "lost"
 
 
 class ShardStatus(StrEnum):
@@ -237,3 +211,23 @@ class DeliveryStatus(StrEnum):
     RETRYING = "retrying"
     EXHAUSTED = "exhausted"
     CANCELLED = "cancelled"
+
+__all__ = [
+    "AccountStatus",
+    "ArtifactKind",
+    "CaseStatus",
+    "DeliveryStatus",
+    "DeviceStatus",
+    "DisconnectReason",
+    "NodeStatus",
+    "NotificationChannelType",
+    "OutboxStatus",
+    "PlatformRole",
+    "ProjectRole",
+    "ProjectStatus",
+    "RunLogLevel",
+    "RunStatus",
+    "ShardAttemptStatus",
+    "ShardStatus",
+    "TriggerType",
+]
