@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 
@@ -108,6 +109,33 @@ def _data_dir() -> Path:
     if settings.data_dir is not None:
         return settings.data_dir
     return runtime_dir() / "data"
+
+
+def _build_sharding_resolver(
+    registry: PluginRegistry,
+    extension_resolver: ExtensionResolver,
+) -> Callable[[str], object | None]:
+    """构造按 plugin_id 解析已启用 SHARDING 插件的闭包（供 TaskService 使用）。"""
+
+    def resolve(plugin_id: str) -> object | None:
+        from aetp_protocol.plugin_types import PluginPoint
+
+        record = next(
+            (
+                item
+                for item in registry.list(PluginPoint.SHARDING)
+                if item.plugin_id.root == plugin_id
+            ),
+            None,
+        )
+        if record is None:
+            return None
+        try:
+            return extension_resolver.resolve(record, PluginPoint.SHARDING).plugin
+        except Exception:
+            return None
+
+    return resolve
 
 
 def _artifact_upload_url(
@@ -374,9 +402,17 @@ class Container(containers.DeclarativeContainer):
         artifact_url_builder=_artifact_upload_url,
     )
 
+    # custom 分片插件解析闭包（TaskService 触发 Run 时按 SplitPolicy.plugin_id 解析）
+    sharding_resolver = providers.Factory(
+        _build_sharding_resolver,
+        registry=plugin_registry,
+        extension_resolver=master_extension_resolver,
+    )
+
     task_service = providers.Factory(
         TaskService,
         uow_factory=uow_factory,
+        sharding_resolver=sharding_resolver,
     )
 
     # 任务调度计划服务（P8.2：cron/interval 互斥，D-18）

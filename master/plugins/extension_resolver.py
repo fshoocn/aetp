@@ -19,6 +19,18 @@ from master.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
+# point → 该扩展点 Master 入口必须提供的方法（resolve 时校验）。
+# executor 的 Master 面由 ScriptDefinitionService 显式传 required_method="parse_cases"，
+# 不在此列默认值。
+_DEFAULT_METHOD_BY_POINT: dict[PluginPoint, str] = {
+    PluginPoint.REPORTER: "report",
+    PluginPoint.ANALYZER: "analyze",
+    PluginPoint.NOTIFIER: "send",
+    PluginPoint.HOOK: "check",
+    PluginPoint.SHARDING: "split",
+    PluginPoint.INTEGRATION: "execute",
+}
+
 
 @dataclass(frozen=True)
 class ResolvedMasterExtension:
@@ -72,7 +84,7 @@ class ExtensionResolver:
             raise FileNotFoundError(f" Master 插件缺少 master 目录: {master_root}")
         _module, factory = load_entrypoint(master_root, entrypoint.root)
         plugin = factory()
-        method = required_method or {PluginPoint.REPORTER: "report", PluginPoint.ANALYZER: "analyze"}.get(point)
+        method = required_method or _DEFAULT_METHOD_BY_POINT.get(point)
         if method is None or not callable(getattr(plugin, method, None)):
             raise TypeError(f" {point.value} 入口未提供 {method}()")
         resolved = ResolvedMasterExtension(record.plugin_id.root, record.version.root, plugin)

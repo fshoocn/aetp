@@ -6,14 +6,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from aetp_protocol.artifacts import CaseSelection
+from aetp_protocol.artifacts import CaseSelection, Configuration
 from aetp_protocol.execution import (
     ExecutionRequirement,
     PluginRequirement,
+    ShardingRequest,
     SplitPolicy,
     TriggerType,
 )
-from aetp_protocol.ids import BusinessId, VersionRange, new_id
+from aetp_protocol.ids import BusinessId, PluginId, VersionRange, new_id
 from aetp_protocol.task import RunScriptSnapshot, RunSnapshot, ScriptDefinition, TestTask
 
 from master.domain.models import RunShard, ScriptDefinitionRecord, TaskRun, TestTaskRecord
@@ -38,9 +39,11 @@ class TaskService:
         uow_factory: Callable[[], UnitOfWork],
         *,
         now: Callable[[], datetime] | None = None,
+        sharding_resolver: Callable[[PluginId], object | None] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._now = now or utcnow
+        self._sharding_resolver = sharding_resolver or (lambda _plugin_id: None)
 
     def register_script_definition(self, definition: ScriptDefinition) -> ScriptDefinitionRecord:
         """登记不可变 ScriptDefinition revision；持久化前移除临时下载 URL。"""
@@ -153,7 +156,12 @@ class TaskService:
                         split_policy=binding.split_policy,
                     )
                 )
-                for case_keys in self._split_cases(selected_keys, definition, binding.split_policy):
+                for case_keys in self._split_cases(
+                    selected_keys,
+                    definition,
+                    binding.configuration,
+                    binding.split_policy,
+                ):
                     shard_inputs.append((binding.binding_id, list(case_keys)))
 
             if not selected_snapshots:
@@ -239,10 +247,11 @@ class TaskService:
             )
         return selected
 
-    @staticmethod
     def _split_cases(
+        self,
         selected_keys: tuple[str, ...],
         definition: ScriptDefinition,
+        configuration: Configuration,
         policy: SplitPolicy,
     ) -> tuple[tuple[str, ...], ...]:
         if policy.type == "none":
@@ -272,7 +281,26 @@ class TaskService:
             if current:
                 chunks.append(current)
             return tuple(tuple(chunk) for chunk in chunks)
-        raise ValueError("custom 分片必须由已解析的  sharding 插件生成")
+        if policy.type == "custom":
+            if policy.plugin_id is None:
+                raise ValueError("custom 分片缺少 plugin_id")
+            plugin = self._sharding_resolver(policy.plugin_id)
+            if plugin is None or not callable(getattr(plugin, "split", None)):
+                raise ValueError(
+                    f"custom 分片插件未启用或不可用: {policy.plugin_id.root}"
+                )
+            cases = tuple(
+                case for case in definition.cases if case.stable_key in selected_keys
+            )
+
+            request = ShardingRequest(
+                cases=cases,
+                policy=policy,
+                configuration=configuration,
+            )
+            result = plugin.split(request)
+            return tuple(tuple(shard.case_keys) for shard in result.shards)
+        raise ValueError(f"未知分片策略: {policy.type}")
 
     @staticmethod
     def _default_requirement(definition: ScriptDefinition) -> ExecutionRequirement:

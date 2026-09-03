@@ -154,3 +154,66 @@ def test_task_service_rejects_invalid_binding_case(client) -> None:
         assert "不存在的用例" in str(exc)
     else:
         raise AssertionError("任务不应接受不存在的 case key")
+
+
+def test_task_service_custom_split_uses_sharding_plugin() -> None:
+    """SplitPolicy.custom 应调用注入的 sharding 插件做分片。"""
+    from aetp_protocol.execution import ShardingRequest, ShardingResult, ShardSpec
+
+    from master.application.services.task_service import TaskService
+
+    captured: list[ShardingRequest] = []
+
+    class _FakeSharding:
+        def split(self, request: ShardingRequest) -> ShardingResult:
+            captured.append(request)
+            keys = [case.stable_key for case in request.cases]
+            return ShardingResult(
+                shards=(
+                    ShardSpec(shard_index=0, case_keys=(keys[0],)),
+                    ShardSpec(shard_index=1, case_keys=(keys[1],)),
+                )
+            )
+
+    plugin_id = PluginId("org.example.custom-sharding")
+    service = TaskService(
+        uow_factory=lambda: None,  # type: ignore[arg-type]
+        sharding_resolver=lambda pid: _FakeSharding() if pid == plugin_id else None,
+    )
+    definition = _definition(SCRIPT_A, name="alpha")
+    policy = SplitPolicy(type="custom", plugin_id=plugin_id)
+    result = service._split_cases(
+        tuple(case.stable_key for case in definition.cases),
+        definition,
+        definition.configuration,
+        policy,
+    )
+
+    assert len(captured) == 1
+    assert captured[0].policy.type == "custom"
+    assert captured[0].policy.plugin_id == plugin_id
+    assert result == (("alpha-a",), ("alpha-b",))
+
+
+def test_task_service_custom_split_missing_plugin_raises() -> None:
+    from master.application.services.task_service import TaskService
+
+    service = TaskService(
+        uow_factory=lambda: None,  # type: ignore[arg-type]
+        sharding_resolver=lambda _pid: None,
+    )
+    definition = _definition(SCRIPT_A, name="alpha")
+    policy = SplitPolicy(
+        type="custom", plugin_id=PluginId("org.example.not-installed")
+    )
+    try:
+        service._split_cases(
+            tuple(case.stable_key for case in definition.cases),
+            definition,
+            definition.configuration,
+            policy,
+        )
+    except ValueError as exc:
+        assert "未启用或不可用" in str(exc)
+    else:
+        raise AssertionError("custom 分片缺插件应报错")

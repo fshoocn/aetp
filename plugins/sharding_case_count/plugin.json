@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "org.case-count.sharding",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "sharding",
+  "display_name": "Case Count Sharding",
+  "description": "自定义分片：按每片最大用例数（SplitPolicy.target_count）把一次运行的 cases 切成多个 Shard；每片最多 target_count 个 case。用于 TestTask 脚本绑定选择 SplitPolicy.type=custom、plugin_id=org.case-count.sharding 时。",
+  "entrypoints": {
+    "master": "case_count_sharding:create_sharding"
+  },
+  "capabilities": ["sharding.by_case_count"],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}

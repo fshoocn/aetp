@@ -8,7 +8,13 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .artifacts import ArtifactRef
-from .execution import CaseResult, ExecutionResult, ExecutionStatus
+from .execution import (
+    CaseResult,
+    ExecutionResult,
+    ExecutionStatus,
+    ShardingRequest,
+    ShardingResult,
+)
 from .ids import BusinessId, JsonObject
 
 
@@ -110,6 +116,16 @@ class AnalyzerPlugin(Protocol):
 
 class NotifierPlugin(Protocol):
     async def send(self, request: NotificationRequest, context: PluginContext) -> DeliveryResult: ...
+
+
+class ShardingPlugin(Protocol):
+    """自定义分片插件：把一次运行的 cases 按 policy 拆成多个 Shard。
+
+    只在 ``SplitPolicy.type == "custom"`` 时被 Kernel 调用；插件不得直接写 Run/Shard
+    状态，只返回纯分片结果。
+    """
+
+    def split(self, request: ShardingRequest) -> ShardingResult: ...
 
 
 __all__ = [
