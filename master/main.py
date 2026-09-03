@@ -40,6 +40,35 @@ from .bootstrap.container import Container
 logger = logging.getLogger(__name__)
 
 
+def _register_hook_plugins(container: Container) -> None:
+    """把已启用的准入 hook 插件注册进 hook_runner registry。
+
+    plugin_registry().load() 之后调用。插件实现
+    ``aetp_protocol.hooks.AdmissionHookPlugin``，经 ``PluginAdmissionHook`` 桥接为
+    内部准入 Hook 注册。单条失败记录日志，不影响启动。
+    """
+    from master.adapters.hooks.plugin_hook import PluginAdmissionHook
+
+    registry = container.hook_runner().registry
+    resolver = container.master_extension_resolver()
+    for resolved in resolver.resolve_all(PluginPoint.HOOK):
+        try:
+            registry.register_admission(PluginAdmissionHook(resolved.plugin))
+            logger.info(
+                "已注册 hook 插件: name=%s stage=%s plugin=%s@%s",
+                getattr(resolved.plugin, "name", "?"),
+                getattr(resolved.plugin, "stage", "?"),
+                resolved.plugin_id,
+                resolved.plugin_version,
+            )
+        except Exception:  # noqa: BLE001 - 单 hook 失败不阻塞启动
+            logger.exception(
+                "hook 插件注册失败: plugin=%s@%s",
+                resolved.plugin_id,
+                resolved.plugin_version,
+            )
+
+
 def _register_notifier_plugins(container: Container) -> None:
     """把已启用的 notifier 渠道插件注册进 sender_registry。
 
@@ -143,6 +172,8 @@ async def lifespan(app: FastAPI):
     logger.info("Master 插件注册表已加载")
     # 把已启用的 notifier 渠道插件注册进 sender_registry（叠加在内置 sender 之后）
     _register_notifier_plugins(container)
+    # 把已启用的 hook 插件注册进 hook_runner registry（准入策略）
+    _register_hook_plugins(container)
     app.state.container = container
 
     # 平台管理员 bootstrap：若 users 表为空且配置了管理员凭据，自动创建首个 admin

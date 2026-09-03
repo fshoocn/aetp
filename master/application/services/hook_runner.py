@@ -54,6 +54,20 @@ class HookRegistry:
     def matching_event_hooks(self, event_type: str) -> list[EventHook]:
         return [h for h in self.event_hooks if not h.event_types or event_type in h.event_types]
 
+    def register_admission(self, hook: AdmissionHook) -> None:
+        """注册一个准入 Hook；同名替换（用于启动时叠加插件）。"""
+        existing = next((h for h in self.admission_hooks if h.name == hook.name), None)
+        if existing is not None:
+            self.admission_hooks.remove(existing)
+        self.admission_hooks.append(hook)
+
+    def register_event(self, hook: EventHook) -> None:
+        """注册一个事件 Hook；同名替换。"""
+        existing = next((h for h in self.event_hooks if h.name == hook.name), None)
+        if existing is not None:
+            self.event_hooks.remove(existing)
+        self.event_hooks.append(hook)
+
 
 class HookRunner:
     """Hook 执行器：排序、超时、审计写入。"""

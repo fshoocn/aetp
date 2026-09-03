@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "id": "org.example.quality-gate",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "hook",
+  "display_name": "Example Quality Gate Hook",
+  "description": "准入 Hook 样例：在 stage=run.before_create 时检查载荷，示例实现默认放行（allowed），用于演示 hook 插件从插件包装配。实现 aetp_protocol.hooks.AdmissionHookPlugin。",
+  "entrypoints": {
+    "master": "quality_gate:create_hook"
+  },
+  "capabilities": ["admission.quality-gate"],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}
