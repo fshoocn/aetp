@@ -1,4 +1,4 @@
-"""V2 Reporter、Analyzer 和 Notifier 扩展点 DTO。"""
+""" Reporter、Analyzer 和 Notifier 扩展点 DTO。"""
 
 from __future__ import annotations
 

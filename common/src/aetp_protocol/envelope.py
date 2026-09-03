@@ -1,82 +1,74 @@
-"""Envelope：统一消息封装与校验（§8.3）。
-
-非法字段（extra=forbid）、协议版本不匹配、未知 message_type、空
-message_id/trace_id 均在模型校验时拒绝（P4.1 验收：非法字段被拒绝）。
-"""
+"""AETP  Envelope 和 typed payload 解析。"""
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
-from .errors import ProtocolError, ProtocolVersionMismatchError
+from .errors import MessagePayloadError, ProtocolError, ProtocolVersionMismatchError
+from .ids import BusinessId, JsonObject, MessageId, SessionId, TraceId
 from .message_types import MessageType
+from .payloads import PAYLOAD_MODELS
 
-# 当前协议版本（整数；收方不支持则拒绝并产生兼容错误，§8.3）
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+MESSAGE_TYPES = frozenset(PAYLOAD_MODELS)
 
 
 class SenderKind(StrEnum):
-    """消息发送方类型（§8.3）。"""
-
     MASTER = "master"
     AGENT = "agent"
 
 
 class Sender(BaseModel):
-    """发送方身份（sender.id 必须与 topic/ACL 身份匹配，§8.3）。"""
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    model_config = ConfigDict(extra="forbid")
-
-    # sym:kind master / agent
     kind: SenderKind
-    # sym:id Master ID 或 node_id（必须与主题身份一致）
-    id: str
-    # sym:session_id 每次进程启动生成，隔离旧连接（§8.6）
-    session_id: str
+    id: BusinessId
+    session_id: SessionId
 
 
 class Envelope(BaseModel):
-    """统一消息信封（§8.3）。"""
+    """ 公共消息头；payload 必须通过 parse_payload 二次解析。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    # sym:protocol_version 协议版本（整型；不匹配拒绝）
-    protocol_version: int = PROTOCOL_VERSION
-    # sym:message_id 每次实际 publish 新生成；Inbox 按 sender+message_id 去重
-    message_id: str
-    # sym:message_type 消息类型（必须为已知 MessageType）
-    message_type: str
-    # sym:sent_at UTC RFC 3339 时间
+    protocol_version: Literal[2] = PROTOCOL_VERSION
+    message_id: MessageId
+    correlation_id: MessageId | None = None
     sent_at: datetime
-    # sym:sender 发送方身份（kind/id/session_id）
     sender: Sender
-    # sym:correlation_id 回执指向触发命令的 message_id（可空）
-    correlation_id: str | None = None
-    # sym:trace_id 同一任务链路复用（日志/审计关联）
-    trace_id: str = ""
-    # sym:payload 消息载荷（具体结构见 payloads / §8.4）
-    payload: dict = Field(default_factory=dict)
+    message_type: str
+    trace_id: TraceId
+    payload: JsonObject
 
-    @field_validator("protocol_version")
-    @classmethod
-    def _check_protocol_version(cls, value: int) -> int:
-        if value != PROTOCOL_VERSION:
-            raise ProtocolVersionMismatchError(f"协议版本不支持: {value}（期望 {PROTOCOL_VERSION}）")
-        return value
+    @model_validator(mode="after")
+    def validate_message_type(self) -> Envelope:
+        if self.message_type not in {message_type.value for message_type in MESSAGE_TYPES}:
+            raise ProtocolError(f"未知或非  message_type: {self.message_type}")
+        return self
 
-    @field_validator("message_type")
-    @classmethod
-    def _check_message_type(cls, value: str) -> str:
-        if value not in MessageType:
-            raise ProtocolError(f"未知 message_type: {value}")
-        return value
+    def parse_payload(self) -> BaseModel:
+        """按 message_type 返回唯一严格 payload 模型。"""
+        message_type = MessageType(self.message_type)
+        payload_model = PAYLOAD_MODELS[message_type]
+        try:
+            return payload_model.model_validate(self.payload)
+        except ValueError as exc:
+            raise MessagePayloadError(f"message_type {self.message_type} 的 payload 无效") from exc
 
-    @field_validator("message_id", "trace_id")
-    @classmethod
-    def _check_non_empty(cls, value: str) -> str:
-        if not value:
-            raise ProtocolError("message_id/trace_id 不能为空")
-        return value
+
+def parse_message(data: object) -> tuple[Envelope, BaseModel]:
+    """解析 Envelope 并返回已校验的 typed payload。"""
+    try:
+        envelope = Envelope.model_validate(data)
+    except ValueError as exc:
+        if "protocol_version" in str(exc):
+            raise ProtocolVersionMismatchError("协议版本不支持，期望 2") from exc
+        raise
+    return envelope, envelope.parse_payload()
+
+
+Message = tuple[Envelope, BaseModel]

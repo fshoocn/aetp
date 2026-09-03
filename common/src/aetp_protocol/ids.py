@@ -33,7 +33,7 @@ _RANDOM_CHARS = 16
 
 
 class BusinessId(RootModel[str]):
-  """V2 业务 ID：26 字符 Crockford Base32 ULID。"""
+  """ 业务 ID：26 字符 Crockford Base32 ULID。"""
 
   root: str = Field(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")
 

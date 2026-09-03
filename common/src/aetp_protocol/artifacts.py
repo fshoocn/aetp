@@ -1,4 +1,4 @@
-"""V2 Artifact、脚本和配置快照 DTO。"""
+""" Artifact、脚本和配置快照 DTO。"""
 
 from __future__ import annotations
 

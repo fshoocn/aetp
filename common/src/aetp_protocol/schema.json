@@ -2,7 +2,7 @@
   "agent.diagnostics.request": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -186,7 +186,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -704,7 +704,7 @@
   "agent.log.batch": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1046,7 +1046,7 @@
   "agent.log.level.update": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1134,7 +1134,7 @@
   "agent.log.level.updated": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1208,7 +1208,7 @@
   "agent.log.received": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1279,7 +1279,7 @@
   "agent.maintenance.drain": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1326,7 +1326,7 @@
   "agent.maintenance.drain.result": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1384,7 +1384,7 @@
   "agent.maintenance.restart": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1431,7 +1431,7 @@
   "agent.maintenance.restart.result": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1496,7 +1496,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1555,7 +1555,7 @@
   "agent.plugin.sync": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1736,7 +1736,7 @@
   "agent.plugin.sync.result": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -1848,7 +1848,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -2000,7 +2000,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -2309,7 +2309,7 @@
   "envelope": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -2352,6 +2352,35 @@
         "title": "MessageId",
         "type": "string"
       },
+      "Sender": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/BusinessId"
+          },
+          "kind": {
+            "$ref": "#/$defs/SenderKind"
+          },
+          "session_id": {
+            "$ref": "#/$defs/SessionId"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "session_id"
+        ],
+        "title": "Sender",
+        "type": "object"
+      },
+      "SenderKind": {
+        "enum": [
+          "master",
+          "agent"
+        ],
+        "title": "SenderKind",
+        "type": "string"
+      },
       "SessionId": {
         "maxLength": 64,
         "minLength": 16,
@@ -2365,36 +2394,10 @@
         "pattern": "^[A-Za-z0-9_-]+$",
         "title": "TraceId",
         "type": "string"
-      },
-      "V2Sender": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "$ref": "#/$defs/BusinessId"
-          },
-          "kind": {
-            "enum": [
-              "master",
-              "agent"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "session_id": {
-            "$ref": "#/$defs/SessionId"
-          }
-        },
-        "required": [
-          "kind",
-          "id",
-          "session_id"
-        ],
-        "title": "V2Sender",
-        "type": "object"
       }
     },
     "additionalProperties": false,
-    "description": "V2 公共消息头；payload 必须通过 parse_payload 二次解析。",
+    "description": "公共消息头；payload 必须通过 parse_payload 二次解析。",
     "properties": {
       "correlation_id": {
         "anyOf": [
@@ -2428,7 +2431,7 @@
         "type": "integer"
       },
       "sender": {
-        "$ref": "#/$defs/V2Sender"
+        "$ref": "#/$defs/Sender"
       },
       "sent_at": {
         "format": "date-time",
@@ -2447,13 +2450,13 @@
       "trace_id",
       "payload"
     ],
-    "title": "V2Envelope",
+    "title": "Envelope",
     "type": "object"
   },
   "execution.ack": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -2522,7 +2525,7 @@
   "execution.cancel": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -2586,7 +2589,7 @@
   "execution.case_status": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -2756,7 +2759,7 @@
         "type": "object"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -3008,7 +3011,7 @@
   "execution.log": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -3247,7 +3250,7 @@
         "type": "object"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -3414,7 +3417,7 @@
         "type": "object"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -3866,7 +3869,7 @@
   "execution.progress": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -4031,7 +4034,7 @@
         "type": "object"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -4424,7 +4427,7 @@
         "type": "object"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -4838,7 +4841,7 @@
         "type": "object"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -5721,7 +5724,7 @@
         "type": "object"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -5934,7 +5937,7 @@
   "lease.renew": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -5975,7 +5978,7 @@
   "lease.renewed": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -6058,7 +6061,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -6643,7 +6646,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -6732,7 +6735,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -7338,7 +7341,7 @@
   "node.register.ack": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -7410,7 +7413,7 @@
         "type": "string"
       },
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -8425,7 +8428,7 @@
   "presence": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -8496,7 +8499,7 @@
   "project_scope": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -8531,7 +8534,7 @@
   "remote_operation": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -8617,7 +8620,7 @@
   "resource_lease": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -8695,7 +8698,7 @@
   "run_script_snapshot": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -9232,7 +9235,7 @@
   "run_snapshot": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -9881,298 +9884,10 @@
     "title": "RunSnapshot",
     "type": "object"
   },
-  "script.parse": {
-    "$defs": {
-      "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
-        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
-        "title": "BusinessId",
-        "type": "string"
-      },
-      "Configuration": {
-        "additionalProperties": false,
-        "properties": {
-          "schema_hash": {
-            "$ref": "#/$defs/Sha256"
-          },
-          "schema_version": {
-            "minimum": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "values": {
-            "additionalProperties": {
-              "$ref": "#/$defs/JsonValue"
-            },
-            "title": "Values",
-            "type": "object"
-          }
-        },
-        "required": [
-          "schema_version",
-          "schema_hash",
-          "values"
-        ],
-        "title": "Configuration",
-        "type": "object"
-      },
-      "JsonValue": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          },
-          {
-            "items": {
-              "$ref": "#/$defs/JsonValue"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/$defs/JsonValue"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "ScriptRef": {
-        "additionalProperties": false,
-        "properties": {
-          "download_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Download Url"
-          },
-          "filename": {
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Filename",
-            "type": "string"
-          },
-          "script_id": {
-            "$ref": "#/$defs/BusinessId"
-          },
-          "sha256": {
-            "$ref": "#/$defs/Sha256"
-          },
-          "size": {
-            "minimum": 0,
-            "title": "Size",
-            "type": "integer"
-          },
-          "version": {
-            "minimum": 1,
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "script_id",
-          "version",
-          "filename",
-          "size",
-          "sha256"
-        ],
-        "title": "ScriptRef",
-        "type": "object"
-      },
-      "Sha256": {
-        "pattern": "^[a-fA-F0-9]{64}$",
-        "title": "Sha256",
-        "type": "string"
-      }
-    },
-    "additionalProperties": false,
-    "properties": {
-      "configuration": {
-        "$ref": "#/$defs/Configuration"
-      },
-      "parse_id": {
-        "$ref": "#/$defs/BusinessId"
-      },
-      "project_id": {
-        "$ref": "#/$defs/BusinessId"
-      },
-      "script": {
-        "$ref": "#/$defs/ScriptRef"
-      }
-    },
-    "required": [
-      "parse_id",
-      "project_id",
-      "script",
-      "configuration"
-    ],
-    "title": "ScriptParseRequest",
-    "type": "object"
-  },
-  "script.verify": {
-    "$defs": {
-      "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
-        "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
-        "title": "BusinessId",
-        "type": "string"
-      },
-      "Configuration": {
-        "additionalProperties": false,
-        "properties": {
-          "schema_hash": {
-            "$ref": "#/$defs/Sha256"
-          },
-          "schema_version": {
-            "minimum": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "values": {
-            "additionalProperties": {
-              "$ref": "#/$defs/JsonValue"
-            },
-            "title": "Values",
-            "type": "object"
-          }
-        },
-        "required": [
-          "schema_version",
-          "schema_hash",
-          "values"
-        ],
-        "title": "Configuration",
-        "type": "object"
-      },
-      "JsonValue": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          },
-          {
-            "items": {
-              "$ref": "#/$defs/JsonValue"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/$defs/JsonValue"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "ScriptRef": {
-        "additionalProperties": false,
-        "properties": {
-          "download_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Download Url"
-          },
-          "filename": {
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Filename",
-            "type": "string"
-          },
-          "script_id": {
-            "$ref": "#/$defs/BusinessId"
-          },
-          "sha256": {
-            "$ref": "#/$defs/Sha256"
-          },
-          "size": {
-            "minimum": 0,
-            "title": "Size",
-            "type": "integer"
-          },
-          "version": {
-            "minimum": 1,
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "script_id",
-          "version",
-          "filename",
-          "size",
-          "sha256"
-        ],
-        "title": "ScriptRef",
-        "type": "object"
-      },
-      "Sha256": {
-        "pattern": "^[a-fA-F0-9]{64}$",
-        "title": "Sha256",
-        "type": "string"
-      }
-    },
-    "additionalProperties": false,
-    "properties": {
-      "configuration": {
-        "$ref": "#/$defs/Configuration"
-      },
-      "project_id": {
-        "$ref": "#/$defs/BusinessId"
-      },
-      "script": {
-        "$ref": "#/$defs/ScriptRef"
-      },
-      "verify_id": {
-        "$ref": "#/$defs/BusinessId"
-      }
-    },
-    "required": [
-      "verify_id",
-      "project_id",
-      "script",
-      "configuration"
-    ],
-    "title": "ScriptVerifyRequest",
-    "type": "object"
-  },
   "script_definition": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -10716,7 +10431,7 @@
   "script_ref": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -10777,7 +10492,7 @@
   "task_script_ref": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -10977,7 +10692,7 @@
   "test_run": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"
@@ -11675,7 +11390,7 @@
   "test_task": {
     "$defs": {
       "BusinessId": {
-        "description": "V2 业务 ID：26 字符 Crockford Base32 ULID。",
+        "description": "业务 ID：26 字符 Crockford Base32 ULID。",
         "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         "title": "BusinessId",
         "type": "string"

@@ -1,4 +1,4 @@
-"""V2 插件归档的跨端完整性和入口校验。"""
+""" 插件归档的跨端完整性和入口校验。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class VerifiedPluginArchive:
     members: tuple[str, ...]
 
 
-class V2PluginArchiveVerifier:
+class PluginArchiveVerifier:
     """只验证归档，不导入或执行插件代码。"""
 
     MAX_SIZE = 100 * 1024 * 1024
@@ -54,7 +54,7 @@ class V2PluginArchiveVerifier:
                 raise ValueError("插件包包含重复成员")
             self._validate_members(infos)
             if "plugin.json" not in names:
-                raise ValueError("V2 插件包必须包含根目录 plugin.json")
+                raise ValueError(" 插件包必须包含根目录 plugin.json")
             manifest = self._read_manifest(archive)
             self._validate_manifest_files(manifest, set(names))
 
@@ -81,7 +81,7 @@ class V2PluginArchiveVerifier:
         try:
             return PluginManifest.model_validate(raw)
         except ValueError as exc:
-            raise ValueError("plugin.json 不符合 V2 PluginManifest") from exc
+            raise ValueError("plugin.json 不符合  PluginManifest") from exc
 
     def _validate_manifest_files(self, manifest: PluginManifest, names: set[str]) -> None:
         entrypoints = manifest.entrypoints

@@ -1,4 +1,4 @@
-"""V2 ScriptDefinition、TestTask 和 Run Snapshot 契约。"""
+""" ScriptDefinition、TestTask 和 Run Snapshot 契约。"""
 
 from __future__ import annotations
 

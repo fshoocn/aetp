@@ -6,6 +6,8 @@ Envelope / topic / sender 校验失败统一抛 ProtocolError 子类，
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import Field, RootModel
 
 
@@ -14,9 +16,8 @@ class ErrorCode(RootModel[str]):
 
     root: str = Field(pattern=r"^[A-Z][A-Z0-9_]{2,63}$")
 
-
-V2_ERROR_CODES = frozenset(
-    {
+    ERROR_CODES: ClassVar[frozenset[str]] = frozenset(
+        {
         "PROTOCOL_VERSION_UNSUPPORTED",
         "MESSAGE_PAYLOAD_INVALID",
         "PLUGIN_MANIFEST_INVALID",
@@ -53,8 +54,8 @@ V2_ERROR_CODES = frozenset(
         "AUTHORIZATION_ALLOWED",
         "AUTHORIZATION_DENIED",
         "PROJECT_SCOPE_REQUIRED",
-    }
-)
+        }
+    )
 
 
 class ProtocolError(ValueError):

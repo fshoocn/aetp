@@ -1,4 +1,4 @@
-"""V2 Requirement、ExecutionPlan、Lease 和执行结果 DTO。"""
+""" Requirement、ExecutionPlan、Lease 和执行结果 DTO。"""
 
 from __future__ import annotations
 

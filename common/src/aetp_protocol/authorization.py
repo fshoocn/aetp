@@ -1,4 +1,4 @@
-"""V2 RBAC 与项目范围授权契约。"""
+""" RBAC 与项目范围授权契约。"""
 
 from __future__ import annotations
 

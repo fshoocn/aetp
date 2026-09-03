@@ -38,10 +38,10 @@ from .authorization import (
     decide_project_access,
 )
 from .authorization import (
-    PlatformRole as V2PlatformRole,
+    PlatformRole as PlatformRole,
 )
 from .authorization import (
-    ProjectRole as V2ProjectRole,
+    ProjectRole as ProjectRole,
 )
 from .capabilities import (
     AgentMaintenanceState,
@@ -77,9 +77,8 @@ from .capabilities import (
     VehicleRequirement,
     VehicleVendor,
     Version,
-    VersionConstraint,
 )
-from .envelope import PROTOCOL_VERSION, Envelope, Sender, SenderKind
+from .envelope import PROTOCOL_VERSION, Envelope, Sender, SenderKind, parse_message
 from .errors import (
     InvalidSenderError,
     MessagePayloadError,
@@ -131,13 +130,12 @@ from .ids import (
     stable_id,
 )
 from .ids import (
-    VersionConstraint as V2VersionConstraint,
+    VersionConstraint as VersionConstraint,
 )
 from .logs import AgentLogBatch, LogCode, LogEvent, LogLevel, RunLogBatch, RunLogEntry
 from .message_types import MessageType
 from .payloads import (
     AgentLogReceived,
-    CaseResultEntry,
     CaseStatusEvent,
     DiagnosticsRequest,
     DiagnosticsSnapshot,
@@ -156,32 +154,11 @@ from .payloads import (
     MaintenanceStatus,
     NodeRegister,
     NodeRegisterAck,
-    PluginPackageRef,
     Presence,
-    RegisterAckPayload,
     RemoteOperation,
     RemoteOperationStatus,
-    RunCancelPayload,
-    RunCaseStatusPayload,
-    RunLogCompletePayload,
-    RunProgressPayload,
-    RunResultPayload,
-    ScriptParsePayload,
-    ScriptParseResultPayload,
-    ScriptVerifyPayload,
-    ScriptVerifyResultPayload,
 )
 from .plan_hash import calculate_plan_hash, canonical_plan_document, with_plan_hash
-from .plugin import (
-    AgentExecutionPlugin,
-    AgentPackageSpec,
-    AgentTaskContext,
-    CaseInfo,
-    PluginMetadata,
-    PluginPackage,
-    ShardSpec,
-    TaskDefinitionSpec,
-)
 from .plugin_types import (
     DesiredPluginVersion,
     PluginAvailability,
@@ -228,22 +205,13 @@ from .topics import (
     command_topic,
     event_topic,
     parse_topic,
-    parse_v2_topic,
-    v2_command_topic,
-    v2_event_topic,
     validate_message_type_for_topic,
-    validate_message_type_for_v2_topic,
     validate_sender_for_topic,
-    validate_sender_for_v2_topic,
 )
-from .v2_envelope import V2_PROTOCOL_VERSION, V2Envelope, V2Sender, parse_v2_message
 
 __all__ = [
     "PROTOCOL_VERSION",
     "Action",
-    "AgentExecutionPlugin",
-    "AgentPackageSpec",
-    "AgentTaskContext",
     "AgentLogBatch",
     "AgentLogReceived",
     "ArtifactKind",
@@ -260,9 +228,7 @@ __all__ = [
     "BusRequirement",
     "BusinessId",
     "CapabilityName",
-    "CaseInfo",
     "CaseResult",
-    "CaseResultEntry",
     "CaseStatusEvent",
     "CaseSelection",
     "CaseStatus",
@@ -339,11 +305,8 @@ __all__ = [
     "ResourceRequirement",
     "PluginId",
     "PluginContext",
-    "PluginMetadata",
     "PluginManifest",
     "PluginEntrypoints",
-    "PluginPackage",
-    "PluginPackageRef",
     "PluginRef",
     "PluginDistributionRef",
     "PluginPoint",
@@ -356,14 +319,8 @@ __all__ = [
     "PluginSyncResult",
     "ProtocolError",
     "ProtocolVersionMismatchError",
-    "RegisterAckPayload",
-    "RunCancelPayload",
-    "RunCaseStatusPayload",
     "RunLogBatch",
-    "RunLogCompletePayload",
     "RunLogEntry",
-    "RunProgressPayload",
-    "RunResultPayload",
     "RunScriptSnapshot",
     "RunSnapshot",
     "RunStatus",
@@ -400,29 +357,22 @@ __all__ = [
     "ReportResult",
     "UnifiedTestResult",
     "ValidationIssue",
-    "V2Envelope",
-    "V2_PROTOCOL_VERSION",
-    "V2PlatformRole",
-    "V2ProjectRole",
-    "V2Sender",
-    "V2VersionConstraint",
+    "Envelope",
+    "PROTOCOL_VERSION",
+    "PlatformRole",
+    "ProjectRole",
+    "Sender",
     "VersionRange",
-    "ScriptParsePayload",
-    "ScriptParseResultPayload",
-    "ScriptVerifyPayload",
-    "ScriptVerifyResultPayload",
     "Sender",
     "SenderKind",
     "SerialCapability",
     "SerialPortCapability",
     "SerialPortRequirement",
-    "ShardSpec",
     "SwitchConnection",
     "SwitchPort",
     "SwitchRouteAllocation",
     "SystemCapability",
     "SystemRequirement",
-    "TaskDefinitionSpec",
     "TopicInfo",
     "TopicMismatchError",
     "VehicleBus",
@@ -436,14 +386,9 @@ __all__ = [
     "new_id",
     "new_ulid",
     "parse_topic",
-    "parse_v2_message",
-    "parse_v2_topic",
+    "parse_message",
     "decide_project_access",
     "validate_message_type_for_topic",
-    "validate_message_type_for_v2_topic",
     "validate_sender_for_topic",
-    "validate_sender_for_v2_topic",
-    "v2_command_topic",
-    "v2_event_topic",
     "with_plan_hash",
 ]

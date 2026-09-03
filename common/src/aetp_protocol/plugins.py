@@ -1,4 +1,4 @@
-"""V2 插件 Manifest、扩展点和版本引用 DTO。"""
+""" 插件 Manifest、扩展点和版本引用 DTO。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""V2 ExecutionPlan RFC 8785 规范化摘要。"""
+""" ExecutionPlan RFC 8785 规范化摘要。"""
 
 from __future__ import annotations
 
