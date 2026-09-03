@@ -1,4 +1,4 @@
-"""M3 V2 Plan 物化服务。"""
+"""M3  Plan 物化服务。"""
 
 from __future__ import annotations
 
@@ -15,15 +15,15 @@ from master.domain.state_machine import assert_transition
 
 
 @dataclass(frozen=True)
-class V2MaterializedPlan:
-    """已原子物化的 V2 Plan 和 Attempt。"""
+class MaterializedPlan:
+    """已原子物化的  Plan 和 Attempt。"""
 
     plan: ExecutionPlanRecord
     attempt: ShardAttempt
 
 
-class V2PlanMaterializationService:
-    """在已有 Run/Shard 上原子创建 V2 Attempt 并委托 Lease/Plan 持久化。"""
+class PlanMaterializationService:
+    """在已有 Run/Shard 上原子创建  Attempt 并委托 Lease/Plan 持久化。"""
 
     def __init__(
         self,
@@ -33,8 +33,8 @@ class V2PlanMaterializationService:
         self._uow_factory = uow_factory
         self._plan_leases = plan_leases
 
-    def materialize(self, plan: ExecutionPlan) -> V2MaterializedPlan:
-        """创建或幂等重放一个 V2 Attempt/Plan。"""
+    def materialize(self, plan: ExecutionPlan) -> MaterializedPlan:
+        """创建或幂等重放一个  Attempt/Plan。"""
         with self._uow_factory() as uow:
             existing_plan = uow.execution_plans.get_by_plan_id(plan.plan_id)
             if existing_plan is not None:
@@ -43,7 +43,7 @@ class V2PlanMaterializationService:
                 attempt = uow.shard_attempts.get_by_attempt_id(plan.attempt_id.root)
                 if attempt is None:
                     raise PlanRejected("已存在 Plan 但缺少对应 Attempt")
-                return V2MaterializedPlan(existing_plan, attempt)
+                return MaterializedPlan(existing_plan, attempt)
             existing_attempt_plan = uow.execution_plans.get_by_attempt(
                 plan.run_id,
                 plan.script_binding_id,
@@ -75,7 +75,7 @@ class V2PlanMaterializationService:
                     uow.shard_attempts.update(attempt)
             else:
                 if shard.status not in {ShardStatus.PENDING, ShardStatus.WAITING_RECOVERY, ShardStatus.DISPATCHING}:
-                    raise PlanRejected("Shard 当前状态不允许物化 V2 Plan")
+                    raise PlanRejected("Shard 当前状态不允许物化  Plan")
                 existing_attempt = uow.shard_attempts.get_by_shard_attempt(
                     plan.shard_id.root,
                     plan.attempt_no,
@@ -115,7 +115,7 @@ class V2PlanMaterializationService:
                 run.status = RunStatus.DISPATCHED
                 uow.task_runs.update(run)
             record = self._plan_leases.allocate_in_uow(uow, plan)
-            return V2MaterializedPlan(record, attempt)
+            return MaterializedPlan(record, attempt)
 
 
-__all__ = ["V2MaterializedPlan", "V2PlanMaterializationService"]
+__all__ = ["MaterializedPlan", "PlanMaterializationService"]

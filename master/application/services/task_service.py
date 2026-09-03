@@ -1,4 +1,4 @@
-"""V2 ScriptDefinition、TestTask 和 Run Snapshot 应用服务。"""
+""" ScriptDefinition、TestTask 和 Run Snapshot 应用服务。"""
 
 from __future__ import annotations
 
@@ -12,29 +12,27 @@ from aetp_protocol.execution import (
     PluginRequirement,
     SplitPolicy,
 )
-from aetp_protocol.execution import (
-    TriggerType as V2TriggerType,
-)
+from aetp_protocol.execution import TriggerType as ProtocolTriggerType
 from aetp_protocol.ids import BusinessId, VersionRange, new_id
 from aetp_protocol.task import RunScriptSnapshot, RunSnapshot, ScriptDefinition, TestTask
 
-from master.domain.enums import TriggerType
-from master.domain.models import RunShard, ScriptDefinitionRecord, TaskRun, V2TestTaskRecord
+from master.domain.enums import TriggerType as DomainTriggerType
+from master.domain.models import RunShard, ScriptDefinitionRecord, TaskRun, TestTaskRecord
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
 
 
 @dataclass(frozen=True)
-class V2RunCreated:
-    """一次 V2 Run 创建结果。"""
+class RunCreated:
+    """一次  Run 创建结果。"""
 
     run: TaskRun
     snapshot: RunSnapshot
     shards: tuple[RunShard, ...]
 
 
-class V2TaskService:
-    """管理 V2 定义 revision，并原子创建多脚本 Run。"""
+class TaskService:
+    """管理  定义 revision，并原子创建多脚本 Run。"""
 
     def __init__(
         self,
@@ -75,19 +73,19 @@ class V2TaskService:
         task: TestTask,
         *,
         created_by: int,
-    ) -> V2TestTaskRecord:
+    ) -> TestTaskRecord:
         """校验脚本 revision 和绑定配置后创建不可变 TestTask revision。"""
         with self._uow_factory() as uow:
             if uow.projects.get_by_project_id(task.project_id.root) is None:
                 raise KeyError(f"项目不存在: {task.project_id.root}")
             self._validate_task_scripts(uow, task)
-            existing = uow.v2_test_tasks.get(task.task_id, task.revision)
+            existing = uow.test_tasks.get(task.task_id, task.revision)
             if existing is not None:
                 if existing.task != task:
                     raise ValueError("TestTask revision 已存在但内容不同")
                 return existing
-            return uow.v2_test_tasks.add(
-                V2TestTaskRecord(
+            return uow.test_tasks.add(
+                TestTaskRecord(
                     id=None,
                     task=task,
                     created_by=created_by,
@@ -102,18 +100,19 @@ class V2TaskService:
         *,
         project_id: BusinessId,
         task_revision: int | None = None,
-        trigger_type: V2TriggerType = V2TriggerType.MANUAL_WEB,
+        trigger_type: ProtocolTriggerType = ProtocolTriggerType.MANUAL_WEB,
         run_id: BusinessId | None = None,
         original_run_id: BusinessId | None = None,
-    ) -> V2RunCreated:
-        """将一个 V2 TestTask revision 快照化并展开为多个脚本 Shard。"""
+        case_filter: set[str] | None = None,
+    ) -> RunCreated:
+        """将一个  TestTask revision 快照化并展开为多个脚本 Shard。"""
         with self._uow_factory() as uow:
-            task_record = uow.v2_test_tasks.get(task_id, task_revision)
+            task_record = uow.test_tasks.get(task_id, task_revision)
             if task_record is None or task_record.task.project_id != project_id:
-                raise KeyError(f"V2 TestTask 不存在或不属于项目: {task_id.root}")
+                raise KeyError(f" TestTask 不存在或不属于项目: {task_id.root}")
             task = task_record.task
             if not task.enabled:
-                raise ValueError("V2 TestTask 已停用，不能创建 Run")
+                raise ValueError(" TestTask 已停用，不能创建 Run")
 
             selected_snapshots: list[RunScriptSnapshot] = []
             shard_inputs: list[tuple[BusinessId, list[str]]] = []
@@ -136,8 +135,10 @@ class V2TaskService:
                 if binding.configuration.schema_hash != definition.configuration.schema_hash:
                     raise ValueError("任务脚本配置 Schema hash 与 ScriptDefinition 不一致")
                 selected_keys = self._selected_case_keys(binding.case_selection, definition)
+                if case_filter is not None:
+                    selected_keys = tuple(key for key in selected_keys if key in case_filter)
                 if not selected_keys:
-                    raise ValueError(f"任务脚本未选择任何用例: {binding.binding_id.root}")
+                    continue
                 requirement = self._default_requirement(definition)
                 source = definition.source.model_copy(update={"download_url": None})
                 selected_snapshots.append(
@@ -157,7 +158,7 @@ class V2TaskService:
                     shard_inputs.append((binding.binding_id, list(case_keys)))
 
             if not selected_snapshots:
-                raise ValueError("V2 TestTask 没有启用的脚本")
+                raise ValueError(" TestTask 没有启用的脚本")
             snapshot = RunSnapshot(
                 task_id=task.task_id,
                 task_revision=task.revision,
@@ -173,8 +174,8 @@ class V2TaskService:
             existing_run = uow.task_runs.get_by_run_id(actual_run_id.root)
             if existing_run is not None:
                 if existing_run.snapshot != snapshot:
-                    raise ValueError("run_id 已用于不同的 V2 Run Snapshot")
-                return V2RunCreated(
+                    raise ValueError("run_id 已用于不同的  Run Snapshot")
+                return RunCreated(
                     run=existing_run,
                     snapshot=snapshot,
                     shards=tuple(uow.run_shards.list_by_run(actual_run_id.root)),
@@ -187,7 +188,7 @@ class V2TaskService:
                     task_id=task.task_id.root,
                     task_revision=task.revision,
                     snapshot=snapshot,
-                    trigger_type=TriggerType(trigger_type.value),
+                    trigger_type=DomainTriggerType(trigger_type.value),
                 )
             )
             shards = uow.run_shards.add_many(
@@ -202,7 +203,7 @@ class V2TaskService:
                     for index, (binding_id, case_keys) in enumerate(shard_inputs)
                 ]
             )
-            return V2RunCreated(
+            return RunCreated(
                 run=run,
                 snapshot=run.snapshot or snapshot,
                 shards=tuple(shards),
@@ -222,7 +223,7 @@ class V2TaskService:
                 raise ValueError("TestTask 不能绑定已停用的 ScriptDefinition")
             if binding.configuration.schema_hash != definition.configuration.schema_hash:
                 raise ValueError("任务脚本配置 Schema hash 与 ScriptDefinition 不一致")
-            V2TaskService._selected_case_keys(binding.case_selection, definition)
+            TaskService._selected_case_keys(binding.case_selection, definition)
 
     @staticmethod
     def _selected_case_keys(selection: CaseSelection, definition: ScriptDefinition) -> tuple[str, ...]:
@@ -272,7 +273,7 @@ class V2TaskService:
             if current:
                 chunks.append(current)
             return tuple(tuple(chunk) for chunk in chunks)
-        raise ValueError("custom 分片必须由已解析的 V2 sharding 插件生成")
+        raise ValueError("custom 分片必须由已解析的  sharding 插件生成")
 
     @staticmethod
     def _default_requirement(definition: ScriptDefinition) -> ExecutionRequirement:
@@ -286,4 +287,4 @@ class V2TaskService:
         )
 
 
-__all__ = ["V2RunCreated", "V2TaskService"]
+__all__ = ["RunCreated", "TaskService"]

@@ -51,24 +51,20 @@ from master.adapters.sqlalchemy.repositories import (
     RunLogRepositoryImpl,
     RunResultRepositoryImpl,
     RunShardRepositoryImpl,
-    ScriptCaseRepositoryImpl,
     ScriptDefinitionRepositoryImpl,
     SecretValueRepositoryImpl,
     ShardAttemptRepositoryImpl,
     TaskRunRepositoryImpl,
     TaskScheduleRepositoryImpl,
-    TestScriptRepositoryImpl,
     TestTaskRepositoryImpl,
     UserRepositoryImpl,
-    V2TestTaskRepositoryImpl,
 )
 from master.domain.repositories import UnitOfWork
 
 
 class SqlAlchemyUnitOfWork(UnitOfWork):
-    def __init__(self, database: DatabaseInterface, *, include_legacy_relations: bool = True) -> None:
+    def __init__(self, database: DatabaseInterface) -> None:
         self._database = database
-        self._include_legacy_relations = include_legacy_relations
         self._session: Session | None = None
 
     def __enter__(self) -> Self:
@@ -76,15 +72,11 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self._session = session
         self.users = UserRepositoryImpl(session)
         self.refresh_tokens = RefreshTokenRepositoryImpl(session)
-        self.test_scripts = TestScriptRepositoryImpl(session)
-        self.script_cases = ScriptCaseRepositoryImpl(session)
         self.secret_values = SecretValueRepositoryImpl(session)
-        self.test_tasks = TestTaskRepositoryImpl(session)
         self.script_definitions = ScriptDefinitionRepositoryImpl(session)
-        self.v2_test_tasks = V2TestTaskRepositoryImpl(session)
+        self.test_tasks = TestTaskRepositoryImpl(session)
         self.task_runs = TaskRunRepositoryImpl(
             session,
-            include_legacy_task=self._include_legacy_relations,
         )
         self.run_shards = RunShardRepositoryImpl(session)
         self.shard_attempts = ShardAttemptRepositoryImpl(session)
@@ -94,7 +86,6 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.agent_logs = AgentLogRepositoryImpl(session)
         self.run_results = RunResultRepositoryImpl(
             session,
-            include_legacy_task=self._include_legacy_relations,
         )
         self.run_extension_results = RunExtensionResultRepositoryImpl(session)
         self.inbox_messages = InboxMessageRepositoryImpl(session)
@@ -116,10 +107,11 @@ class SqlAlchemyUnitOfWork(UnitOfWork):
         self.notification_endpoints = NotificationEndpointRepositoryImpl(session)
         self.event_subscriptions = EventSubscriptionRepositoryImpl(
             session,
-            include_legacy_task=self._include_legacy_relations,
         )
         self.event_deliveries = EventDeliveryRepositoryImpl(session)
-        self.task_schedules = TaskScheduleRepositoryImpl(session)
+        self.task_schedules = TaskScheduleRepositoryImpl(
+            session,
+        )
         self.project_integrations = ProjectIntegrationRepositoryImpl(session)
         self.ci_trigger_bindings = CiTriggerBindingRepositoryImpl(session)
         self.ci_webhook_deliveries = CiWebhookDeliveryRepositoryImpl(session)
@@ -159,7 +151,4 @@ class SqlAlchemyUnitOfWorkFactory:
         self._database = database
 
     def __call__(self) -> SqlAlchemyUnitOfWork:
-        return SqlAlchemyUnitOfWork(
-            self._database,
-            include_legacy_relations=not self._database.config.v2_only,
-        )
+        return SqlAlchemyUnitOfWork(self._database)

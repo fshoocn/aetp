@@ -93,7 +93,7 @@ class MaintenanceWorker:
             try:
                 stats["leases_expired"] = len(self._plan_leases.expire_due())
             except Exception:
-                logger.exception("V2 Lease 到期回收失败")
+                logger.exception(" Lease 到期回收失败")
         if self._storage_cleanup is not None:
             try:
                 stats["orphans_removed"] = self._storage_cleanup.cleanup_orphans()["removed"]

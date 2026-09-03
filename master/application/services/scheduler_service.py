@@ -1,7 +1,8 @@
-"""V2 多脚本 Run 调度和 ExecutionPlan 生成。"""
+""" 多脚本 Run 调度和 ExecutionPlan 生成。"""
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -14,9 +15,9 @@ from aetp_protocol.plugin_types import PluginDistributionRef, PluginStatus
 from aetp_protocol.task import RunScriptSnapshot, RunSnapshot
 
 from master.application.services.node_matching_service import NodeMatchingService
-from master.application.services.v2_plan_materialization_service import (
-    V2MaterializedPlan,
-    V2PlanMaterializationService,
+from master.application.services.plan_materialization_service import (
+    MaterializedPlan,
+    PlanMaterializationService,
 )
 from master.domain.enums import RunStatus, ShardAttemptStatus, ShardStatus
 from master.domain.models import RunShard, TaskRun
@@ -24,29 +25,31 @@ from master.domain.repositories import UnitOfWork
 from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
-class V2ScheduledPlan:
+class ScheduledPlan:
     plan: ExecutionPlan
-    materialized: V2MaterializedPlan
+    materialized: MaterializedPlan
 
 
 @dataclass(frozen=True)
-class V2ScheduleResult:
+class ScheduleResult:
     run_id: str
-    scheduled: tuple[V2ScheduledPlan, ...] = ()
+    scheduled: tuple[ScheduledPlan, ...] = ()
     pending_shard_ids: tuple[str, ...] = ()
     cancelled_shard_ids: tuple[str, ...] = ()
 
 
-class V2SchedulerService:
-    """以 Snapshot 为唯一输入的 V2 脚本级调度器。"""
+class SchedulerService:
+    """以 Snapshot 为唯一输入的  脚本级调度器。"""
 
     def __init__(
         self,
         uow_factory: Callable[[], UnitOfWork],
         node_matching: NodeMatchingService,
-        materializer: V2PlanMaterializationService,
+        materializer: PlanMaterializationService,
         *,
         script_url_builder: Callable[[str], str] | None = None,
         plugin_url_builder: Callable[[PluginId, SemVer], str] | None = None,
@@ -65,12 +68,12 @@ class V2SchedulerService:
         self._now = now or utcnow
         self._plan_ttl = timedelta(seconds=plan_ttl_s)
 
-    def schedule_run(self, run_id: BusinessId) -> V2ScheduleResult:
-        """为一个 V2 Run 派发当前可用脚本 Shard。"""
+    def schedule_run(self, run_id: BusinessId) -> ScheduleResult:
+        """为一个  Run 派发当前可用脚本 Shard。"""
         with self._uow_factory() as uow:
             run = uow.task_runs.get_by_run_id(run_id.root)
             if run is None or run.snapshot is None:
-                raise KeyError(f"V2 Run 不存在或缺少 Snapshot: {run_id.root}")
+                raise KeyError(f" Run 不存在或缺少 Snapshot: {run_id.root}")
             snapshot = run.snapshot
             shards = uow.run_shards.list_by_run(run_id.root)
             by_binding = self._scripts_by_binding(snapshot)
@@ -81,7 +84,7 @@ class V2SchedulerService:
                 shards = uow.run_shards.list_by_run(run_id.root)
                 eligible_bindings = self._eligible_bindings(snapshot, shards)
 
-            scheduled: list[V2ScheduledPlan] = []
+            scheduled: list[ScheduledPlan] = []
             pending: list[str] = []
             for shard in shards:
                 if shard.script_binding_id not in eligible_bindings:
@@ -101,15 +104,35 @@ class V2SchedulerService:
                     # 资源/Session 竞态由下一轮调度重新匹配，不能伪造失败。
                     pending.append(shard.shard_id)
                     continue
-                scheduled.append(V2ScheduledPlan(plan=plan, materialized=materialized))
+                scheduled.append(ScheduledPlan(plan=plan, materialized=materialized))
 
             self._project_cancelled_run_if_terminal(uow, run)
-            return V2ScheduleResult(
+            return ScheduleResult(
                 run_id=run_id.root,
                 scheduled=tuple(scheduled),
                 pending_shard_ids=tuple(pending),
                 cancelled_shard_ids=tuple(cancelled),
             )
+
+    def reschedule_pending_runs(self, *, node_id: str | None = None) -> int:
+        """节点上线后重新轮询仍有  Shard 的非终态 Run。"""
+        with self._uow_factory() as uow:
+            run_ids = [
+                run.run_id
+                for run in uow.task_runs.list_non_terminal(limit=1000)
+                if run.snapshot is not None
+            ]
+        scheduled_count = 0
+        for run_id in run_ids:
+            result = self.schedule_run(BusinessId(run_id))
+            scheduled_count += len(result.scheduled)
+        if scheduled_count:
+            logger.info(
+                " 节点上线触发补偿调度: node=%s scheduled=%d",
+                node_id or "*",
+                scheduled_count,
+            )
+        return scheduled_count
 
     def _build_plan(
         self,
@@ -283,10 +306,10 @@ class V2SchedulerService:
     ) -> SwitchRouteAllocation | None:
         if not requirement.allow_switching or resource.switch_connection is None:
             return None
-        if V2SchedulerService._labels_match(resource.labels, requirement.required_labels):
+        if SchedulerService._labels_match(resource.labels, requirement.required_labels):
             return None
         for port in resource.switch_connection.ports:
-            if V2SchedulerService._labels_match(port.labels, requirement.required_labels):
+            if SchedulerService._labels_match(port.labels, requirement.required_labels):
                 from aetp_protocol.capabilities import SwitchRouteAllocation
 
                 return SwitchRouteAllocation(
@@ -331,13 +354,13 @@ class V2SchedulerService:
     @staticmethod
     def _is_dispatchable(uow: UnitOfWork, shard: RunShard, snapshot: RunSnapshot) -> bool:
         if shard.status not in {ShardStatus.PENDING, ShardStatus.WAITING_RECOVERY}:
-            return shard.status is ShardStatus.DISPATCHING and V2SchedulerService._retry_available(uow, shard, snapshot)
+            return shard.status is ShardStatus.DISPATCHING and SchedulerService._retry_available(uow, shard, snapshot)
         attempts = uow.shard_attempts.list_by_shard(shard.shard_id)
         if any(attempt.status in _ACTIVE_ATTEMPT_STATUSES for attempt in attempts):
             return False
         if any(attempt.status is ShardAttemptStatus.UNKNOWN for attempt in attempts):
             return False
-        return V2SchedulerService._retry_available(uow, shard, snapshot)
+        return SchedulerService._retry_available(uow, shard, snapshot)
 
     @staticmethod
     def _retry_available(uow: UnitOfWork, shard: RunShard, snapshot: RunSnapshot) -> bool:
@@ -434,4 +457,4 @@ _TERMINAL_SHARD_STATUSES = {
 }
 
 
-__all__ = ["V2ScheduledPlan", "V2ScheduleResult", "V2SchedulerService"]
+__all__ = ["ScheduledPlan", "ScheduleResult", "SchedulerService"]

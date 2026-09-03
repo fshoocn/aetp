@@ -35,17 +35,14 @@ from master.application.services.artifact_service import ArtifactService
 from master.application.services.artifact_storage_service import ArtifactStorageService
 from master.application.services.artifact_upload_signing_service import ArtifactUploadSigningService
 from master.application.services.auth_service import AuthService
-from master.application.services.capability_service import CapabilityService
 from master.application.services.capability_snapshot_service import (
     CapabilitySnapshotProjectionService,
     DiagnosticsSnapshotProjectionService,
     NodeCapabilityRevisionCache,
 )
-from master.application.services.case_duration_service import CaseDurationStatsService
-from master.application.services.ci_integration_service import CiIntegrationService
-from master.application.services.device_service import DeviceService
 from master.application.services.diagnostics_request_service import DiagnosticsRequestService
 from master.application.services.event_publisher import EventPublisher
+from master.application.services.execution_service import ExecutionService
 from master.application.services.hook_runner import HookRunner
 from master.application.services.idempotency_service import IdempotencyService
 from master.application.services.message_router import MasterMessageRouter
@@ -56,6 +53,7 @@ from master.application.services.node_service import NodeService
 from master.application.services.notification_dispatcher import NotificationDispatcher
 from master.application.services.notification_service import NotificationService
 from master.application.services.plan_lease_service import PlanLeaseService
+from master.application.services.plan_materialization_service import PlanMaterializationService
 from master.application.services.plugin_download_service import PluginDownloadService
 from master.application.services.plugin_governance_service import PluginGovernanceService
 from master.application.services.plugin_sync_service import PluginSyncService
@@ -69,43 +67,25 @@ from master.application.services.reporting_pipeline import (
     ReportPipeline,
     build_default_reporting_registries,
 )
-from master.application.services.run_cancel_service import RunCancelService
-from master.application.services.run_projection_service import RunProjectionService
-from master.application.services.run_retry_service import RunRetryService
-from master.application.services.run_trigger_service import RunTriggerService
 from master.application.services.schedule_service import ScheduleService
+from master.application.services.scheduler_service import SchedulerService
+from master.application.services.script_definition_service import ScriptDefinitionService
 from master.application.services.script_download_service import ScriptDownloadService
-from master.application.services.script_service import ScriptService
 from master.application.services.script_storage_service import ScriptStorageService
-from master.application.services.script_verification_service import (
-    ScriptVerificationService,
-)
-from master.application.services.shard_scheduler_service import (
-    SchedulerConfig,
-    ShardSchedulerService,
-)
 from master.application.services.storage_cleanup_service import StorageCleanupService
-from master.application.services.test_task_service import TestTaskService
-from master.application.services.v2_execution_service import V2ExecutionService
-from master.application.services.v2_plan_materialization_service import V2PlanMaterializationService
-from master.application.services.v2_scheduler_service import V2SchedulerService
-from master.application.services.v2_script_definition_service import V2ScriptDefinitionService
-from master.application.services.v2_script_download_service import V2ScriptDownloadService
-from master.application.services.v2_task_service import V2TaskService
+from master.application.services.task_service import TaskService
 from master.config import get_settings, runtime_dir
 from master.domain.node_matcher import NodeMatcher
-from master.plugins.manager import PluginManager
-from master.plugins.registry import create_default_registry
-from master.plugins.v2_extension_resolver import MasterV2ExtensionResolver
-from master.plugins.v2_registry import V2PluginRegistry
+from master.plugins.extension_resolver import ExtensionResolver
+from master.plugins.registry import PluginRegistry
 from master.workers.event_hook_worker import EventHookWorker
 from master.workers.maintenance_worker import MaintenanceWorker
 from master.workers.outbox_worker import OutboxWorker
 
 
-def _init_database(url: str, v2_only: bool = False) -> DatabaseInterface:
+def _init_database(url: str) -> DatabaseInterface:
     """创建数据库实例并完成建表 + 迁移。"""
-    db = create_database({"url": url, "v2_only": v2_only})
+    db = create_database(url)
     db.connect()
     return db
 
@@ -123,16 +103,11 @@ def _internal_signing_secret() -> str:
 
 
 def _data_dir() -> Path:
-    """外部数据目录：V2 profile 与 legacy 运行目录物理隔离。"""
+    """外部数据目录。"""
     settings = get_settings()
     if settings.data_dir is not None:
         return settings.data_dir
-    return runtime_dir() / ("data-v2" if settings.v2_only else "data")
-
-
-def _plugin_ref_from_registry(task_type: str, version: str):
-    """运行时从 Master 插件注册表获取 Agent 包引用。"""
-    return Container.plugin_registry().agent_package_ref(task_type)
+    return runtime_dir() / "data"
 
 
 def _artifact_upload_url(
@@ -160,7 +135,6 @@ class Container(containers.DeclarativeContainer):
     database = providers.Singleton(
         _init_database,
         database_url,
-        v2_only=providers.Callable(lambda: get_settings().v2_only),
     )
 
     # 工作单元工厂：进程级单例（工厂本身无状态，仅持有 database；
@@ -235,16 +209,16 @@ class Container(containers.DeclarativeContainer):
     plugin_governance_service = providers.Singleton(
         PluginGovernanceService,
         uow_factory=uow_factory,
-        archive_root=providers.Callable(lambda: _data_dir() / "plugins-v2"),
+        archive_root=providers.Callable(lambda: _data_dir() / "plugins"),
     )
-    v2_plugin_registry = providers.Singleton(
-        V2PluginRegistry,
-        archive_root=providers.Callable(lambda: _data_dir() / "plugins-v2"),
+    plugin_registry = providers.Singleton(
+        PluginRegistry,
+        archive_root=providers.Callable(lambda: _data_dir() / "plugins"),
     )
-    v2_master_extension_resolver = providers.Singleton(
-        MasterV2ExtensionResolver,
-        registry=v2_plugin_registry,
-        extraction_root=providers.Callable(lambda: _data_dir() / "plugins-v2" / "runtime"),
+    master_extension_resolver = providers.Singleton(
+        ExtensionResolver,
+        registry=plugin_registry,
+        extraction_root=providers.Callable(lambda: _data_dir() / "plugins" / "runtime"),
     )
     plugin_sync_service = providers.Singleton(
         PluginSyncService,
@@ -257,37 +231,17 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
     )
-    v2_plan_materialization_service = providers.Factory(
-        V2PlanMaterializationService,
+    plan_materialization_service = providers.Factory(
+        PlanMaterializationService,
         uow_factory=uow_factory,
         plan_leases=plan_lease_service,
     )
-    v2_execution_service = providers.Singleton(
-        V2ExecutionService,
+    execution_service = providers.Singleton(
+        ExecutionService,
         uow_factory=uow_factory,
         plan_leases=plan_lease_service,
         master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
     )
-    plugin_manager = providers.Singleton(
-        PluginManager,
-        # 存储目录在 data/plugins 下（与脚本/产物存储一致），
-        # 绝不可用 master/plugins 源码目录，避免污染 Python 包
-        root=providers.Callable(_data_dir),
-        agent_download_builder=plugin_download_service.provided.build_download_url,
-    )
-    plugin_registry = providers.Singleton(
-        create_default_registry,
-        disabled_task_types=providers.Callable(lambda manager: manager.disabled_task_types(), plugin_manager),
-        zip_packages=providers.Callable(lambda manager: manager.load_packages(), plugin_manager),
-    )
-
-    # P6.8：成功 case 耗时滚动统计与 by-time 缺省耗时策略
-    case_duration_stats = providers.Singleton(
-        CaseDurationStatsService,
-        default_duration_s=providers.Callable(lambda: get_settings().case_duration_default_s),
-        anomaly_percent=providers.Callable(lambda: get_settings().case_duration_anomaly_percent),
-    )
-
     # 文件存储：进程级单例（默认本地 data/ 目录；切云存储只换 adapter）
     storage = providers.Singleton(
         LocalStorage,
@@ -297,14 +251,6 @@ class Container(containers.DeclarativeContainer):
     # 脚本文件存储服务（P4.7：上传/下载统一走 Storage 端口）
     script_storage_service = providers.Factory(ScriptStorageService, storage=storage)
 
-    # 脚本上传/解析服务（P7.3：upload_spec 校验 → verify → parse → 写库）
-    script_service = providers.Factory(
-        ScriptService,
-        uow_factory=uow_factory,
-        plugin_registry=plugin_registry,
-        storage=script_storage_service,
-    )
-
     # 产物文件存储服务（P6.6：run_artifacts 文件读写统一走 Storage 端口）
     artifact_storage_service = providers.Factory(ArtifactStorageService, storage=storage)
 
@@ -313,7 +259,6 @@ class Container(containers.DeclarativeContainer):
         StorageCleanupService,
         uow_factory=uow_factory,
         storage=storage,
-        include_legacy_scripts=providers.Callable(lambda: not get_settings().v2_only),
     )
 
     # 产物登记/查询服务（P6.6：写引用 + 项目范围查询）
@@ -326,11 +271,11 @@ class Container(containers.DeclarativeContainer):
     # M6：Run 事实提交后由独立 Reporter/Analyzer 插件处理。
     reporter_registry = providers.Singleton(
         lambda resolver: build_default_reporting_registries(resolver)[0],
-        v2_master_extension_resolver,
+        master_extension_resolver,
     )
     analyzer_registry = providers.Singleton(
         lambda resolver: build_default_reporting_registries(resolver)[1],
-        v2_master_extension_resolver,
+        master_extension_resolver,
     )
     report_pipeline = providers.Factory(
         ReportPipeline,
@@ -358,9 +303,6 @@ class Container(containers.DeclarativeContainer):
         ttl_s=providers.Callable(lambda: get_settings().idempotency_ttl_s),
     )
 
-    # 设备服务
-    device_service = providers.Factory(DeviceService, uow_factory=uow_factory)
-
     # 项目服务
     project_service = providers.Factory(ProjectService, uow_factory=uow_factory)
 
@@ -387,8 +329,6 @@ class Container(containers.DeclarativeContainer):
         recovery_service=recovery_service,
     )
 
-    # 硬件能力匹配服务（P4.5：谓词匹配/硬校验/候选过滤，无状态）
-    capability_service = providers.Factory(CapabilityService)
     capability_snapshot_cache = providers.Singleton(NodeCapabilityRevisionCache)
     capability_snapshot_service = providers.Singleton(
         CapabilitySnapshotProjectionService,
@@ -411,95 +351,31 @@ class Container(containers.DeclarativeContainer):
         matcher=providers.Factory(NodeMatcher),
     )
 
-    # 脚本签名下载服务（P4.7：限时 HMAC 签名 URL，Agent 下载校验 sha256）
     script_download_service = providers.Factory(
         ScriptDownloadService,
         secret=providers.Callable(_internal_signing_secret),
         base_url=providers.Callable(lambda: get_settings().public_base_url),
         ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
     )
-    v2_script_download_service = providers.Factory(
-        V2ScriptDownloadService,
-        secret=providers.Callable(_internal_signing_secret),
-        base_url=providers.Callable(lambda: get_settings().public_base_url),
-        ttl_s=providers.Callable(lambda: get_settings().internal_download_ttl_s),
-    )
-    v2_script_definition_service = providers.Factory(
-        V2ScriptDefinitionService,
+    script_definition_service = providers.Factory(
+        ScriptDefinitionService,
         uow_factory=uow_factory,
         storage=script_storage_service,
-        plugin_registry=v2_plugin_registry,
-        executor_resolver=v2_master_extension_resolver,
+        plugin_registry=plugin_registry,
+        executor_resolver=master_extension_resolver,
     )
-    v2_scheduler_service = providers.Factory(
-        V2SchedulerService,
+    scheduler_service = providers.Factory(
+        SchedulerService,
         uow_factory=uow_factory,
         node_matching=node_matching_service,
-        materializer=v2_plan_materialization_service,
-        script_url_builder=v2_script_download_service.provided.build_download_url,
+        materializer=plan_materialization_service,
+        script_url_builder=script_download_service.provided.build_download_url,
         plugin_url_builder=plugin_download_service.provided.build_versioned_download_url,
         artifact_url_builder=_artifact_upload_url,
     )
 
-    # Agent 脚本验证下发服务（P7.2：复用脚本签名下载和 Agent script.verify）
-    script_verification_service = providers.Factory(
-        ScriptVerificationService,
-        uow_factory=uow_factory,
-        plugin_registry=plugin_registry,
-        script_download=script_download_service,
-    )
-
-    # 测试任务定义服务（P4.5 延伸：创建/编辑时的节点筛选，D-23 软校验）
-    test_task_service = providers.Factory(
-        TestTaskService,
-        uow_factory=uow_factory,
-        capability_service=capability_service,
-    )
-    v2_task_service = providers.Factory(
-        V2TaskService,
-        uow_factory=uow_factory,
-    )
-
-    # Shard 调度服务（P4.6：项目绑定、能力、三层并发、failover、run.assign outbox）
-    shard_scheduler_service = providers.Factory(
-        ShardSchedulerService,
-        uow_factory=uow_factory,
-        capability_service=capability_service,
-        config=providers.Factory(
-            SchedulerConfig,
-            download_url_builder=script_download_service.provided.build_download_url,
-            artifact_upload_url_builder=providers.Object(_artifact_upload_url),
-            plugin_ref_builder=providers.Object(_plugin_ref_from_registry),
-        ),
-    )
-
-    # Run 投影服务（P6.4：ack/progress/log/result → Run 执行域投影）
-    run_projection_service = providers.Factory(
-        RunProjectionService,
-        uow_factory=uow_factory,
-        duration_stats=case_duration_stats,
-    )
-
-    # Run 触发服务（P6.4：任务定义 → 插件分割 → Run/Shards → 派发）
-    run_trigger_service = providers.Factory(
-        RunTriggerService,
-        uow_factory=uow_factory,
-        plugin_registry=plugin_registry,
-        scheduler=shard_scheduler_service,
-        duration_stats=case_duration_stats,
-        event_publisher=event_publisher,
-    )
-
-    # Run 重试服务（P6.7：retry=新 Run；retry-failed=失败 case 新 Run，D-20）
-    run_retry_service = providers.Factory(
-        RunRetryService,
-        uow_factory=uow_factory,
-        trigger_service=run_trigger_service,
-    )
-
-    # Run 取消服务（P8.1：向活跃 Shard 节点发 run.cancel，Agent 安全点释放硬件）
-    run_cancel_service = providers.Factory(
-        RunCancelService,
+    task_service = providers.Factory(
+        TaskService,
         uow_factory=uow_factory,
     )
 
@@ -507,30 +383,22 @@ class Container(containers.DeclarativeContainer):
     schedule_service = providers.Factory(
         ScheduleService,
         uow_factory=uow_factory,
-        trigger_service=run_trigger_service,
-    )
-
-    # CI/CD 集成服务（P8.3：集成 CRUD + webhook 签名验证 + delivery 去重）
-    ci_integration_service = providers.Factory(
-        CiIntegrationService,
-        uow_factory=uow_factory,
-        trigger_service=run_trigger_service,
-        secret_store=secret_store,
+        task_service=task_service,
+        scheduler=scheduler_service,
+        event_publisher=event_publisher,
     )
 
     # 入站 Agent 事件路由（P6.4：严格 Envelope 校验后投影/在线处理）
     message_router = providers.Factory(
         MasterMessageRouter,
         node_presence=node_presence_service,
-        projection=run_projection_service,
         event_publisher=event_publisher,
-        verification=script_verification_service,
-        scheduler=shard_scheduler_service,
+        scheduler=scheduler_service,
         uow_factory=uow_factory,
         capability_snapshot=capability_snapshot_service,
         diagnostics_snapshot=diagnostics_snapshot_service,
         plugin_sync=plugin_sync_service,
-        v2_execution=v2_execution_service,
+        execution=execution_service,
         agent_logs=agent_log_service,
         maintenance=agent_maintenance_service,
     )
@@ -552,7 +420,6 @@ class Container(containers.DeclarativeContainer):
         transport=mqtt_transport,
         router=message_router,
         outbox_worker=outbox_worker,
-        v2_only=providers.Callable(lambda: get_settings().v2_only),
     )
 
     # 后台维护 worker（P8.2/P8.5：Schedule tick + Stale Run 检测 + 孤儿清理）
@@ -563,6 +430,5 @@ class Container(containers.DeclarativeContainer):
         plan_lease_service=plan_lease_service,
         storage_cleanup_service=storage_cleanup_service,
         notification_dispatcher=notification_dispatcher,
-        enable_schedules=providers.Callable(lambda: not get_settings().v2_only),
         interval_s=providers.Callable(lambda: get_settings().maintenance_interval_s),
     )

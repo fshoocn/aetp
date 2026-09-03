@@ -11,11 +11,12 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 import croniter
-from aetp_protocol.ids import new_id
+from aetp_protocol.execution import TriggerType
+from aetp_protocol.ids import BusinessId, new_id
 
 from master.application.errors import TaskNotFoundError
-from master.application.services.run_trigger_service import RunTriggerService
-from master.domain.enums import TriggerType
+from master.application.services.scheduler_service import SchedulerService
+from master.application.services.task_service import TaskService
 from master.domain.models.task_schedule import TaskSchedule
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
@@ -33,10 +34,14 @@ class ScheduleService:
         self,
         uow_factory: Callable[[], UnitOfWork],
         *,
-        trigger_service: RunTriggerService | None = None,
+        task_service: TaskService,
+        scheduler: SchedulerService,
+        event_publisher=None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._trigger = trigger_service
+        self._task_service = task_service
+        self._scheduler = scheduler
+        self._event_publisher = event_publisher
 
     def create_schedule(
         self,
@@ -55,8 +60,7 @@ class ScheduleService:
         )
 
         with self._uow_factory() as uow:
-            task = uow.test_tasks.get_by_task_id(task_id, project_id)
-            if task is None:
+            if not self._task_exists(uow, task_id, project_id):
                 raise TaskNotFoundError(f"任务定义不存在: {task_id}")
 
             next_run = self._compute_next_run(
@@ -153,8 +157,7 @@ class ScheduleService:
         return triggered
 
     async def _fire_schedule(self, uow: UnitOfWork, schedule: TaskSchedule, now: datetime) -> None:
-        task = uow.test_tasks.get_by_task_id(schedule.task_id, schedule.project_id)
-        if task is None or not task.enabled:
+        if not self._task_enabled(uow, schedule.task_id, schedule.project_id):
             schedule.enabled = False
             uow.task_schedules.update(schedule)
             logger.warning(
@@ -164,17 +167,24 @@ class ScheduleService:
             )
             return
 
-        # 触发 Run（async 契约，直接 await，不新建事件循环）
-        if self._trigger is not None:
-            await self._trigger.trigger(
-                schedule.task_id,
-                project_id=schedule.project_id,
-                trigger_type=TriggerType.SCHEDULE,
-                trigger_context={
+        created = self._task_service.create_run(
+            BusinessId(schedule.task_id),
+            project_id=BusinessId(schedule.project_id),
+            trigger_type=TriggerType.SCHEDULE,
+            run_id=BusinessId(new_id()),
+        )
+        self._scheduler.schedule_run(BusinessId(created.run.run_id))
+        if self._event_publisher is not None:
+            await self._event_publisher.publish(
+                "run.created",
+                {
+                    "run_id": created.run.run_id,
+                    "task_id": created.run.task_id,
+                    "project_id": created.run.project_id,
                     "schedule_id": schedule.schedule_id,
-                    "cron_expression": schedule.cron_expression,
-                    "interval_seconds": schedule.interval_seconds,
                 },
+                project_id=created.run.project_id,
+                aggregate_id=created.run.run_id,
             )
 
         schedule.last_run_at = now
@@ -186,10 +196,23 @@ class ScheduleService:
         )
         uow.task_schedules.update(schedule)
 
-    @staticmethod
-    def _require_task(uow: UnitOfWork, task_id: str, project_id: str) -> None:
-        if uow.test_tasks.get_by_task_id(task_id, project_id) is None:
+    def _require_task(self, uow: UnitOfWork, task_id: str, project_id: str) -> None:
+        if not self._task_exists(uow, task_id, project_id):
             raise TaskNotFoundError(f"任务定义不存在: {task_id}")
+
+    def _task_exists(self, uow: UnitOfWork, task_id: str, project_id: str) -> bool:
+        try:
+            record = uow.test_tasks.get(BusinessId(task_id))
+        except ValueError:
+            return False
+        return record is not None and record.task.project_id.root == project_id
+
+    def _task_enabled(self, uow: UnitOfWork, task_id: str, project_id: str) -> bool:
+        try:
+            record = uow.test_tasks.get(BusinessId(task_id))
+        except ValueError:
+            return False
+        return record is not None and record.task.project_id.root == project_id and record.task.enabled
 
     @staticmethod
     def _validate_schedule_values(

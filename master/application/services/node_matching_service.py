@@ -1,4 +1,4 @@
-"""Master V2 节点匹配应用服务。"""
+"""Master  节点匹配应用服务。"""
 
 from __future__ import annotations
 

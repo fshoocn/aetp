@@ -1,10 +1,11 @@
-"""Master V2 execution.ack 和 lease.renew 消息服务。"""
+"""Master  execution.ack 和 lease.renew 消息服务。"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
 
+from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import CancelRequest, ExecutionStatus
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, new_id, stable_id
@@ -22,8 +23,7 @@ from aetp_protocol.payloads import (
     LeaseRenewRequest,
     LogComplete,
 )
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import command_topic
 
 from master.application.services.plan_lease_service import PlanLeaseService
 from master.domain.enums import CaseStatus, OutboxStatus, RunLogLevel, RunStatus, ShardAttemptStatus, ShardStatus
@@ -33,8 +33,8 @@ from master.domain.state_machine import assert_transition
 from master.domain.time import utcnow
 
 
-class V2ExecutionService:
-    """投影 V2 Plan ACK，并处理 Agent 的 Lease 续租请求。"""
+class ExecutionService:
+    """投影  Plan ACK，并处理 Agent 的 Lease 续租请求。"""
 
     def __init__(
         self,
@@ -109,7 +109,7 @@ class V2ExecutionService:
         sender_node_id: BusinessId,
         sender_session_id: SessionId,
     ) -> bool:
-        """投影 V2 progress；低于已确认序号的消息幂等丢弃。"""
+        """投影  progress；低于已确认序号的消息幂等丢弃。"""
         with self._uow_factory() as uow:
             plan_record = uow.execution_plans.get_by_plan_id(progress.plan_id)
             if plan_record is None or not self._matches_runtime_identity(
@@ -156,7 +156,7 @@ class V2ExecutionService:
         sender_node_id: BusinessId,
         sender_session_id: SessionId,
     ) -> bool:
-        """投影 V2 execution.log，按 Attempt 和 sequence 幂等。"""
+        """投影  execution.log，按 Attempt 和 sequence 幂等。"""
         with self._uow_factory() as uow:
             plan_record = uow.execution_plans.get_by_plan_id(batch.plan_id)
             if plan_record is None or not self._matches_runtime_identity(
@@ -212,7 +212,7 @@ class V2ExecutionService:
         sender_node_id: BusinessId,
         sender_session_id: SessionId,
     ) -> bool:
-        """投影 V2 case status，按 case sequence 防止旧状态覆盖新状态。"""
+        """投影  case status，按 case sequence 防止旧状态覆盖新状态。"""
         with self._uow_factory() as uow:
             plan_record = uow.execution_plans.get_by_plan_id(event.plan_id)
             if plan_record is None or not self._matches_runtime_identity(
@@ -271,7 +271,7 @@ class V2ExecutionService:
         sender_node_id: BusinessId,
         sender_session_id: SessionId,
     ) -> bool:
-        """关闭 V2 Attempt 日志围栏；相同声明幂等，倒退声明拒绝。"""
+        """关闭  Attempt 日志围栏；相同声明幂等，倒退声明拒绝。"""
         with self._uow_factory() as uow:
             plan_record = uow.execution_plans.get_by_plan_id(complete.plan_id)
             if plan_record is None or not self._matches_runtime_identity(
@@ -323,11 +323,11 @@ class V2ExecutionService:
                 )
             )
             outbox_id = stable_id(f"execution-cancel:{cancel.request.cancel_request_id.root}").root
-            envelope = V2Envelope(
+            envelope = Envelope(
                 message_id=MessageId(new_id()),
                 sent_at=self._now(),
-                sender=V2Sender(
-                    kind="master",
+                sender=Sender(
+                    kind=SenderKind.MASTER,
                     id=stable_id(self._master_id),
                     session_id=SessionId(stable_id(f"{self._master_id}:session").root),
                 ),
@@ -343,7 +343,7 @@ class V2ExecutionService:
                     outbox_id=outbox_id,
                     aggregate_type="execution_plan",
                     aggregate_id=plan.plan_id.root,
-                    topic=v2_command_topic(plan.node_id.root, "execution.cancel"),
+                    topic=command_topic(plan.node_id.root, "execution.cancel"),
                     payload=envelope.model_dump(mode="json"),
                     qos=1,
                     status=OutboxStatus.PENDING,
@@ -360,7 +360,7 @@ class V2ExecutionService:
         sender_node_id: BusinessId,
         sender_session_id: SessionId,
     ) -> bool:
-        """处理 lease.renew，并把 LeaseRenewed 写入 V2 command outbox。"""
+        """处理 lease.renew，并把 LeaseRenewed 写入  command outbox。"""
         outbox_id = stable_id(f"lease-renewed:{message_id.root}").root
         if not self._is_current_session(sender_node_id, sender_session_id):
             response = LeaseRenewed(
@@ -380,12 +380,12 @@ class V2ExecutionService:
                 node_id=sender_node_id,
                 session_id=sender_session_id,
             )
-        envelope = V2Envelope(
+        envelope = Envelope(
             message_id=MessageId(new_id()),
             correlation_id=message_id,
             sent_at=self._now(),
-            sender=V2Sender(
-                kind="master",
+            sender=Sender(
+                kind=SenderKind.MASTER,
                 id=stable_id(self._master_id),
                 session_id=SessionId(stable_id(f"{self._master_id}:session").root),
             ),
@@ -400,7 +400,7 @@ class V2ExecutionService:
                         outbox_id=outbox_id,
                         aggregate_type="resource_lease",
                         aggregate_id=request.lease_id.root,
-                        topic=v2_command_topic(sender_node_id.root, "lease.renewed"),
+                        topic=command_topic(sender_node_id.root, "lease.renewed"),
                         payload=envelope.model_dump(mode="json"),
                         qos=1,
                         status=OutboxStatus.PENDING,
@@ -537,7 +537,7 @@ class V2ExecutionService:
                     expected_revision=lease_record.lease.revision,
                 )
             self._project_run_if_terminal(uow, finished.run_id)
-            self._project_v2_run_result(uow, finished, sender_node_id)
+            self._project_run_result(uow, finished, sender_node_id)
             return True
 
     def handle_execution_reconcile(
@@ -703,12 +703,12 @@ class V2ExecutionService:
         node_id: BusinessId,
         result: ExecutionReconcileResult,
     ) -> None:
-        envelope = V2Envelope(
+        envelope = Envelope(
             message_id=MessageId(new_id()),
             correlation_id=message_id,
             sent_at=self._now(),
-            sender=V2Sender(
-                kind="master",
+            sender=Sender(
+                kind=SenderKind.MASTER,
                 id=stable_id(self._master_id),
                 session_id=SessionId(stable_id(f"{self._master_id}:session").root),
             ),
@@ -723,7 +723,7 @@ class V2ExecutionService:
                         outbox_id=outbox_id,
                         aggregate_type="execution_reconcile",
                         aggregate_id=node_id.root,
-                        topic=v2_command_topic(node_id.root, "execution.reconcile_result"),
+                        topic=command_topic(node_id.root, "execution.reconcile_result"),
                         payload=envelope.model_dump(mode="json"),
                         qos=1,
                         status=OutboxStatus.PENDING,
@@ -870,13 +870,13 @@ class V2ExecutionService:
         run.finished_at = utcnow()
         uow.task_runs.update(run)
 
-    def _project_v2_run_result(
+    def _project_run_result(
         self,
         uow: UnitOfWork,
         finished: ExecutionFinished,
         sender_node_id: BusinessId,
     ) -> None:
-        """将所有 V2 Shard 收敛后的结果写入统一 RunResult 投影。"""
+        """将所有  Shard 收敛后的结果写入统一 RunResult 投影。"""
         run = uow.task_runs.get_by_run_id(finished.run_id.root)
         if run is None or run.status not in {
             RunStatus.SUCCEEDED,
@@ -933,4 +933,4 @@ class V2ExecutionService:
             return current is not None and current.session_id == session_id.root
 
 
-__all__ = ["V2ExecutionService"]
+__all__ = ["ExecutionService"]

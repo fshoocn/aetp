@@ -1,6 +1,6 @@
 """插件包签名下载服务（P5.5 延伸，§18.8）。
 
-封装内部插件下载端点的签名 URL 生成与校验：派发 ``run.assign`` 时把签名
+封装内部插件下载端点的签名 URL 生成与校验：派发 ``execution.plan`` 时把签名
 ``download_url`` 写入 ``plugin_ref``，Agent 检查本地版本、缺失时经内部
 端点下载插件包并按 sha256 校验安装。
 
@@ -48,7 +48,7 @@ class PluginDownloadService:
         return f"{self._base_url}{self.build_path(plugin_id)}"
 
     def build_versioned_download_url(self, plugin_id: PluginId, version: SemVer) -> str:
-        """生成 V2 指定插件版本的签名下载 URL。"""
+        """生成  指定插件版本的签名下载 URL。"""
         resource_id = f"{plugin_id.root}@{version.root}"
         path = build_signed_path(
             resource_id,
@@ -65,7 +65,7 @@ class PluginDownloadService:
         return verify_signed_path(plugin_id, expires, signature, self._secret)
 
     def verify_version(self, plugin_id: PluginId, version: SemVer, expires: int, signature: str) -> bool:
-        """校验 V2 指定版本插件签名 URL。"""
+        """校验  指定版本插件签名 URL。"""
         return verify_signed_path(
             f"{plugin_id.root}@{version.root}",
             expires,

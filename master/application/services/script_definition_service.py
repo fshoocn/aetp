@@ -1,4 +1,4 @@
-"""V2 ScriptDefinition 上传、解析和不可变登记。"""
+""" ScriptDefinition 上传、解析和不可变登记。"""
 
 from __future__ import annotations
 
@@ -17,16 +17,16 @@ from common.zip_utils import safe_extract_zip
 from master.application.services.script_storage_service import ScriptStorageService
 from master.domain.models import ScriptDefinitionRecord
 from master.domain.time import utcnow
-from master.plugins.v2_extension_resolver import MasterV2ExtensionResolver
-from master.plugins.v2_registry import V2PluginRegistry
+from master.plugins.extension_resolver import ExtensionResolver
+from master.plugins.registry import PluginRegistry
 
 
-class V2ScriptDefinitionError(ValueError):
-    """V2 脚本上传或解析失败。"""
+class ScriptDefinitionError(ValueError):
+    """ 脚本上传或解析失败。"""
 
 
-class V2ScriptDefinitionService:
-    """用精确 V2 executor 生成 ScriptDefinition。"""
+class ScriptDefinitionService:
+    """用精确  executor 生成 ScriptDefinition。"""
 
     MAX_SIZE = 100 * 1024 * 1024
 
@@ -34,8 +34,8 @@ class V2ScriptDefinitionService:
         self,
         uow_factory,
         storage: ScriptStorageService,
-        plugin_registry: V2PluginRegistry,
-        executor_resolver: MasterV2ExtensionResolver,
+        plugin_registry: PluginRegistry,
+        executor_resolver: ExtensionResolver,
     ) -> None:
         self._uow_factory = uow_factory
         self._storage = storage
@@ -55,15 +55,15 @@ class V2ScriptDefinitionService:
         created_by: int,
     ) -> ScriptDefinitionRecord:
         if not name.strip():
-            raise V2ScriptDefinitionError("ScriptDefinition 名称不能为空")
+            raise ScriptDefinitionError("ScriptDefinition 名称不能为空")
         if not file_data:
-            raise V2ScriptDefinitionError("脚本文件不能为空")
+            raise ScriptDefinitionError("脚本文件不能为空")
         if len(file_data) > self.MAX_SIZE:
-            raise V2ScriptDefinitionError("脚本文件不能超过 100 MB")
+            raise ScriptDefinitionError("脚本文件不能超过 100 MB")
         try:
             self._storage.validate_filename(filename)
         except ValueError as exc:
-            raise V2ScriptDefinitionError(str(exc)) from exc
+            raise ScriptDefinitionError(str(exc)) from exc
 
         record = self._plugin_registry.get(
             executor_plugin_id,
@@ -71,8 +71,8 @@ class V2ScriptDefinitionService:
             PluginPoint.EXECUTOR,
         )
         if record is None or record.status is not PluginStatus.ENABLED:
-            raise V2ScriptDefinitionError(
-                f"V2 executor 未启用: {executor_plugin_id.root}@{executor_version.root}"
+            raise ScriptDefinitionError(
+                f" executor 未启用: {executor_plugin_id.root}@{executor_version.root}"
             )
         resolved = self._executor_resolver.resolve(
             record,
@@ -85,7 +85,7 @@ class V2ScriptDefinitionService:
         try:
             cases = await self._parse_cases(parser, file_data, filename, configuration.values)
             if not cases:
-                raise V2ScriptDefinitionError("脚本未解析出任何用例")
+                raise ScriptDefinitionError("脚本未解析出任何用例")
             source = ScriptRef(
                 script_id=definition_id,
                 version=1,
@@ -117,7 +117,7 @@ class V2ScriptDefinitionService:
             )
             with self._uow_factory() as uow:
                 if uow.projects.get_by_project_id(project_id.root) is None:
-                    raise V2ScriptDefinitionError(f"项目不存在: {project_id.root}")
+                    raise ScriptDefinitionError(f"项目不存在: {project_id.root}")
                 self._storage.store_script(
                     definition_id.root,
                     source.version,
@@ -138,10 +138,10 @@ class V2ScriptDefinitionService:
                         self._storage.script_key(definition_id.root, source.version, filename)
                     )
                     raise
-        except V2ScriptDefinitionError:
+        except ScriptDefinitionError:
             raise
         except Exception as exc:
-            raise V2ScriptDefinitionError(f"V2 脚本解析失败: {exc}") from exc
+            raise ScriptDefinitionError(f" 脚本解析失败: {exc}") from exc
 
     async def _parse_cases(
         self,
@@ -150,7 +150,7 @@ class V2ScriptDefinitionService:
         filename: str,
         configuration: Mapping[str, object],
     ) -> list[TestCase]:
-        with tempfile.TemporaryDirectory(prefix="aetp-v2-script-") as raw_dir:
+        with tempfile.TemporaryDirectory(prefix="aetp-script-") as raw_dir:
             script_dir = Path(raw_dir)
             if filename.lower().endswith(".zip"):
                 safe_extract_zip(file_data, script_dir)
@@ -173,7 +173,7 @@ class V2ScriptDefinitionService:
                 tags = getattr(raw, "tags", ())
                 estimated = getattr(raw, "estimated_duration_s", None)
             if not isinstance(stable_key, str) or not stable_key.strip():
-                raise V2ScriptDefinitionError("executor 返回了无效 case stable_key")
+                raise ScriptDefinitionError("executor 返回了无效 case stable_key")
             if not isinstance(case_name, str) or not case_name.strip():
                 case_name = stable_key.rsplit("::", 1)[-1]
             if not isinstance(parent_path, str):
@@ -196,4 +196,4 @@ class V2ScriptDefinitionService:
         return cases
 
 
-__all__ = ["V2ScriptDefinitionError", "V2ScriptDefinitionService"]
+__all__ = ["ScriptDefinitionError", "ScriptDefinitionService"]

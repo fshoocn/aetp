@@ -20,19 +20,21 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
-from starlette.responses import JSONResponse
 
 from master.config import get_settings
 
-from .api.v1.dependencies import DbDep
-from .api.v1.errors import register_application_error_handlers
-from .api.v1.router import router as v1_router
-from .api.v2.nodes import router as v2_nodes_router
-from .api.v2.auth import router as v2_auth_router
-from .api.v2.internal import router as v2_internal_router
-from .api.v2.projects import router as v2_projects_router
-from .api.v2.router import router as v2_router
-from .api.v2.tasks import router as v2_tasks_router
+from .api.admin import router as admin_router
+from .api.auth import router as auth_router
+from .api.dependencies import DbDep
+from .api.errors import register_application_error_handlers
+from .api.events import router as events_router
+from .api.internal import router as internal_router
+from .api.nodes import router as nodes_router
+from .api.notifications import router as notifications_router
+from .api.projects import router as projects_router
+from .api.router import router
+from .api.schedules import router as schedules_router
+from .api.tasks import router as tasks_router
 from .bootstrap.container import Container
 
 logger = logging.getLogger(__name__)
@@ -99,27 +101,19 @@ async def lifespan(app: FastAPI):
     # 启动时校验安全配置（JWT 密钥强度等），弱配置直接拒绝启动。
     # 校验只在这里做一次：无论从 run.py / 直接 uvicorn / 测试 / 嵌入方式启动，
     # lifespan 都会执行，保证所有入口都经过同一道启动检查。
-    from master.api.v1.security import validate_security_settings
+    from master.api.security import validate_security_settings
 
     validate_security_settings()
     settings = get_settings()
-    # 首次解析 database 单例 — 触发 _init_database() → create_database().connect() → Alembic upgrade head
+    # 首次解析 database 单例，创建当前 schema 基线。
     logger.info("开始初始化数据库和执行迁移")
     container.database()
     logger.info("数据库初始化完成")
     with container.uow_factory()() as uow:
-        container.v2_plugin_registry().load(
+        container.plugin_registry().load(
             uow.plugin_versions.list(status=PluginStatus.ENABLED)
         )
-    if settings.v2_only:
-        logger.info("V2-only profile 已启用：跳过 legacy task_type Registry")
-    else:
-        # 迁移期兼容：legacy profile 才装配旧 task_type Registry。
-        plugins = container.plugin_registry()
-        logger.info(
-            "Master 插件注册表已加载: task_types=%s",
-            [package.metadata.task_type for package in plugins.list()],
-        )
+    logger.info("Master 插件注册表已加载")
     app.state.container = container
 
     # 平台管理员 bootstrap：若 users 表为空且配置了管理员凭据，自动创建首个 admin
@@ -257,69 +251,32 @@ class RequestLoggingMiddleware:
             )
 
 
-class V2OnlyApiGuard:
-    """V2-only profile 拒绝 legacy API，避免新部署静默落回 V1。"""
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["path"].startswith("/api/v1"):
-            try:
-                v2_only = get_settings().v2_only
-            except RuntimeError:
-                v2_only = False
-            if v2_only:
-                response = JSONResponse(
-                    {
-                        "code": "V2_ONLY",
-                        "message": "V2-only profile 已停用 legacy API，请使用 /api/v2",
-                        "data": None,
-                    },
-                    status_code=410,
-                )
-                await response(scope, receive, send)
-                return
-        await self.app(scope, receive, send)
-
-
 app.add_middleware(RequestLoggingMiddleware)
-app.add_middleware(V2OnlyApiGuard)
-
-app.include_router(v1_router)
-app.include_router(v2_router)
-app.include_router(v2_auth_router)
-app.include_router(v2_internal_router)
-app.include_router(v2_projects_router)
-app.include_router(v2_nodes_router)
-app.include_router(v2_tasks_router)
+app.include_router(router)
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(events_router)
+app.include_router(internal_router)
+app.include_router(projects_router)
+app.include_router(nodes_router)
+app.include_router(notifications_router)
+app.include_router(schedules_router)
+app.include_router(tasks_router)
 
 
 @app.get("/api/v2/health", tags=["system"])
-def health_v2(db: DbDep) -> dict[str, str]:
-    """V2 健康检查：探活独立 V2 数据库连接。"""
-    try:
-        with db.session_scope() as session:
-            session.execute(sa_text("SELECT 1"))
-    except Exception:
-        logger.exception("V2 健康检查失败：数据库不可用")
-        return {"status": "degraded", "database": "unreachable", "profile": "v2"}
-    return {"status": "ok", "database": "ok", "profile": "v2"}
-
-
-@app.get("/api/v1/health", tags=["system"])
 def health(db: DbDep) -> dict[str, str]:
-    """健康检查：探活数据库连接。"""
+    """健康检查：探活当前数据库连接。"""
     try:
         with db.session_scope() as session:
             session.execute(sa_text("SELECT 1"))
     except Exception:
-        logger.exception("健康检查失败：数据库不可用")
+        logger.exception(" 健康检查失败：数据库不可用")
         return {"status": "degraded", "database": "unreachable"}
     return {"status": "ok", "database": "ok"}
 
 
-@app.get("/api/v1/health/system", tags=["system"])
+@app.get("/api/v2/health/system", tags=["system"])
 def system_health(request: Request) -> dict[str, object]:
     """返回面向运维与前端的全局组件状态。"""
     container: Container | None = getattr(request.app.state, "container", None)

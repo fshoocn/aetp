@@ -6,13 +6,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.ids import BusinessId, MessageId, SessionId, TraceId, new_id, stable_id
 from aetp_protocol.logs import AgentLogBatch
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import AgentLogReceived
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import command_topic
 
 from master.domain.enums import OutboxStatus
 from master.domain.models import AgentLogEventRecord, OutboxMessage
@@ -201,12 +201,12 @@ class AgentLogService:
         ).root
         if uow.outbox_messages.get_by_outbox_id(outbox_id) is not None:
             return
-        envelope = V2Envelope(
+        envelope = Envelope(
             message_id=MessageId(new_id()),
             correlation_id=message_id,
             sent_at=self._now(),
-            sender=V2Sender(
-                kind="master",
+            sender=Sender(
+                kind=SenderKind.MASTER,
                 id=stable_id(self._master_id),
                 session_id=SessionId(stable_id(f"{self._master_id}:session").root),
             ),
@@ -219,7 +219,7 @@ class AgentLogService:
                 outbox_id=outbox_id,
                 aggregate_type="agent_log",
                 aggregate_id=receipt.node_id.root,
-                topic=v2_command_topic(receipt.node_id.root, "agent.log.received"),
+                topic=command_topic(receipt.node_id.root, "agent.log.received"),
                 payload=envelope.model_dump(mode="json"),
                 qos=1,
                 status=OutboxStatus.PENDING,

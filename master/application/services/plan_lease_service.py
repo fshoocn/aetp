@@ -1,10 +1,11 @@
-"""M3 V2 ExecutionPlan 和 ResourceLease 应用服务。"""
+"""M3  ExecutionPlan 和 ResourceLease 应用服务。"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
 
+from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.errors import ErrorCode
 from aetp_protocol.execution import ExecutionPlan, LeaseState, ResourceLease
 from aetp_protocol.ids import (
@@ -18,8 +19,7 @@ from aetp_protocol.ids import (
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import LeaseRenewed, LeaseRenewRequest
 from aetp_protocol.plan_hash import calculate_plan_hash, canonical_plan_document, with_plan_hash
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import command_topic
 from sqlalchemy.exc import IntegrityError
 
 from master.domain.enums import OutboxStatus, ShardAttemptStatus, ShardStatus
@@ -43,7 +43,7 @@ _STALE_ATTEMPT = ErrorCode("STALE_ATTEMPT")
 
 
 class PlanLeaseService:
-    """Master 权威的 V2 Plan/Lease 分配、续租和回收服务。"""
+    """Master 权威的  Plan/Lease 分配、续租和回收服务。"""
 
     def __init__(
         self,
@@ -111,7 +111,7 @@ class PlanLeaseService:
                 outbox_id=stable_id(f"execution-plan:{plan.plan_id.root}").root,
                 aggregate_type="execution_plan",
                 aggregate_id=plan.plan_id.root,
-                topic=v2_command_topic(plan.node_id.root, "execution.plan"),
+                topic=command_topic(plan.node_id.root, "execution.plan"),
                 payload=envelope.model_dump(mode="json"),
                 qos=1,
                 status=OutboxStatus.PENDING,
@@ -269,12 +269,12 @@ class PlanLeaseService:
         if current is None or current.session_id != session_id.root:
             raise PlanRejected("Plan 目标 session 已失效")
 
-    def _build_plan_envelope(self, plan: ExecutionPlan) -> V2Envelope:
-        return V2Envelope(
+    def _build_plan_envelope(self, plan: ExecutionPlan) -> Envelope:
+        return Envelope(
             message_id=MessageId(new_id()),
             sent_at=self._now(),
-            sender=V2Sender(
-                kind="master",
+            sender=Sender(
+                kind=SenderKind.MASTER,
                 id=stable_id(self._master_id),
                 session_id=SessionId(stable_id(f"{self._master_id}:session").root),
             ),

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from aetp_protocol.ids import new_id
+from aetp_protocol.ids import BusinessId, new_id
 from aetp_protocol.reporting import NotificationPolicy
 
 from master.domain.models.notification import (
@@ -155,7 +155,7 @@ class NotificationService:
             if ep is None or ep.project_id != project_id:
                 raise ValueError(f"通知端点不存在: {endpoint_id}")
             normalized_task_id = task_id.strip() if task_id and task_id.strip() else None
-            if normalized_task_id and uow.test_tasks.get_by_task_id(normalized_task_id, project_id) is None:
+            if normalized_task_id and not self._task_exists(uow, normalized_task_id, project_id):
                 raise ValueError(f"测试任务不存在或不属于当前项目: {normalized_task_id}")
             sub = EventSubscription(
                 subscription_id=new_id(),
@@ -200,7 +200,7 @@ class NotificationService:
                 sub.event_types = event_types
             if task_id is not None:
                 normalized_task_id = task_id.strip() if task_id.strip() else None
-                if normalized_task_id and uow.test_tasks.get_by_task_id(normalized_task_id, project_id) is None:
+                if normalized_task_id and not self._task_exists(uow, normalized_task_id, project_id):
                     raise ValueError(f"测试任务不存在或不属于当前项目: {normalized_task_id}")
                 sub.task_id = normalized_task_id
             if filter_json is not None:
@@ -287,6 +287,13 @@ class NotificationService:
             logger.warning("未配置 SecretStore，密钥未持久化: %s", secret_ref)
             return
         self._store.set(secret_ref, value)
+
+    def _task_exists(self, uow: UnitOfWork, task_id: str, project_id: str) -> bool:
+        try:
+            record = uow.test_tasks.get(BusinessId(task_id))
+        except ValueError:
+            return False
+        return record is not None and record.task.project_id.root == project_id
 
     def _delete_secret(self, secret_ref: str) -> None:
         if self._store is None:

@@ -1,4 +1,4 @@
-"""Master V2 插件版本治理应用服务。"""
+"""Master  插件版本治理应用服务。"""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from aetp_protocol.ids import PluginId, SemVer, Sha256
+from aetp_protocol.plugin_archive import PluginArchiveVerifier
 from aetp_protocol.plugin_types import PluginRef, PluginStatus
 
 from master.domain.models import PluginVersionRecord
 from master.domain.repositories import UnitOfWork
-from master.plugins.v2_archive import V2PluginArchiveVerifier
-from master.plugins.v2_lifecycle import assert_transition
+from master.plugins.lifecycle import assert_transition
 
 
 class PluginGovernanceService:
@@ -26,14 +26,14 @@ class PluginGovernanceService:
         self,
         uow_factory: Callable[[], UnitOfWork],
         archive_root: Path,
-        verifier: V2PluginArchiveVerifier | None = None,
+        verifier: PluginArchiveVerifier | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._archive_root = archive_root
-        self._verifier = verifier or V2PluginArchiveVerifier()
+        self._verifier = verifier or PluginArchiveVerifier()
 
     def register_archive(self, filename: str, content: bytes) -> PluginVersionRecord:
-        verified = self._verifier.verify(filename, content)
+        verified = self._verifier.verify(content, filename=filename)
         manifest_bytes = json.dumps(
             verified.manifest.model_dump(mode="json", exclude_none=True),
             ensure_ascii=False,
@@ -228,7 +228,7 @@ class PluginGovernanceService:
         try:
             reference = PluginRef.model_validate_json(path.read_text(encoding="utf-8"))
         except ValueError as exc:
-            raise ValueError("active pointer 不是有效的 V2 PluginRef") from exc
+            raise ValueError("active pointer 不是有效的  PluginRef") from exc
         record = uow.plugin_versions.get(reference.plugin_id, reference.version)
         if record is None or record.plugin_id != plugin_id or record.archive_sha256 != reference.archive_sha256:
             raise ValueError("active pointer 与插件治理记录不一致")

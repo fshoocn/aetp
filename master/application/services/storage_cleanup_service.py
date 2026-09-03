@@ -29,11 +29,9 @@ class StorageCleanupService:
         self,
         uow_factory: Callable[[], UnitOfWork],
         storage: Storage,
-        include_legacy_scripts: bool = True,
     ) -> None:
         self._uow_factory = uow_factory
         self._storage = storage
-        self._include_legacy_scripts = include_legacy_scripts
 
     def cleanup_orphans(self) -> dict[str, int]:
         """扫描并删除无数据库引用的存储对象，返回清理统计。
@@ -41,19 +39,14 @@ class StorageCleanupService:
         不删除任何仍被引用的对象；单文件删除失败只记录日志并继续。
         """
         with self._uow_factory() as uow:
-            script_refs = (
-                set(uow.test_scripts.list_all_file_refs())
-                if self._include_legacy_scripts
-                else set()
-            )
+            script_refs = set(uow.script_definitions.list_all_file_refs())
             artifact_refs = set(uow.run_artifacts.list_all_file_refs())
 
         referenced = script_refs | artifact_refs
 
         removed = 0
         errors = 0
-        prefixes = (_SCRIPT_PREFIX, _ARTIFACT_PREFIX) if self._include_legacy_scripts else (_ARTIFACT_PREFIX,)
-        for prefix in prefixes:
+        for prefix in (_SCRIPT_PREFIX, _ARTIFACT_PREFIX):
             for key in self._storage.list_keys(prefix):
                 if key in referenced:
                     continue

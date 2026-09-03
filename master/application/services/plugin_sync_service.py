@@ -1,4 +1,4 @@
-"""Master V2 插件期望版本和 Agent 同步操作服务。"""
+"""Master  插件期望版本和 Agent 同步操作服务。"""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.ids import BusinessId, MessageId, PluginId, SemVer, SessionId, TraceId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import MaintenanceStatus
 from aetp_protocol.plugin_types import DesiredPluginVersion, PluginStatus, PluginSyncAction
 from aetp_protocol.plugins import PluginSyncItem, PluginSyncRequest, PluginSyncResult
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import command_topic
 
 from master.application.services.agent_maintenance_service import MaintenanceLockConflict
 from master.domain.enums import OutboxStatus
@@ -111,7 +111,7 @@ class PluginSyncService:
         *,
         actor_id: int | None = None,
     ) -> AgentPluginSyncOperationRecord:
-        """原子写入同步操作和 V2 command outbox。"""
+        """原子写入同步操作和  command outbox。"""
         normalized = self._with_package_urls(request)
         now = datetime.now(UTC)
         with self._uow_factory() as uow:
@@ -165,7 +165,7 @@ class PluginSyncService:
                     outbox_id=outbox_id,
                     aggregate_type="agent_plugin_sync",
                     aggregate_id=normalized.sync_id.root,
-                    topic=v2_command_topic(normalized.node_id.root, "agent.plugin.sync"),
+                    topic=command_topic(normalized.node_id.root, "agent.plugin.sync"),
                     payload=envelope.model_dump(mode="json"),
                     qos=1,
                     status=OutboxStatus.PENDING,
@@ -452,12 +452,12 @@ class PluginSyncService:
         )
         return request.model_copy(update={"items": items})
 
-    def _build_command_envelope(self, request: PluginSyncRequest) -> V2Envelope:
-        return V2Envelope(
+    def _build_command_envelope(self, request: PluginSyncRequest) -> Envelope:
+        return Envelope(
             message_id=MessageId(new_id()),
             sent_at=datetime.now(UTC),
-            sender=V2Sender(
-                kind="master",
+            sender=Sender(
+                kind=SenderKind.MASTER,
                 id=stable_id(self._master_id),
                 session_id=SessionId(stable_id(f"{self._master_id}:session").root),
             ),

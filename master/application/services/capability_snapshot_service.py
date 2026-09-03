@@ -1,4 +1,4 @@
-"""Master V2 节点能力快照投影服务。"""
+"""Master  节点能力快照投影服务。"""
 
 from __future__ import annotations
 

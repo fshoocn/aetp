@@ -1,4 +1,4 @@
-"""Master V2 远程诊断请求服务。"""
+"""Master  远程诊断请求服务。"""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from aetp_protocol.envelope import Envelope, Sender, SenderKind
 from aetp_protocol.ids import BusinessId, MessageId, RequestId, SessionId, TraceId, new_id, stable_id
 from aetp_protocol.message_types import MessageType
 from aetp_protocol.payloads import DiagnosticsRequest, RemoteOperationStatus
-from aetp_protocol.topics import v2_command_topic
-from aetp_protocol.v2_envelope import V2Envelope, V2Sender
+from aetp_protocol.topics import command_topic
 
 from master.domain.enums import OutboxStatus
 from master.domain.models import OutboxMessage, RemoteOperationRecord
@@ -75,11 +75,11 @@ class DiagnosticsRequestService:
                     updated_at=now,
                 )
             )
-            envelope = V2Envelope(
+            envelope = Envelope(
                 message_id=MessageId(new_id()),
                 sent_at=now,
-                sender=V2Sender(
-                    kind="master",
+                sender=Sender(
+                    kind=SenderKind.MASTER,
                     id=stable_id(self._master_id),
                     session_id=SessionId(stable_id(f"{self._master_id}:session").root),
                 ),
@@ -92,7 +92,7 @@ class DiagnosticsRequestService:
                     outbox_id=f"diagnostics:{request_id.root}",
                     aggregate_type="node",
                     aggregate_id=node_id.root,
-                    topic=v2_command_topic(node_id.root, "agent.diagnostics.request"),
+                    topic=command_topic(node_id.root, "agent.diagnostics.request"),
                     payload=envelope.model_dump(mode="json"),
                     qos=1,
                     status=OutboxStatus.PENDING,
