@@ -10,7 +10,8 @@ from aetp_protocol.plugin_types import PluginRef
 from aetp_protocol.task import TaskScriptRef
 from aetp_protocol.task import TestTask as ProtocolTestTask
 
-from master.domain.models import ScriptDefinitionRecord, TestTaskRecord
+from master.domain.models import ScriptDefinitionRecord
+from master.domain.models import TestTaskRecord as TaskRecordModel
 from tests.test_m3_plan_lease import NOW
 
 PROJECT_ID = BusinessId("01J00000000000000000000030")
@@ -47,7 +48,7 @@ def _definition(revision: int = 1) -> ScriptDefinitionRecord:
     return ScriptDefinitionRecord(id=None, definition=definition, created_at=NOW, updated_at=NOW)
 
 
-def _task(script_revision: int = 1) -> TestTaskRecord:
+def _task(script_revision: int = 1) -> TaskRecordModel:
     script = TaskScriptRef(
         binding_id=BusinessId("01J00000000000000000000033"),
         script_definition_id=SCRIPT_ID,
@@ -57,7 +58,7 @@ def _task(script_revision: int = 1) -> TestTaskRecord:
         split_policy=SplitPolicy(type="none"),
         order_index=0,
     )
-    return TestTaskRecord(
+    return TaskRecordModel(
         id=None,
         task=ProtocolTestTask(
             task_id=TASK_ID,

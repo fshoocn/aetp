@@ -177,7 +177,7 @@ def test_topics_are_distinct_and_strict() -> None:
     assert event.startswith("aetp/v2/")
     assert command.startswith("aetp/v2/")
     assert parse_topic(event).segment == "execution.progress"
-    with pytest.raises(ValueError, match=""):
+    with pytest.raises(ValueError):
         parse_topic(event.replace("aetp/v2", "aetp/unsupported", 1))
     with pytest.raises(ValueError, match="BusinessId"):
         event_topic("not-a-ulid", "execution.progress")

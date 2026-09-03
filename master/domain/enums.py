@@ -55,37 +55,6 @@ class ProjectRole(StrEnum):
     OWNER = "owner"
 
 
-class ScriptParseStatus(StrEnum):
-    """测试脚本用例解析状态。"""
-
-    PENDING = "pending"
-    PARSING = "parsing"
-    PARSED = "parsed"
-    FAILED = "failed"
-
-
-class ScriptParseLocation(StrEnum):
-    """用例解析/结果解析执行位置（D-17）。"""
-
-    MASTER = "master"
-    AGENT = "agent"
-
-
-class SplitPolicyType(StrEnum):
-    """任务分割策略类型（§18.6，D-19/D-21）。
-
-    none: 不分割，单 Shard
-    by_time: 按 case 平均耗时切分（依赖 avg_duration_s，D-21）
-    by_case_count: 按用例数量切分
-    custom: 插件自定义分割
-    """
-
-    NONE = "none"
-    BY_TIME = "by_time"
-    BY_CASE_COUNT = "by_case_count"
-    CUSTOM = "custom"
-
-
 class TriggerType(StrEnum):
     """Run 触发来源（§18.7，统一 RunRequested 用例）。
 
