@@ -41,7 +41,7 @@ class NodePresenceService:
 
     def handle_register(self, *, envelope: Envelope, payload: NodeRegister) -> OutboxMessage:
         """注册节点并写入当前协议注册回执。"""
-        if envelope.sender.kind != "agent":
+        if envelope.sender.kind is not SenderKind.AGENT:
             raise NodePresenceError("注册 sender.kind 必须为 agent")
         if envelope.sender.id != payload.node_id:
             raise NodePresenceError("注册 sender.id 与 node_id 不一致")
@@ -185,7 +185,7 @@ class NodePresenceService:
 
     @staticmethod
     def _validate_sender(envelope: Envelope, node_id) -> None:
-        if envelope.sender.kind != "agent":
+        if envelope.sender.kind is not SenderKind.AGENT:
             raise NodePresenceError("sender.kind 必须为 agent")
         if envelope.sender.id != node_id:
             raise NodePresenceError("sender.id 与 node_id 不一致")
