@@ -32,7 +32,9 @@ htmlcov/
 # 仓库内置 pytest 插件源码；仅忽略其生成物
 /plugins/pytest_plugin/__pycache__/
 /plugins/pytest_plugin/**/*.pyc
-/plugins/pytest_plugin.zip
+
+# 插件构建产物归档（build.ps1/build_plugin.py 生成，如 org.pytest.executor-2.0.0.zip）
+/plugins/*.zip
 
 # ---- 日志 ----
 **/logs/
