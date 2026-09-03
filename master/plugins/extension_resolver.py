@@ -1,20 +1,18 @@
-"""Master  Reporter/Analyzer 插件入口解析器。"""
+"""Master Reporter/Analyzer 插件入口解析器（统一经 common.plugin_loader 加载）。"""
 
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import logging
 import re
 import shutil
-import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
 
 from aetp_protocol.plugin_types import PluginPoint
 
+from common.plugin_loader import load_entrypoint
 from common.zip_utils import safe_extract_zip
 from master.domain.models import PluginVersionRecord
 from master.plugins.registry import PluginRegistry
@@ -69,19 +67,10 @@ class ExtensionResolver:
         if entrypoint is None:
             raise ValueError(f" {point.value} 插件缺少 master entrypoint")
         install_root = self._ensure_extracted(record)
-        module_name, attribute_name = entrypoint.root.split(":", 1)
         master_root = (install_root / "master").resolve()
-        module_path = (master_root / (module_name.replace(".", "/") + ".py")).resolve()
-        try:
-            module_path.relative_to(master_root)
-        except ValueError as exc:
-            raise ValueError(" Master entrypoint 越界") from exc
-        if not module_path.is_file():
-            raise FileNotFoundError(f" Master 入口文件不存在: {module_path}")
-        module = self._load_module(module_path, key)
-        factory = getattr(module, attribute_name, None)
-        if not callable(factory):
-            raise TypeError(f" Master entrypoint 不可调用: {entrypoint.root}")
+        if not master_root.is_dir():
+            raise FileNotFoundError(f" Master 插件缺少 master 目录: {master_root}")
+        _module, factory = load_entrypoint(master_root, entrypoint.root)
         plugin = factory()
         method = required_method or {PluginPoint.REPORTER: "report", PluginPoint.ANALYZER: "analyze"}.get(point)
         if method is None or not callable(getattr(plugin, method, None)):
@@ -111,24 +100,6 @@ class ExtensionResolver:
             raise ValueError(" 插件归档摘要在加载时发生变化")
         marker.write_text(actual, encoding="ascii")
         return target
-
-    @staticmethod
-    def _load_module(path: Path, key: tuple[str, str, PluginPoint]) -> ModuleType:
-        module_name = (
-            f"aetp_master_{key[2].value}_"
-            f"{key[0].replace('.', '_')}_{key[1].replace('.', '_')}"
-        )
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"无法加载  Master 扩展: {path}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        except Exception:
-            sys.modules.pop(module_name, None)
-            raise
-        return module
 
 
 def _safe_component(value: str) -> str:

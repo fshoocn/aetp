@@ -1,15 +1,18 @@
-"""Agent 插件多文件 side 目录加载器。
+"""共享插件多文件 side 目录加载器（Master/Agent 通用）。
 
-现状：插件入口经 ``importlib.util.spec_from_file_location`` 以单文件方式加载，
-入口只能 import 已安装的第三方包（如 ``aetp_protocol``）与标准库，无法 import
-同目录的兄弟模块。多文件插件（例如 resource 插件拆成 ``base.py`` + 多个
-provider + ``entry.py``）因此无法直接加载。
+插件入口经 ``importlib.util.spec_from_file_location`` 以单文件方式加载时，入口只能
+import 已安装的第三方包（如 ``aetp_protocol``）与标准库，无法 import 同目录的兄弟
+模块。多文件插件（例如 resource 插件拆成 ``base.py`` + 多个 provider + ``entry.py``）
+因此无法直接加载。
 
-本模块把插件的某个 side 目录（如 ``agent/``）加载为一个**合成包**（synthetic
-package）：为目录创建带 ``__path__`` 的包模块，注册进 ``sys.modules``，再把兄弟
-文件作为该包的子模块加载。这样包内文件可以正常使用相对导入（``from .base import
-...``）或兄弟导入（``import serial``），加载完清理 ``sys.modules`` 中注册的条目，
-不污染进程全局。
+本模块把插件的某个 side 目录（如 ``agent/``、``master/``）加载为一个**合成包**
+（synthetic package）：为目录创建带 ``__path__`` 的包模块，注册进 ``sys.modules``，
+再把兄弟文件作为该包的子模块加载。这样包内文件可以正常使用相对导入
+（``from .base import ...``）或兄弟导入（``import serial``），加载完清理
+``sys.modules`` 中注册的条目，不污染进程全局。
+
+executor / resource / reporter / analyzer 等各类插件统一使用本加载器，从已安装目录
+按 manifest 入口加载实现。
 """
 
 from __future__ import annotations

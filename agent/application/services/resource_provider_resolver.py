@@ -11,8 +11,8 @@ from aetp_protocol.plugin_types import PluginPoint
 from aetp_protocol.plugins import PluginManifest
 from aetp_protocol.resource import ResourceProvider
 
-from agent.plugins.loader import load_entrypoint
 from agent.plugins.registry import PluginRegistry
+from common.plugin_loader import load_entrypoint
 
 logger = logging.getLogger(__name__)
 
