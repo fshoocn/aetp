@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "id": "org.example.demo-ui",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "ui",
+  "display_name": "Example Demo UI",
+  "description": "UI 扩展样例：由 Master 托管 ui/ 静态目录，Web Shell 以同源 iframe 加载。页面自包含（不依赖外部 CDN），实现 aetp.plugin-ui.v2 消息协议的最小握手：加载后向宿主发 ready，示例修改配置时发 configuration.changed。",
+  "entrypoints": {
+    "ui": "ui/index.html"
+  },
+  "capabilities": [
+    "ui.configuration"
+  ],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  },
+  "configuration_schema": "schemas/demo-config.schema.json",
+  "ui_protocol_version": 2
+}

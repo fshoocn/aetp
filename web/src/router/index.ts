@@ -56,6 +56,11 @@ const routes = [
         component: () => import("@/views/Plugins.vue"),
       },
       {
+        path: "plugin-ui",
+        name: "PluginUiHost",
+        component: () => import("@/views/PluginUiHost.vue"),
+      },
+      {
         path: "project-nodes",
         name: "ProjectNodes",
         component: () => import("@/views/ProjectNodes.vue"),

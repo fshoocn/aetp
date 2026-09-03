@@ -9,6 +9,7 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from master.adapters.plugin_ui.host import PluginUiHost
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
 from master.adapters.sqlalchemy.uow import SqlAlchemyUnitOfWorkFactory
 from master.adapters.sse.event_bus import EventBus
@@ -238,5 +239,15 @@ def get_schedule_service(
 
 
 ScheduleServiceDep = Annotated[ScheduleService, Depends(get_schedule_service)]
+
+
+def get_plugin_ui_host(
+    container: Annotated[Container, Depends(get_container)],
+) -> PluginUiHost:
+    """从容器解析插件 UI 静态托管服务。"""
+    return container.plugin_ui_host()
+
+
+PluginUiHostDep = Annotated["PluginUiHost", Depends(get_plugin_ui_host)]
 
 

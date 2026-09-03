@@ -24,6 +24,7 @@ from dependency_injector import containers, providers
 from common.secret_derivation import derive_hex
 from master.adapters.mqtt.transport import MqttTransport
 from master.adapters.notifications.senders import build_default_registry
+from master.adapters.plugin_ui.host import PluginUiHost
 from master.adapters.secrets.encrypted_store import EncryptedSecretStore
 from master.adapters.sqlalchemy.database_factory import create_database
 from master.adapters.sqlalchemy.database_interface import DatabaseInterface
@@ -247,6 +248,12 @@ class Container(containers.DeclarativeContainer):
         ExtensionResolver,
         registry=plugin_registry,
         extraction_root=providers.Callable(lambda: _data_dir() / "plugins" / "runtime"),
+    )
+    # 插件 UI 静态托管：Web Shell 以同源 iframe 加载已启用 UI 插件归档内的 ui/ 目录
+    plugin_ui_host = providers.Singleton(
+        PluginUiHost,
+        registry=plugin_registry,
+        extension_resolver=master_extension_resolver,
     )
     plugin_sync_service = providers.Singleton(
         PluginSyncService,

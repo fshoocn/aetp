@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Example Demo UI</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        background: #f6f8fb;
+        color: #1f2d3d;
+        padding: 16px;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #e4e9f2;
+        border-radius: 10px;
+        padding: 16px 18px;
+      }
+      h1 { font-size: 16px; margin: 0 0 4px; }
+      .sub { color: #7a8699; font-size: 12px; margin: 0 0 14px; }
+      label { display: block; font-size: 13px; margin: 10px 0 4px; color: #44526c; }
+      input[type="text"] {
+        width: 100%;
+        padding: 7px 9px;
+        border: 1px solid #cdd6e2;
+        border-radius: 6px;
+        font-size: 13px;
+      }
+      .row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+      .status {
+        display: inline-block;
+        font-size: 11px;
+        color: #0a7d33;
+        background: #e8f7ee;
+        border-radius: 999px;
+        padding: 2px 9px;
+      }
+      pre {
+        background: #f1f4f9;
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 11px;
+        overflow: auto;
+        margin: 10px 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Example Demo UI</h1>
+      <p class="sub">
+        这是由 Master 托管的插件 UI（同源 iframe）。它与 Web Shell 通过
+        aetp.plugin-ui.v2 消息通信：加载后发送 ready，修改配置时发送
+        configuration.changed。
+      </p>
+      <div class="row">
+        <span class="status" id="state">初始化中…</span>
+        <span id="hostInfo" style="font-size:12px;color:#7a8699"></span>
+      </div>
+      <label for="markers">标签（逗号分隔）</label>
+      <input id="markers" type="text" value="smoke,regression" />
+      <div class="row">
+        <label for="enabled" style="margin:0">启用示例开关</label>
+        <input id="enabled" type="checkbox" checked />
+      </div>
+      <pre id="log"></pre>
+    </div>
+
+    <script>
+      (function () {
+        var PROTOCOL = "aetp.plugin-ui.v2";
+        var sessionId = null;
+        var stateEl = document.getElementById("state");
+        var hostInfoEl = document.getElementById("hostInfo");
+        var logEl = document.getElementById("log");
+        var markersEl = document.getElementById("markers");
+        var enabledEl = document.getElementById("enabled");
+
+        function appendLog(text) {
+          logEl.textContent = logEl.textContent
+            ? logEl.textContent + "\n" + text
+            : text;
+        }
+
+        function send(type, payload) {
+          var requestId =
+            "req-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+          parent.postMessage(
+            {
+              protocol: PROTOCOL,
+              session_id: sessionId,
+              request_id: requestId,
+              type: type,
+              payload: payload || {}
+            },
+            "*"
+          );
+          appendLog("-> " + type + " " + JSON.stringify(payload || {}));
+        }
+
+        function currentConfiguration() {
+          return {
+            markers: (markersEl.value || "")
+              .split(",")
+              .map(function (s) { return s.trim(); })
+              .filter(Boolean),
+            enabled: enabledEl.checked
+          };
+        }
+
+        window.addEventListener("message", function (event) {
+          var data = event.data;
+          if (!data || data.protocol !== PROTOCOL) return;
+          if (data.type === "initialize") {
+            sessionId = data.session_id || null;
+            var context = data.payload && data.payload.context ? data.payload.context : {};
+            stateEl.textContent = "已就绪";
+            hostInfoEl.textContent =
+              "plugin=" + (context.plugin_id || "?") + "@" + (context.version || "?");
+            appendLog("<- initialize");
+          } else if (data.type === "context.updated") {
+            appendLog("<- context.updated");
+          }
+        });
+
+        function announceReady() {
+          send("ready", { ui_protocol_version: 2 });
+        }
+
+        function announceChanged() {
+          send("configuration.changed", { configuration: currentConfiguration() });
+        }
+
+        markersEl.addEventListener("change", announceChanged);
+        enabledEl.addEventListener("change", announceChanged);
+        // 首次握手：宿主可能已在监听，先主动发 ready；若稍后收到 initialize 会刷新 session
+        announceReady();
+      })();
+    </script>
+  </body>
+</html>

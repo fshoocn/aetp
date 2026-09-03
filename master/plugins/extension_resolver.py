@@ -91,6 +91,14 @@ class ExtensionResolver:
         self._loaded[key] = resolved
         return resolved
 
+    def install_root(self, record: PluginVersionRecord) -> Path:
+        """确保插件归档已按摘要提取，返回安装根目录。
+
+        UI 等纯静态扩展点没有 Master/Agent 入口，无法经 ``resolve()`` 加载；它们
+        直接读取安装目录里的静态文件，复用同一份按摘要校验的提取缓存。
+        """
+        return self._ensure_extracted(record)
+
     def _ensure_extracted(self, record: PluginVersionRecord) -> Path:
         target = (
             self._extraction_root

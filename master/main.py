@@ -31,6 +31,7 @@ from .api.events import router as events_router
 from .api.internal import router as internal_router
 from .api.nodes import router as nodes_router
 from .api.notifications import router as notifications_router
+from .api.plugin_ui import router as plugin_ui_router
 from .api.projects import router as projects_router
 from .api.router import router
 from .api.schedules import router as schedules_router
@@ -320,6 +321,7 @@ app.include_router(internal_router)
 app.include_router(projects_router)
 app.include_router(nodes_router)
 app.include_router(notifications_router)
+app.include_router(plugin_ui_router)
 app.include_router(schedules_router)
 app.include_router(tasks_router)
 
