@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "id": "org.aetp.resource",
+  "version": "1.0.0",
+  "api_version": "2.0.0",
+  "point": "resource",
+  "display_name": "AETP Built-in Resource Providers",
+  "entrypoints": {
+    "agent": "entry:create_providers"
+  },
+  "capabilities": [
+    "resource.serial",
+    "resource.power",
+    "resource.can"
+  ],
+  "static_requirements": {
+    "runtimes": [],
+    "software": [],
+    "resources": []
+  }
+}
