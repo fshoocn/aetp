@@ -152,7 +152,7 @@ def test_plan_hash_excludes_temporary_urls_and_includes_semantics() -> None:
     assert calculate_plan_hash(first) == first.plan_hash
 
 
-def test_plan_allocation_is_idempotent_and_publishes_v2_command(client) -> None:
+def test_plan_allocation_is_idempotent_and_publishes_command(client) -> None:
     container = client.app.state.container
     _seed_node(container)
     service = PlanLeaseService(container.uow_factory(), now=lambda: NOW)

@@ -277,7 +277,7 @@ def test_plugin_sync_service_is_idempotent_and_records_result(client, tmp_path) 
         service.transition(SYNC_ID, PluginSyncOperationState.CANCELLED)
 
 
-def test_v2_plugin_list_api_uses_governance_service(client, auth_header) -> None:
+def test_plugin_list_api_uses_governance_service(client, auth_header) -> None:
     response = client.get("/api/v2/plugins", headers=auth_header)
 
     assert response.status_code == 200
@@ -377,7 +377,7 @@ def test_plugin_sync_service_sets_desired_version_for_node_group(client, tmp_pat
     assert {item.node_id.root for item in selected} == {nodes[0], nodes[2]}
 
 
-def test_v2_node_group_desired_plugin_api(client) -> None:
+def test_node_group_desired_plugin_api(client) -> None:
     container = client.app.state.container
     auth = container.auth_service()
     assert auth.bootstrap_admin("desired-api-admin", "admin-pass-123", "Desired API Admin")

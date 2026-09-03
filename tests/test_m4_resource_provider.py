@@ -72,7 +72,7 @@ def _runner(tmp_path, provider_registry: ResourceProviderRegistry) -> tuple[Exec
     )
 
 
-def test_v2_runner_activates_and_deactivates_resources(tmp_path) -> None:
+def test_runner_activates_and_deactivates_resources(tmp_path) -> None:
     provider = _Provider()
     registry = ResourceProviderRegistry((provider,))
     runner, ledger = _runner(tmp_path, registry)
@@ -105,7 +105,7 @@ def test_v2_runner_activates_and_deactivates_resources(tmp_path) -> None:
     assert provider.deactivated == ["01J00000000000000000000071"]
 
 
-def test_v2_runner_maps_activation_failure_to_stable_error(tmp_path) -> None:
+def test_runner_maps_activation_failure_to_stable_error(tmp_path) -> None:
     provider = _Provider(fail=True)
     runner, ledger = _runner(tmp_path, ResourceProviderRegistry((provider,)))
     plan = with_plan_hash(
@@ -146,7 +146,7 @@ def test_v2_runner_maps_activation_failure_to_stable_error(tmp_path) -> None:
     assert provider.deactivated == []
 
 
-def test_v2_runner_rejects_resource_without_provider(tmp_path) -> None:
+def test_runner_rejects_resource_without_provider(tmp_path) -> None:
     runner, ledger = _runner(tmp_path, ResourceProviderRegistry())
     plan = with_plan_hash(
         _plan().model_copy(

@@ -1,4 +1,4 @@
-"""M2 V2 节点能力和诊断 API 测试。"""
+"""M2 节点能力和诊断 API 测试。"""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def _diagnostics_snapshot() -> DiagnosticsSnapshot:
     )
 
 
-def test_v2_node_api_returns_latest_capability_and_diagnostics(client, auth_header) -> None:
+def test_node_api_returns_latest_capability_and_diagnostics(client, auth_header) -> None:
     container = client.app.state.container
     _seed_node(container)
     assert container.capability_snapshot_service().accept(_capability_snapshot()) is True
@@ -109,7 +109,7 @@ def test_v2_node_api_returns_latest_capability_and_diagnostics(client, auth_head
     assert diagnostics_response.json()["snapshot"]["system"]["hostname"] == "bench-01"
 
 
-def test_v2_node_api_rejects_invalid_id_and_reports_missing_snapshot(client, auth_header) -> None:
+def test_node_api_rejects_invalid_id_and_reports_missing_snapshot(client, auth_header) -> None:
     missing = client.get(
         "/api/v2/nodes/01J00000000000000000000000/capability-snapshot",
         headers=auth_header,
@@ -120,7 +120,7 @@ def test_v2_node_api_rejects_invalid_id_and_reports_missing_snapshot(client, aut
     assert invalid.status_code == 422
 
 
-def test_v2_diagnostics_collect_enqueues_typed_command(client, auth_header) -> None:
+def test_diagnostics_collect_enqueues_typed_command(client, auth_header) -> None:
     container = client.app.state.container
     _seed_node(container)
 

@@ -1,4 +1,4 @@
-"""M6 ResourceProvider 与 Agent V2 能力快照集成测试。"""
+"""M6 ResourceProvider 与 Agent 能力快照集成测试。"""
 
 from __future__ import annotations
 

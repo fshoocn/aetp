@@ -107,7 +107,7 @@ def test_router_records_maintenance_result_and_releases_failed_lock(client) -> N
         assert uow.maintenance_locks.get(NODE_ID) is None
 
 
-def test_new_v2_session_releases_successful_restart_lock(client) -> None:
+def test_new_session_releases_successful_restart_lock(client) -> None:
     container = client.app.state.container
     _seed_node(container)
     service = container.agent_maintenance_service()

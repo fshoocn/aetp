@@ -76,7 +76,7 @@ def _snapshot() -> NodeCapabilitySnapshot:
     )
 
 
-def test_node_matching_service_uses_v2_snapshot_and_online_projection(client) -> None:
+def test_node_matching_service_uses_snapshot_and_online_projection(client) -> None:
     container = client.app.state.container
     _seed(container)
     assert container.capability_snapshot_service().accept(_snapshot()) is True

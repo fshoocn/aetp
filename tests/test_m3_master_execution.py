@@ -1,4 +1,4 @@
-"""M3 Master V2 execution.ack 和 lease.renew 测试。"""
+"""M3 Master execution.ack 和 lease.renew 测试。"""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def _future_plan():
     return with_plan_hash(base)
 
 
-def test_master_router_projects_v2_execution_ack_against_stored_plan(client) -> None:
+def test_master_router_projects_execution_ack_against_stored_plan(client) -> None:
     container = client.app.state.container
     _seed_node(container)
     plan = _future_plan()

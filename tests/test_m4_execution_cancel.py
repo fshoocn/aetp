@@ -1,4 +1,4 @@
-"""M4 V2 execution.cancel 消息测试。"""
+"""M4 execution.cancel 消息测试。"""
 
 from __future__ import annotations
 

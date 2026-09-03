@@ -125,7 +125,7 @@ def test_plugin_resolver_does_not_silently_install_or_downgrade(tmp_path) -> Non
         )
 
 
-def test_v2_registry_rejects_same_version_different_archive(tmp_path) -> None:
+def test_registry_rejects_same_version_different_archive(tmp_path) -> None:
     registry = PluginRegistry(tmp_path)
     original = _record(tmp_path, "2.0.0")
     registry.register(original)

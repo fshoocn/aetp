@@ -1,4 +1,4 @@
-"""M3 V2 execution 运行事件和重连对账测试。"""
+"""M3 execution 运行事件和重连对账测试。"""
 
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def _materialize(container, plan):
     ).materialize(plan)
 
 
-def test_master_v2_runtime_events_are_sequence_safe_and_fenced(client) -> None:
+def test_master_runtime_events_are_sequence_safe_and_fenced(client) -> None:
     container = client.app.state.container
     plan = with_plan_hash(_plan().model_copy(update={"node_id": stable_id("m3-events-node")}))
     _materialize(container, plan)

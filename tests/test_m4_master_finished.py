@@ -58,7 +58,7 @@ def _finished_message(plan, *, message_id: str) -> MqttMessage:
     )
 
 
-def test_master_projects_finished_and_releases_v2_leases(client) -> None:
+def test_master_projects_finished_and_releases_leases(client) -> None:
     container = client.app.state.container
     plan = with_plan_hash(_plan().model_copy(update={"node_id": stable_id("m4-node")}))
     _seed_context(container, plan)
