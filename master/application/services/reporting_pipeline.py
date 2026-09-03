@@ -8,9 +8,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from aetp_protocol.artifacts import ArtifactKind, ArtifactRef
+from aetp_protocol.artifacts import ArtifactRef
 from aetp_protocol.execution import CaseResult, ExecutionResult, ExecutionStatus
-from aetp_protocol.execution import CaseStatus as ProtocolCaseStatus
 from aetp_protocol.ids import BusinessId, Sha256, new_id
 from aetp_protocol.plugin_types import PluginPoint
 from aetp_protocol.reporting import (
@@ -397,7 +396,7 @@ def _case_result(value: RunCaseResult) -> CaseResult | None:
     try:
         return CaseResult(
             case_key=value.case_key,
-            status=ProtocolCaseStatus(value.status.value),
+            status=value.status,
             duration_ms=value.duration_ms,
             error_summary=value.error_summary,
             detail=value.detail,
@@ -416,7 +415,7 @@ def _artifact_ref(value: RunArtifact, project_id: str) -> ArtifactRef | None:
             shard_id=BusinessId(value.shard_id) if value.shard_id else None,
             attempt_id=BusinessId(value.attempt_id) if value.attempt_id else None,
             node_id=BusinessId(value.node_id) if value.node_id else None,
-            kind=ArtifactKind(value.kind.value),
+            kind=value.kind,
             filename=value.filename,
             content_type=value.content_type,
             size=value.size,

@@ -239,7 +239,7 @@ class ExecutionService:
             )
             if existing is not None and event.sequence <= existing.sequence:
                 return True
-            target_status = CaseStatus(event.status.value)
+            target_status = event.status
             if existing is not None:
                 if existing.status in {
                     CaseStatus.PASSED,
@@ -500,7 +500,7 @@ class ExecutionService:
                             shard_id=finished.shard_id.root,
                             case_key=case.case_key,
                             attempt_no=attempt.attempt_no,
-                            status=CaseStatus(case.status.value),
+                            status=case.status,
                             duration_ms=case.duration_ms,
                             error_summary=case.error_summary,
                             detail=case.detail,
