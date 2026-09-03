@@ -1,58 +1,119 @@
-# AETP pytest 插件
+# AETP pytest V2 executor 插件
 
-该目录是项目根目录下的 pytest 任务类型插件，采用 ZIP 插件规范。当前版本提供独立的脚本工作台：上传前校验工程、Master 解析用例、按 Shard 只执行选中的 pytest nodeid，并统一采集日志、JUnit XML 与附件。
+V2 executor 插件，用于把 pytest 工程作为测试脚本下发给 Agent 执行：Master 面用
+`pytest --collect-only` 解析用例，Agent 面按 Shard Plan 精确执行所选 nodeid，实时采集
+stdout/stderr/logging 日志，生成 JUnit XML 并分析出 case 级结果与附件，统一上报给
+Master 投影、报告与通知。
 
 ```text
-pytest_plugin.zip
-├── plugin.json
-├── master/executor.py
-├── agent/executor.py
-└── ui/
+pytest_executor.zip（V2 归档）
+├── plugin.json          # Manifest V2
+├── master/executor.py   # Master 面：create_executor
+└── agent/executor.py    # Agent 面：create_executor
 ```
 
-## 构建 ZIP
+> 本插件是 V2 executor 的参考实现，也是默认装配的 pytest 执行器；Master 默认还把它
+> 提供的 `JUnitReporter` 与 `CaseStatisticsAnalyzer` 注册为平台级扩展（见
+> `master/application/services/reporting_pipeline.py::build_default_reporting_registries`）。
 
-在 `plugins/pytest_plugin` 目录执行：
+## 插件标识
+
+- 插件 ID：`org.pytest.executor`
+- 版本：`2.0.0`（SemVer）
+- 扩展点：`executor`（`api_version=2.0.0`）
+- 能力：`test.execute`、`test.case-results`、`test.junit-report`
+- 静态准入：需要 Python 运行时（`python`）；动态可用性以 Agent 能力快照为准
+
+## 目录职责
+
+| 文件 | 职责 |
+|---|---|
+| `master/executor.py` | Master 面 `PytestMasterExecutor.parse_cases`：收集并解析 pytest nodeid 为稳定用例（`stable_key` 即 nodeid） |
+| `agent/executor.py` | Agent 面 `PytestExecutor`：`execute` 执行精确 case_keys、`analyze_results` 解析 JUnit、`cleanup`/`cancel` |
+| `master/junit_reporter.py` | Master Reporter：把 JUnit Artifact 转成 `UnifiedTestResult`（被平台默认装配） |
+| `master/case_statistics_analyzer.py` | Master Analyzer：case 耗时与失败率统计（被平台默认装配） |
+| `tests/` | 插件自测（master nodeid 解析、agent JUnit 解析/参数校验/附件收集） |
+| `examples/e2e_script/` | 可直接下发的 pytest 冒烟工程（含通过/参数化/跳过/xfail/失败控制用例） |
+
+## 配置项
+
+配置作为 ScriptDefinition / TestTask 绑定配置下发（随 Plan 传到 Agent），字段：
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `python_executable` | str | Agent 当前 Python | Master 收集与 Agent 执行使用的解释器；留空用当前进程 Python |
+| `pytest_args` | string[] | `[]` | 附加 pytest 参数；不允许覆盖平台托管的 `--junitxml`/`--rootdir` |
+| `fail_fast` | bool | `false` | 首个失败后停止当前 Shard（`--maxfail=1`） |
+| `collect_timeout_s` | int | `60` | Master 收集用例超时（秒） |
+| `timeout_s` | int | 无（由 Plan 截止时间约束） | 子进程执行超时（秒）；平台另有 Plan deadline 超时 |
+| `artifact_paths` | string[] | `[]` | 相对脚本根目录的附件路径/glob，执行后作为 `data` 附件上传 |
+| `test_path` | str | 脚本根目录 | 兼容字段（预留）；实际收集范围由上传的脚本工程决定 |
+
+> JUnit XML（`report` 附件）由平台自动上传，不需要写进 `artifact_paths`。
+
+## 构建 V2 归档
+
+在仓库根目录执行（推荐用打包脚本）：
 
 ```powershell
-Compress-Archive -Path plugin.json,master,agent,ui -DestinationPath ..\pytest_plugin.zip -Force
+powershell -ExecutionPolicy Bypass -File plugins\pytest_plugin\build.ps1
 ```
 
-或使用 Python：
+脚本产出 `plugins/org.pytest.executor-2.0.0.zip`（只含 `plugin.json`、`master/executor.py`、
+`agent/executor.py`），并打印归档内容清单。也可手动打包：
 
 ```powershell
-..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('..\\pytest_plugin.zip','w',zipfile.ZIP_DEFLATED); [z.write(path) for path in ['plugin.json','master/executor.py','agent/executor.py']]; z.close()"
+cd plugins\pytest_plugin
+..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('../org.pytest.executor-2.0.0.zip','w',zipfile.ZIP_DEFLATED); [z.write(p) for p in ('plugin.json','master/executor.py','agent/executor.py')]; z.close()"
 ```
 
-## 构建 executor 归档
-
-使用 `plugin.json` 作为 Manifest；打包时必须同时包含 `master/` 与 `agent/` 入口：
+校验归档：
 
 ```powershell
-..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('..\\pytest_executor.zip','w',zipfile.ZIP_DEFLATED); z.write('plugin.json'); z.write('master\\executor.py','master/executor.py'); z.write('agent\\executor.py','agent/executor.py'); z.close()"
+..\..\.venv\Scripts\python.exe -c "import zipfile; print(zipfile.ZipFile('../org.pytest.executor-2.0.0.zip').namelist())"
 ```
 
-插件 ID 为 `org.pytest.executor`，版本为 `2.0.0`。Master 通过
-`master/executor.py:create_executor` 收集用例，Agent 通过
-`agent/executor.py:create_executor` 执行精确的 pytest nodeid，并上传 JUnit
-report Artifact。
+## 安装与下发流程
 
-## 插件能力
+1. **上传并安装**：把归档上传到 V2 插件中心
+   `POST /api/v2/plugins`，随后 `POST /api/v2/plugins/org.pytest.executor/2.0.0/install`
+   （生产写请求带 `Idempotency-Key`）。
+2. **启用版本**：`POST /api/v2/plugins/org.pytest.executor/2.0.0/enable`。
+3. **上传脚本**：上传 pytest 工程（`.zip` 工程或单文件）。Master 用本插件
+   `parse_cases` 收集用例并创建 ScriptDefinition（每个 pytest nodeid 即一个 case）。
+4. **创建任务**：新建 TestTask，绑定脚本与用例集合（可多脚本、parallel/sequence）、
+   设置上文配置与分片/重试策略，选定项目内已绑定且能力匹配的节点。
+5. **触发 Run**：Web/API/定时/CI 触发。Master 生成 ExecutionPlan，经 MQTT
+   `aetp/v2/.../execution.plan` 下发给 Agent。
+6. **Agent 执行**：按 Plan 的 `case_keys` 精确执行，实时回传日志/进度，结束生成
+   JUnit XML 并作为 `report` Artifact 上传。
+7. **结果呈现**：Master 投影 Run/case 结果；`JUnitReporter` 与
+   `CaseStatisticsAnalyzer` 生成报告与统计；Web Run 详情可查看 case 输出、报告与附件。
 
-- Master：检查 pytest 脚本、`pytest --collect-only -q` 解析用例、按用例数量分片。
-- Agent：执行 pytest，实时采集 stdout/stderr 和 logging，生成 JUnit XML，分析 case 级结果。
-- 配置：`pytest_args`、`python_executable`、`test_path`、`timeout_s`、`collect_timeout_s`、`cases_per_shard`、`fail_fast`、`artifact_paths`。
-- Shard 执行只传递当前 Shard 的 pytest nodeid，不会重复执行整套脚本；`--junitxml` 和 `--rootdir` 由平台托管，不能通过附加参数覆盖。
-- `artifact_paths` 使用相对脚本目录的路径或 glob；JUnit XML 自动上传，声明的附件也会上传到 Master。
-- Web Run 详情页的 case 行可展开查看 stdout/stderr，结束产物区域可下载报告和附件。
-- 配置页面位于插件包 `ui/index.html`，由 Web iframe 宿主加载；页面通过 `postMessage`
-	接收节点能力与验证上下文，不依赖平台 Web 源码。
-- 任务类型：`pytest`。
-- 版本：`1.1.1`（修复单文件解析并增加保存关闭操作，协议版本保持 1 以兼容既有宿主）。
+## 本地验证
 
-## 使用限制
+先安装共享协议包（插件本身只依赖标准库，跑通脚本需 Agent 环境有 pytest）：
 
-- Agent 节点必须安装 pytest。
-- pytest 脚本应包含 `test_*.py` 或 `*_test.py` 文件。
-- 脚本中的依赖应由 Agent 环境预先安装。
-- ZIP 安装后需要重启 Master 才能加载。
+```powershell
+..\..\.venv\Scripts\python.exe -m pip install -e ..\..\common
+..\..\.venv\Scripts\python.exe -m ruff check master agent
+..\..\.venv\Scripts\python.exe -m pyright master agent
+..\..\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+仓库端到端测试（真实打包本插件→Agent 安装→执行→JUnit 上报）：
+
+```powershell
+..\..\.venv\Scripts\python.exe -m pytest tests\test_pytest_executor.py -q
+```
+
+可用 `examples/e2e_script/` 作为下发冒烟脚本：覆盖通过/参数化/跳过/xfail，默认不会
+失败；需要验证失败终态时在 Agent 运行环境设置 `AETP_E2E_INCLUDE_FAILURE=1`。
+
+## 使用约束
+
+- Agent 节点必须安装 pytest，脚本依赖由 Agent 环境预先安装（运行时发现与预检由平台
+  runtime/software 扩展点负责）。
+- `--junitxml` 与 `--rootdir` 由平台托管，插件与用户配置不得覆盖。
+- 本插件按受信任代码执行，不能视为安全沙箱；只安装经过审核的归档。
+
