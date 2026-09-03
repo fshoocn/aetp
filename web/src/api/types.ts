@@ -163,53 +163,6 @@ export interface AdminUser {
   created_at: string;
 }
 
-export interface Run {
-  run_id: string;
-  project_id: string;
-  task_id: string;
-  status: string;
-  trigger_type: string;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-  scheduled?: number;
-  pending_shard_ids?: string[];
-}
-
-export interface RunShard {
-  shard_id: string;
-  shard_index: number;
-  case_keys: string[];
-  status: string;
-  final_node: string | null;
-}
-
-export interface RunDetail extends Run {
-  shards: RunShard[];
-  result: Record<string, unknown> | null;
-  case_results: RunCaseResult[];
-}
-
-export interface RunLog {
-  id: number;
-  run_id: string;
-  node_id: string;
-  sequence: number;
-  level: string;
-  message: string;
-  detail: Record<string, unknown> | null;
-  occurred_at: string | null;
-}
-
-export interface RunEvent {
-  event_id: string;
-  sequence: number | null;
-  event_type: string;
-  aggregate_id: string;
-  payload: Record<string, unknown>;
-  occurred_at: string | null;
-}
-
 export interface RunArtifact {
   artifact_id: string;
   run_id: string;
@@ -220,39 +173,12 @@ export interface RunArtifact {
   size: number;
   sha256: string;
   uploaded_at: string | null;
+  filename?: string;
+  content_type?: string;
+  derived_from?: string | null;
 }
 
-export interface TaskTypePlugin {
-  task_type: string;
-  display_name: string;
-  plugin_version: string;
-  supported_versions: string[];
-  config_schema: Record<string, unknown>;
-  upload_spec: Record<string, unknown>;
-  ui?: {
-    config_page?: string;
-    entry?: string;
-    url?: string;
-    task_config_entry?: string;
-    task_config_url?: string;
-    min_frontend_version?: string;
-    protocol_version?: number;
-  };
-  agent_available: boolean;
-  agent_package: { package_name: string; version: string; entry_point: string } | null;
-}
-
-export interface ManagedPlugin {
-  plugin_id: string;
-  filename: string;
-  task_type: string;
-  version: string;
-  sha256: string;
-  enabled: boolean;
-  installed: boolean;
-}
-
-export type V2PluginStatus =
+export type PluginStatus =
   | "uploaded"
   | "verified"
   | "installed"
@@ -262,7 +188,7 @@ export type V2PluginStatus =
   | "removed"
   | "error";
 
-export interface V2PluginManifest {
+export interface PluginManifest {
   schema_version: 2;
   id: string;
   version: string;
@@ -300,33 +226,33 @@ export interface V2PluginManifest {
   ui_protocol_version: number | null;
 }
 
-export interface V2PluginVersion {
+export interface PluginVersion {
   plugin_id: string;
   version: string;
   point: string;
-  status: V2PluginStatus;
+  status: PluginStatus;
   filename: string;
   archive_sha256: string;
   manifest_sha256: string;
-  manifest: V2PluginManifest;
+  manifest: PluginManifest;
   installed_at: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
 
-export interface V2PluginRef {
+export interface PluginRef {
   plugin_id: string;
   version: string;
   archive_sha256: string;
 }
 
-export interface V2Configuration {
+export interface Configuration {
   schema_version: number;
   schema_hash: string;
   values: Record<string, unknown>;
 }
 
-export interface V2ScriptRef {
+export interface ScriptRef {
   script_id: string;
   version: number;
   filename: string;
@@ -335,7 +261,7 @@ export interface V2ScriptRef {
   download_url: string | null;
 }
 
-export interface V2TestCase {
+export interface TestCase {
   stable_key: string;
   name: string;
   parent_path: string;
@@ -343,36 +269,36 @@ export interface V2TestCase {
   estimated_duration_s: number | null;
 }
 
-export interface V2CaseSelection {
+export interface CaseSelection {
   selected_keys: string[];
   include_all: boolean;
 }
 
-export interface V2SplitPolicy {
+export interface SplitPolicy {
   type: "none" | "by_time" | "by_case_count" | "custom";
   target_count: number | null;
   target_duration_s: number | null;
   plugin_id: string | null;
 }
 
-export interface V2VersionConstraint {
+export interface VersionConstraint {
   exact: string | null;
   minimum: string | null;
   maximum: string | null;
 }
 
-export interface V2RuntimeRequirement {
+export interface RuntimeRequirement {
   runtime_type: string;
-  version: V2VersionConstraint | null;
+  version: VersionConstraint | null;
 }
 
-export interface V2SoftwareRequirement {
+export interface SoftwareRequirement {
   name: string;
-  version: V2VersionConstraint | null;
+  version: VersionConstraint | null;
   license_required: boolean;
 }
 
-export interface V2ResourceRequirement {
+export interface ResourceRequirement {
   resource_type: string;
   quantity: number;
   vendor: string | null;
@@ -383,42 +309,42 @@ export interface V2ResourceRequirement {
   allow_switching: boolean;
 }
 
-export interface V2ExecutionRequirement {
+export interface ExecutionRequirement {
   executor: {
     plugin_id: string;
-    version: V2VersionConstraint;
+    version: VersionConstraint;
   };
-  runtimes: V2RuntimeRequirement[];
-  software: V2SoftwareRequirement[];
-  resources: V2ResourceRequirement[];
+  runtimes: RuntimeRequirement[];
+  software: SoftwareRequirement[];
+  resources: ResourceRequirement[];
   required_tags: string[];
 }
 
-export interface V2ScriptDefinition {
+export interface ScriptDefinition {
   script_definition_id: string;
   project_id: string;
   revision: number;
   name: string;
-  executor: V2PluginRef;
-  source: V2ScriptRef;
-  configuration: V2Configuration;
-  cases: V2TestCase[];
-  requirement: V2ExecutionRequirement | null;
+  executor: PluginRef;
+  source: ScriptRef;
+  configuration: Configuration;
+  cases: TestCase[];
+  requirement: ExecutionRequirement | null;
   enabled: boolean;
 }
 
-export interface V2TaskScriptRef {
+export interface TaskScriptRef {
   binding_id: string;
   script_definition_id: string;
   script_revision: number;
-  case_selection: V2CaseSelection;
-  configuration: V2Configuration;
-  split_policy: V2SplitPolicy;
+  case_selection: CaseSelection;
+  configuration: Configuration;
+  split_policy: SplitPolicy;
   order_index: number;
   enabled: boolean;
 }
 
-export interface V2RetryPolicy {
+export interface RetryPolicy {
   max_attempts: number;
   failover_nodes: boolean;
   retry_failed_cases: boolean;
@@ -426,47 +352,52 @@ export interface V2RetryPolicy {
   backoff_max_s: number;
 }
 
-export interface V2TestTask {
+export interface TestTask {
   task_id: string;
   project_id: string;
   revision: number;
   name: string;
-  scripts: V2TaskScriptRef[];
+  scripts: TaskScriptRef[];
   execution_mode: "parallel" | "sequence";
   stop_on_failure: boolean;
-  retry_policy: V2RetryPolicy;
+  retry_policy: RetryPolicy;
   node_ids: string[];
   priority: number;
   enabled: boolean;
 }
 
-export interface V2RunScriptSnapshot {
+export interface TaskView {
+  task: TestTask;
+  created_by: number;
+}
+
+export interface RunScriptSnapshot {
   binding_id: string;
   script_definition_id: string;
   script_revision: number;
-  executor: V2PluginRef;
-  source: V2ScriptRef;
-  configuration: V2Configuration;
-  requirement: V2ExecutionRequirement;
+  executor: PluginRef;
+  source: ScriptRef;
+  configuration: Configuration;
+  requirement: ExecutionRequirement;
   selected_case_keys: string[];
-  split_policy: V2SplitPolicy;
+  split_policy: SplitPolicy;
 }
 
-export interface V2RunSnapshot {
+export interface RunSnapshot {
   task_id: string;
   task_revision: number;
-  scripts: V2RunScriptSnapshot[];
+  scripts: RunScriptSnapshot[];
   execution_mode: "parallel" | "sequence";
   stop_on_failure: boolean;
-  retry_policy: V2RetryPolicy;
+  retry_policy: RetryPolicy;
   node_ids: string[];
-  trigger_type: V2TriggerType;
+  trigger_type: TriggerType;
   original_run_id: string | null;
 }
 
-export type V2TriggerType = "manual_web" | "api" | "schedule" | "ci_webhook" | "retry" | "recovery";
+export type TriggerType = "manual_web" | "api" | "schedule" | "ci_webhook" | "retry" | "recovery";
 
-export interface V2RunShard {
+export interface RunShard {
   shard_id: string;
   script_binding_id: string;
   shard_index: number;
@@ -474,28 +405,80 @@ export interface V2RunShard {
   status: string;
 }
 
-export interface V2RunView {
+export interface RunView {
   run_id: string;
   task_id: string;
-  snapshot: V2RunSnapshot;
+  snapshot: RunSnapshot;
   status: string;
-  shards: V2RunShard[];
+  trigger_type: TriggerType;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  shards: RunShard[];
   scheduled: number;
   pending_shard_ids: string[];
   cancelled_shard_ids: string[];
 }
 
-export type V2PluginAvailability = "available" | "blocked" | "updating" | "error" | "not_installed";
-export type V2ResourceHealth = "ready" | "degraded" | "unavailable";
-export type V2MaintenanceState = "ready" | "idle" | "busy" | "draining" | "updating" | "restarting" | "degraded";
+export interface RunListView {
+  run_id: string;
+  task_id: string;
+  task_revision: number;
+  status: string;
+  trigger_type: TriggerType;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
 
-export interface V2ExecutorCapability {
+export interface RunResultView {
+  result_id: string;
+  passed: boolean;
+  status: string;
+  node_id: string | null;
+  metrics: Record<string, unknown>;
+  data: Record<string, unknown>;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface RunDetailView extends RunView {
+  result: RunResultView | null;
+  case_results: RunCaseResult[];
+  artifacts: RunArtifact[];
+}
+
+export interface RunLogView {
+  id: number;
+  run_id: string;
+  node_id: string;
+  sequence: number;
+  level: string;
+  message: string;
+  detail: Record<string, unknown> | null;
+  occurred_at: string | null;
+}
+
+export interface RunEventView {
+  event_id: string;
+  sequence: number | null;
+  event_type: string;
+  aggregate_id: string;
+  payload: Record<string, unknown>;
+  occurred_at: string | null;
+}
+
+export type PluginAvailability = "available" | "blocked" | "updating" | "error" | "not_installed";
+export type ResourceHealth = "ready" | "degraded" | "unavailable";
+export type MaintenanceState = "ready" | "idle" | "busy" | "draining" | "updating" | "restarting" | "degraded";
+
+export interface ExecutorCapability {
   plugin_id: string;
   version: string;
   capabilities: string[];
 }
 
-export interface V2RuntimeCapability {
+export interface RuntimeCapability {
   provider_id: string;
   runtime_id: string;
   runtime_type: string;
@@ -503,14 +486,14 @@ export interface V2RuntimeCapability {
   executable_ref: string | null;
 }
 
-export interface V2SoftwareCapability {
+export interface SoftwareCapability {
   provider_id: string;
   name: string;
   version: string;
   properties: Record<string, unknown>;
 }
 
-export interface V2ResourceCapability {
+export interface ResourceCapability {
   resource_id: string;
   provider_id: string;
   resource_type: string;
@@ -520,46 +503,46 @@ export interface V2ResourceCapability {
   function: string | null;
   labels: Record<string, string>;
   properties: Record<string, unknown>;
-  health: V2ResourceHealth;
+  health: ResourceHealth;
 }
 
-export interface V2PluginInventoryItem {
+export interface PluginInventoryItem {
   plugin_id: string;
   point: string;
   version: string;
   archive_sha256: string;
-  availability: V2PluginAvailability;
+  availability: PluginAvailability;
   unavailable_reasons: string[];
   checked_at: string;
 }
 
-export interface V2CapabilitySnapshot {
+export interface CapabilitySnapshot {
   schema_version: 2;
   node_id: string;
   session_id: string;
   revision: number;
   reported_at: string;
   tags: string[];
-  executors: V2ExecutorCapability[];
-  runtimes: V2RuntimeCapability[];
-  software: V2SoftwareCapability[];
-  resources: V2ResourceCapability[];
+  executors: ExecutorCapability[];
+  runtimes: RuntimeCapability[];
+  software: SoftwareCapability[];
+  resources: ResourceCapability[];
   system: SystemCapability | null;
-  maintenance_state: V2MaintenanceState;
-  plugin_inventory: V2PluginInventoryItem[];
+  maintenance_state: MaintenanceState;
+  plugin_inventory: PluginInventoryItem[];
 }
 
-export interface V2CapabilitySnapshotView {
+export interface CapabilitySnapshotView {
   node_id: string;
   session_id: string;
   revision: number;
   snapshot_sha256: string;
-  snapshot: V2CapabilitySnapshot;
+  snapshot: CapabilitySnapshot;
   reported_at: string;
   created_at: string | null;
 }
 
-export interface V2LogEvent {
+export interface LogEvent {
   event_id: string;
   source: "master" | "agent" | "web" | "plugin";
   source_id: string;
@@ -589,11 +572,11 @@ export interface V2LogEvent {
   } | null;
 }
 
-export interface V2DiagnosticsSnapshot {
+export interface DiagnosticsSnapshot {
   request_id: string;
   node_id: string;
   collected_at: string;
-  maintenance_state: V2MaintenanceState;
+  maintenance_state: MaintenanceState;
   system: {
     hostname: string;
     os_name: string;
@@ -616,7 +599,7 @@ export interface V2DiagnosticsSnapshot {
     last_error_code: string | null;
     last_error_message: string | null;
   };
-  plugins: V2PluginInventoryItem[];
+  plugins: PluginInventoryItem[];
   active_attempts: Array<{
     attempt_id: string;
     plan_id: string;
@@ -625,33 +608,33 @@ export interface V2DiagnosticsSnapshot {
     started_at: string | null;
   }>;
   capability_revision: number;
-  log_tail: V2LogEvent[];
+  log_tail: LogEvent[];
 }
 
-export interface V2DiagnosticsSnapshotView {
+export interface DiagnosticsSnapshotView {
   request_id: string;
   node_id: string;
   session_id: string;
-  snapshot: V2DiagnosticsSnapshot;
+  snapshot: DiagnosticsSnapshot;
   collected_at: string;
   created_at: string | null;
 }
 
-export interface V2DiagnosticsCollectResponse {
+export interface DiagnosticsCollectResponse {
   operation_id: string;
   request_id: string;
   node_id: string;
   status: "pending";
 }
 
-export type V2RemoteOperationKind = "diagnostics" | "plugin_sync" | "log_level" | "drain" | "restart";
-export type V2RemoteOperationStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type RemoteOperationKind = "diagnostics" | "plugin_sync" | "log_level" | "drain" | "restart";
+export type RemoteOperationStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
-export interface V2RemoteOperation {
+export interface RemoteOperation {
   operation_id: string;
   node_id: string;
-  kind: V2RemoteOperationKind;
-  status: V2RemoteOperationStatus;
+  kind: RemoteOperationKind;
+  status: RemoteOperationStatus;
   expected_session_id: string | null;
   request: Record<string, unknown>;
   error_code: string | null;
@@ -660,7 +643,7 @@ export interface V2RemoteOperation {
   updated_at: string | null;
 }
 
-export interface V2PluginSyncView {
+export interface PluginSyncView {
   sync_id: string;
   node_id: string;
   expected_session_id: string;
@@ -674,119 +657,33 @@ export interface V2PluginSyncView {
   updated_at: string | null;
 }
 
-export interface V2AgentLogView {
+export interface AgentLogView {
   node_id: string;
   session_id: string;
   sequence: number;
-  event: V2LogEvent;
+  event: LogEvent;
   batch_first_sequence: number;
   received_at: string;
 }
 
-export interface V2LogLevelUpdateRequest {
+export interface LogLevelUpdateRequest {
   component: string;
   plugin_id?: string | null;
   level: "debug" | "info" | "warn" | "error";
   expires_at?: string | null;
 }
 
-export interface V2MaintenanceRequest {
+export interface MaintenanceRequest {
   drain_timeout_s?: number;
   reason?: string;
 }
 
-export interface TaskTypeConfigContext {
-  project_id: string;
-  task_type: string;
-  plugin_version: string;
-  config_schema: Record<string, unknown>;
-  upload_spec: Record<string, unknown>;
-  ui: Record<string, unknown>;
-  nodes: Array<{
-    node_id: string;
-    name: string;
-    hostname: string;
-    status: string;
-    online: boolean;
-    enabled: boolean;
-    capabilities: NodeCapabilities;
-    plugin_versions: Record<string, string>;
-  }>;
-  verification: {
-    supported: boolean;
-    location: string;
-    endpoint_template: string;
-  };
-}
 
 // ---- P7.3 鑴氭湰搴?----
-export interface TestScript {
-  script_id: string;
-  project_id: string;
-  task_type: string;
-  name: string;
-  version: number;
-  file_ref: string;
-  size: number;
-  sha256: string;
-  parse_status: "pending" | "parsing" | "parsed" | "failed";
-  parse_location: string;
-  result_parse_location: string;
-  plugin_version: string;
-  created_by: number | null;
-  last_parsed_at: string | null;
-  created_at: string | null;
-  updated_at: string | null;
-  file_missing: boolean;
-}
 
-export interface ScriptCase {
-  case_id: string;
-  script_id: string;
-  stable_key: string;
-  name: string;
-  parent_path: string;
-  tags: string[];
-  params: Record<string, unknown>;
-  avg_duration_s: number | null;
-  duration_samples: number;
-  order_index: number;
-  deleted: boolean;
-}
 
 // ---- P7.4 浠诲姟瀹氫箟 ----
-export interface TestTask {
-  task_id: string;
-  project_id: string;
-  script_id: string;
-  script_version: number;
-  task_type: string;
-  name: string;
-  default_case_selection: string[];
-  node_ids: string[];
-  split_policy: Record<string, unknown>;
-  retry_policy: Record<string, unknown>;
-  config: Record<string, unknown>;
-  timeout_s: number;
-  enabled: boolean;
-  priority: number;
-  validation_warning?: string | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
 
-export interface TestTaskCreateRequest {
-  name: string;
-  script_id: string;
-  default_case_selection?: string[];
-  node_ids?: string[];
-  split_policy?: Record<string, unknown>;
-  retry_policy?: Record<string, unknown>;
-  config?: Record<string, unknown>;
-  timeout_s?: number;
-  priority?: number;
-}
 
 export interface RunCaseResult {
   run_id: string;
@@ -880,6 +777,7 @@ export interface SubscriptionUpdateRequest {
 export interface TaskScheduleOut {
   schedule_id: string;
   task_id: string;
+  project_id: string;
   cron_expression: string | null;
   interval_seconds: number | null;
   timezone: string;

@@ -1,685 +1,118 @@
 <template>
-  <div class="test-tasks-page">
-    <div class="page-heading">
+  <div class="page">
+    <header class="page-heading">
       <div>
-        <span class="eyebrow">TASK DEFINITIONS / PROJECT SCOPE</span>
-        <h1>任务定义</h1>
-        <p>引用脚本版本 + 勾选用例 + 绑定节点，创建可重复执行的任务模板。</p>
+        <span class="eyebrow">TEST TASKS</span>
+        <h1>测试任务</h1>
+        <p>组合多个 ScriptDefinition，固定执行顺序、节点范围和重试策略。</p>
       </div>
       <div class="heading-actions">
-        <el-button v-if="canDispatch" type="primary" :icon="Plus" @click="openCreate">新建任务定义</el-button>
+        <el-button v-if="canManage" type="primary" :icon="Plus" @click="openCreate">新建任务</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
       </div>
-    </div>
+    </header>
 
-    <el-alert v-if="!projectId" title="尚未选择项目" description="请先从顶部选择一个项目。" type="info" show-icon :closable="false" />
-    <el-alert v-if="errorMessage" title="任务定义加载失败" :description="errorMessage" type="error" show-icon :closable="false" class="page-alert" />
+    <el-alert v-if="!projectId" title="尚未选择项目" description="请先选择一个项目。" type="info" show-icon :closable="false" />
+    <el-alert v-if="errorMessage" title="任务加载失败" :description="errorMessage" type="error" show-icon :closable="false" class="page-alert" />
 
-    <el-card v-if="projectId" v-loading="loading" shadow="never">
-      <template #header>
-        <div class="card-heading">
-          <div><strong>任务模板</strong><span>{{ projectStore.currentProject?.name || '当前项目' }}</span></div>
-          <el-tag effect="light">{{ tasks.length }} 个</el-tag>
-        </div>
-      </template>
-      <el-table :data="tasks" row-key="task_id" @row-click="openTask">
-        <el-table-column label="定义名" min-width="220">
-          <template #default="{ row }">
-            <div class="task-cell">
-              <span class="task-mark"><el-icon><List /></el-icon></span>
-              <div>
-                <strong>{{ row.name }}</strong>
-                <small>{{ row.task_id }}</small>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="任务类型" width="130"><template #default="{ row }"><el-tag effect="plain" size="small">{{ row.task_type }}</el-tag></template></el-table-column>
-        <el-table-column label="用例数" width="90"><template #default="{ row }">{{ row.default_case_selection.length }}</template></el-table-column>
-        <el-table-column label="绑定节点" min-width="160">
-          <template #default="{ row }">
-            <el-tag v-for="node in row.node_ids" :key="node" size="small" effect="plain" class="node-tag">{{ node }}</el-tag>
-            <span v-if="!row.node_ids.length">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="分割策略" width="140"><template #default="{ row }">{{ splitText(row.split_policy) }}</template></el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" effect="light">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column label="操作" width="320" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="canDispatch" link type="primary" @click.stop="trigger(row)">运行</el-button>
-            <el-button link type="success" @click.stop="openSchedules(row)">调度计划</el-button>
-            <el-button v-if="canManage" link type="warning" @click.stop="openEdit(row)">编辑</el-button>
-            <el-button v-if="canManage" link type="info" @click.stop="toggleEnabled(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
-            <el-button v-if="canManage" link type="danger" @click.stop="remove(row)">删除</el-button>
-          </template>
-        </el-table-column>
+    <el-card v-if="projectId" v-loading="loading" shadow="never" class="content-card">
+      <template #header><div class="card-heading"><div><strong>可执行任务</strong><span>TestTask revision</span></div><el-tag effect="plain">{{ tasks.length }} 个</el-tag></div></template>
+      <el-table :data="tasks" row-key="task.task_id">
+        <el-table-column label="任务" min-width="280"><template #default="{ row }"><div class="task-cell"><span class="task-mark"><el-icon><List /></el-icon></span><div><strong>{{ row.task.name }}</strong><small>{{ row.task.task_id }} · revision {{ row.task.revision }}</small></div></div></template></el-table-column>
+        <el-table-column label="脚本" width="90"><template #default="{ row }">{{ row.task.scripts.length }}</template></el-table-column>
+        <el-table-column label="执行模式" width="120"><template #default="{ row }"><el-tag effect="plain" size="small">{{ row.task.execution_mode }}</el-tag></template></el-table-column>
+        <el-table-column label="节点范围" min-width="220"><template #default="{ row }"><span class="mono">{{ row.task.node_ids.length ? row.task.node_ids.join(', ') : '自动匹配' }}</span></template></el-table-column>
+        <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.task.enabled ? 'success' : 'info'" effect="light">{{ row.task.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
+        <el-table-column label="操作" width="120"><template #default="{ row }"><el-button link type="primary" @click="run(row.task)">运行</el-button></template></el-table-column>
       </el-table>
-      <el-empty v-if="!loading && tasks.length === 0" description="当前项目尚未创建任务定义" />
+      <el-empty v-if="!loading && tasks.length === 0" description="当前项目尚未创建 TestTask" />
     </el-card>
 
-    <!-- 创建/编辑弹窗 -->
-    <el-dialog v-model="editorVisible" :title="editing ? '编辑任务定义' : '新建任务定义'" width="720px" destroy-on-close>
-      <el-form ref="formRef" :model="form" :rules="formRules" label-position="top">
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="定义名称" prop="name"><el-input v-model="form.name" placeholder="如 CAN 通信回归" /></el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="引用脚本" prop="scriptId">
-              <el-select v-model="form.scriptId" filterable placeholder="选择已解析的脚本" style="width: 100%" @change="onScriptChange">
-                <el-option v-for="s in parsedScripts" :key="s.script_id" :label="`${s.name} v${s.version} (${s.task_type})`" :value="s.script_id" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="绑定节点">
-              <el-select v-model="form.nodeIds" multiple filterable placeholder="候选 = 项目绑定节点" style="width: 100%">
-                <el-option v-for="b in bindings" :key="b.node_id" :disabled="!b.enabled || !b.node_enabled" :label="`${b.name || b.node_id} · ${b.node_id}${b.online ? '' : '（离线）'}`" :value="b.node_id" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="分割策略">
-              <el-select v-model="form.splitType" style="width: 100%">
-                <el-option label="不分割（单 Shard）" value="none" />
-                <el-option label="按用例数量" value="by_case_count" />
-                <el-option label="按测试时间" value="by_time" :disabled="!hasDurationData" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row v-if="form.splitType === 'by_case_count'" :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="每 Shard 用例数">
-              <el-input-number v-model="casesPerShard" :min="1" :max="1000" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row v-if="form.splitType === 'by_time'" :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="目标时长（秒）">
-              <el-input-number v-model="targetDurationS" :min="1" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-alert title="按 case 平均耗时切分；全部用例无耗时数据时禁用（D-21）" type="info" show-icon :closable="false" />
-          </el-col>
-        </el-row>
-        <el-form-item v-if="form.scriptId" label="任务类型插件配置">
-          <div v-if="pluginConfigUrl" v-loading="pluginConfigLoading" class="plugin-config-shell">
-            <iframe ref="pluginConfigFrame" :src="pluginConfigObjectUrl" title="任务类型插件配置页面" class="plugin-config-frame" @load="postPluginConfigContext" />
-          </div>
-          <el-alert v-else title="该任务类型未提供配置页面" description="任务定义将使用该插件的默认配置。" type="info" show-icon :closable="false" />
-        </el-form-item>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="超时（秒，0=不限）">
-              <el-input-number v-model="form.timeoutS" :min="0" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="重试策略">
-              <el-select v-model="form.retryPolicy" style="width: 100%">
-                <el-option label="不重试" value="none" />
-                <el-option label="换节点重试 1 次" value="failover" />
-                <el-option label="换节点重试 2 次" value="failover2" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="16">
-          <el-col :span="12">
-            <el-form-item label="失败用例重试次数">
-              <el-input-number v-model="form.caseRetry" :min="0" :max="10" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="调度优先级">
-              <el-input-number v-model="form.priority" :min="0" :max="1000" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="默认勾选用例（可全选 / 过滤）">
-          <div class="case-selector">
-            <div class="case-selector-bar">
-              <el-input v-model="caseKeyword" placeholder="过滤用例" clearable size="small" style="width: 220px" />
-              <el-button size="small" @click="selectAllCases">全选当前结果</el-button>
-              <el-button size="small" @click="selectNoneCases">清空</el-button>
-              <el-tag effect="plain" size="small">{{ form.caseKeys.length }} 已选</el-tag>
-            </div>
-            <el-table ref="caseTable" :data="filteredCases" row-key="stable_key" size="small" max-height="280" @selection-change="onCaseSelection">
-              <el-table-column type="selection" width="46" :reserve-selection="false" />
-              <el-table-column prop="stable_key" label="稳定键" min-width="240">
-                <template #default="{ row }">
-                  <div class="case-cell">
-                    <strong>{{ row.name || row.stable_key }}</strong>
-                    <small>{{ row.stable_key }}</small>
-                  </div>
-                </template>
-              </el-table-column>
-              <el-table-column label="平均耗时" width="110">
-                <template #default="{ row }">{{ row.avg_duration_s != null ? `${row.avg_duration_s}s` : '-' }}</template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-if="!caseLoading && filteredCases.length === 0" description="请先选择引用脚本" :image-size="50" />
-          </div>
-        </el-form-item>
+    <el-dialog v-model="dialogVisible" title="新建 TestTask" width="640px" destroy-on-close>
+      <el-form label-position="top">
+        <el-form-item label="任务名称"><el-input v-model="form.name" placeholder="例如夜间回归任务" /></el-form-item>
+        <el-form-item label="选择脚本"><el-select v-model="form.scriptIds" multiple filterable style="width:100%" placeholder="至少选择一个 ScriptDefinition"><el-option v-for="definition in definitions" :key="definition.script_definition_id" :label="`${definition.name} · ${definition.script_definition_id}`" :value="definition.script_definition_id" /></el-select></el-form-item>
+        <el-form-item label="执行模式"><el-radio-group v-model="form.executionMode"><el-radio-button value="parallel">并行</el-radio-button><el-radio-button value="sequence">顺序</el-radio-button></el-radio-group></el-form-item>
+        <el-form-item label="目标节点"><el-select v-model="form.nodeIds" multiple filterable clearable style="width:100%" placeholder="留空由 Master 自动匹配"><el-option v-for="node in nodes" :key="node.node_id" :label="`${node.name || node.node_id} · ${node.online ? '在线' : '离线'}`" :value="node.node_id" :disabled="!node.enabled" /></el-select></el-form-item>
+        <el-form-item label="失败策略"><el-switch v-model="form.stopOnFailure" active-text="顺序执行遇到失败时停止后续脚本" /></el-form-item>
+        <el-form-item label="优先级"><el-input-number v-model="form.priority" :min="0" :max="1000" /></el-form-item>
       </el-form>
-      <template #footer>
-        <el-button @click="editorVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 调度计划弹窗 -->
-    <el-dialog v-model="scheduleVisible" title="调度计划" width="680px" destroy-on-close>
-      <div class="schedule-section">
-        <div class="schedule-header">
-          <strong>{{ scheduleTask?.name || '' }}</strong>
-          <el-button v-if="canManage" size="small" type="primary" @click="openScheduleCreate">新建计划</el-button>
-        </div>
-        <el-table :data="schedules" size="small">
-          <el-table-column label="类型" width="120">
-            <template #default="{ row }">
-              <el-tag effect="plain" size="small">{{ row.cron_expression ? 'Cron' : '间隔' }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="表达式/间隔" min-width="180">
-            <template #default="{ row }">
-              <span class="mono">{{ row.cron_expression || (row.interval_seconds ? `${row.interval_seconds}s` : '-') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="时区" width="100" prop="timezone" />
-          <el-table-column label="下次执行" width="170">
-            <template #default="{ row }">{{ row.next_run_at ? fmt(row.next_run_at) : '-' }}</template>
-          </el-table-column>
-          <el-table-column label="上次执行" width="170">
-            <template #default="{ row }">{{ row.last_run_at ? fmt(row.last_run_at) : '-' }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.enabled ? 'success' : 'info'" effect="light" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="130" fixed="right">
-            <template #default="{ row }">
-              <el-button v-if="canManage" link type="info" @click.stop="toggleSchedule(row)">{{ row.enabled ? '停用' : '启用' }}</el-button>
-              <el-button v-if="canManage" link type="danger" @click.stop="removeSchedule(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="schedules.length === 0" description="尚未创建调度计划" />
-      </div>
-    </el-dialog>
-
-    <!-- 新建调度计划弹窗 -->
-    <el-dialog v-model="scheduleFormVisible" title="新建调度计划" width="500px" destroy-on-close>
-      <el-form :model="scheduleForm" label-position="top">
-        <el-form-item label="调度模式">
-          <el-radio-group v-model="scheduleForm.mode">
-            <el-radio value="interval">固定间隔</el-radio>
-            <el-radio value="cron">Cron 表达式</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item v-if="scheduleForm.mode === 'interval'" label="间隔（秒）">
-          <el-input-number v-model="scheduleForm.intervalSeconds" :min="1" style="width: 100%" />
-        </el-form-item>
-        <el-form-item v-if="scheduleForm.mode === 'cron'" label="Cron 表达式">
-          <el-input v-model="scheduleForm.cronExpression" placeholder="如 */5 * * * *（每 5 分钟）" />
-          <div class="cron-hint">格式：分 时 日 月 周</div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="scheduleFormVisible = false">取消</el-button>
-        <el-button type="primary" :loading="scheduleSaving" @click="saveSchedule">保存</el-button>
-      </template>
+      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">创建任务</el-button></template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRaw, watch } from "vue";
+import { computed, reactive, ref } from "vue";
+import { ElMessage } from "element-plus";
 import { useRouter } from "vue-router";
-import type { FormInstance, FormRules } from "element-plus";
-import { ElMessage, ElMessageBox } from "element-plus";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { List, Plus, Refresh } from "@element-plus/icons-vue";
-import { aetpApi, type TestScript, type ScriptCase, type TestTask, type TaskScheduleOut } from "@/api/endpoints";
+import { aetpApi, type Node, type ScriptDefinition, type TestTask, type TaskView } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
-import { useTaskEvents } from "@/composables/useTaskEvents";
 
 const router = useRouter();
 const auth = useAuthStore();
 const projectStore = useProjectStore();
-const qc = useQueryClient();
-useTaskEvents(qc);
-
+const queryClient = useQueryClient();
 const projectId = computed(() => projectStore.currentProjectId ?? "");
 const canManage = computed(() => auth.user?.platform_role === "admin" || ["maintainer", "owner"].includes(projectStore.currentRole || ""));
-const canDispatch = computed(() => auth.user?.platform_role === "admin" || ["operator", "maintainer", "owner"].includes(projectStore.currentRole || ""));
-
-const tasksQuery = useQuery({
-  queryKey: ["testTasks", projectId],
-  queryFn: () => aetpApi.testTasks.list(projectId.value),
-  enabled: computed(() => !!projectId.value),
-});
-const scriptsQuery = useQuery({
-  queryKey: ["scripts", projectId],
-  queryFn: () => aetpApi.scripts.list(projectId.value),
-  enabled: computed(() => !!projectId.value),
-});
-const taskTypesQuery = useQuery({
-  queryKey: ["taskTypes"],
-  queryFn: () => aetpApi.plugins.list(),
-});
-const bindingsQuery = useQuery({
-  queryKey: ["projectNodes", projectId],
-  queryFn: () => aetpApi.projects.nodes(projectId.value),
-  enabled: computed(() => !!projectId.value),
-});
+const tasksQuery = useQuery({ queryKey: ["tasks", projectId], queryFn: () => aetpApi.tasks.listTasks(projectId.value), enabled: computed(() => !!projectId.value) });
+const definitionsQuery = useQuery({ queryKey: ["script-definitions", projectId], queryFn: () => aetpApi.tasks.listScriptDefinitions(projectId.value), enabled: computed(() => !!projectId.value) });
+const nodesQuery = useQuery({ queryKey: ["nodes"], queryFn: () => aetpApi.assets.nodes(undefined, true) });
 const tasks = computed(() => tasksQuery.data.value ?? []);
-const scripts = computed(() => scriptsQuery.data.value ?? []);
-const bindings = computed(() => bindingsQuery.data.value ?? []);
-const loading = computed(() => tasksQuery.isLoading.value);
-const errorMessage = computed(() => tasksQuery.error.value?.message || "");
-const parsedScripts = computed(() => scripts.value.filter((s) => s.parse_status === "parsed"));
+const definitions = computed(() => definitionsQuery.data.value ?? []);
+const nodes = computed(() => nodesQuery.data.value ?? []);
+const loading = computed(() => tasksQuery.isLoading.value || tasksQuery.isFetching.value);
+const errorMessage = computed(() => tasksQuery.error.value?.message || definitionsQuery.error.value?.message || "");
+const dialogVisible = ref(false);
+const saving = ref(false);
+const form = reactive({ name: "", scriptIds: [] as string[], nodeIds: [] as string[], executionMode: "parallel" as "parallel" | "sequence", stopOnFailure: false, priority: 0 });
 
-function refresh() { qc.invalidateQueries({ queryKey: ["testTasks"] }); qc.invalidateQueries({ queryKey: ["scripts"] }); }
-
-// ---- 编辑器 ----
-const editorVisible = ref(false);
-const editing = ref<TestTask | null>(null);
-const formRef = ref<FormInstance>();
-const caseTable = ref<{ clearSelection: () => void; toggleRowSelection: (row: ScriptCase, selected?: boolean) => void }>();
-const caseKeyword = ref("");
-const casesPerShard = ref(20);
-const targetDurationS = ref(300);
-const selectAllWhenLoaded = ref(false);
-const syncingSelection = ref(false);
-const form = reactive({
-  name: "",
-  scriptId: "",
-  nodeIds: [] as string[],
-  splitType: "none",
-  timeoutS: 0,
-  retryPolicy: "none",
-  caseRetry: 0,
-  priority: 0,
-  caseKeys: [] as string[],
-  pluginConfig: {} as Record<string, unknown>,
-});
-const selectedScript = computed(() => scripts.value.find((script) => script.script_id === form.scriptId));
-const selectedPlugin = computed(() => taskTypesQuery.data.value?.find((plugin) => plugin.task_type === selectedScript.value?.task_type) ?? null);
-const pluginConfigUrl = computed(() => {
-  const url = selectedPlugin.value?.ui?.task_config_url || "";
-  if (!url) return "";
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}v=${encodeURIComponent(selectedPlugin.value?.plugin_version || "")}`;
-});
-const pluginConfigObjectUrl = ref("");
-const pluginConfigLoading = ref(false);
-const pluginConfigFrame = ref<HTMLIFrameElement>();
-const formRules: FormRules = {
-  name: [{ required: true, message: "请输入定义名称", trigger: "blur" }],
-  scriptId: [{ required: true, message: "请选择引用脚本", trigger: "change" }],
-};
-
-// 脚本用例
-const scriptCasesQuery = useQuery({
-  queryKey: ["scripts", "cases", projectId, () => form.scriptId],
-  queryFn: () => aetpApi.scripts.cases(projectId.value, form.scriptId),
-  enabled: computed(() => !!form.scriptId),
-});
-const allCases = computed(() => scriptCasesQuery.data.value ?? []);
-const caseLoading = computed(() => scriptCasesQuery.isLoading.value);
-const selectedCases = computed(() => {
-  const selected = new Set(form.caseKeys);
-  return selected.size
-    ? allCases.value.filter((item) => selected.has(item.stable_key))
-    : allCases.value;
-});
-const hasDurationData = computed(() => selectedCases.value.some((c) => c.avg_duration_s != null));
-const filteredCases = computed(() => {
-  const kw = caseKeyword.value.trim().toLowerCase();
-  if (!kw) return allCases.value;
-  return allCases.value.filter((c) => c.stable_key.toLowerCase().includes(kw) || (c.name || "").toLowerCase().includes(kw));
-});
-
-async function loadPluginConfigUi() {
-  closePluginConfigUi();
-  if (!pluginConfigUrl.value || !editorVisible.value) return;
-  pluginConfigLoading.value = true;
-  try {
-    const html = await (await aetpApi.plugins.uiAsset(pluginConfigUrl.value)).text();
-    const inlineHtml = await inlinePluginAssets(html, pluginConfigUrl.value);
-    pluginConfigObjectUrl.value = URL.createObjectURL(new Blob([inlineHtml], { type: "text/html" }));
-  } catch (error) {
-    ElMessage.error(`插件任务配置页面加载失败: ${(error as Error).message}`);
-  } finally {
-    pluginConfigLoading.value = false;
-  }
-}
-async function inlinePluginAssets(html: string, entryUrl: string): Promise<string> {
-  const paths = [...html.matchAll(/(?:src|href)=["'](vendor\/[^"]+)["']/g)].map((match) => match[1]);
-  const replacements = await Promise.all([...new Set(paths)].map(async (assetPath) => {
-    const assetUrl = new URL(assetPath, `${window.location.origin}${entryUrl}`).pathname;
-    const asset = await aetpApi.plugins.uiAsset(assetUrl);
-    const bytes = new Uint8Array(await asset.arrayBuffer());
-    let binary = "";
-    for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-    return [assetPath, `data:${asset.type || "application/octet-stream"};base64,${btoa(binary)}`] as const;
-  }));
-  return replacements.reduce((result, [path, dataUrl]) => result.split(path).join(dataUrl), html);
-}
-function closePluginConfigUi() {
-  if (pluginConfigObjectUrl.value) URL.revokeObjectURL(pluginConfigObjectUrl.value);
-  pluginConfigObjectUrl.value = "";
-}
-function postPluginConfigContext() {
-  if (!pluginConfigFrame.value?.contentWindow || !selectedScript.value) return;
-  pluginConfigFrame.value.contentWindow.postMessage(
-    JSON.stringify({
-      type: "aetp.task-config.context",
-      payload: { context: { project_id: projectId.value, task_type: selectedScript.value.task_type, plugin_version: selectedPlugin.value?.plugin_version || "", config_schema: selectedPlugin.value?.config_schema || {}, config: toRaw(form.pluginConfig) } },
-    }),
-    window.location.origin,
-  );
-}
-function onPluginConfigMessage(event: MessageEvent) {
-  if (event.source !== pluginConfigFrame.value?.contentWindow || event.origin !== window.location.origin) return;
-  let message = event.data as { type?: string; payload?: Record<string, unknown> | string } | string;
-  if (typeof message === "string") {
-    try { message = JSON.parse(message) as { type?: string; payload?: Record<string, unknown> | string }; } catch { return; }
-  }
-  let payload = message.payload;
-  if (typeof payload === "string") {
-    try { payload = JSON.parse(payload) as Record<string, unknown>; } catch { return; }
-  }
-  if (message.type === "aetp.task-config.ready") postPluginConfigContext();
-  if (message.type === "aetp.task-config.config" && payload && typeof payload.config === "object") {
-    form.pluginConfig = { ...(payload.config as Record<string, unknown>) };
-  }
-}
-
-function onScriptChange() {
-  form.caseKeys = [];
-  caseKeyword.value = "";
-  form.pluginConfig = {};
-  selectAllWhenLoaded.value = true;
-}
-function onCaseSelection(rows: ScriptCase[]) {
-  if (syncingSelection.value) return;
-  const visibleKeys = new Set(filteredCases.value.map((item) => item.stable_key));
-  const selectedVisible = new Set(rows.map((row) => row.stable_key));
-  form.caseKeys = [
-    ...form.caseKeys.filter((key) => !visibleKeys.has(key)),
-    ...filteredCases.value.filter((item) => selectedVisible.has(item.stable_key)).map((item) => item.stable_key),
-  ];
-}
-function syncCaseSelection() {
-  void nextTick(() => {
-    syncingSelection.value = true;
-    caseTable.value?.clearSelection();
-    for (const item of filteredCases.value) {
-      if (form.caseKeys.includes(item.stable_key)) caseTable.value?.toggleRowSelection(item, true);
-    }
-    syncingSelection.value = false;
-  });
-}
-function selectAllCases() {
-  const selected = new Set(form.caseKeys);
-  filteredCases.value.forEach((item) => selected.add(item.stable_key));
-  form.caseKeys = [...selected];
-  syncCaseSelection();
-}
-function selectNoneCases() {
-  form.caseKeys = [];
-  syncCaseSelection();
+function newBusinessId(): string {
+  const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let time = Date.now();
+  let value = "";
+  for (let index = 0; index < 10; index += 1) { value = alphabet[time % 32] + value; time = Math.floor(time / 32); }
+  for (const byte of bytes) value += alphabet[byte % 32];
+  return value;
 }
 
 function openCreate() {
-  editing.value = null;
-  form.name = ""; form.scriptId = ""; form.nodeIds = []; form.splitType = "none";
-  form.timeoutS = 0; form.retryPolicy = "none"; form.caseRetry = 0; form.priority = 0; form.caseKeys = []; caseKeyword.value = "";
-  form.pluginConfig = {};
-  selectAllWhenLoaded.value = false;
-  casesPerShard.value = 20; targetDurationS.value = 300;
-  editorVisible.value = true;
+  Object.assign(form, { name: "", scriptIds: [], nodeIds: [], executionMode: "parallel", stopOnFailure: false, priority: 0 });
+  dialogVisible.value = true;
 }
-function openEdit(task: TestTask) {
-  editing.value = task;
-  form.name = task.name;
-  form.scriptId = task.script_id;
-  form.nodeIds = [...task.node_ids];
-  form.splitType = (task.split_policy?.type as string) || "none";
-  form.timeoutS = task.timeout_s;
-  form.caseKeys = [...task.default_case_selection];
-  const policy = task.split_policy as Record<string, unknown>;
-  casesPerShard.value = typeof policy.cases_per_shard === "number" ? policy.cases_per_shard : 20;
-  targetDurationS.value = typeof policy.target_duration_s === "number" ? policy.target_duration_s : 300;
-  const maxAttempts = typeof task.retry_policy?.max_attempts === "number" ? task.retry_policy.max_attempts : 1;
-  form.retryPolicy = maxAttempts >= 3 ? "failover2" : maxAttempts > 1 ? "failover" : "none";
-  form.caseRetry = typeof task.retry_policy?.case_retry === "number" ? task.retry_policy.case_retry : 0;
-  form.priority = task.priority;
-  form.pluginConfig = { ...(task.config || {}) };
-  selectAllWhenLoaded.value = false;
-  caseKeyword.value = "";
-  editorVisible.value = true;
+function refresh() { queryClient.invalidateQueries({ queryKey: ["tasks"] }); queryClient.invalidateQueries({ queryKey: ["script-definitions"] }); }
+async function save() {
+  if (!projectId.value || !form.name.trim() || !form.scriptIds.length) { ElMessage.warning("请填写任务名称并至少选择一个脚本"); return; }
+  const selected = form.scriptIds.map((id) => definitions.value.find((item) => item.script_definition_id === id)).filter((item): item is ScriptDefinition => !!item);
+  const task: TestTask = {
+    task_id: newBusinessId(), project_id: projectId.value, revision: 1, name: form.name.trim(),
+    scripts: selected.map((definition, index) => ({
+      binding_id: newBusinessId(), script_definition_id: definition.script_definition_id, script_revision: definition.revision,
+      case_selection: { selected_keys: [], include_all: true }, configuration: definition.configuration,
+      split_policy: { type: "none", target_count: null, target_duration_s: null, plugin_id: null }, order_index: index, enabled: true,
+    })),
+    execution_mode: form.executionMode, stop_on_failure: form.stopOnFailure,
+    retry_policy: { max_attempts: 1, failover_nodes: false, retry_failed_cases: false, backoff_initial_s: 1, backoff_max_s: 60 },
+    node_ids: [...form.nodeIds], priority: form.priority, enabled: true,
+  };
+  saving.value = true;
+  try { await aetpApi.tasks.createTask(projectId.value, task); ElMessage.success("TestTask 已创建"); dialogVisible.value = false; refresh(); }
+  catch (error) { ElMessage.error(error instanceof Error ? error.message : "创建失败"); }
+  finally { saving.value = false; }
 }
-
-const saveMutation = useMutation({
-  mutationFn: () => {
-    const splitPolicy = buildSplitPolicy();
-    const retryPolicy = buildRetryPolicy();
-    const payload = {
-      name: form.name,
-      script_id: form.scriptId,
-      default_case_selection: form.caseKeys,
-      node_ids: form.nodeIds,
-      split_policy: splitPolicy,
-      retry_policy: retryPolicy,
-      config: toRaw(form.pluginConfig),
-      timeout_s: form.timeoutS,
-      priority: form.priority,
-    };
-    return editing.value
-      ? aetpApi.testTasks.update(projectId.value, editing.value.task_id, payload)
-      : aetpApi.testTasks.create(projectId.value, payload);
-  },
-  onSuccess: (task) => {
-    if (task.validation_warning) ElMessage.warning(task.validation_warning);
-    else ElMessage.success(editing.value ? "任务定义已更新" : "任务定义已创建");
-    editorVisible.value = false;
-    refresh();
-  },
-  onError: (e: Error) => ElMessage.error(e.message),
-});
-const saving = computed(() => saveMutation.isPending.value);
-
-function buildSplitPolicy(): Record<string, unknown> {
-  if (form.splitType === "by_case_count") return { type: "by_case_count", cases_per_shard: casesPerShard.value };
-  if (form.splitType === "by_time") return { type: "by_time", target_duration_s: targetDurationS.value };
-  return { type: "none" };
-}
-function buildRetryPolicy(): Record<string, unknown> {
-  if (form.retryPolicy === "failover") return { max_attempts: 2, failover_nodes: true, case_retry: form.caseRetry };
-  if (form.retryPolicy === "failover2") return { max_attempts: 3, failover_nodes: true, case_retry: form.caseRetry };
-  return { max_attempts: 1, failover_nodes: false, case_retry: form.caseRetry };
-}
-async function submit() {
-  if (!formRef.value) return;
-  const valid = await formRef.value.validate().catch(() => false);
-  if (!valid) return;
-  if (form.splitType === "by_time" && !hasDurationData.value) {
-    ElMessage.warning("全部用例无耗时数据，无法使用按时间分割（D-21）");
-    return;
-  }
-  if (!form.caseKeys.length && allCases.value.length) {
-    ElMessage.warning("请至少选择一个默认用例");
-    return;
-  }
-  saveMutation.mutate();
-}
-
-// ---- 运行 ----
-const triggeringId = ref<string | null>(null);
-const triggerMutation = useMutation({
-  mutationFn: (taskId: string) => aetpApi.runs.trigger(projectId.value, taskId),
-  onSuccess: (run) => {
-    if ((run.scheduled ?? 0) === 0 && (run.pending_shard_ids?.length ?? 0) > 0) {
-      ElMessage.warning("Run 已创建，但当前没有在线节点，任务已排队等待节点上线");
-    } else {
-      ElMessage.success(`Run 已创建，已派发 ${run.scheduled ?? 0} 个 Shard`);
-    }
-    router.push(`/runs/${run.run_id}`);
-  },
-  onError: (e: Error) => ElMessage.error(e.message),
-});
-async function trigger(row: TestTask) {
-  if (!row.enabled) { ElMessage.warning("该任务定义已停用，无法触发"); return; }
-  try { await ElMessageBox.confirm(`确认立即运行任务定义 ${row.name}？`, "运行确认", { type: "warning" }); } catch { return; }
-  triggeringId.value = row.task_id;
-  triggerMutation.mutate(row.task_id, { onSettled: () => { triggeringId.value = null; } });
-}
-
-// ---- 删除 ----
-const removeMutation = useMutation({
-  mutationFn: (taskId: string) => aetpApi.testTasks.remove(projectId.value, taskId),
-  onSuccess: () => { ElMessage.success("任务定义已删除"); refresh(); },
-  onError: (e: Error) => ElMessage.error(e.message),
-});
-const toggleMutation = useMutation({
-  mutationFn: (task: TestTask) => aetpApi.testTasks.update(projectId.value, task.task_id, { enabled: !task.enabled }),
-  onSuccess: (task) => { ElMessage.success(task.enabled ? "任务定义已启用" : "任务定义已停用"); refresh(); },
-  onError: (e: Error) => ElMessage.error(e.message),
-});
-async function toggleEnabled(row: TestTask) {
-  const action = row.enabled ? "停用" : "启用";
-  try { await ElMessageBox.confirm(`确认${action}任务定义 ${row.name}？`, `${action}确认`, { type: "warning" }); } catch { return; }
-  toggleMutation.mutate(row);
-}
-async function remove(row: TestTask) {
-  try { await ElMessageBox.confirm(`确认删除任务定义 ${row.name}？`, "删除确认", { type: "warning" }); } catch { return; }
-  removeMutation.mutate(row.task_id);
-}
-
-function openTask(row: TestTask) { openEdit(row); }
-function splitText(policy: Record<string, unknown>) {
-  const type = policy?.type as string;
-  if (type === "by_case_count") return `按数量 (${policy.cases_per_shard ?? '-'}/shard)`;
-  if (type === "by_time") return `按时间 (${policy.target_duration_s ?? '-'}s)`;
-  return "不分割";
-}
-function fmt(v: string) { return new Date(v).toLocaleString("zh-CN", { hour12: false }); }
-
-watch(allCases, (cases) => {
-  if (selectAllWhenLoaded.value && cases.length) {
-    form.caseKeys = cases.map((item) => item.stable_key);
-    selectAllWhenLoaded.value = false;
-  }
-  syncCaseSelection();
-});
-watch(filteredCases, syncCaseSelection);
-watch(editorVisible, (visible) => { if (visible) syncCaseSelection(); });
-watch(() => projectId.value, () => { refresh(); });
-watch([pluginConfigUrl, editorVisible], ([url, visible]) => {
-  if (visible && url) void loadPluginConfigUi();
-  else closePluginConfigUi();
-});
-onMounted(() => window.addEventListener("message", onPluginConfigMessage));
-onUnmounted(() => {
-  window.removeEventListener("message", onPluginConfigMessage);
-  closePluginConfigUi();
-});
-
-// ---- 调度计划 ----
-const scheduleVisible = ref(false);
-const scheduleTask = ref<TestTask | null>(null);
-const scheduleFormVisible = ref(false);
-const scheduleSaving = ref(false);
-const scheduleForm = reactive({ mode: "interval", intervalSeconds: 3600, cronExpression: "" });
-
-const schedulesQuery = useQuery({
-  queryKey: ["schedules", projectId, () => scheduleTask.value?.task_id ?? ""],
-  queryFn: () => aetpApi.schedules.list(projectId.value, scheduleTask.value!.task_id),
-  enabled: computed(() => scheduleVisible.value && !!scheduleTask.value),
-});
-const schedules = computed(() => schedulesQuery.data.value ?? []);
-
-function openSchedules(row: TestTask) {
-  scheduleTask.value = row;
-  scheduleVisible.value = true;
-  qc.invalidateQueries({ queryKey: ["schedules"] });
-}
-function openScheduleCreate() {
-  scheduleForm.mode = "interval";
-  scheduleForm.intervalSeconds = 3600;
-  scheduleForm.cronExpression = "";
-  scheduleFormVisible.value = true;
-}
-async function saveSchedule() {
-  if (!scheduleTask.value) return;
-  scheduleSaving.value = true;
-  try {
-    await aetpApi.schedules.create(projectId.value, scheduleTask.value.task_id, {
-      cron_expression: scheduleForm.mode === "cron" ? scheduleForm.cronExpression : undefined,
-      interval_seconds: scheduleForm.mode === "interval" ? scheduleForm.intervalSeconds : undefined,
-    });
-    ElMessage.success("调度计划已创建");
-    scheduleFormVisible.value = false;
-    qc.invalidateQueries({ queryKey: ["schedules"] });
-  } catch (e) { ElMessage.error((e as Error).message); } finally { scheduleSaving.value = false; }
-}
-async function toggleSchedule(row: { schedule_id: string; enabled: boolean }) {
-  if (!scheduleTask.value) return;
-  try {
-    await aetpApi.schedules.update(projectId.value, scheduleTask.value.task_id, row.schedule_id, { enabled: !row.enabled });
-    ElMessage.success(row.enabled ? "计划已停用" : "计划已启用");
-    qc.invalidateQueries({ queryKey: ["schedules"] });
-  } catch (e) { ElMessage.error((e as Error).message); }
-}
-async function removeSchedule(row: { schedule_id: string }) {
-  if (!scheduleTask.value) return;
-  try { await ElMessageBox.confirm("确认删除此调度计划？", "删除计划", { type: "warning" }); } catch { return; }
-  try {
-    await aetpApi.schedules.remove(projectId.value, scheduleTask.value.task_id, row.schedule_id);
-    ElMessage.success("计划已删除");
-    qc.invalidateQueries({ queryKey: ["schedules"] });
-  } catch (e) { ElMessage.error((e as Error).message); }
+async function run(task: TestTask) {
+  if (!projectId.value) return;
+  try { const result = await aetpApi.tasks.createRun(projectId.value, { task_id: task.task_id, task_revision: task.revision }); router.push(`/runs/${result.run_id}`); }
+  catch (error) { ElMessage.error(error instanceof Error ? error.message : "启动失败"); }
 }
 </script>
 
 <style scoped>
-.test-tasks-page { max-width: 1480px; margin: 0 auto; }
-.page-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 22px; }
-.eyebrow { color: var(--aetp-cyan); font-size: 10px; font-weight: 800; letter-spacing: .16em; }
-.page-heading h1 { margin: 8px 0 6px; font-size: 28px; }
-.page-heading p { margin: 0; color: var(--aetp-muted); font-size: 13px; }
-.heading-actions { display: flex; align-items: center; gap: 10px; }
-.page-alert { margin-bottom: 14px; }
-.card-heading { display: flex; justify-content: space-between; align-items: center; }
-.card-heading div { display: flex; align-items: baseline; gap: 10px; }
-.card-heading strong { font-size: 15px; }
-.card-heading span { color: var(--aetp-muted); font-size: 11px; }
-.task-cell { display: flex; align-items: center; gap: 10px; }
-.task-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 7px; background: #eaf3ff; color: var(--aetp-blue); }
-.task-cell div { display: flex; flex-direction: column; gap: 3px; }
-.task-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
-.node-tag { margin-right: 4px; }
-.case-selector { width: 100%; border: 1px solid var(--el-border-color); border-radius: 6px; padding: 10px; }
-.case-selector-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.plugin-config-shell { width: 100%; height: 560px; overflow: hidden; border: 1px solid var(--el-border-color); border-radius: 6px; background: #f4f7f8; }
-.plugin-config-frame { display: block; width: 100%; height: 100%; border: 0; background: #f4f7f8; }
-.case-cell { display: flex; flex-direction: column; gap: 2px; }
-.case-cell small { color: #96a3ac; font-family: ui-monospace, monospace; font-size: 11px; }
-.schedule-section { min-height: 200px; }
-.schedule-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.cron-hint { margin-top: 4px; color: var(--aetp-muted); font-size: 11px; }
-.mono { font-family: ui-monospace, monospace; font-size: 12px; }
-@media (max-width: 760px) { .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; }.heading-actions { width: 100%; justify-content: space-between; } }
+.page { max-width:1480px; margin:0 auto; }.page-heading { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:22px; }.eyebrow { color:var(--aetp-cyan); font-size:10px; font-weight:800; letter-spacing:.16em; }.page-heading h1 { margin:8px 0 6px; color:var(--aetp-ink); font-size:28px; }.page-heading p { margin:0; color:var(--aetp-muted); font-size:13px; }.heading-actions { display:flex; gap:9px; }.page-alert { margin-top:14px; }.content-card :deep(.el-card__body) { padding-top:0; }.card-heading { display:flex; align-items:center; justify-content:space-between; }.card-heading div { display:flex; align-items:baseline; gap:10px; }.card-heading strong { font-size:15px; }.card-heading span { color:var(--aetp-muted); font-size:11px; }.task-cell { display:flex; align-items:center; gap:10px; }.task-mark { display:grid; width:34px; height:34px; place-items:center; border-radius:7px; background:#eaf3ff; color:var(--aetp-blue); }.task-cell div { display:flex; flex-direction:column; gap:3px; }.task-cell small { color:var(--aetp-muted); font:11px ui-monospace,monospace; }.mono { font:12px ui-monospace,monospace; }
+@media (max-width:760px) { .page-heading { align-items:flex-start; flex-direction:column; gap:14px; } }
 </style>

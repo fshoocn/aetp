@@ -24,7 +24,7 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh } from "@element-plus/icons-vue";
-import { aetpApi, type Run } from "@/api/endpoints";
+import { aetpApi, type RunListView } from "@/api/endpoints";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
 import { runStatusText, runStatusTag, triggerText } from "@/utils/statusMaps";
@@ -33,7 +33,7 @@ const projectId = computed(() => projectStore.currentProjectId ?? "");
 const query = useQuery({ queryKey: ["runs", "list", projectId], queryFn: () => aetpApi.runs.list(projectId.value), enabled: computed(() => !!projectId.value) });
 const runs = computed(() => query.data.value ?? []); const loading = computed(() => query.isLoading.value);
 function refresh() { queryClient.invalidateQueries({ queryKey: ["runs"] }); }
-function openRun(run: Run) { router.push(`/runs/${run.run_id}`); }
+function openRun(run: RunListView) { router.push(`/runs/${run.run_id}`); }
 function fmt(value: string) { return new Date(value).toLocaleString("zh-CN", { hour12: false }); }
 const statusText = runStatusText;
 const statusTag = runStatusTag;

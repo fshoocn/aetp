@@ -186,7 +186,7 @@
         <el-form-item label="测试任务">
           <el-select v-model="subscriptionForm.task_id" style="width: 100%" placeholder="全部测试任务（项目级）" clearable>
             <el-option label="全部测试任务（项目级）" value="" />
-            <el-option v-for="task in testTasks" :key="task.task_id" :label="`${task.name} · ${task.task_type}`" :value="task.task_id" />
+            <el-option v-for="task in testTasks" :key="task.task.task_id" :label="`${task.task.name} · revision ${task.task.revision}`" :value="task.task.task_id" />
           </el-select>
           <div class="form-hint">选择具体任务后，只有该任务产生的事件会触发通知。</div>
         </el-form-item>
@@ -217,7 +217,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Connection, Plus, Refresh } from "@element-plus/icons-vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { aetpApi, type NotificationEndpointOut, type EventSubscriptionOut, type EventDeliveryOut } from "@/api/endpoints";
-import type { TestTask } from "@/api/types";
+import type { TaskView } from "@/api/types";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -242,7 +242,7 @@ const subscriptionsQuery = useQuery({
 });
 const testTasksQuery = useQuery({
   queryKey: ["testTasks", "notifications", projectId],
-  queryFn: () => aetpApi.testTasks.list(projectId.value),
+  queryFn: () => aetpApi.tasks.listTasks(projectId.value),
   enabled: computed(() => !!projectId.value),
 });
 const deliveryFilter = ref<string | undefined>(undefined);
@@ -253,7 +253,7 @@ const deliveriesQuery = useQuery({
 });
 const endpoints = computed(() => endpointsQuery.data.value ?? []);
 const subscriptions = computed(() => subscriptionsQuery.data.value ?? []);
-const testTasks = computed<TestTask[]>(() => testTasksQuery.data.value ?? []);
+const testTasks = computed<TaskView[]>(() => testTasksQuery.data.value ?? []);
 const deliveries = computed(() => deliveriesQuery.data.value ?? []);
 const loading = computed(() => endpointsQuery.isLoading.value || subscriptionsQuery.isLoading.value);
 const deliveryLoading = computed(() => deliveriesQuery.isLoading.value);
@@ -271,7 +271,7 @@ function endpointName(id: string) {
   return endpoints.value.find((ep) => ep.endpoint_id === id)?.name || id;
 }
 function taskName(id: string) {
-  return testTasks.value.find((task) => task.task_id === id)?.name || id;
+  return testTasks.value.find((task) => task.task.task_id === id)?.task.name || id;
 }
 
 // ---- 端点 ----

@@ -1,23 +1,23 @@
 <template>
-  <div class="v2-diagnostics-panel" v-loading="loading">
+  <div class="diagnostics-panel" v-loading="loading">
     <el-alert
-      v-if="!isV2Node"
-      title="该节点尚未注册 V2 能力快照"
-      description="节点使用 V2 会话注册后，能力、插件库存和诊断信息会显示在这里。"
+      v-if="!isRegisteredNode"
+      title="该节点尚未注册能力快照"
+      description="节点使用会话注册后，能力、插件库存和诊断信息会显示在这里。"
       type="info"
       show-icon
       :closable="false"
     />
     <el-alert
       v-else-if="errorMessage"
-      title="V2 诊断数据暂不可用"
+      title="诊断数据暂不可用"
       :description="errorMessage"
       type="warning"
       show-icon
       :closable="false"
     />
-    <div v-if="isV2Node" class="panel-head">
-      <div class="panel-label">V2 能力与诊断</div>
+    <div v-if="isRegisteredNode" class="panel-head">
+      <div class="panel-label">能力与诊断</div>
       <div class="panel-actions">
         <el-button size="small" :loading="collecting" @click="collect">立即采集诊断</el-button>
         <el-button v-if="isAdmin" size="small" :icon="Setting" :loading="actionLoading" @click="updateLogLevel">设置日志</el-button>
@@ -26,7 +26,7 @@
         <el-button v-if="isAdmin" size="small" type="danger" plain :icon="SwitchButton" :loading="actionLoading" @click="restart">重启 Agent</el-button>
       </div>
     </div>
-    <div v-if="isV2Node && isAdmin" class="maintenance-controls">
+    <div v-if="isRegisteredNode && isAdmin" class="maintenance-controls">
       <span class="control-label">日志组件</span>
       <el-input v-model="logComponent" size="small" class="component-input" placeholder="agent.runtime" />
       <el-select v-model="logLevel" size="small" class="level-select" aria-label="日志级别">
@@ -63,7 +63,7 @@
               </template>
             </el-table-column>
           </el-table>
-          <el-empty v-if="snapshot.snapshot.plugin_inventory.length === 0" description="暂无 V2 插件库存" :image-size="50" />
+          <el-empty v-if="snapshot.snapshot.plugin_inventory.length === 0" description="暂无插件库存" :image-size="50" />
         </section>
 
         <section class="diagnostic-section compact-section">
@@ -111,7 +111,7 @@
         </section>
       </div>
     </template>
-    <section v-if="isV2Node" class="maintenance-section">
+    <section v-if="isRegisteredNode" class="maintenance-section">
       <div class="section-head">
         <div class="section-title">最近维护操作</div>
         <el-button link size="small" :loading="operationsQuery.isFetching.value" @click="operationsQuery.refetch()">刷新</el-button>
@@ -124,7 +124,7 @@
       </el-table>
       <span v-else class="muted">暂无维护操作</span>
     </section>
-    <section v-if="isV2Node" class="maintenance-section logs-section">
+    <section v-if="isRegisteredNode" class="maintenance-section logs-section">
       <div class="section-head">
         <div class="section-title">Agent 结构化日志 <span class="live-indicator">LIVE</span></div>
         <el-button link size="small" :loading="logsQuery.isFetching.value" @click="logsQuery.refetch()">刷新</el-button>
@@ -151,7 +151,7 @@
         <el-button type="primary" :loading="syncing" :disabled="!selectedPlugin" @click="syncPlugin">下发同步</el-button>
       </template>
     </el-dialog>
-    <el-empty v-if="isV2Node && !loading && !snapshot && !diagnostics" description="暂无诊断快照" :image-size="50" />
+    <el-empty v-if="isRegisteredNode && !loading && !snapshot && !diagnostics" description="暂无诊断快照" :image-size="50" />
   </div>
 </template>
 
@@ -161,26 +161,26 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Refresh, Setting, SwitchButton, Upload } from "@element-plus/icons-vue";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { connectAgentLogs } from "@/api/sse";
-import { aetpApi, type V2CapabilitySnapshotView, type V2DiagnosticsSnapshotView, type V2LogEvent, type V2PluginAvailability, type V2PluginVersion, type V2RemoteOperation } from "@/api/endpoints";
+import { aetpApi, type CapabilitySnapshotView, type DiagnosticsSnapshotView, type LogEvent, type PluginAvailability, type PluginVersion, type RemoteOperation } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 
 const props = defineProps<{ nodeId: string }>();
 const auth = useAuthStore();
 const queryClient = useQueryClient();
-const isV2Node = computed(() => /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(props.nodeId));
+const isRegisteredNode = computed(() => /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(props.nodeId));
 const isAdmin = computed(() => auth.user?.platform_role === "admin");
 const capabilityQuery = useQuery({
-  queryKey: computed(() => ["v2-node-capability", props.nodeId]),
-  queryFn: () => aetpApi.assets.v2CapabilitySnapshot(props.nodeId),
-  enabled: isV2Node,
+  queryKey: computed(() => ["node-capability", props.nodeId]),
+  queryFn: () => aetpApi.assets.capabilitySnapshot(props.nodeId),
+  enabled: isRegisteredNode,
 });
 const diagnosticsQuery = useQuery({
-  queryKey: computed(() => ["v2-node-diagnostics", props.nodeId]),
-  queryFn: () => aetpApi.assets.v2Diagnostics(props.nodeId),
-  enabled: isV2Node,
+  queryKey: computed(() => ["node-diagnostics", props.nodeId]),
+  queryFn: () => aetpApi.assets.diagnostics(props.nodeId),
+  enabled: isRegisteredNode,
 });
-const snapshot = computed<V2CapabilitySnapshotView | null>(() => capabilityQuery.data.value ?? null);
-const diagnostics = computed<V2DiagnosticsSnapshotView | null>(() => diagnosticsQuery.data.value ?? null);
+const snapshot = computed<CapabilitySnapshotView | null>(() => capabilityQuery.data.value ?? null);
+const diagnostics = computed<DiagnosticsSnapshotView | null>(() => diagnosticsQuery.data.value ?? null);
 const loading = computed(() => capabilityQuery.isLoading.value || diagnosticsQuery.isLoading.value);
 const errorMessage = computed(() => {
   const error = capabilityQuery.error.value || diagnosticsQuery.error.value;
@@ -193,28 +193,28 @@ const syncVisible = ref(false);
 const selectedPluginKey = ref("");
 const logComponent = ref("agent.runtime");
 const logLevel = ref<"debug" | "info" | "warn" | "error">("info");
-const liveLogs = ref<V2LogEvent[]>([]);
+const liveLogs = ref<LogEvent[]>([]);
 const logsQuery = useQuery({
-  queryKey: computed(() => ["v2-node-logs", props.nodeId]),
-  queryFn: () => aetpApi.assets.v2Logs(props.nodeId, { limit: 100 }),
-  enabled: isV2Node,
+  queryKey: computed(() => ["node-logs", props.nodeId]),
+  queryFn: () => aetpApi.assets.logs(props.nodeId, { limit: 100 }),
+  enabled: isRegisteredNode,
 });
 const operationsQuery = useQuery({
-  queryKey: computed(() => ["v2-node-maintenance", props.nodeId]),
-  queryFn: () => aetpApi.assets.v2MaintenanceOperations(props.nodeId),
-  enabled: isV2Node,
+  queryKey: computed(() => ["node-maintenance", props.nodeId]),
+  queryFn: () => aetpApi.assets.maintenanceOperations(props.nodeId),
+  enabled: isRegisteredNode,
   refetchInterval: 5000,
 });
-const operations = computed<V2RemoteOperation[]>(() => operationsQuery.data.value ?? []);
+const operations = computed<RemoteOperation[]>(() => operationsQuery.data.value ?? []);
 const pluginVersionsQuery = useQuery({
-  queryKey: ["v2-plugin-versions"],
-  queryFn: () => aetpApi.plugins.v2List(),
+  queryKey: ["plugin-versions"],
+  queryFn: () => aetpApi.plugins.list(),
   enabled: isAdmin,
 });
-const syncablePlugins = computed<V2PluginVersion[]>(() => (pluginVersionsQuery.data.value ?? []).filter((plugin) => ["verified", "installed", "enabled", "disabled", "pending_restart"].includes(plugin.status)));
+const syncablePlugins = computed<PluginVersion[]>(() => (pluginVersionsQuery.data.value ?? []).filter((plugin) => ["verified", "installed", "enabled", "disabled", "pending_restart"].includes(plugin.status)));
 const selectedPlugin = computed(() => syncablePlugins.value.find((plugin) => `${plugin.plugin_id}:${plugin.version}` === selectedPluginKey.value) ?? null);
-const logRows = computed<V2LogEvent[]>(() => {
-  const unique = new Map<string, V2LogEvent>();
+const logRows = computed<LogEvent[]>(() => {
+  const unique = new Map<string, LogEvent>();
   for (const item of logsQuery.data.value ?? []) unique.set(item.event.event_id, item.event);
   for (const item of liveLogs.value) unique.set(item.event_id, item);
   return [...unique.values()].sort((a, b) => b.sequence - a.sequence).slice(0, 100);
@@ -222,10 +222,10 @@ const logRows = computed<V2LogEvent[]>(() => {
 let disconnectLogs = () => {};
 
 onMounted(() => {
-  if (!isV2Node.value) return;
+  if (!isRegisteredNode.value) return;
   disconnectLogs = connectAgentLogs(props.nodeId, (event) => {
     if (event.type !== "agent.log") return;
-    const log = event.data as unknown as V2LogEvent;
+    const log = event.data as unknown as LogEvent;
     if (!log.event_id || !log.message) return;
     liveLogs.value = [log, ...liveLogs.value.filter((item) => item.event_id !== log.event_id)].slice(0, 100);
   });
@@ -235,10 +235,10 @@ onUnmounted(() => disconnectLogs());
 async function collect() {
   collecting.value = true;
   try {
-    await aetpApi.assets.v2CollectDiagnostics(props.nodeId);
+    await aetpApi.assets.collectDiagnostics(props.nodeId);
     ElMessage.success("诊断请求已下发");
-    await queryClient.invalidateQueries({ queryKey: ["v2-node-maintenance", props.nodeId] });
-    await queryClient.invalidateQueries({ queryKey: ["v2-node-diagnostics", props.nodeId] });
+    await queryClient.invalidateQueries({ queryKey: ["node-maintenance", props.nodeId] });
+    await queryClient.invalidateQueries({ queryKey: ["node-diagnostics", props.nodeId] });
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : "诊断请求失败");
   } finally {
@@ -249,7 +249,7 @@ async function collect() {
 async function updateLogLevel() {
   actionLoading.value = true;
   try {
-    await aetpApi.assets.v2SetLogLevel(props.nodeId, { component: logComponent.value, level: logLevel.value });
+    await aetpApi.assets.setLogLevel(props.nodeId, { component: logComponent.value, level: logLevel.value });
     ElMessage.success("日志级别更新请求已下发");
     await operationsQuery.refetch();
   } catch (error) {
@@ -262,7 +262,7 @@ async function updateLogLevel() {
 async function drain() {
   actionLoading.value = true;
   try {
-    await aetpApi.assets.v2Drain(props.nodeId, { drain_timeout_s: 1800, reason: "Web 运维操作" });
+    await aetpApi.assets.drain(props.nodeId, { drain_timeout_s: 1800, reason: "Web 运维操作" });
     ElMessage.success("排空请求已下发");
     await operationsQuery.refetch();
   } catch (error) {
@@ -280,7 +280,7 @@ async function restart() {
   }
   actionLoading.value = true;
   try {
-    await aetpApi.assets.v2Restart(props.nodeId, { drain_timeout_s: 1800, reason: "Web 运维操作" });
+    await aetpApi.assets.restart(props.nodeId, { drain_timeout_s: 1800, reason: "Web 运维操作" });
     ElMessage.success("重启请求已下发");
     await operationsQuery.refetch();
   } catch (error) {
@@ -295,7 +295,7 @@ async function syncPlugin() {
   if (!plugin) return;
   syncing.value = true;
   try {
-    await aetpApi.assets.v2PluginSync(props.nodeId, {
+    await aetpApi.assets.pluginSync(props.nodeId, {
       items: [{
         plugin_id: plugin.plugin_id,
         point: plugin.point,
@@ -321,22 +321,22 @@ async function syncPlugin() {
   }
 }
 
-function availabilityType(availability: V2PluginAvailability) {
+function availabilityType(availability: PluginAvailability) {
   if (availability === "available") return "success";
   if (availability === "error") return "danger";
   if (availability === "blocked") return "warning";
   return "info";
 }
-function operationLabel(kind: V2RemoteOperation["kind"]) {
+function operationLabel(kind: RemoteOperation["kind"]) {
   return { diagnostics: "诊断", plugin_sync: "插件同步", log_level: "日志级别", drain: "排空", restart: "重启" }[kind];
 }
-function operationType(status: V2RemoteOperation["status"]) {
+function operationType(status: RemoteOperation["status"]) {
   if (status === "succeeded") return "success";
   if (status === "failed" || status === "cancelled") return "danger";
   if (status === "running") return "warning";
   return "info";
 }
-function logType(level: V2LogEvent["level"]) {
+function logType(level: LogEvent["level"]) {
   if (level === "error") return "danger";
   if (level === "warn") return "warning";
   if (level === "info") return "success";
@@ -347,7 +347,7 @@ function formatMemory(mb: number) { return mb >= 1024 ? `${(mb / 1024).toFixed(1
 </script>
 
 <style scoped>
-.v2-diagnostics-panel { padding: 14px 28px 18px 56px; background: #fbfcfd; border-top: 1px solid #edf1f4; }
+.diagnostics-panel { padding: 14px 28px 18px 56px; background: #fbfcfd; border-top: 1px solid #edf1f4; }
 .snapshot-strip { display: flex; flex-wrap: wrap; gap: 22px; padding: 2px 0 14px; color: #71808b; font-size: 12px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
 .panel-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
@@ -385,6 +385,6 @@ function formatMemory(mb: number) { return mb >= 1024 ? `${(mb / 1024).toFixed(1
 .live-indicator::before { width: 5px; height: 5px; border-radius: 50%; background: #3ab47e; content: ""; }
 .error-text { color: #bc4c4c; }
 .logs-section :deep(.el-table__body-wrapper) { min-height: 58px; }
-@media (max-width: 900px) { .v2-diagnostics-panel { padding-left: 20px; padding-right: 20px; }.diagnostics-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .diagnostics-panel { padding-left: 20px; padding-right: 20px; }.diagnostics-grid { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .snapshot-strip { gap: 10px 16px; }.system-grid { grid-template-columns: 1fr; }.system-grid b { text-align: left; }.panel-head { align-items: flex-start; flex-direction: column; }.panel-actions { justify-content: flex-start; }.component-input { width: 100%; }.level-select { width: 100%; } }
 </style>

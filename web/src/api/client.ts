@@ -14,6 +14,15 @@ export function clearSession(): void {
   localStorage.removeItem(USER_KEY);
 }
 
+export function newIdempotencyKey(prefix = "web"): string {
+  if (typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return `${prefix}-${Date.now()}-${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
 function storeTokens(body: { access_token: string; refresh_token: string }) {
   localStorage.setItem(ACCESS_KEY, body.access_token);
   localStorage.setItem(REFRESH_KEY, body.refresh_token);
@@ -28,7 +37,7 @@ async function tryRefresh(): Promise<boolean> {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       try {
-        const resp = await fetch(`${BASE}/api/v1/auth/refresh`, {
+        const resp = await fetch(`${BASE}/api/v2/auth/refresh`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refresh_token: raw }),
@@ -155,35 +164,43 @@ export const api = {
   get<T>(path: string): Promise<T> {
     return request<T>(path);
   },
-  post<T>(path: string, body?: unknown): Promise<T> {
+  post<T>(path: string, body?: unknown, requestHeaders?: Record<string, string>): Promise<T> {
     return request<T>(path, {
       method: "POST",
+      headers: requestHeaders,
       body: body ? JSON.stringify(body) : undefined,
     });
   },
-  patch<T>(path: string, body?: unknown): Promise<T> {
+  patch<T>(path: string, body?: unknown, requestHeaders?: Record<string, string>): Promise<T> {
     return request<T>(path, {
       method: "PATCH",
+      headers: requestHeaders,
       body: body ? JSON.stringify(body) : undefined,
     });
   },
-  delete<T = void>(path: string): Promise<T> {
-    return request<T>(path, { method: "DELETE" });
+  delete<T = void>(path: string, requestHeaders?: Record<string, string>): Promise<T> {
+    return request<T>(path, { method: "DELETE", headers: requestHeaders });
   },
   blob(path: string): Promise<Blob> {
     return requestBlob(path);
   },
   /** 上传：可传单个 File（自动包成 FormData）或直接传 FormData（多字段）。 */
-  async upload<T>(path: string, fileOrForm: File | FormData, retried = false): Promise<T> {
+  async upload<T>(
+    path: string,
+    fileOrForm: File | FormData,
+    retried = false,
+    requestHeaders?: Record<string, string>,
+  ): Promise<T> {
     const token = getToken();
     const form = fileOrForm instanceof FormData ? fileOrForm : (() => {
       const f = new FormData();
       f.append("file", fileOrForm);
       return f;
     })();
-    const resp = await fetch(`${BASE}${path}`, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: form });
+    const headers = { ...requestHeaders, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+    const resp = await fetch(`${BASE}${path}`, { method: "POST", headers, body: form });
     if (resp.status === 401 && !retried && await tryRefresh()) {
-      return api.upload<T>(path, form, true);
+      return api.upload<T>(path, form, true, requestHeaders);
     }
     if (resp.status === 401) {
       clearSession();

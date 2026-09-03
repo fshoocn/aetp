@@ -55,7 +55,7 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { ArrowRight, Connection, DataLine, List, Refresh, Timer } from "@element-plus/icons-vue";
-import { aetpApi, type Run } from "@/api/endpoints";
+import { aetpApi, type RunListView } from "@/api/endpoints";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
 import { runStatusText, runStatusTag } from "@/utils/statusMaps";
@@ -68,7 +68,7 @@ const projectId = computed(() => projectStore.currentProjectId ?? "");
 const currentProject = computed(() => projectStore.projects.find((project) => project.project_id === projectId.value));
 const runsQuery = useQuery({ queryKey: ["runs", "dashboard", projectId], queryFn: () => aetpApi.runs.list(projectId.value, 200), enabled: computed(() => !!projectId.value), refetchInterval: 5000 });
 const nodesQuery = useQuery({ queryKey: ["assets", "nodes", "dashboard"], queryFn: () => aetpApi.assets.nodes(undefined, true), refetchInterval: 5000 });
-const devicesQuery = useQuery({ queryKey: ["devices", "dashboard", projectId], queryFn: () => aetpApi.devices.list(projectId.value), enabled: computed(() => !!projectId.value), refetchInterval: 5000 });
+const devicesQuery = useQuery({ queryKey: ["assets", "devices", "dashboard"], queryFn: () => aetpApi.assets.devices(), refetchInterval: 5000 });
 const loading = computed(() => runsQuery.isLoading.value || nodesQuery.isLoading.value || devicesQuery.isLoading.value);
 const queryError = computed(() => (runsQuery.error.value || nodesQuery.error.value || devicesQuery.error.value)?.message || "");
 const allRuns = computed(() => runsQuery.data.value ?? []);
@@ -77,7 +77,7 @@ const allDevices = computed(() => devicesQuery.data.value ?? []);
 const recentRuns = computed(() => allRuns.value.slice(0, 8));
 const stats = computed(() => { const total = allDevices.value.length; const online = allDevices.value.filter((device) => device.online).length; return { totalRuns: allRuns.value.length, runningRuns: allRuns.value.filter((run) => ["created", "dispatched", "acked", "running"].includes(run.status)).length, onlineNodes: allNodes.value.filter((node) => node.online).length, onlineDevices: online, deviceRate: total ? Math.round((online / total) * 100) : null }; });
 function refresh() { queryClient.invalidateQueries({ queryKey: ["runs"] }); queryClient.invalidateQueries({ queryKey: ["assets", "nodes"] }); queryClient.invalidateQueries({ queryKey: ["devices"] }); }
-function gotoRun(row: Run) { router.push(`/runs/${row.run_id}`); }
+function gotoRun(row: RunListView) { router.push(`/runs/${row.run_id}`); }
 function fmt(ts: string) { return new Date(ts).toLocaleString("zh-CN", { hour12: false }); }
 const statusText = runStatusText;
 const statusTag = runStatusTag;

@@ -30,7 +30,7 @@ export function connectEvents(
 ): () => void {
   if (!projectId) return () => {};
   return connectSse(
-    `${BASE}/api/v1/events?project_id=${encodeURIComponent(projectId)}`,
+    `${BASE}/api/v2/events?project_id=${encodeURIComponent(projectId)}`,
     onEvent,
     onError,
     onOpen,

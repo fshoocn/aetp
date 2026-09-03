@@ -18,8 +18,8 @@
           <CapabilityPanel :capabilities="row.capabilities" />
           <div v-if="Object.keys(row.plugin_versions || {}).length" class="device-list-head cap-head">执行插件版本</div>
           <div v-if="Object.keys(row.plugin_versions || {}).length" class="cap-grid">
-            <div v-for="(version, taskType) in row.plugin_versions" :key="taskType" class="cap-item">
-              <span class="cap-key">{{ taskType }}</span>
+            <div v-for="(version, pluginId) in row.plugin_versions" :key="pluginId" class="cap-item">
+              <span class="cap-key">{{ pluginId }}</span>
               <span class="cap-value mono">{{ version }}</span>
             </div>
           </div>

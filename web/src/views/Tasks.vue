@@ -36,7 +36,7 @@ import { computed, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Search } from "@element-plus/icons-vue";
-import { aetpApi, type Run } from "@/api/endpoints";
+import { aetpApi, type RunListView } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 import { useTaskEvents } from "@/composables/useTaskEvents";
@@ -60,7 +60,7 @@ const errorMessage = computed(() => runQuery.error.value?.message || "");
 function applyFilters() { queryClient.invalidateQueries({ queryKey: ["runs", "queue"] }); }
 function resetFilters() { filters.status = ""; }
 function refresh() { queryClient.invalidateQueries({ queryKey: ["runs", "queue"] }); }
-function gotoRun(row: Run) { router.push(`/runs/${row.run_id}`); }
+function gotoRun(row: RunListView) { router.push(`/runs/${row.run_id}`); }
 const statusText = (status: string) => status === "created" ? "等待调度" : runStatusText(status);
 const statusTag = runStatusTag;
 
