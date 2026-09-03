@@ -40,7 +40,7 @@ Analyzer 在 Reporter 产出统一结果后执行，对 Run 的 case 结果做�
 在仓库根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File plugins\build_plugin.ps1 -PluginDir plugins\case_statistics_analyzer
+python plugins/build_plugin.py plugins/case_statistics_analyzer
 ```
 
 产出 `plugins/org.case-statistics.analyzer-1.0.0.zip`，内容为 `plugin.json` + `master/`。

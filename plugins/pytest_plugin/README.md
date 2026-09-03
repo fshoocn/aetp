@@ -12,9 +12,10 @@ pytest_executor.zip（V2 归档）
 └── agent/executor.py    # Agent 面：create_executor
 ```
 
-> 本插件是 V2 executor 的参考实现，也是默认装配的 pytest 执行器；Master 默认还把它
-> 提供的 `JUnitReporter` 与 `CaseStatisticsAnalyzer` 注册为平台级扩展（见
-> `master/application/services/reporting_pipeline.py::build_default_reporting_registries`）。
+> 本插件是 V2 executor 的参考实现，也是默认装配的 pytest 执行器。Run 报告解析与
+> case 统计由独立的 reporter / analyzer 插件包提供：`plugins/junit_reporter/`
+> （`org.junit.reporter`）与 `plugins/case_statistics_analyzer/`
+> （`org.case-statistics.analyzer`）。
 
 ## 插件标识
 
@@ -30,8 +31,6 @@ pytest_executor.zip（V2 归档）
 |---|---|
 | `master/executor.py` | Master 面 `PytestMasterExecutor.parse_cases`：收集并解析 pytest nodeid 为稳定用例（`stable_key` 即 nodeid） |
 | `agent/executor.py` | Agent 面 `PytestExecutor`：`execute` 执行精确 case_keys、`analyze_results` 解析 JUnit、`cleanup`/`cancel` |
-| `master/junit_reporter.py` | Master Reporter：把 JUnit Artifact 转成 `UnifiedTestResult`（被平台默认装配） |
-| `master/case_statistics_analyzer.py` | Master Analyzer：case 耗时与失败率统计（被平台默认装配） |
 | `tests/` | 插件自测（master nodeid 解析、agent JUnit 解析/参数校验/附件收集） |
 | `examples/e2e_script/` | 可直接下发的 pytest 冒烟工程（含通过/参数化/跳过/xfail/失败控制用例） |
 
@@ -53,24 +52,23 @@ pytest_executor.zip（V2 归档）
 
 ## 构建 V2 归档
 
-在仓库根目录执行（推荐用打包脚本）：
+在仓库根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File plugins\pytest_plugin\build.ps1
+python plugins/build_plugin.py plugins/pytest_plugin
 ```
 
-脚本产出 `plugins/org.pytest.executor-2.0.0.zip`（只含 `plugin.json`、`master/executor.py`、
-`agent/executor.py`），并打印归档内容清单。也可手动打包：
+产出 `plugins/org.pytest.executor-2.0.0.zip`（`plugin.json` + `master/` + `agent/`）。
+也可一键重建 `plugins/` 下全部插件：
 
 ```powershell
-cd plugins\pytest_plugin
-..\..\.venv\Scripts\python.exe -c "import zipfile; z=zipfile.ZipFile('../org.pytest.executor-2.0.0.zip','w',zipfile.ZIP_DEFLATED); [z.write(p) for p in ('plugin.json','master/executor.py','agent/executor.py')]; z.close()"
+python plugins/build_plugin.py --all
 ```
 
-校验归档：
+校验归档成员：
 
 ```powershell
-..\..\.venv\Scripts\python.exe -c "import zipfile; print(zipfile.ZipFile('../org.pytest.executor-2.0.0.zip').namelist())"
+..\..\.venv\Scripts\python.exe -c "import zipfile; print(zipfile.ZipFile('plugins/org.pytest.executor-2.0.0.zip').namelist())"
 ```
 
 ## 安装与下发流程

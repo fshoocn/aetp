@@ -77,7 +77,6 @@ aetp_resource/
 在仓库根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File plugins\build_plugin.ps1 -PluginDir plugins\aetp_resource
 python plugins/build_plugin.py plugins/aetp_resource
 ```
 

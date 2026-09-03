@@ -9,7 +9,7 @@
   "entrypoints": {
     "master": "case_count_sharding:create_sharding"
   },
-  "capabilities": ["sharding.by_case_count"],
+  "capabilities": ["sharding.by-case-count"],
   "static_requirements": {
     "runtimes": [],
     "software": [],

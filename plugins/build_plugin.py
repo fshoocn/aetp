@@ -1,18 +1,17 @@
 """通用 AETP V2 插件归档构建脚本。
 
 用法（仓库根）：
-    python plugins/build_plugin.py plugins/pytest_plugin
-    python plugins/build_plugin.py plugins/junit_reporter
-    python plugins/build_plugin.py plugins/case_statistics_analyzer
-    python plugins/build_plugin.py plugins/resource_package          # 多资源 provider 包（后述）
+    python plugins/build_plugin.py plugins/pytest_plugin        # 构建单个
+    python plugins/build_plugin.py --all                          # 构建 plugins/ 下全部插件
 
-读取目标目录的 plugin.json，按 point 决定归档内容，产出
-``plugins/{plugin_id}-{version}.zip``（archive 目录为仓库根 plugins/）。
+读取目标目录（或 ``--all`` 时 plugins/ 下全部子目录）的 plugin.json，按 point 决定
+归档内容，产出 ``plugins/{plugin_id}-{version}.zip``（archive 目录为仓库根 plugins/）。
 
 归档内容规则：
 - 总是包含根 ``plugin.json``。
-- ``master/``、``agent/`` 目录存在时整目录递归加入（跳过 __pycache__、.pyc、tests）。
-- 除 plugin.json 外顶层文件（如 README 之外）只加白名单（见 _TOP_LEVEL_FILES）。
+- ``master/``、``agent/``、``ui/``、``schemas/`` 目录存在时整目录递归加入
+  （跳过 __pycache__、.pyc、tests）。
+- 除 plugin.json 外顶层文件（如 README）只加白名单（见 _TOP_LEVEL_FILES）。
 """
 
 from __future__ import annotations
@@ -87,15 +86,42 @@ def build(plugin_root: pathlib.Path, output_dir: pathlib.Path) -> pathlib.Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 AETP V2 插件归档")
-    parser.add_argument("plugin_dir", help="插件工程目录（含 plugin.json）")
+    parser.add_argument("plugin_dir", nargs="?", help="插件工程目录（含 plugin.json）")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="构建 plugins/ 下全部插件工程（跳过非插件子目录）",
+    )
     args = parser.parse_args()
+    repo_root = pathlib.Path(__file__).resolve().parent
+    if args.all:
+        dirs = build_all(repo_root)
+        return 0 if dirs else 2
+    if not args.plugin_dir:
+        parser.error("需要提供插件目录或使用 --all")
     plugin_root = pathlib.Path(args.plugin_dir)
     if not plugin_root.is_dir() or not (plugin_root / "plugin.json").is_file():
         print(f"无效插件目录: {plugin_root}", file=sys.stderr)
         return 2
-    repo_root = pathlib.Path(__file__).resolve().parent
     build(plugin_root, repo_root)
     return 0
+
+
+def build_all(plugins_root: pathlib.Path) -> tuple[pathlib.Path, ...]:
+    """构建 plugins_root 下所有含 plugin.json 的插件工程，返回产物列表。"""
+    built: list[pathlib.Path] = []
+    for child in sorted(plugins_root.iterdir()):
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        if not (child / "plugin.json").is_file():
+            continue
+        try:
+            built.append(build(child, plugins_root))
+        except SystemExit as exc:
+            print(f"跳过 {child.name}: {exc}", file=sys.stderr)
+    if not built:
+        print("未找到可构建的插件工程", file=sys.stderr)
+    return tuple(built)
 
 
 if __name__ == "__main__":

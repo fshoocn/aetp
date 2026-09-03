@@ -43,7 +43,7 @@ content-type），解析 `<testsuite>/<testcase>`，把 case 结果（passed/fai
 在仓库根目录执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File plugins\build_plugin.ps1 -PluginDir plugins\junit_reporter
+python plugins/build_plugin.py plugins/junit_reporter
 ```
 
 产出 `plugins/org.junit.reporter-1.0.0.zip`，内容为 `plugin.json` + `master/`。

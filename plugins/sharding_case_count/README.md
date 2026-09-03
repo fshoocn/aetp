@@ -7,7 +7,7 @@
 - 版本：`1.0.0`（SemVer）
 - 扩展点：`sharding`（`api_version=2.0.0`）
 - 装配侧：Master
-- 能力：`sharding.by_case_count`
+- 能力：`sharding.by-case-count`
 
 ## 用途 / 触发方式
 
