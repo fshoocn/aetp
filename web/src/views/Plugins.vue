@@ -28,7 +28,15 @@ async function upload(event: Event) { const file = (event.target as HTMLInputEle
 function statusLabel(status: PluginVersion["status"]) { return ({ uploaded: "待校验", verified: "已校验", installed: "已安装", pending_restart: "待重启", enabled: "已启用", disabled: "已停用", removed: "已移除", error: "错误" } as Record<string, string>)[status] || status; }
 function statusType(status: PluginVersion["status"]) { return status === "enabled" ? "success" : status === "error" ? "danger" : "info"; }
 async function install(row: PluginVersion) { try { await aetpApi.plugins.install(row.plugin_id, row.version); ElMessage.success("插件已安装"); refresh(); } catch (error) { ElMessage.error(error instanceof Error ? error.message : "安装失败"); } }
-async function toggle(row: PluginVersion) { try { if (row.status === "enabled") await aetpApi.plugins.disable(row.plugin_id, row.version); else await aetpApi.plugins.enable(row.plugin_id, row.version); ElMessage.success("状态已更新，重启后生效"); refresh(); } catch (error) { ElMessage.error(error instanceof Error ? error.message : "操作失败"); } }
+async function toggle(row: PluginVersion) {
+  try {
+    const needsAgentSync = Boolean((row.manifest.entrypoints as { agent?: string } | undefined)?.agent);
+    if (row.status === "enabled") await aetpApi.plugins.disable(row.plugin_id, row.version);
+    else await aetpApi.plugins.enable(row.plugin_id, row.version);
+    ElMessage.success(needsAgentSync ? "状态已即时生效；若含 Agent 端，需对节点执行插件同步" : "状态已即时生效（热插拔）");
+    refresh();
+  } catch (error) { ElMessage.error(error instanceof Error ? error.message : "操作失败"); }
+}
 async function rollback(row: PluginVersion) { try { await aetpApi.plugins.rollback(row.plugin_id, row.version); ElMessage.success("活动版本已切换"); refresh(); } catch (error) { ElMessage.error(error instanceof Error ? error.message : "回滚失败"); } }
 async function remove(row: PluginVersion) { try { await ElMessageBox.confirm(`确认移除 ${row.plugin_id}@${row.version}？\n移除前需确保没有启用脚本引用它；移除后归档仍可下载。`, "移除插件", { type: "warning" }); await aetpApi.plugins.remove(row.plugin_id, row.version); ElMessage.success("插件版本已移除"); refresh(); } catch (error) { if (error instanceof Error && error.message !== "cancel") ElMessage.error(error.message); } }
 async function download(row: PluginVersion) {

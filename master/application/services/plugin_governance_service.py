@@ -251,6 +251,41 @@ class PluginGovernanceService:
             assert_transition(record.status, PluginStatus.PENDING_RESTART)
             return uow.plugin_versions.update(replace(record, status=PluginStatus.PENDING_RESTART))
 
+    def is_master_consumed(self, plugin_id: PluginId, version: SemVer) -> bool:
+        """插件是否在 Master 进程内被消费（有 master 入口或 ui 入口）。
+
+        Master 面插件（reporter/analyzer/notifier/hook/sharding/ui/executor-master…
+        ）可热插拔、直接 ENABLED/DISABLED；纯 Agent 插件（resource/runtime/software…
+        无 master 也无 ui 入口）只经节点同步装配，保留 PENDING_RESTART 等待同步。
+        """
+        with self._uow_factory() as uow:
+            record = self._require(uow, plugin_id, version)
+        entrypoints = record.manifest.entrypoints
+        return entrypoints.master is not None or entrypoints.ui is not None
+
+    def enable(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
+        """启用插件版本。
+
+        - Master 面插件：直接落定 ENABLED（跳过 PENDING_RESTART，热插拔即时生效，
+          由热重载器在 API 层触发 refresh）；
+        - 纯 Agent 插件：保持 PENDING_RESTART，等待节点同步后装配。
+        """
+        if not self.is_master_consumed(plugin_id, version):
+            return self.request_enabled(plugin_id, version)
+        pending = self.request_enabled(plugin_id, version)
+        return self.complete_restart(pending.plugin_id, pending.version, enabled=True)
+
+    def disable(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
+        """停用插件版本。
+
+        - Master 面插件：直接落定 DISABLED（跳过 PENDING_RESTART，热插拔即时生效）；
+        - 纯 Agent 插件：保持 PENDING_RESTART，等待节点同步停用。
+        """
+        if not self.is_master_consumed(plugin_id, version):
+            return self.request_disabled(plugin_id, version)
+        pending = self.request_disabled(plugin_id, version)
+        return self.complete_restart(pending.plugin_id, pending.version, enabled=False)
+
     @staticmethod
     def _assert_no_active_references(
         uow: UnitOfWork,

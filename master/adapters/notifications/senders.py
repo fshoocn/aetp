@@ -274,16 +274,32 @@ class EmailSender(NotificationSender):
 class SenderRegistry:
     """Sender 注册中心：运行时注册/查询 sender adapter。
 
-    支持插件通过 register() 注册自定义 sender，无需修改核心代码。
+    支持插件通过 register_plugin() 注册自定义 sender，无需修改核心代码。
+    插件渠道单独记账（``_plugin_channels``），热插拔刷新时只卸载插件渠道、
+    保留内置渠道。
     """
 
     def __init__(self) -> None:
         self._senders: dict[str, NotificationSender] = {}
+        self._plugin_channels: set[str] = set()
 
     def register(self, sender: NotificationSender) -> None:
-        """注册一个 sender，已存在同 channel_type 则覆盖。"""
+        """注册一个内置 sender，已存在同 channel_type 则覆盖。"""
         self._senders[sender.channel_type] = sender
         logger.info("注册通知 sender: channel_type=%s", sender.channel_type)
+
+    def register_plugin(self, sender: NotificationSender) -> None:
+        """注册插件渠道 sender（同 channel_type 覆盖，含内置）；并记账为插件渠道。"""
+        self._senders[sender.channel_type] = sender
+        self._plugin_channels.add(sender.channel_type)
+        logger.info("注册插件通知 sender: channel_type=%s", sender.channel_type)
+
+    def unregister_plugin_channels(self) -> None:
+        """移除所有插件渠道（恢复被插件覆盖的同名内置渠道）。"""
+        for channel_type in self._plugin_channels:
+            self._senders.pop(channel_type, None)
+        self._plugin_channels.clear()
+        logger.info("已卸载插件通知渠道")
 
     def get(self, channel_type: str) -> NotificationSender | None:
         """按 channel_type 获取 sender。"""

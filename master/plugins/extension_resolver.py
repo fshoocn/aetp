@@ -99,6 +99,10 @@ class ExtensionResolver:
         """
         return self._ensure_extracted(record)
 
+    def invalidate_all(self) -> None:
+        """清空已解析缓存（热插拔：registry 变更后让下一次 resolve 重新加载）。"""
+        self._loaded.clear()
+
     def _ensure_extracted(self, record: PluginVersionRecord) -> Path:
         target = (
             self._extraction_root

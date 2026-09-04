@@ -227,6 +227,7 @@ def install_plugin(
 def enable_plugin(
     plugin_id: str,
     version: str,
+    request: Request,
     admin: PlatformAdminDep,
     service: Annotated[PluginGovernanceService, Depends(get_plugin_service)],
     idempotency: IdempotencyServiceDep,
@@ -234,20 +235,23 @@ def enable_plugin(
 ) -> PluginVersionView:
     typed_plugin_id = _plugin_id(plugin_id)
     typed_version = _version(version)
-    return _mutate_plugin(
+    response = _mutate_plugin(
         service=service,
         idempotency=idempotency,
         idempotency_key=idempotency_key,
         scope=f"plugin.enable:{admin.persisted_id}:{plugin_id}:{version}",
         payload={"plugin_id": plugin_id, "version": version, "operation": "enable"},
-        action=lambda: service.request_enabled(typed_plugin_id, typed_version),
+        action=lambda: service.enable(typed_plugin_id, typed_version),
     )
+    _refresh_hot_plugins(request)
+    return response
 
 
 @router.post("/{plugin_id}/{version}/disable", response_model=PluginVersionView)
 def disable_plugin(
     plugin_id: str,
     version: str,
+    request: Request,
     admin: PlatformAdminDep,
     service: Annotated[PluginGovernanceService, Depends(get_plugin_service)],
     idempotency: IdempotencyServiceDep,
@@ -255,20 +259,23 @@ def disable_plugin(
 ) -> PluginVersionView:
     typed_plugin_id = _plugin_id(plugin_id)
     typed_version = _version(version)
-    return _mutate_plugin(
+    response = _mutate_plugin(
         service=service,
         idempotency=idempotency,
         idempotency_key=idempotency_key,
         scope=f"plugin.disable:{admin.persisted_id}:{plugin_id}:{version}",
         payload={"plugin_id": plugin_id, "version": version, "operation": "disable"},
-        action=lambda: service.request_disabled(typed_plugin_id, typed_version),
+        action=lambda: service.disable(typed_plugin_id, typed_version),
     )
+    _refresh_hot_plugins(request)
+    return response
 
 
 @router.post("/{plugin_id}/{version}/rollback", response_model=PluginVersionView)
 def rollback_plugin(
     plugin_id: str,
     version: str,
+    request: Request,
     admin: PlatformAdminDep,
     service: Annotated[PluginGovernanceService, Depends(get_plugin_service)],
     idempotency: IdempotencyServiceDep,
@@ -276,7 +283,7 @@ def rollback_plugin(
 ) -> PluginVersionView:
     typed_plugin_id = _plugin_id(plugin_id)
     typed_version = _version(version)
-    return _mutate_plugin(
+    response = _mutate_plugin(
         service=service,
         idempotency=idempotency,
         idempotency_key=idempotency_key,
@@ -284,12 +291,28 @@ def rollback_plugin(
         payload={"plugin_id": plugin_id, "version": version, "operation": "rollback"},
         action=lambda: service.rollback(typed_plugin_id, typed_version),
     )
+    _refresh_hot_plugins(request)
+    return response
+
+
+def _refresh_hot_plugins(request: Request) -> None:
+    """状态变更后即时把 DB 的 ENABLED 插件集重投影到进程内装配面（热插拔，无需重启）。"""
+    container = getattr(request.app.state, "container", None)
+    if container is None:
+        return
+    try:
+        container.plugin_hot_reload().refresh()
+    except Exception:  # noqa: BLE001 - 热重载失败不应让已成功的状态变更报错
+        import logging
+
+        logging.getLogger(__name__).exception("插件热重载失败")
 
 
 @router.delete("/{plugin_id}/{version}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_plugin(
     plugin_id: str,
     version: str,
+    request: Request,
     admin: PlatformAdminDep,
     service: Annotated[PluginGovernanceService, Depends(get_plugin_service)],
     idempotency: IdempotencyServiceDep,
@@ -308,6 +331,7 @@ def remove_plugin(
         return
     try:
         service.remove(typed_plugin_id, typed_version)
+        _refresh_hot_plugins(request)
         complete_idempotency(
             idempotency,
             result.reservation,

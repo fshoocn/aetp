@@ -68,6 +68,11 @@ class HookRegistry:
             self.event_hooks.remove(existing)
         self.event_hooks.append(hook)
 
+    def clear(self) -> None:
+        """清空全部 hook（热插拔：重建前先清空，registry 为常驻单例原地改）。"""
+        self.admission_hooks.clear()
+        self.event_hooks.clear()
+
 
 class HookRunner:
     """Hook 执行器：排序、超时、审计写入。"""

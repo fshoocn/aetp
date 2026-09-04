@@ -58,6 +58,7 @@ from master.application.services.plan_lease_service import PlanLeaseService
 from master.application.services.plan_materialization_service import PlanMaterializationService
 from master.application.services.plugin_download_service import PluginDownloadService
 from master.application.services.plugin_governance_service import PluginGovernanceService
+from master.application.services.plugin_hot_reload import PluginHotReloader
 from master.application.services.plugin_sync_service import PluginSyncService
 from master.application.services.project_member_service import ProjectMemberService
 from master.application.services.project_node_binding_service import (
@@ -199,8 +200,10 @@ class Container(containers.DeclarativeContainer):
         get_secret=notification_service.provided.get_secret,
     )
 
-    # P8.4：生命周期 Hook（准入 fail-closed、事件 fail-open、审计）
-    hook_runner = providers.Factory(
+    # P8.4：生命周期 Hook（准入 fail-closed、事件 fail-open、审计）。
+    # 用 Singleton 保证注册端（main/_register_hook_plugins、热重载）与执行端
+    # （event_hook_worker 持有的 runner）共享同一 registry，热插拔才真正生效。
+    hook_runner = providers.Singleton(
         HookRunner,
         uow_factory=uow_factory,
     )
@@ -318,6 +321,19 @@ class Container(containers.DeclarativeContainer):
         storage=artifact_storage_service,
         reporters=reporter_registry,
         analyzers=analyzer_registry,
+    )
+
+    # 插件热重载器：把 DB 的 ENABLED 插件集投影到进程内装配面（registry/resolver/
+    # reporter/analyzer/notifier/hook），供启停/回滚/移除后即时生效、无需重启。
+    plugin_hot_reload = providers.Singleton(
+        PluginHotReloader,
+        uow_factory=uow_factory,
+        registry=plugin_registry,
+        extension_resolver=master_extension_resolver,
+        reporter_registry=reporter_registry,
+        analyzer_registry=analyzer_registry,
+        sender_registry=sender_registry,
+        hook_runner=hook_runner,
     )
 
     # P7.1：领域事件先持久化，再广播到项目范围 SSE；P8.5：分发通知。

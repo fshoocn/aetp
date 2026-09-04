@@ -72,6 +72,10 @@ class ReporterRegistry:
     def list(self) -> tuple[RegisteredReporter, ...]:
         return tuple(self._plugins.values())
 
+    def clear(self) -> None:
+        """清空全部注册项（热插拔：重建前先清空，registry 为常驻单例原地改）。"""
+        self._plugins.clear()
+
 
 class AnalyzerRegistry:
     """Master Analyzer 注册中心。"""
@@ -100,6 +104,10 @@ class AnalyzerRegistry:
 
     def list(self) -> tuple[RegisteredAnalyzer, ...]:
         return tuple(self._plugins.values())
+
+    def clear(self) -> None:
+        """清空全部注册项（热插拔：重建前先清空，registry 为常驻单例原地改）。"""
+        self._plugins.clear()
 
 
 class _RunArtifactContext(PluginContext):
