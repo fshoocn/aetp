@@ -203,6 +203,9 @@ export const aetpApi = {
     remove(pluginId: string, version: string) {
       return api.delete(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}`, idempotencyHeaders("plugin-remove"));
     },
+    download(pluginId: string, version: string) {
+      return api.blob(`/api/v2/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/download`);
+    },
   },
 
   tasks: {
@@ -213,6 +216,12 @@ export const aetpApi = {
     getScriptDefinition(projectId: string, scriptDefinitionId: string, revision: number) {
       return api.get<ScriptDefinition>(
         `${API_BASE}/projects/${encodeURIComponent(projectId)}/script-definitions/${encodeURIComponent(scriptDefinitionId)}?revision=${revision}`,
+      );
+    },
+    disableScriptDefinition(projectId: string, scriptDefinitionId: string, revision: number) {
+      return api.delete<ScriptDefinition>(
+        `${API_BASE}/projects/${encodeURIComponent(projectId)}/script-definitions/${encodeURIComponent(scriptDefinitionId)}?revision=${revision}`,
+        idempotencyHeaders("script-disable"),
       );
     },
     uploadScriptDefinition(
@@ -250,6 +259,12 @@ export const aetpApi = {
       const query = revision === undefined ? "" : `?revision=${revision}`;
       return api.get<TaskView>(
         `${API_BASE}/projects/${encodeURIComponent(projectId)}/test-tasks/${encodeURIComponent(taskId)}${query}`,
+      );
+    },
+    disableTask(projectId: string, taskId: string) {
+      return api.delete<TaskView>(
+        `${API_BASE}/projects/${encodeURIComponent(projectId)}/test-tasks/${encodeURIComponent(taskId)}`,
+        idempotencyHeaders("task-disable"),
       );
     },
     createScriptDefinition(projectId: string, definition: ScriptDefinition) {

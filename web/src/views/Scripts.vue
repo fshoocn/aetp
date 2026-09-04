@@ -36,6 +36,12 @@
         <el-table-column label="用例" width="90"><template #default="{ row }">{{ row.cases.length }}</template></el-table-column>
         <el-table-column label="脚本文件" min-width="180"><template #default="{ row }"><span>{{ row.source.filename }}</span><small class="subline">{{ formatBytes(row.source.size) }}</small></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" effect="light">{{ row.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
+        <el-table-column label="操作" width="160">
+          <template #default="{ row }">
+            <el-button v-if="row.enabled && canManage" link type="danger" :disabled="disabling" @click.stop="disableDefinition(row)">停用</el-button>
+            <el-button link @click.stop="showDefinition(row)">详情</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <el-empty v-if="!loading && definitions.length === 0" description="当前项目尚未创建 ScriptDefinition" />
     </el-card>
@@ -91,7 +97,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Collection, Document, Refresh, Upload, UploadFilled } from "@element-plus/icons-vue";
 import { aetpApi, type PluginVersion, type ScriptDefinition } from "@/api/endpoints";
@@ -280,6 +286,25 @@ async function upload() {
   finally { uploading.value = false; }
 }
 function showDefinition(definition: ScriptDefinition) { selected.value = definition; detailVisible.value = true; }
+const disabling = ref(false);
+async function disableDefinition(definition: ScriptDefinition) {
+  if (!projectId.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认停用脚本定义 ${definition.name}（rev ${definition.revision}）？停用前需先停用引用它的测试任务，停用后不可再触发运行。`,
+      "停用脚本定义",
+      { type: "warning" },
+    );
+  } catch { return; }
+  disabling.value = true;
+  try {
+    await aetpApi.tasks.disableScriptDefinition(projectId.value, definition.script_definition_id, definition.revision);
+    ElMessage.success("脚本定义已停用");
+    refresh();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "停用失败");
+  } finally { disabling.value = false; }
+}
 function formatBytes(size: number) { return size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KB`; }
 </script>
 

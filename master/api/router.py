@@ -11,6 +11,7 @@ from aetp_protocol.ids import PluginId, SemVer, Sha256
 from aetp_protocol.plugin_types import PluginPoint, PluginStatus
 from aetp_protocol.plugins import PluginManifest
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from master.api.dependencies import CurrentUser, IdempotencyServiceDep
@@ -165,6 +166,40 @@ async def upload_plugin(
     except Exception:
         release_idempotency(idempotency, result.reservation)
         raise
+
+
+@router.get("/{plugin_id}/{version}/download")
+def download_plugin_archive(
+    plugin_id: str,
+    version: str,
+    request: Request,
+    _admin: PlatformAdminDep,
+) -> FileResponse:
+    """下载插件归档（平台管理员）。
+
+    已移除/停用/历史版本都可下载：归档文件在治理里不可变保留（逻辑移除不清文件），
+    用于备份或"无新版本时仍可获取原包 / 有新版本时下载历史版本"。
+    """
+    from pathlib import Path
+
+    try:
+        typed_plugin_id = PluginId(plugin_id)
+        typed_version = SemVer(version)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="插件 ID/版本不合法") from exc
+    container = request.app.state.container
+    with container.uow_factory()() as uow:
+        record = uow.plugin_versions.get(typed_plugin_id, typed_version)
+    if record is None:
+        raise HTTPException(status_code=404, detail="插件版本不存在")
+    archive_path = Path(record.archive_path)
+    if not archive_path.is_file():
+        raise HTTPException(status_code=404, detail="插件归档文件缺失")
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=record.filename or f"{plugin_id}-{version}.zip",
+    )
 
 
 @router.post("/{plugin_id}/{version}/install", response_model=PluginVersionView)

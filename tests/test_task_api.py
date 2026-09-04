@@ -82,3 +82,53 @@ def test_task_and_run_api_creates_snapshot_and_pending_shards(client) -> None:
     assert len(body["shards"]) == 2
     assert body["scheduled"] == 0
     assert len(body["pending_shard_ids"]) == 2
+
+
+def test_disable_endpoints_enforce_reference_preconditions(client) -> None:
+    """删脚本前必须先删任务；任务有 Run 时也不能删。"""
+    from aetp_protocol.ids import BusinessId
+
+    headers = _seed_project(client)
+    definition = _definition(SCRIPT_A, name="alpha")
+    response = client.post(
+        f"/api/v2/projects/{PROJECT_ID.root}/script-definitions",
+        headers=headers,
+        json={"definition": definition.model_dump(mode="json")},
+    )
+    assert response.status_code == 201, response.text
+
+    task_id = BusinessId("01J0000000000000000000004B")
+    task = ProtocolTestTask(
+        task_id=task_id,
+        project_id=PROJECT_ID,
+        revision=1,
+        name="disable api task",
+        scripts=(_binding("01J0000000000000000000004C", definition, 0),),
+    )
+    response = client.post(
+        f"/api/v2/projects/{PROJECT_ID.root}/test-tasks",
+        headers=headers,
+        json={"task": task.model_dump(mode="json")},
+    )
+    assert response.status_code == 201, response.text
+
+    # 脚本仍被任务引用 → 409
+    response = client.delete(
+        f"/api/v2/projects/{PROJECT_ID.root}/script-definitions/{SCRIPT_A.root}?revision=1",
+        headers=headers,
+    )
+    assert response.status_code == 409, response.text
+
+    # 任务被删（先建一个 Run 让它无法删除）→ 409
+    response = client.post(
+        f"/api/v2/projects/{PROJECT_ID.root}/runs",
+        headers=headers,
+        json={"task_id": task_id.root},
+    )
+    assert response.status_code == 201, response.text
+    response = client.delete(
+        f"/api/v2/projects/{PROJECT_ID.root}/test-tasks/{task_id.root}",
+        headers=headers,
+    )
+    assert response.status_code == 409, response.text
+

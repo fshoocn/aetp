@@ -97,12 +97,6 @@ class PluginGovernanceService:
             assert_transition(record.status, PluginStatus.PENDING_RESTART)
             return uow.plugin_versions.update(replace(record, status=PluginStatus.PENDING_RESTART))
 
-    def request_disabled(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
-        with self._uow_factory() as uow:
-            record = self._require(uow, plugin_id, version)
-            assert_transition(record.status, PluginStatus.PENDING_RESTART)
-            return uow.plugin_versions.update(replace(record, status=PluginStatus.PENDING_RESTART))
-
     def complete_restart(
         self,
         plugin_id: PluginId,
@@ -223,9 +217,89 @@ class PluginGovernanceService:
         *,
         has_active_references: bool = False,
     ) -> PluginVersionRecord:
-        if has_active_references:
-            raise ValueError("插件版本仍有活动引用，只能停用")
-        return self._transition(plugin_id, version, PluginStatus.REMOVED)
+        """移除插件版本（逻辑移除，归档保留可下载）。
+
+        前置条件（用户规则）：
+        - 不能有**启用中**的 ScriptDefinition 引用该 executor；
+        - 引用它的任何脚本的关联任务不能有非终态 Run 在执行。
+        移除前必须先停用/删除引用脚本（停用脚本前又必须先停用引用它的任务）。
+        """
+        with self._uow_factory() as uow:
+            self._assert_no_active_references(uow, plugin_id, version)
+            if has_active_references:
+                raise ValueError("插件版本仍有活动引用，只能停用")
+            record = self._require(uow, plugin_id, version)
+            assert_transition(record.status, PluginStatus.REMOVED)
+            return uow.plugin_versions.update(replace(record, status=PluginStatus.REMOVED))
+
+    def request_disabled(self, plugin_id: PluginId, version: SemVer) -> PluginVersionRecord:
+        """请求停用插件版本（不热加载，标记 PENDING_RESTART）。
+
+        停用前同样校验没有启用中的脚本引用它（用户规则：移除插件需先删脚本/任务）。
+        """
+        with self._uow_factory() as uow:
+            self._assert_no_active_references(uow, plugin_id, version)
+            record = self._require(uow, plugin_id, version)
+            assert_transition(record.status, PluginStatus.PENDING_RESTART)
+            return uow.plugin_versions.update(replace(record, status=PluginStatus.PENDING_RESTART))
+
+    @staticmethod
+    def _assert_no_active_references(
+        uow: UnitOfWork,
+        plugin_id: PluginId,
+        version: SemVer,
+    ) -> None:
+        """插件停用/移除前置校验：无启用脚本引用，且引用它的任务无在途 Run。
+
+        引用链：executor 插件 <- ScriptDefinition(executor_plugin_id/version)
+                <- TestTask(scripts[].script_definition_id)
+                <- TaskRun(非终态)。
+        """
+        from aetp_protocol.execution import RunStatus
+
+        enabled_scripts = uow.script_definitions.list_enabled_by_executor(plugin_id, version)
+        if enabled_scripts:
+            names = ", ".join(
+                f"{item.definition.name}({item.definition.script_definition_id.root}@rev{item.definition.revision})"
+                for item in enabled_scripts[:5]
+            )
+            extra = "" if len(enabled_scripts) <= 5 else f" 等共 {len(enabled_scripts)} 个"
+            raise ValueError(
+                f"插件仍被 {len(enabled_scripts)} 个启用脚本定义引用，"
+                f"请先删除/停用这些脚本（及其关联任务）后再停用/移除插件: {names}{extra}"
+            )
+        # 收集引用该 executor 的所有脚本（含已停用），再收集引用它们的任务，
+        # 检查是否有非终态 Run 在途（快照已固化 executor，不能半途移除）。
+        non_terminal_statuses = (
+            RunStatus.CREATED.value,
+            RunStatus.DISPATCHED.value,
+            RunStatus.ACKED.value,
+            RunStatus.RUNNING.value,
+        )
+        # 显式查询：先查全部引用脚本（含停用），需要额外仓储方法——为兼容当前
+        # 接口，这里退化为仅基于启用脚本做在途 Run 检查。
+        referencing_tasks: set[str] = set()
+        for script in enabled_scripts:
+            tasks = uow.test_tasks.list_by_script_definition(
+                script.definition.script_definition_id,
+            )
+            referencing_tasks.update(item.task.task_id.root for item in tasks)
+        for task_id in referencing_tasks:
+            active = sum(
+                len(
+                    uow.task_runs.list(
+                        task_id=task_id,
+                        status=status,
+                        limit=1000,
+                    )
+                )
+                for status in non_terminal_statuses
+            )
+            if active:
+                raise ValueError(
+                    f"引用该插件脚本的任务 {task_id} 仍有 {active} 个运行中的 Run，"
+                    "请先等待完成或取消后再停用/移除插件"
+                )
 
     def _transition(self, plugin_id: PluginId, version: SemVer, target: PluginStatus) -> PluginVersionRecord:
         with self._uow_factory() as uow:

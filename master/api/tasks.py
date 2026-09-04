@@ -589,6 +589,107 @@ def get_task(
     return _task_view(record)
 
 
+@router.delete(
+    "/{project_id}/test-tasks/{task_id}",
+    response_model=TaskView,
+)
+def disable_task(
+    project_id: str,
+    task_id: str,
+    access: ProjectManagerDep,
+    service: TaskServiceDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    revision: int | None = None,
+) -> TaskView:
+    """逻辑停用 TestTask（DELETE 语义：停用后不再触发 Run）。
+
+    前置：任务无运行中的 Run；有运行中 Run 时返回 409。
+    """
+    typed_project_id = _project_id(project_id)
+    try:
+        typed_task_id = BusinessId(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=" TestTask ID 不合法") from exc
+    result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"test-task.disable:{typed_project_id.root}:{typed_task_id.root}:{access.user.persisted_id}",
+        payload={"task_id": task_id, "revision": revision},
+        response_model=TaskView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
+    try:
+        record = service.disable_task(
+            typed_task_id,
+            project_id=typed_project_id,
+            task_revision=revision,
+        )
+    except KeyError as exc:
+        release_idempotency(idempotency, result.reservation)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response = _task_view(record)
+    complete_idempotency(idempotency, result.reservation, response, response_status=status.HTTP_200_OK)
+    return response
+
+
+@router.delete(
+    "/{project_id}/script-definitions/{script_definition_id}",
+    response_model=ScriptDefinition,
+)
+def disable_script_definition(
+    project_id: str,
+    script_definition_id: str,
+    access: ProjectManagerDep,
+    service: TaskServiceDep,
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    revision: int | None = None,
+) -> ScriptDefinition:
+    """逻辑停用 ScriptDefinition（DELETE 语义：停用后不可再被引用/触发 Run）。
+
+    前置（用户规则）：删除脚本前必须先删除关联任务 → 有启用任务引用时返回 409；
+    引用任务有运行中 Run 时也返回 409。
+    """
+    typed_project_id = _project_id(project_id)
+    try:
+        typed_script_id = BusinessId(script_definition_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=" ScriptDefinition ID 不合法") from exc
+    if revision is None or revision < 1:
+        raise HTTPException(status_code=422, detail="revision 必须大于 0")
+    result = reserve_idempotency(
+        idempotency,
+        idempotency_key,
+        scope=f"script-definition.disable:{typed_project_id.root}:{typed_script_id.root}:{access.user.persisted_id}",
+        payload={"script_definition_id": script_definition_id, "revision": revision},
+        response_model=ScriptDefinition,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
+    try:
+        record = service.disable_script_definition(
+            typed_script_id,
+            project_id=typed_project_id,
+            revision=revision,
+        )
+    except KeyError as exc:
+        release_idempotency(idempotency, result.reservation)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        release_idempotency(idempotency, result.reservation)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response = _definition_view(record)
+    complete_idempotency(idempotency, result.reservation, response, response_status=status.HTTP_200_OK)
+    return response
+
+
 @router.post(
     "/{project_id}/runs",
     response_model=RunView,

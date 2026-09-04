@@ -501,3 +501,43 @@ def test_node_group_desired_plugin_api(client) -> None:
     assert response.status_code == 200, response.text
     assert len(response.json()) == 2
     assert {item["desired"]["version"] for item in response.json()} == {"2.0.0"}
+
+
+def test_plugin_archive_download_endpoint(client, tmp_path) -> None:
+    """管理员可下载插件归档；移除后仍可下载（逻辑移除保留文件）。"""
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+    content = _archive()
+    registered = governance.register_archive("example.zip", content)
+
+    auth = container.auth_service()
+    assert auth.bootstrap_admin("dl-admin", "admin-pass-123", "Download Admin")
+    login = client.post(
+        "/api/v2/auth/login",
+        json={"username": "dl-admin", "password": "admin-pass-123"},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    response = client.get(
+        f"/api/v2/plugins/{registered.plugin_id.root}/{registered.version.root}/download",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.content == content
+
+    # 移除（逻辑）后仍可下载
+    governance.install(registered.plugin_id, registered.version)
+    governance.request_enabled(registered.plugin_id, registered.version)
+    governance.complete_restart(registered.plugin_id, registered.version, enabled=True)
+    governance.request_disabled(registered.plugin_id, registered.version)
+    governance.complete_restart(registered.plugin_id, registered.version, enabled=False)
+    removed = governance.remove(registered.plugin_id, registered.version)
+    assert removed.status is PluginStatus.REMOVED
+
+    response = client.get(
+        f"/api/v2/plugins/{registered.plugin_id.root}/{registered.version.root}/download",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert response.content == content

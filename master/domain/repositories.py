@@ -115,10 +115,27 @@ class ScriptDefinitionRepository(ABC):
     ) -> list[ScriptDefinitionRecord]: ...
 
     @abstractmethod
+    def list_enabled_by_executor(
+        self,
+        plugin_id: PluginId,
+        version: SemVer,
+    ) -> list[ScriptDefinitionRecord]:
+        """列出全局所有 ENABLED 且引用指定 executor 的脚本定义（跨项目）。
+
+        供插件停用/移除前置校验使用。
+        """
+        ...
+
+    @abstractmethod
     def add(self, record: ScriptDefinitionRecord) -> ScriptDefinitionRecord: ...
 
     @abstractmethod
     def list_all_file_refs(self) -> list[str]: ...
+
+    @abstractmethod
+    def disable(self, script_definition_id: BusinessId, revision: int) -> ScriptDefinitionRecord:
+        """把指定脚本定义 revision 逻辑停用（enabled=False）。"""
+        ...
 
 
 class TestTaskRepository(ABC):
@@ -136,7 +153,25 @@ class TestTaskRepository(ABC):
     ) -> list[TestTaskRecord]: ...
 
     @abstractmethod
+    def list_by_script_definition(
+        self,
+        script_definition_id: BusinessId,
+        *,
+        enabled: bool | None = None,
+    ) -> list[TestTaskRecord]:
+        """列出引用指定脚本定义的测试任务（可选按 enabled 过滤）。
+
+        供删除脚本定义前置校验使用。
+        """
+        ...
+
+    @abstractmethod
     def add(self, record: TestTaskRecord) -> TestTaskRecord: ...
+
+    @abstractmethod
+    def disable(self, task_id: BusinessId, revision: int | None = None) -> TestTaskRecord:
+        """把指定任务（默认最新 revision）逻辑停用（enabled=False）。"""
+        ...
 
 
 class TaskRunRepository(ABC):

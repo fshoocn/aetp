@@ -10,6 +10,7 @@ from aetp_protocol.artifacts import CaseSelection, Configuration
 from aetp_protocol.execution import (
     ExecutionRequirement,
     PluginRequirement,
+    RunStatus,
     ShardingRequest,
     SplitPolicy,
     TriggerType,
@@ -20,6 +21,15 @@ from aetp_protocol.task import RunScriptSnapshot, RunSnapshot, ScriptDefinition,
 from master.domain.models import RunShard, ScriptDefinitionRecord, TaskRun, TestTaskRecord
 from master.domain.repositories import UnitOfWork
 from master.domain.time import utcnow
+
+# Run 非终态集合（判定"有任务在执行"）：created/dispatched/acked/running
+_RUN_NON_TERMINAL_STATUSES = (
+    RunStatus.CREATED,
+    RunStatus.DISPATCHED,
+    RunStatus.ACKED,
+    RunStatus.RUNNING,
+)
+
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,86 @@ class TaskService:
                     updated_at=self._now(),
                 )
             )
+
+    def disable_task(
+        self,
+        task_id: BusinessId,
+        *,
+        project_id: BusinessId,
+        task_revision: int | None = None,
+    ) -> TestTaskRecord:
+        """逻辑停用 TestTask。
+
+        前置条件：该任务没有非终态 Run（created/dispatched/acked/running）在执行；
+        否则抛 ``ValueError`` 提示先等待/取消运行。
+        """
+        with self._uow_factory() as uow:
+            task_record = uow.test_tasks.get(task_id, task_revision)
+            if task_record is None or task_record.task.project_id != project_id:
+                raise KeyError(f" TestTask 不存在或不属于项目: {task_id.root}")
+            active = self._active_run_count(uow, task_id.root)
+            if active:
+                raise ValueError(
+                    f"测试任务仍有 {active} 个运行中的 Run，请先等待完成或取消后再停用"
+                )
+            return uow.test_tasks.disable(task_id, task_revision)
+
+    def disable_script_definition(
+        self,
+        script_definition_id: BusinessId,
+        *,
+        project_id: BusinessId,
+        revision: int,
+    ) -> ScriptDefinitionRecord:
+        """逻辑停用 ScriptDefinition。
+
+        前置条件（用户规则）：
+        1. 删除脚本前必须先删除关联任务 → 存在**启用中**引用本脚本的 TestTask 时
+           拒绝停用；
+        2. 引用本脚本的任务若仍有非终态 Run，也拒绝停用。
+        """
+        with self._uow_factory() as uow:
+            record = uow.script_definitions.get(script_definition_id, revision)
+            if record is None or record.definition.project_id != project_id:
+                raise KeyError(
+                    f"脚本定义不存在或不属于项目: {script_definition_id.root}@rev{revision}"
+                )
+            referencing = uow.test_tasks.list_by_script_definition(
+                script_definition_id,
+                enabled=True,
+            )
+            if referencing:
+                names = ", ".join(
+                    f"{item.task.name}({item.task.task_id.root})" for item in referencing
+                )
+                raise ValueError(
+                    f"脚本定义仍被 {len(referencing)} 个启用任务引用，请先删除/停用任务再停用脚本: {names}"
+                )
+            # 引用本脚本的所有任务（含已停用）若有非终态 Run 也不允许停用脚本，
+            # 防止在途引用悬空。
+            referencing_all = uow.test_tasks.list_by_script_definition(script_definition_id)
+            for item in referencing_all:
+                active = self._active_run_count(uow, item.task.task_id.root)
+                if active:
+                    raise ValueError(
+                        f"引用本脚本的任务 {item.task.name} 仍有 {active} 个运行中的 Run，"
+                        "请先等待完成或取消"
+                    )
+            return uow.script_definitions.disable(script_definition_id, revision)
+
+    @staticmethod
+    def _active_run_count(uow: UnitOfWork, task_id: str) -> int:
+        """统计指定任务在非终态 Run（created/dispatched/acked/running）上的数量。"""
+        return sum(
+            len(
+                uow.task_runs.list(
+                    task_id=task_id,
+                    status=status.value,
+                    limit=1000,
+                )
+            )
+            for status in _RUN_NON_TERMINAL_STATUSES
+        )
 
     def create_task(
         self,

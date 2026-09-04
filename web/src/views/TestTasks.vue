@@ -23,7 +23,7 @@
         <el-table-column label="执行模式" width="120"><template #default="{ row }"><el-tag effect="plain" size="small">{{ row.task.execution_mode }}</el-tag></template></el-table-column>
         <el-table-column label="节点范围" min-width="220"><template #default="{ row }"><span class="mono">{{ row.task.node_ids.length ? row.task.node_ids.join(', ') : '自动匹配' }}</span></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.task.enabled ? 'success' : 'info'" effect="light">{{ row.task.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="120"><template #default="{ row }"><el-button link type="primary" @click="run(row.task)">运行</el-button></template></el-table-column>
+        <el-table-column label="操作" width="160"><template #default="{ row }"><el-button v-if="row.task.enabled" link type="danger" :disabled="disabling" @click="disableTask(row.task)">停用</el-button><el-button link type="primary" @click="run(row.task)">运行</el-button></template></el-table-column>
       </el-table>
       <el-empty v-if="!loading && tasks.length === 0" description="当前项目尚未创建 TestTask" />
     </el-card>
@@ -44,11 +44,11 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useRouter } from "vue-router";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { List, Plus, Refresh } from "@element-plus/icons-vue";
-import { aetpApi, type Node, type ScriptDefinition, type TestTask, type TaskView } from "@/api/endpoints";
+import { aetpApi, type ScriptDefinition, type TestTask } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -109,6 +109,25 @@ async function run(task: TestTask) {
   if (!projectId.value) return;
   try { const result = await aetpApi.tasks.createRun(projectId.value, { task_id: task.task_id, task_revision: task.revision }); router.push(`/runs/${result.run_id}`); }
   catch (error) { ElMessage.error(error instanceof Error ? error.message : "启动失败"); }
+}
+const disabling = ref(false);
+async function disableTask(task: TestTask) {
+  if (!projectId.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认停用测试任务 ${task.name}？任务有运行中 Run 时无法停用；停用后该任务与其脚本才可被移除。`,
+      "停用测试任务",
+      { type: "warning" },
+    );
+  } catch { return; }
+  disabling.value = true;
+  try {
+    await aetpApi.tasks.disableTask(projectId.value, task.task_id);
+    ElMessage.success("测试任务已停用");
+    refresh();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "停用失败");
+  } finally { disabling.value = false; }
 }
 </script>
 

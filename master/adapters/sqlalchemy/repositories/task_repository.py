@@ -114,6 +114,41 @@ class ScriptDefinitionRepositoryImpl(ScriptDefinitionRepository):
         )
         return [_script_to_domain(item) for item in self._s.execute(statement).scalars().all()]
 
+    def list_enabled_by_executor(
+        self,
+        plugin_id: PluginId,
+        version: SemVer,
+    ) -> list[ScriptDefinitionRecord]:
+        """列出全局所有 ENABLED 且引用指定 executor 的脚本定义（跨项目）。"""
+        statement = select(ScriptDefinitionORM).where(
+            ScriptDefinitionORM.executor_plugin_id == plugin_id.root,
+            ScriptDefinitionORM.executor_version == version.root,
+            ScriptDefinitionORM.enabled.is_(True),
+        )
+        statement = statement.order_by(
+            ScriptDefinitionORM.script_definition_id,
+            ScriptDefinitionORM.revision.desc(),
+        )
+        return [_script_to_domain(item) for item in self._s.execute(statement).scalars().all()]
+
+    def disable(self, script_definition_id: BusinessId, revision: int) -> ScriptDefinitionRecord:
+        """把指定脚本定义 revision 逻辑停用（enabled=False）。"""
+        orm = self._s.execute(
+            select(ScriptDefinitionORM).where(
+                ScriptDefinitionORM.script_definition_id == script_definition_id.root,
+                ScriptDefinitionORM.revision == revision,
+            )
+        ).scalar_one_or_none()
+        if orm is None:
+            raise KeyError(
+                f"脚本定义不存在: {script_definition_id.root}@rev{revision}"
+            )
+        if orm.enabled:
+            orm.enabled = False
+            self._s.flush()
+            self._s.refresh(orm)
+        return _script_to_domain(orm)
+
     def add(self, record: ScriptDefinitionRecord) -> ScriptDefinitionRecord:
         definition = record.definition
         orm = ScriptDefinitionORM(
@@ -180,6 +215,53 @@ class TestTaskRepositoryImpl(TestTaskRepository):
             _task_to_domain(orm)
             for orm in self._s.execute(statement).scalars().all()
         ]
+
+    def list_by_script_definition(
+        self,
+        script_definition_id: BusinessId,
+        *,
+        enabled: bool | None = None,
+    ) -> list[TestTaskRecord]:
+        """列出引用指定脚本定义的测试任务（默认最新 revision，按需过滤 enabled）。"""
+        referencing_task_pks = self._s.execute(
+            select(TestTaskScriptORM.task_pk).where(
+                TestTaskScriptORM.script_definition_id == script_definition_id.root
+            )
+        ).scalars().all()
+        if not referencing_task_pks:
+            return []
+        statement = (
+            select(TestTask)
+            .options(selectinload(TestTask.scripts))
+            .where(TestTask.id.in_(referencing_task_pks))
+            .order_by(TestTask.task_id, TestTask.revision.desc())
+        )
+        if enabled is not None:
+            statement = statement.where(TestTask.enabled.is_(enabled))
+        # 一个 task 可能命中多个 script 行，去重到每个 (task_id, revision) 一条
+        seen: dict[tuple[str, int], TestTaskRecord] = {}
+        for orm in self._s.execute(statement).scalars().all():
+            key = (orm.task_id, orm.revision)
+            seen.setdefault(key, _task_to_domain(orm))
+        return list(seen.values())
+
+    def disable(self, task_id: BusinessId, revision: int | None = None) -> TestTaskRecord:
+        """把指定任务（默认最新 revision）逻辑停用（enabled=False）。"""
+        statement = select(TestTask).options(selectinload(TestTask.scripts)).where(
+            TestTask.task_id == task_id.root
+        )
+        if revision is not None:
+            statement = statement.where(TestTask.revision == revision)
+        else:
+            statement = statement.order_by(TestTask.revision.desc())
+        orm = self._s.execute(statement).scalars().first()
+        if orm is None:
+            raise KeyError(f"测试任务不存在: {task_id.root}")
+        if orm.enabled:
+            orm.enabled = False
+            self._s.flush()
+            self._s.refresh(orm)
+        return _task_to_domain(orm)
 
     def add(self, record: TestTaskRecord) -> TestTaskRecord:
         task = record.task
