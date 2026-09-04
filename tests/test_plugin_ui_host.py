@@ -102,7 +102,53 @@ def test_host_returns_none_for_unknown_plugin_or_version(tmp_path: Path) -> None
     assert host.resolve("not-an-id!", VERSION.root, None) is None
 
 
-def test_host_ignores_non_ui_point(tmp_path: Path) -> None:
+def _executor_with_ui_record(tmp_path: Path) -> tuple[PluginRegistry, PluginVersionRecord]:
+    """构造携带 ui/ 入口的 executor 插件并注册为 ENABLED。"""
+    archive_path = tmp_path / "archives" / "exec-with-ui.zip"
+    archive_path.parent.mkdir(parents=True)
+    manifest = PluginManifest(
+        schema_version=2,
+        id=PluginId("org.example.exec-ui"),
+        version=SemVer("1.0.0"),
+        api_version=SemVer("2.0.0"),
+        point=PluginPoint.EXECUTOR,
+        display_name="Exec UI",
+        entrypoints=PluginEntrypoints(
+            master="entry:create",
+            agent="entry:create",
+            ui="ui/index.html",
+        ),
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("plugin.json", manifest.model_dump_json())
+        archive.writestr("master/entry.py", "def create():\n    return object()\n")
+        archive.writestr("agent/entry.py", "def create():\n    return object()\n")
+        archive.writestr("ui/index.html", "<html><body>exec ui</body></html>")
+        archive.writestr("ui/config.js", "console.log('cfg')")
+    archive_path.write_bytes(buffer.getvalue())
+    registry = PluginRegistry(tmp_path / "archives")
+    record = PluginVersionRecord(
+        id=None,
+        plugin_id=manifest.id,
+        version=manifest.version,
+        point=manifest.point,
+        status=PluginStatus.ENABLED,
+        filename="exec-with-ui.zip",
+        archive_sha256=Sha256(hashlib.sha256(archive_path.read_bytes()).hexdigest()),
+        manifest_sha256=Sha256("c" * 64),
+        manifest=manifest,
+        archive_path=str(archive_path),
+        installed_at=None,
+        created_at=None,
+        updated_at=None,
+    )
+    registry.register(record)
+    return registry, record
+
+
+def test_host_ignores_plugin_without_ui_entry(tmp_path: Path) -> None:
+    """无 ui 入口的 executor 不被 UI 托管（原 test_host_ignores_non_ui_point）。"""
     archive_path = tmp_path / "archives" / "exec.zip"
     archive_path.parent.mkdir(parents=True)
     manifest = PluginManifest(
@@ -147,6 +193,21 @@ def test_host_ignores_non_ui_point(tmp_path: Path) -> None:
     host = PluginUiHost(registry, ExtensionResolver(registry, tmp_path / "runtime"))
 
     assert host.resolve("org.example.exec", "1.0.0", None) is None
+
+
+def test_host_serves_executor_plugin_with_ui_entry(tmp_path: Path) -> None:
+    """executor 等非 ui point 的插件只要声明 ui 入口，就能被 UI 托管。"""
+    registry, _record = _executor_with_ui_record(tmp_path)
+    host = PluginUiHost(registry, ExtensionResolver(registry, tmp_path / "runtime"))
+
+    default = host.resolve("org.example.exec-ui", "1.0.0", None)
+
+    assert default is not None
+    assert default.path.name == "index.html"
+    assert "exec ui" in default.path.read_text(encoding="utf-8")
+
+    asset = host.resolve("org.example.exec-ui", "1.0.0", "config.js")
+    assert asset is not None and asset.path.name == "config.js"
 
 
 def test_http_serves_enabled_plugin_ui_via_governance_flow(client) -> None:

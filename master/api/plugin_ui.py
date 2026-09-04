@@ -1,13 +1,15 @@
 """Web 插件 UI 静态托管 API。
 
-Web Shell 以同源 iframe 加载已启用 UI 插件归档内的静态页面。请求格式：
+Web Shell 以同源 iframe 加载已启用插件（不限 point）归档内携带的 ``ui/`` 页面。
+请求格式：
 
     /plugins/{plugin_id}/{version}/ui            -> 默认文档（entrypoints.ui）
     /plugins/{plugin_id}/{version}/ui/{path}     -> ui/ 目录内静态资源
 
-只服务 ENABLED 且 Manifest 声明了 ``entrypoints.ui`` 的 UI 插件；路径在
-``PluginUiHost`` 内做越界防护。静态页面不含平台敏感数据，与 Web dist 一样公开
-可读；页面与宿主之间的结构化消息由 Web 侧 postMessage 协议处理（规范 §6.3）。
+只服务 ENABLED 且 Manifest 声明了 ``entrypoints.ui`` 的插件（executor 等任务插件
+可携带配置/上传/生成用例界面）；路径在 ``PluginUiHost`` 内做越界防护。静态页面不
+含平台敏感数据，与 Web dist 一样公开可读；页面与宿主之间的结构化消息由 Web 侧
+postMessage 协议处理（规范 §6.3）。
 """
 
 from __future__ import annotations

@@ -1,10 +1,14 @@
 """Master 插件 UI 静态托管适配层。
 
-UI 插件（point=ui）在归档里携带 ``ui/`` 目录（入口 HTML/JS/CSS，入口经
-``entrypoints.ui`` 声明、必须位于 ``ui/`` 下）。Master 从已启用插件归档提取后，
-由 ``PluginUiHost`` 提供安全的文件解析，Web Shell 以同源 iframe 加载这些静态
-资源。本层只负责路径安全与文档解析，不解析 Web 与插件的消息内容（见规范
+任意插件（主要是 executor 等任务插件）可在归档里携带 ``ui/`` 目录（入口 HTML/JS/
+CSS，入口经 ``entrypoints.ui`` 声明、必须位于 ``ui/`` 下）。Master 从已启用插件
+归档提取后，由 ``PluginUiHost`` 提供安全的文件解析，Web Shell 以同源 iframe 加载
+这些静态资源。本层只负责路径安全与文档解析，不解析 Web 与插件的消息内容（见规范
 §6.3 消息协议，消息在 Web 宿主侧处理）。
+
+``ui`` 不再是独立 ``point=ui`` 插件的专属：任何 point 的插件（executor/reporter/
+analyzer/…）只要 Manifest 声明了 ``entrypoints.ui`` 就具备配置/上传/生成界面；
+是否提供 UI 由插件自己决定，Master 只做静态托管与越界防护。
 """
 
 from __future__ import annotations
@@ -15,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from aetp_protocol.ids import PluginId, SemVer
-from aetp_protocol.plugin_types import PluginPoint
 
 from master.domain.models import PluginVersionRecord
 from master.plugins.extension_resolver import ExtensionResolver
@@ -77,12 +80,24 @@ class PluginUiHost:
         return PluginUiAsset(path=target, media_type=_media_type(target))
 
     def _find(self, plugin_id: str, version: str) -> PluginVersionRecord | None:
+        """在已启用插件里按 (plugin_id, version) 找声明了 ui 入口的记录。
+
+        ui 不是独立 point 的专属：任意 point 的已启用插件只要 Manifest 声明了
+        ``entrypoints.ui`` 即可被托管（例如 executor 携带配置/上传界面）。
+        """
         try:
             typed_id = PluginId(plugin_id)
             typed_version = SemVer(version)
         except ValueError:
             return None
-        return self._registry.get(typed_id, typed_version, PluginPoint.UI)
+        for record in self._registry.list():
+            if (
+                record.plugin_id == typed_id
+                and record.version == typed_version
+                and record.manifest.entrypoints.ui is not None
+            ):
+                return record
+        return None
 
     def _ui_root(self, record: PluginVersionRecord) -> Path | None:
         entrypoints = record.manifest.entrypoints
