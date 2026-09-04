@@ -17,6 +17,7 @@ import logging
 import signal
 import sys
 
+from agent.application.services.restart_coordinator import reexec_process
 from agent.config import configure
 from agent.container import Container
 from common.event_loop import run_with_selector
@@ -35,6 +36,7 @@ async def _run(env_file: str | None) -> None:
     )
     container = Container()
     runtime = container.runtime()
+    restart_coordinator = container.restart_coordinator()
     logger.info("Agent 日志文件: %s", log_path)
     await runtime.start()
 
@@ -60,12 +62,25 @@ async def _run(env_file: str | None) -> None:
         signal.signal(signal.SIGTERM, _win_handler)
 
     try:
-        await shutdown_event.wait()
+        # 同时等待"停止信号"或"优雅重启请求"：任一触发即退出循环进入收尾
+        wait_shutdown = asyncio.create_task(shutdown_event.wait())
+        wait_restart = asyncio.create_task(restart_coordinator.wait_for_restart())
+        done, pending = await asyncio.wait(
+            (wait_shutdown, wait_restart),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        if restart_coordinator.requested() and not shutdown_event.is_set():
+            logger.info("Agent 将执行优雅重启（先收尾再重新拉起）")
     except asyncio.CancelledError:
         # 信号处理器通过 cancel() 触发时，等待 stop 完成后再传播
         pass
     finally:
         await runtime.stop()
+        if restart_coordinator.requested():
+            logger.info("Agent runtime 已优雅停止，重新拉起进程")
+            reexec_process()
 
 
 def main() -> None:

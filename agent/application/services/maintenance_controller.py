@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 from collections.abc import Awaitable, Callable
@@ -36,6 +37,8 @@ from common.transport import MqttMessage
 
 MaintenanceResult: TypeAlias = LogLevelUpdateResult | MaintenanceDrainResult | MaintenanceRestartResult
 MaintenanceRequest: TypeAlias = LogLevelUpdateRequest | MaintenanceDrainRequest | MaintenanceRestartRequest
+
+logger = logging.getLogger(__name__)
 
 
 class AgentMaintenanceController:
@@ -81,7 +84,19 @@ class AgentMaintenanceController:
             return False
         envelope, request = parsed
         if not self._is_registered() or request.expected_session_id != session_id:
+            logger.warning(
+                "维护命令被拒绝（未注册或 session 不匹配）: type=%s op=%s session=%s",
+                type(request).__name__,
+                request.operation_id.root,
+                session_id.root,
+            )
             return False
+        logger.info(
+            "收到维护命令: type=%s op=%s drain_timeout_s=%s",
+            type(request).__name__,
+            request.operation_id.root,
+            getattr(request, "drain_timeout_s", None),
+        )
 
         cached = self._results.get(request.operation_id.root)
         if cached is not None:
@@ -111,6 +126,7 @@ class AgentMaintenanceController:
             and isinstance(result, MaintenanceRestartResult)
             and result.accepted
         ):
+            logger.info("重启命令已接受，准备触发优雅重启: op=%s", request.operation_id.root)
             await self._restart_after_ack(request, session_id, envelope.message_id)
         return True
 
@@ -151,6 +167,12 @@ class AgentMaintenanceController:
                 plugin_id=request.plugin_id,
                 expires_at=request.expires_at,
             )
+            logger.info(
+                "日志级别已更新: op=%s component=%s level=%s",
+                request.operation_id.root,
+                request.component,
+                request.level,
+            )
             return LogLevelUpdateResult(
                 node_id=self._node_id,
                 operation_id=request.operation_id,
@@ -159,6 +181,13 @@ class AgentMaintenanceController:
                 message="日志级别已更新",
             )
         except Exception as exc:  # noqa: BLE001 - 运维边界返回结构化失败
+            logger.warning(
+                "日志级别更新失败: op=%s component=%s level=%s err=%s",
+                request.operation_id.root,
+                request.component,
+                request.level,
+                exc,
+            )
             return LogLevelUpdateResult(
                 node_id=self._node_id,
                 operation_id=request.operation_id,
@@ -175,15 +204,30 @@ class AgentMaintenanceController:
         *,
         restart: bool,
     ) -> MaintenanceDrainResult | MaintenanceRestartResult:
+        initial_active = self._active_attempt_count()
+        logger.info(
+            "开始排空（restart=%s）: op=%s drain_timeout_s=%s 活动执行=%s",
+            restart,
+            request.operation_id.root,
+            request.drain_timeout_s,
+            initial_active,
+        )
         await self._publisher.publish_maintenance_status(
             AgentMaintenanceState.DRAINING,
             session_id,
-            active_attempt_count=self._active_attempt_count(),
+            active_attempt_count=initial_active,
             message="等待活动执行结束",
             correlation_id=correlation_id,
         )
         active_count = await self._wait_for_idle(request.drain_timeout_s)
         accepted = active_count == 0
+        logger.info(
+            "排空结束（restart=%s）: op=%s accepted=%s 剩余活动执行=%s",
+            restart,
+            request.operation_id.root,
+            accepted,
+            active_count,
+        )
         if isinstance(request, MaintenanceDrainRequest) or not restart:
             result: MaintenanceDrainResult | MaintenanceRestartResult = MaintenanceDrainResult(
                 node_id=self._node_id,
@@ -248,8 +292,11 @@ class AgentMaintenanceController:
         correlation_id,
     ) -> None:
         try:
+            logger.info("触发优雅重启回调: op=%s", request.operation_id.root)
             await self._restart_if_needed()
+            logger.info("优雅重启已请求，等待主入口收尾 execv: op=%s", request.operation_id.root)
         except Exception as exc:  # noqa: BLE001 - 自重启失败只能进入降级状态
+            logger.exception("Agent 自重启回调失败: op=%s", request.operation_id.root)
             await self._publisher.publish_maintenance_status(
                 AgentMaintenanceState.DEGRADED,
                 session_id,

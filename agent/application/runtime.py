@@ -55,6 +55,7 @@ class AgentRuntime:
         resource_providers: ResourceProviderRegistry | None = None,
         agent_log_facade: AgentLogFacade | None = None,
         maintenance_controller: AgentMaintenanceController | None = None,
+        restart_coordinator=None,
         sleep: Callable[[float], asyncio.Future] | None = None,
     ) -> None:
         self._settings = settings
@@ -68,6 +69,7 @@ class AgentRuntime:
         self._resource_providers = resource_providers
         self._agent_log_facade = agent_log_facade
         self._maintenance_controller = maintenance_controller
+        self._restart_coordinator = restart_coordinator
         self._sleep = sleep or asyncio.sleep
         self._execution_service = execution_service
         self._script_cache = script_cache
@@ -98,6 +100,13 @@ class AgentRuntime:
             raise RuntimeError("Agent 缺少当前协议执行组件")
         publisher = self._publisher
         node_id = BusinessId(self._settings.node_id)
+        # 统一的重启请求入口：维护/插件同步都不直接 os.execv，而是请求优雅重启，
+        # 由主入口在 runtime.stop() 收尾后 execv（restart_coordinator 为空时退化为
+        # 直接重启进程，兼容无协调器的旧装配/测试）。
+        if self._restart_coordinator is not None:
+            restart_request = self._restart_coordinator.request_restart
+        else:
+            restart_request = restart_process
         if self._plugin_sync is None:
             self._plugin_sync = PluginSyncController(
                 node_id,
@@ -106,7 +115,7 @@ class AgentRuntime:
                 self._plugin_registry,
                 publisher,
                 master_id=self._settings.master_id,
-                restart=restart_process,
+                restart=restart_request,
             )
         if self._lease_renewal is None:
             self._lease_renewal = LeaseRenewalService(
@@ -154,6 +163,7 @@ class AgentRuntime:
                 self._agent_log_facade,
                 is_registered=lambda: publisher.registered,
                 master_id=self._settings.master_id,
+                restart=restart_request,
             )
 
     async def start(self) -> None:

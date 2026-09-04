@@ -23,6 +23,7 @@ from agent.application.services.execution_service import ExecutionService
 from agent.application.services.executor_resolver import ExecutorResolver
 from agent.application.services.resource_provider import ResourceProviderRegistry
 from agent.application.services.resource_provider_resolver import ResourceProviderResolver
+from agent.application.services.restart_coordinator import AgentRestartCoordinator
 from agent.application.services.script_cache_service import ScriptCacheService
 from agent.config import AgentSettings, get_settings, resolve_sqlite_url
 from agent.plugins.installer import PluginInstaller
@@ -164,6 +165,9 @@ class Container(containers.DeclarativeContainer):
         ledger=ledger,
     )
 
+    # 优雅重启协调器：维护/插件同步控制器只 request_restart()，主入口收尾后 execv
+    restart_coordinator = providers.Singleton(AgentRestartCoordinator)
+
     # AgentRuntime：唯一生命周期组合根
     runtime = providers.Factory(
         AgentRuntime,
@@ -179,4 +183,5 @@ class Container(containers.DeclarativeContainer):
         executor_resolver=executor_resolver.provided.resolve,
         resource_providers=resource_provider_registry,
         agent_log_facade=agent_log_facade,
+        restart_coordinator=restart_coordinator,
     )
