@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>pytest 执行器 · 上传与参数</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        background: #f6f8fb;
+        color: #1f2d3d;
+        padding: 16px;
+      }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      .sub { color: #7a8699; font-size: 12px; margin: 0 0 14px; }
+      .card { background: #fff; border: 1px solid #e4e9f2; border-radius: 10px; padding: 14px 16px; }
+      .card + .card { margin-top: 12px; }
+      label { display: block; font-size: 12px; margin: 10px 0 4px; color: #44526c; }
+      input[type="text"], select {
+        width: 100%; padding: 7px 9px; border: 1px solid #cdd6e2;
+        border-radius: 6px; font-size: 13px;
+      }
+      input[type="checkbox"] { margin-right: 6px; }
+      .file-drop {
+        border: 1px dashed #cdd6e2; border-radius: 8px; padding: 18px 12px;
+        text-align: center; color: #7a8699; font-size: 13px; cursor: pointer;
+        background: #fafcff;
+      }
+      .file-drop.drag { border-color: #2f6feb; background: #eef4ff; color: #2f6feb; }
+      .picked { margin-top: 8px; font-size: 12px; color: #0a7d33; }
+      .row { display: flex; gap: 10px; }
+      .row > div { flex: 1; }
+      .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+      button {
+        border: 0; border-radius: 6px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+      }
+      button.primary { background: #2f6feb; color: #fff; }
+      button.ghost { background: #eef2f7; color: #44526c; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .status { font-size: 12px; color: #7a8699; margin-top: 8px; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>pytest 执行器</h1>
+    <p class="sub">选择 pytest 工程（zip）或单个 .py，配置执行参数。提交后由宿主上传，Master 调 parse_cases 解析用例。</p>
+
+    <div class="card">
+      <label>测试文件</label>
+      <div id="drop" class="file-drop">点击选择 zip / .py 文件（或拖入）</div>
+      <input id="file" type="file" accept=".zip,.py" hidden />
+      <div id="picked" class="picked"></div>
+
+      <div class="row">
+        <div>
+          <label>python_executable</label>
+          <input id="python" type="text" placeholder="留空 = Agent 当前 Python" />
+        </div>
+        <div>
+          <label>collect_timeout_s</label>
+          <input id="timeout" type="text" value="60" />
+        </div>
+      </div>
+
+      <label>pytest_args</label>
+      <input id="pytestArgs" type="text" placeholder="如 -x -q；不可覆盖 --junitxml/--rootdir" />
+
+      <label style="margin-top: 12px">
+        <input id="failFast" type="checkbox" />
+        fail_fast（首个失败即停止）
+      </label>
+    </div>
+
+    <div class="actions">
+      <button id="reset" class="ghost">重置</button>
+      <button id="submit" class="primary" disabled>提交给宿主</button>
+    </div>
+    <div id="status" class="status"></div>
+
+    <script>
+      (function () {
+        var PROTOCOL = "aetp.plugin-ui.v2";
+        var sessionId = null;
+        var selectedFile = null;
+
+        function post(type, payload) {
+          if (!window.parent) return;
+          window.parent.postMessage(
+            { protocol: PROTOCOL, session_id: sessionId, request_id: "req-" + Date.now(), type: type, payload: payload || {} },
+            window.location.origin
+          );
+        }
+
+        // 监听宿主的 initialize：拿到会话后回复 ready
+        window.addEventListener("message", function (event) {
+          if (event.origin !== window.location.origin) return;
+          var data = event.data;
+          if (!data || data.protocol !== PROTOCOL) return;
+          if (data.type === "initialize") {
+            sessionId = data.session_id || null;
+            post("ready", {});
+            setStatus("已连接宿主（" + (data.payload && data.payload.context && data.payload.context.mode || "plugin") + "）");
+          }
+        });
+
+        var drop = document.getElementById("drop");
+        var fileInput = document.getElementById("file");
+        var picked = document.getElementById("picked");
+        var statusEl = document.getElementById("status");
+
+        function setStatus(text) { statusEl.textContent = text || ""; }
+
+        drop.addEventListener("click", function () { fileInput.click(); });
+        drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("drag"); });
+        drop.addEventListener("dragleave", function () { drop.classList.remove("drag"); });
+        drop.addEventListener("drop", function (e) {
+          e.preventDefault();
+          drop.classList.remove("drag");
+          if (e.dataTransfer.files && e.dataTransfer.files.length) {
+            setFile(e.dataTransfer.files[0]);
+          }
+        });
+        fileInput.addEventListener("change", function () {
+          if (fileInput.files && fileInput.files.length) setFile(fileInput.files[0]);
+        });
+
+        function setFile(f) {
+          selectedFile = f;
+          picked.textContent = "已选：" + f.name + "（" + (f.size / 1024).toFixed(1) + " KB）";
+          document.getElementById("submit").disabled = false;
+        }
+
+        document.getElementById("reset").addEventListener("click", function () {
+          selectedFile = null;
+          picked.textContent = "";
+          fileInput.value = "";
+          document.getElementById("python").value = "";
+          document.getElementById("timeout").value = "60";
+          document.getElementById("pytestArgs").value = "";
+          document.getElementById("failFast").checked = false;
+          document.getElementById("submit").disabled = true;
+          setStatus("");
+        });
+
+        document.getElementById("submit").addEventListener("click", function () {
+          if (!selectedFile) { setStatus("请先选择测试文件"); return; }
+          var configuration = {};
+          var python = document.getElementById("python").value.trim();
+          var timeout = document.getElementById("timeout").value.trim();
+          var args = document.getElementById("pytestArgs").value.trim();
+          if (python) configuration.python_executable = python;
+          if (timeout) { var n = parseInt(timeout, 10); if (n > 0) configuration.collect_timeout_s = n; }
+          if (args) configuration.pytest_args = args.split(/\s+/).filter(Boolean);
+          if (document.getElementById("failFast").checked) configuration.fail_fast = true;
+          // 文件 + 配置交回宿主（宿主走认证上传）；不携带 cases → Master 调 parse_cases
+          post("submit", { file: selectedFile, filename: selectedFile.name, configuration: configuration });
+          setStatus("已提交给宿主，等待上传…");
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -21,19 +21,26 @@ VERSION = SemVer("1.0.0")
 
 
 def _ui_plugin_bytes() -> tuple[bytes, PluginManifest]:
+    """构造携带 ui/ 入口的 executor 插件归档（任务插件自带 UI 的规范形态）。"""
     manifest = PluginManifest(
         schema_version=2,
         id=PLUGIN_ID,
         version=VERSION,
         api_version=SemVer("2.0.0"),
-        point=PluginPoint.UI,
-        display_name="Demo UI",
-        entrypoints=PluginEntrypoints(ui="ui/index.html"),
+        point=PluginPoint.EXECUTOR,
+        display_name="Demo Executor UI",
+        entrypoints=PluginEntrypoints(
+            master="entry:create",
+            agent="entry:create",
+            ui="ui/index.html",
+        ),
         ui_protocol_version=2,
     )
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("plugin.json", manifest.model_dump_json())
+        archive.writestr("master/entry.py", "def create():\n    return object()\n")
+        archive.writestr("agent/entry.py", "def create():\n    return object()\n")
         archive.writestr("ui/index.html", "<html><body>demo ui</body></html>")
         archive.writestr("ui/app.js", "console.log('demo')")
     return buffer.getvalue(), manifest

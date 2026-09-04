@@ -13,7 +13,8 @@
 
 | 插件源目录 | 插件 ID | point | 装配侧 | 构建产物 | 说明 |
 |---|---|---|---|---|---|
-| `pytest_plugin/` | `org.pytest.executor` | executor | Master + Agent | `org.pytest.executor-2.0.0.zip` | pytest 用例收集与执行（默认 executor） |
+| `pytest_plugin/` | `org.pytest.executor` | executor | Master + Agent | `org.pytest.executor-2.0.0.zip` | pytest 用例收集与执行（默认 executor；带 `ui/` 上传/参数界面） |
+| `csv_cases/` | `org.example.csv-cases` | executor | Master + Agent | `org.example.csv-cases-1.0.0.zip` | 资料驱动示例：自带 UI 上传 CSV 并生成用例（直存 cases） |
 | `aetp_resource/` | `org.aetp.resource` | resource | Agent | `org.aetp.resource-1.0.0.zip` | 串口/电源/Vector CAN 三 Provider（一包多 Provider） |
 | `junit_reporter/` | `org.junit.reporter` | reporter | Master | `org.junit.reporter-1.0.0.zip` | JUnit XML → 统一测试结果 |
 | `case_statistics_analyzer/` | `org.case-statistics.analyzer` | analyzer | Master | `org.case-statistics.analyzer-1.0.0.zip` | case 统计与质量指标 |
@@ -22,7 +23,10 @@
 | `sharding_case_count/` | `org.case-count.sharding` | sharding | Master | `org.case-count.sharding-1.0.0.zip` | 按 `target_count` 分片 |
 | `python_runtime/` | `org.aetp.python-runtime` | runtime | Agent | `org.aetp.python-runtime-1.0.0.zip` | Python 运行时发现 |
 | `canoe_software/` | `org.aetp.canoe-software` | software | Agent | `org.aetp.canoe-software-1.0.0.zip` | CANoe 软件/License 发现 |
-| `demo_ui/` | `org.example.demo-ui` | ui | Web | `org.example.demo-ui-1.0.0.zip` | iframe UI 扩展样例（aetp.plugin-ui.v2） |
+
+> 插件 UI 不再依赖独立的 `point=ui`：**任意插件**（主要是 executor）只要在归档里
+> 携带 `ui/` 目录并声明 `entrypoints.ui`，就会在脚本上传弹层被同源 iframe 托管，
+> 由插件自己决定是否提供上传/配置/用例生成能力（Master 只管静态托管与越界防护）。
 
 ## 构建
 
@@ -32,7 +36,7 @@
 # 构建单个
 python plugins/build_plugin.py plugins/junit_reporter
 
-# 一键重建全部（10 个）
+# 一键重建全部（11 个）
 python plugins/build_plugin.py --all
 ```
 

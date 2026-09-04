@@ -9,7 +9,8 @@ Master 投影、报告与通知。
 pytest_executor.zip（V2 归档）
 ├── plugin.json          # Manifest V2
 ├── master/executor.py   # Master 面：create_executor
-└── agent/executor.py    # Agent 面：create_executor
+├── agent/executor.py    # Agent 面：create_executor
+└── ui/index.html        # 自带 UI（可选）：上传 pytest 工程 + 配置执行参数
 ```
 
 > 本插件是 V2 executor 的参考实现，也是默认装配的 pytest 执行器。Run 报告解析与
@@ -23,6 +24,7 @@ pytest_executor.zip（V2 归档）
 - 版本：`2.0.0`（SemVer）
 - 扩展点：`executor`（`api_version=2.0.0`）
 - 能力：`test.execute`、`test.case-results`、`test.junit-report`
+- 自带 UI：`entrypoints.ui = ui/index.html`（上传 pytest 工程 + 配置参数，宿主内嵌）
 - 静态准入：需要 Python 运行时（`python`）；动态可用性以 Agent 能力快照为准
 
 ## 目录职责
@@ -31,6 +33,7 @@ pytest_executor.zip（V2 归档）
 |---|---|
 | `master/executor.py` | Master 面 `PytestMasterExecutor.parse_cases`：收集并解析 pytest nodeid 为稳定用例（`stable_key` 即 nodeid） |
 | `agent/executor.py` | Agent 面 `PytestExecutor`：`execute` 执行精确 case_keys、`analyze_results` 解析 JUnit、`cleanup`/`cancel` |
+| `ui/index.html` | 自带 UI：上传 pytest 工程（zip/裸 .py）+ 配置 python_executable/pytest_args/fail_fast，提交给宿主 |
 | `tests/` | 插件自测（master nodeid 解析、agent JUnit 解析/参数校验/附件收集） |
 | `examples/e2e_script/` | 可直接下发的 pytest 冒烟工程（含通过/参数化/跳过/xfail/失败控制用例） |
 

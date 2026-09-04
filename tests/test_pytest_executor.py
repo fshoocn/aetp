@@ -75,6 +75,12 @@ def _plugin_archive() -> bytes:
         archive.writestr("plugin.json", json.dumps(manifest, separators=(",", ":")))
         for side in ("agent", "master"):
             archive.write(root / side / "executor.py", f"{side}/executor.py")
+        # 插件自带 ui/ 目录：manifest 声明了 entrypoints.ui，归档校验要求该文件存在
+        ui_root = root / "ui"
+        if ui_root.is_dir():
+            for path in sorted(ui_root.rglob("*")):
+                if path.is_file():
+                    archive.write(path, path.relative_to(root).as_posix())
     return buffer.getvalue()
 
 

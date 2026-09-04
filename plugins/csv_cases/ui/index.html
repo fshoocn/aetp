@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>CSV 用例生成器</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background: #f6f8fb; color: #1f2d3d; padding: 16px; }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      .sub { color: #7a8699; font-size: 12px; margin: 0 0 14px; }
+      .card { background: #fff; border: 1px solid #e4e9f2; border-radius: 10px; padding: 14px 16px; }
+      .card + .card { margin-top: 12px; }
+      .file-drop { border: 1px dashed #cdd6e2; border-radius: 8px; padding: 18px 12px; text-align: center; color: #7a8699; font-size: 13px; cursor: pointer; background: #fafcff; }
+      .file-drop.drag { border-color: #2f6feb; background: #eef4ff; color: #2f6feb; }
+      .picked { margin-top: 8px; font-size: 12px; color: #0a7d33; }
+      .preview { margin-top: 10px; max-height: 180px; overflow: auto; border: 1px solid #e4e9f2; border-radius: 6px; }
+      .preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .preview th, .preview td { border-bottom: 1px solid #eef2f7; padding: 4px 8px; text-align: left; }
+      .preview th { background: #fafcff; position: sticky; top: 0; }
+      label { display: block; font-size: 12px; margin: 10px 0 4px; color: #44526c; }
+      input[type="text"] { width: 100%; padding: 7px 9px; border: 1px solid #cdd6e2; border-radius: 6px; font-size: 13px; }
+      .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+      button { border: 0; border-radius: 6px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+      button.primary { background: #2f6feb; color: #fff; }
+      button.ghost { background: #eef2f7; color: #44526c; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .status { font-size: 12px; color: #7a8699; margin-top: 8px; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>CSV 用例生成器（示例）</h1>
+    <p class="sub">上传 CSV/文本资料，插件 UI 在浏览器内逐行生成用例，与文件一起提交；Master 直存 cases，不解析文件。</p>
+
+    <div class="card">
+      <div id="drop" class="file-drop">点击选择 CSV / 文本资料（或拖入）</div>
+      <input id="file" type="file" accept=".csv,.txt,.tsv" hidden />
+      <div id="picked" class="picked"></div>
+      <div id="preview" class="preview"></div>
+      <label>用例名前缀（可选）</label>
+      <input id="prefix" type="text" placeholder="如：UDS-，留空用 row-N" />
+    </div>
+
+    <div class="actions">
+      <button id="reset" class="ghost">重置</button>
+      <button id="submit" class="primary" disabled>提交（含生成的用例）</button>
+    </div>
+    <div id="status" class="status"></div>
+
+    <script>
+      (function () {
+        var PROTOCOL = "aetp.plugin-ui.v2";
+        var sessionId = null;
+        var selectedFile = null;
+        var generatedCases = [];
+
+        function post(type, payload) {
+          window.parent.postMessage(
+            { protocol: PROTOCOL, session_id: sessionId, request_id: "req-" + Date.now(), type: type, payload: payload || {} },
+            window.location.origin
+          );
+        }
+
+        window.addEventListener("message", function (event) {
+          if (event.origin !== window.location.origin) return;
+          var data = event.data;
+          if (!data || data.protocol !== PROTOCOL) return;
+          if (data.type === "initialize") {
+            sessionId = data.session_id || null;
+            post("ready", {});
+            setStatus("已连接宿主（CSV 用例生成器）");
+          }
+        });
+
+        var drop = document.getElementById("drop");
+        var fileInput = document.getElementById("file");
+        var picked = document.getElementById("picked");
+        var preview = document.getElementById("preview");
+        var statusEl = document.getElementById("status");
+
+        function setStatus(t) { statusEl.textContent = t || ""; }
+        drop.addEventListener("click", function () { fileInput.click(); });
+        drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("drag"); });
+        drop.addEventListener("dragleave", function () { drop.classList.remove("drag"); });
+        drop.addEventListener("drop", function (e) {
+          e.preventDefault(); drop.classList.remove("drag");
+          if (e.dataTransfer.files && e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener("change", function () {
+          if (fileInput.files && fileInput.files.length) handleFile(fileInput.files[0]);
+        });
+
+        function handleFile(f) {
+          selectedFile = f;
+          picked.textContent = "已选：" + f.name + "（" + (f.size / 1024).toFixed(1) + " KB）";
+          var reader = new FileReader();
+          reader.onload = function () {
+            try { renderCases(String(reader.result || "")); }
+            catch (err) { setStatus("解析失败：" + err.message); }
+          };
+          reader.readAsText(f, "utf-8");
+        }
+
+        function renderCases(text) {
+          var prefix = document.getElementById("prefix").value.trim();
+          var lines = text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+          generatedCases = lines.map(function (line, index) {
+            var cells = line.split(/[,\t]/).map(function (c) { return c.trim(); });
+            var label = prefix ? prefix + (index + 1) : "row-" + (index + 1);
+            return { stable_key: selectedFile.name + "::" + label, name: label, parent_path: selectedFile.name, tags: cells.length ? [cells[0]] : [] };
+          });
+          var html = "<table><thead><tr><th>#</th><th>stable_key</th><th>name</th></tr></thead><tbody>";
+          generatedCases.slice(0, 200).forEach(function (c, i) {
+            html += "<tr><td>" + (i + 1) + "</td><td>" + esc(c.stable_key) + "</td><td>" + esc(c.name) + "</td></tr>";
+          });
+          html += "</tbody></table>";
+          preview.innerHTML = html;
+          document.getElementById("submit").disabled = generatedCases.length === 0;
+          setStatus("已生成 " + generatedCases.length + " 个用例（每行一个）");
+        }
+
+        function esc(s) { return String(s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+
+        document.getElementById("prefix").addEventListener("input", function () {
+          if (selectedFile) {
+            var reader = new FileReader();
+            reader.onload = function () { try { renderCases(String(reader.result || "")); } catch (_) {} };
+            reader.readAsText(selectedFile, "utf-8");
+          }
+        });
+
+        document.getElementById("reset").addEventListener("click", function () {
+          selectedFile = null; generatedCases = [];
+          picked.textContent = ""; preview.innerHTML = ""; fileInput.value = "";
+          document.getElementById("prefix").value = "";
+          document.getElementById("submit").disabled = true;
+          setStatus("");
+        });
+
+        document.getElementById("submit").addEventListener("click", function () {
+          if (!selectedFile || generatedCases.length === 0) { setStatus("请先上传资料并生成用例"); return; }
+          // 文件 + 生成的 cases 一并交回宿主；Master 收到 cases 后直接落库（不调 parse_cases）
+          post("submit", {
+            file: selectedFile,
+            filename: selectedFile.name,
+            configuration: {},
+            cases: generatedCases,
+          });
+          setStatus("已提交（文件 + " + generatedCases.length + " 个用例）");
+        });
+      })();
+    </script>
+  </body>
+</html>
