@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from aetp_protocol.artifacts import Configuration
+from aetp_protocol.artifacts import Configuration, TestCase
 from aetp_protocol.execution import TriggerType
 from aetp_protocol.ids import BusinessId, PluginId, SemVer, Sha256, new_id
 from aetp_protocol.task import RunSnapshot, ScriptDefinition
@@ -381,6 +381,7 @@ async def upload_script_definition(
     executor_plugin_id: str = Form(...),
     executor_version: str = Form(...),
     configuration: str = Form("{}"),
+    cases: str = Form(""),  # 可选：插件 UI/后端已生成的用例（JSON TestCase[]）
     file: UploadFile = File(...),  # noqa: B008 - FastAPI 文件参数
 ) -> ScriptDefinition:
     typed_project_id = _project_id(project_id)
@@ -404,6 +405,12 @@ async def upload_script_definition(
                 schema_hash=Sha256(hashlib.sha256(values_json).hexdigest()),
                 values=raw_configuration,
             )
+        typed_cases: tuple[TestCase, ...] | None = None
+        if cases.strip():
+            raw_cases = json.loads(cases)
+            if not isinstance(raw_cases, list):
+                raise ValueError("cases 必须是 JSON 数组")
+            typed_cases = tuple(TestCase.model_validate(item) for item in raw_cases)
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=422, detail=f" ScriptDefinition 参数无效: {exc}") from exc
     file_data = await file.read()
@@ -418,6 +425,7 @@ async def upload_script_definition(
             "configuration": typed_configuration.model_dump(mode="json"),
             "filename": file.filename or "script.zip",
             "sha256": hashlib.sha256(file_data).hexdigest(),
+            **({"cases": [case.model_dump(mode="json") for case in typed_cases]} if typed_cases else {}),
         },
         response_model=ScriptDefinition,
     )
@@ -434,6 +442,7 @@ async def upload_script_definition(
             filename=file.filename or "script.zip",
             file_data=file_data,
             created_by=access.user.persisted_id,
+            cases=typed_cases,
         )
     except ScriptDefinitionError as exc:
         release_idempotency(idempotency, result.reservation)

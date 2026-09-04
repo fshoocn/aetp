@@ -53,6 +53,7 @@ class ScriptDefinitionService:
         filename: str,
         file_data: bytes,
         created_by: int,
+        cases: tuple[TestCase, ...] | None = None,
     ) -> ScriptDefinitionRecord:
         if not name.strip():
             raise ScriptDefinitionError("ScriptDefinition 名称不能为空")
@@ -74,17 +75,29 @@ class ScriptDefinitionService:
             raise ScriptDefinitionError(
                 f" executor 未启用: {executor_plugin_id.root}@{executor_version.root}"
             )
-        resolved = self._executor_resolver.resolve(
-            record,
-            PluginPoint.EXECUTOR,
-            required_method="parse_cases",
-        )
-        parser = resolved.plugin
         definition_id = BusinessId(new_id())
         digest = hashlib.sha256(file_data).hexdigest()
         try:
-            cases = await self._parse_cases(parser, file_data, filename, configuration.values)
-            if not cases:
+            if cases is not None:
+                # 用例已由调用方（插件 UI/后端或前端）生成：Master 不再解析文件，
+                # 只做一致性校验后直接落库。
+                normalized_cases = self._normalize_cases(cases)
+            else:
+                # 未带 cases：经 executor 的 parse_cases（插件后端 Python）从上传
+                # 目录生成。这是解析类插件（如 pytest）的默认通道。
+                resolved = self._executor_resolver.resolve(
+                    record,
+                    PluginPoint.EXECUTOR,
+                    required_method="parse_cases",
+                )
+                parser = resolved.plugin
+                normalized_cases = await self._parse_cases(
+                    parser,
+                    file_data,
+                    filename,
+                    configuration.values,
+                )
+            if not normalized_cases:
                 raise ScriptDefinitionError("脚本未解析出任何用例")
             source = ScriptRef(
                 script_id=definition_id,
@@ -106,7 +119,7 @@ class ScriptDefinitionService:
                 ),
                 source=source,
                 configuration=configuration,
-                cases=tuple(cases),
+                cases=tuple(normalized_cases),
                 requirement=ExecutionRequirement(
                     executor=PluginRequirement(
                         plugin_id=executor_plugin_id,
@@ -150,14 +163,25 @@ class ScriptDefinitionService:
         filename: str,
         configuration: Mapping[str, object],
     ) -> list[TestCase]:
+        """把上传文件铺进临时目录，交给插件 parse_cases 生成用例。
+
+        目录**忠实反映用户上传物**：zip 解包成目录；单个文件（任意类型）保留
+        原名放入目录。Master 不再假设"非 zip = test_script.py"——pytest 等解析类
+        插件在 parse_cases 里自行识别布局；资料类插件则按自己上传的文件名读取。
+        """
         with tempfile.TemporaryDirectory(prefix="aetp-script-") as raw_dir:
             script_dir = Path(raw_dir)
+            script_dir.mkdir(parents=True, exist_ok=True)
             if filename.lower().endswith(".zip"):
                 safe_extract_zip(file_data, script_dir)
             else:
-                script_dir.mkdir(parents=True, exist_ok=True)
-                (script_dir / "test_script.py").write_bytes(file_data)
+                (script_dir / filename).write_bytes(file_data)
             raw_cases = await parser.parse_cases(script_dir, dict(configuration))
+        return self._normalize_cases(tuple(raw_cases))
+
+    @staticmethod
+    def _normalize_cases(raw_cases: tuple[object, ...]) -> list[TestCase]:
+        """把插件返回的用例（映射/对象）规范化为 TestCase，并做一致性校验。"""
         cases: list[TestCase] = []
         for raw in raw_cases:
             if isinstance(raw, Mapping):
@@ -193,6 +217,9 @@ class ScriptDefinitionService:
                     estimated_duration_s=estimated,
                 )
             )
+        keys = tuple(case.stable_key for case in cases)
+        if len(keys) != len(set(keys)):
+            raise ScriptDefinitionError("executor 返回了重复 case stable_key")
         return cases
 
 

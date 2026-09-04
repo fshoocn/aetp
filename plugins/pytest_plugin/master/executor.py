@@ -39,7 +39,8 @@ class PytestMasterExecutor:
             raise FileNotFoundError(f"脚本目录不存在: {root}")
         executable = self._python_executable(configuration)
         timeout_s = self._collect_timeout(configuration)
-        command = [executable, "-m", "pytest", "--collect-only", "-q", str(root)]
+        target = self._pytest_target(root)
+        command = [executable, "-m", "pytest", "--collect-only", "-q", str(target)]
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -75,6 +76,21 @@ class PytestMasterExecutor:
         if isinstance(raw, str) and raw.strip():
             return raw.strip()
         return sys.executable
+
+    @staticmethod
+    def _pytest_target(root: Path) -> Path:
+        """决定 pytest collect 的目标路径。
+
+        - zip 解包出的工程（含 pytest.ini/conftest.py 或多个 .py）→ 整个目录。
+        - Master 保留原名的单个 .py 上传 → 直接对该文件 collect（pytest 对显式
+          传入的文件名不做 test_* 前缀限制），保证 bare 文件也能被收集。
+        """
+        if (root / "pytest.ini").is_file() or (root / "conftest.py").is_file():
+            return root
+        py_files = sorted(path for path in root.glob("*.py") if path.is_file())
+        if len(py_files) == 1:
+            return py_files[0]
+        return root
 
     @staticmethod
     def _collect_timeout(configuration: Mapping[str, object]) -> int:
