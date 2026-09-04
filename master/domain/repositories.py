@@ -752,6 +752,11 @@ class PluginVersionRepository(ABC):
     @abstractmethod
     def update(self, record: PluginVersionRecord) -> PluginVersionRecord: ...
 
+    @abstractmethod
+    def delete(self, plugin_id: PluginId, version: SemVer) -> None:
+        """物理删除某插件版本记录（用于 REMOVED 版本重新上传同 id 时覆盖）。"""
+        ...
+
 
 class AgentPluginDesiredVersionRepository(ABC):
     @abstractmethod

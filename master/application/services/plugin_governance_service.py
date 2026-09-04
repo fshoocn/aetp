@@ -45,10 +45,18 @@ class PluginGovernanceService:
 
         with self._uow_factory() as uow:
             existing = uow.plugin_versions.get(verified.manifest.id, verified.manifest.version)
-            if existing is not None:
+            if existing is not None and existing.status is not PluginStatus.REMOVED:
                 if existing.archive_sha256 != verified.sha256:
                     raise ValueError("插件版本已存在但 SHA-256 不同")
                 return existing
+            # existing 为 REMOVED（或不存在）→ 允许重新上传同 id+version：
+            # 覆盖重登记为新 VERIFIED。旧记录与旧归档文件被替换（REMOVED 语义上
+            # 已无启用引用；用户重新上传同版本即明确"重建该版本"意图）。
+            if existing is not None:
+                old_archive_path = Path(existing.archive_path)
+                uow.plugin_versions.delete(existing.plugin_id, existing.version)
+                if old_archive_path.exists():
+                    old_archive_path.unlink(missing_ok=True)
 
             wrote_archive = self._write_immutable_archive(archive_path, content)
             try:

@@ -151,6 +151,18 @@ class PluginVersionRepositoryImpl(PluginVersionRepository):
         self._s.refresh(orm)
         return _plugin_to_domain(orm)
 
+    def delete(self, plugin_id: PluginId, version: SemVer) -> None:
+        """物理删除某插件版本记录。"""
+        orm = self._s.execute(
+            select(PluginVersionORM).where(
+                PluginVersionORM.plugin_id == plugin_id.root,
+                PluginVersionORM.version == version.root,
+            )
+        ).scalar_one_or_none()
+        if orm is not None:
+            self._s.delete(orm)
+            self._s.flush()
+
 
 class AgentPluginDesiredVersionRepositoryImpl(AgentPluginDesiredVersionRepository):
     def __init__(self, session: Session) -> None:

@@ -541,3 +541,95 @@ def test_plugin_archive_download_endpoint(client, tmp_path) -> None:
     )
     assert response.status_code == 200, response.text
     assert response.content == content
+
+
+def _same_id_different_content_archive(version: str, marker: str) -> bytes:
+    """构造与 _versioned_archive 同 id+version 但内容（sha256）不同的归档。"""
+    files = {
+        "plugin.json": json.dumps(
+            {
+                "schema_version": 2,
+                "id": "org.example.executor",
+                "version": version,
+                "api_version": "2.0.0",
+                "point": "executor",
+                "display_name": "Example Executor",
+                "entrypoints": {
+                    "master": "plugin:create_plugin",
+                    "agent": "plugin:create_plugin",
+                },
+            }
+        ).encode(),
+        "master/plugin.py": f"def create_plugin(): pass  # {marker}\n".encode(),
+        "agent/plugin.py": f"def create_plugin(): pass  # {marker}\n".encode(),
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return buffer.getvalue()
+
+
+def test_removed_plugin_can_reupload_same_id_version(client, tmp_path) -> None:
+    """REMOVED 后重新上传同 id+version（内容不同）应成功登记为 VERIFIED（覆盖重登记）。"""
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+
+    first = governance.register_archive("v1.zip", _same_id_different_content_archive("2.0.0", "v1"))
+    governance.install(first.plugin_id, first.version)
+    governance.request_enabled(first.plugin_id, first.version)
+    governance.complete_restart(first.plugin_id, first.version, enabled=True)
+    governance.request_disabled(first.plugin_id, first.version)
+    governance.complete_restart(first.plugin_id, first.version, enabled=False)
+    removed = governance.remove(first.plugin_id, first.version)
+    assert removed.status is PluginStatus.REMOVED
+
+    # 同 id+version 不同内容重新上传：不再报"已存在但 SHA-256 不同"
+    second = governance.register_archive(
+        "v2.zip", _same_id_different_content_archive("2.0.0", "v2")
+    )
+
+    assert second.status is PluginStatus.VERIFIED
+    assert second.archive_sha256 != first.archive_sha256
+    # 归档文件确实被替换为新的内容
+    assert Path(second.archive_path).read_bytes() == _same_id_different_content_archive("2.0.0", "v2")
+    # 还能继续走安装链路
+    installed = governance.install(second.plugin_id, second.version)
+    assert installed.status is PluginStatus.INSTALLED
+
+
+def test_removed_plugin_reupload_same_content_is_idempotent_revive(client, tmp_path) -> None:
+    """REMOVED 后重新上传同 id+version 且内容相同：不报错，复活为 VERIFIED。"""
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+
+    content = _same_id_different_content_archive("2.0.0", "same")
+    registered = governance.register_archive("a.zip", content)
+    governance.install(registered.plugin_id, registered.version)
+    governance.request_enabled(registered.plugin_id, registered.version)
+    governance.complete_restart(registered.plugin_id, registered.version, enabled=True)
+    governance.request_disabled(registered.plugin_id, registered.version)
+    governance.complete_restart(registered.plugin_id, registered.version, enabled=False)
+    governance.remove(registered.plugin_id, registered.version)
+
+    revived = governance.register_archive("b.zip", content)
+
+    assert revived.status is PluginStatus.VERIFIED
+    assert revived.archive_sha256 == registered.archive_sha256
+
+
+def test_non_removed_duplicate_different_sha_still_rejected(client, tmp_path) -> None:
+    """非 REMOVED 状态（如 VERIFIED）重复上传同 id+version 不同 sha 仍报错。"""
+    container = client.app.state.container
+    governance = PluginGovernanceService(container.uow_factory(), tmp_path / "plugins")
+
+    governance.register_archive("v1.zip", _same_id_different_content_archive("2.0.0", "v1"))
+
+    try:
+        governance.register_archive(
+            "v2.zip", _same_id_different_content_archive("2.0.0", "v2")
+        )
+    except ValueError as exc:
+        assert "已存在但 SHA-256 不同" in str(exc)
+    else:
+        raise AssertionError("非 REMOVED 状态下同版本不同内容应报错")
