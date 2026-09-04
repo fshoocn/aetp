@@ -308,6 +308,35 @@ def _refresh_hot_plugins(request: Request) -> None:
         logging.getLogger(__name__).exception("插件热重载失败")
 
 
+def _uninstall_from_agents(
+    request: Request,
+    plugin_id: PluginId,
+    version: SemVer,
+    actor_id: int | None,
+) -> None:
+    """治理移除插件版本后，把它从所有装有它的 Agent 上卸载（尽力而为）。
+
+    - 所有节点上指向该版本的期望会被清除（防止随后对账复装）；
+    - 在线节点直接下发 REMOVE 同步；离线节点跳过并记录日志，
+      其上的插件版本只能等待 Agent 端手工清理（期望已清除，不会被复装）。
+    """
+    container = getattr(request.app.state, "container", None)
+    if container is None:
+        return
+    try:
+        container.node_plugin_reconciler().uninstall_plugin_everywhere(
+            plugin_id,
+            version,
+            actor_id=actor_id,
+        )
+    except Exception:  # noqa: BLE001 - Agent 清理失败不应让已成功的移除报错
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "插件移除后的 Agent 卸载下发失败: %s@%s", plugin_id.root, version.root
+        )
+
+
 @router.delete("/{plugin_id}/{version}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_plugin(
     plugin_id: str,
@@ -332,6 +361,7 @@ def remove_plugin(
     try:
         service.remove(typed_plugin_id, typed_version)
         _refresh_hot_plugins(request)
+        _uninstall_from_agents(request, typed_plugin_id, typed_version, admin.persisted_id)
         complete_idempotency(
             idempotency,
             result.reservation,

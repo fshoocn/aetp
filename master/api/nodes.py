@@ -9,7 +9,7 @@ from typing import Annotated, Literal, cast
 
 from aetp_protocol.capabilities import NodeCapabilities, NodeCapabilitySnapshot
 from aetp_protocol.errors import ErrorCode
-from aetp_protocol.ids import BusinessId, PluginId, RequestId, SessionId, Sha256
+from aetp_protocol.ids import BusinessId, PluginId, RequestId, SemVer, SessionId, Sha256
 from aetp_protocol.logs import LogEvent, LogLevel
 from aetp_protocol.payloads import DiagnosticsSnapshot, RemoteOperationStatus
 from aetp_protocol.plugin_types import DesiredPluginVersion
@@ -34,6 +34,9 @@ from master.application.services.capability_snapshot_service import (
 from master.application.services.diagnostics_request_service import (
     AgentOfflineForDiagnostics,
     DiagnosticsRequestService,
+)
+from master.application.services.node_plugin_reconciler import (
+    NodePluginReconciler,
 )
 from master.application.services.plugin_sync_service import (
     AgentOfflineForPluginSync,
@@ -210,6 +213,10 @@ def get_diagnostics_request_service(request: Request) -> DiagnosticsRequestServi
 
 def get_plugin_sync_service(request: Request) -> PluginSyncService:
     return request.app.state.container.plugin_sync_service()
+
+
+def get_node_plugin_reconciler(request: Request) -> NodePluginReconciler:
+    return request.app.state.container.node_plugin_reconciler()
 
 
 def get_agent_log_service(request: Request) -> AgentLogService:
@@ -879,6 +886,103 @@ def request_plugin_sync(
     return response
 
 
+@router.post(
+    "/{node_id}/plugin-sync/reconcile",
+    response_model=PluginSyncView | None,
+    status_code=202,
+)
+def reconcile_node_plugins(
+    node_id: str,
+    admin: PlatformAdminDep,
+    service: Annotated[NodePluginReconciler, Depends(get_node_plugin_reconciler)],
+) -> PluginSyncView | None:
+    """对账节点插件：期望版本 vs Agent 库存，自动下发安装/卸载同步。
+
+    无差异时返回空体（null），表示节点已是期望状态。
+    并发由节点维护锁保证（对账与手动同步互斥）。
+    """
+    typed_node_id = _node_id(node_id)
+    try:
+        record = service.reconcile_node(typed_node_id, actor_id=admin.persisted_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentOfflineForPluginSync as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MaintenanceLockConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return None if record is None else _plugin_sync_view(record)
+
+
+@router.delete(
+    "/{node_id}/plugins/{plugin_id}/{version}",
+    response_model=PluginSyncView,
+    status_code=202,
+)
+def uninstall_node_plugin(
+    node_id: str,
+    plugin_id: str,
+    version: str,
+    admin: PlatformAdminDep,
+    service: Annotated[NodePluginReconciler, Depends(get_node_plugin_reconciler)],
+    idempotency: IdempotencyServiceDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> PluginSyncView:
+    """把指定插件版本从该节点卸载（Agent 等待空闲后移除并重启）。"""
+    typed_node_id = _node_id(node_id)
+    try:
+        typed_plugin_id = PluginId(plugin_id)
+        typed_version = SemVer(version)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="插件 ID/版本不合法") from exc
+    result = reserve_or_replay(
+        idempotency,
+        idempotency_key,
+        scope=f"node.plugin-uninstall:{typed_node_id.root}:{typed_plugin_id.root}:{typed_version.root}",
+        payload={"node_id": node_id, "plugin_id": plugin_id, "version": version},
+        response_model=PluginSyncView,
+    )
+    if result.replayed:
+        assert result.response is not None
+        return result.response
+    try:
+        record = service.uninstall_plugin_from_node(
+            typed_node_id,
+            typed_plugin_id,
+            version=typed_version,
+            actor_id=admin.persisted_id,
+        )
+    except KeyError as exc:
+        release_idempotency(idempotency, result.reservation)
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentOfflineForPluginSync as exc:
+        release_idempotency(idempotency, result.reservation)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except MaintenanceLockConflict as exc:
+        release_idempotency(idempotency, result.reservation)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        release_idempotency(idempotency, result.reservation)
+        raise
+    response = _plugin_sync_view(record)
+    complete_idempotency(idempotency, result.reservation, response, response_status=202)
+    return response
+
+
+def _try_reconcile(request: Request, node_id: BusinessId, actor_id: int | None) -> None:
+    """desired 变更后尽力对账；节点离线/维护锁冲突等仅记录日志，不影响响应。"""
+    import logging
+
+    container = getattr(request.app.state, "container", None)
+    if container is None:
+        return
+    try:
+        container.node_plugin_reconciler().reconcile_node(node_id, actor_id=actor_id)
+    except Exception:  # noqa: BLE001 - 对账失败不阻塞期望设置
+        logging.getLogger(__name__).warning(
+            "节点插件对账未执行: node=%s", node_id.root, exc_info=True
+        )
+
+
 @router.put(
     "/{node_id}/desired-plugin",
     response_model=DesiredPluginVersionView,
@@ -886,7 +990,8 @@ def request_plugin_sync(
 def set_node_desired_plugin(
     node_id: str,
     desired: DesiredPluginVersion,
-    _admin: PlatformAdminDep,
+    request: Request,
+    admin: PlatformAdminDep,
     service: Annotated[PluginSyncService, Depends(get_plugin_sync_service)],
 ) -> DesiredPluginVersionView:
     try:
@@ -895,6 +1000,8 @@ def set_node_desired_plugin(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    typed_node_id = _node_id(node_id)
+    _try_reconcile(request, typed_node_id, admin.persisted_id)
     return _desired_view(record)
 
 
@@ -905,11 +1012,14 @@ def set_node_desired_plugin(
 def set_group_desired_plugin(
     tag: str,
     desired: DesiredPluginVersion,
-    _admin: PlatformAdminDep,
+    request: Request,
+    admin: PlatformAdminDep,
     service: Annotated[PluginSyncService, Depends(get_plugin_sync_service)],
 ) -> list[DesiredPluginVersionView]:
     try:
         records = service.set_desired_version_for_tag(tag, desired)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    for record in records:
+        _try_reconcile(request, record.node_id, admin.persisted_id)
     return [_desired_view(record) for record in records]

@@ -48,6 +48,7 @@ export type {
   PluginSyncView,
   LogLevelUpdateRequest,
   MaintenanceRequest,
+  PluginInventoryItem,
   PluginManifest,
   PluginAvailability,
   Node,

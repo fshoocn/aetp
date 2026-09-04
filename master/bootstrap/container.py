@@ -50,6 +50,7 @@ from master.application.services.idempotency_service import IdempotencyService
 from master.application.services.message_router import MasterMessageRouter
 from master.application.services.mqtt_runtime import MasterMqttRuntime
 from master.application.services.node_matching_service import NodeMatchingService
+from master.application.services.node_plugin_reconciler import NodePluginReconciler
 from master.application.services.node_presence_service import NodePresenceService
 from master.application.services.node_service import NodeService
 from master.application.services.notification_dispatcher import NotificationDispatcher
@@ -263,6 +264,13 @@ class Container(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         package_url_builder=plugin_download_service.provided.build_versioned_download_url,
         master_id=providers.Callable(lambda: get_settings().mqtt_client_id),
+    )
+    # 节点插件对账：期望版本 vs Agent 库存，支持显式卸载与治理移除后的自动清理
+    node_plugin_reconciler = providers.Singleton(
+        NodePluginReconciler,
+        uow_factory=uow_factory,
+        sync_service=plugin_sync_service,
+        package_url_builder=plugin_download_service.provided.build_versioned_download_url,
     )
     plan_lease_service = providers.Singleton(
         PlanLeaseService,

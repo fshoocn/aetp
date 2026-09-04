@@ -22,6 +22,7 @@
         <el-button size="small" :loading="collecting" @click="collect">立即采集诊断</el-button>
         <el-button v-if="isAdmin" size="small" :icon="Setting" :loading="actionLoading" @click="updateLogLevel">设置日志</el-button>
         <el-button v-if="isAdmin" size="small" :icon="Upload" :loading="syncing" @click="syncVisible = true">同步插件</el-button>
+        <el-button v-if="isAdmin" size="small" :icon="Refresh" :loading="reconciling" @click="reconcilePlugins">对账插件</el-button>
         <el-button v-if="isAdmin" size="small" :icon="Refresh" :loading="actionLoading" @click="drain">排空节点</el-button>
         <el-button v-if="isAdmin" size="small" type="danger" plain :icon="SwitchButton" :loading="actionLoading" @click="restart">重启 Agent</el-button>
       </div>
@@ -60,6 +61,17 @@
               <template #default="{ row }">
                 <span v-if="row.unavailable_reasons.length" class="reason-list">{{ row.unavailable_reasons.join(", ") }}</span>
                 <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="isAdmin" label="操作" width="80">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  type="danger"
+                  size="small"
+                  :loading="uninstallingKey === `${row.plugin_id}:${row.version}`"
+                  @click="uninstallPlugin(row)"
+                >卸载</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -161,7 +173,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Refresh, Setting, SwitchButton, Upload } from "@element-plus/icons-vue";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import { connectAgentLogs } from "@/api/sse";
-import { aetpApi, type CapabilitySnapshotView, type DiagnosticsSnapshotView, type LogEvent, type PluginAvailability, type PluginVersion, type RemoteOperation } from "@/api/endpoints";
+import { aetpApi, type CapabilitySnapshotView, type DiagnosticsSnapshotView, type LogEvent, type PluginAvailability, type PluginInventoryItem, type PluginVersion, type RemoteOperation } from "@/api/endpoints";
 import { useAuthStore } from "@/stores/auth";
 
 const props = defineProps<{ nodeId: string }>();
@@ -191,6 +203,8 @@ const actionLoading = ref(false);
 const syncing = ref(false);
 const syncVisible = ref(false);
 const selectedPluginKey = ref("");
+const reconciling = ref(false);
+const uninstallingKey = ref("");
 const logComponent = ref("agent.runtime");
 const logLevel = ref<"debug" | "info" | "warn" | "error">("info");
 const liveLogs = ref<LogEvent[]>([]);
@@ -326,6 +340,41 @@ function availabilityType(availability: PluginAvailability) {
   if (availability === "error") return "danger";
   if (availability === "blocked") return "warning";
   return "info";
+}
+
+async function reconcilePlugins() {
+  reconciling.value = true;
+  try {
+    const result = await aetpApi.assets.reconcileNodePlugins(props.nodeId);
+    ElMessage.success(result ? "对账完成，已下发插件同步" : "节点已是期望状态，无需同步");
+    if (result) await operationsQuery.refetch();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "插件对账失败");
+  } finally {
+    reconciling.value = false;
+  }
+}
+
+async function uninstallPlugin(row: PluginInventoryItem) {
+  try {
+    await ElMessageBox.confirm(
+      `将从该节点卸载 ${row.plugin_id}@${row.version}，Agent 会在空闲后移除并重启，确定继续？`,
+      "卸载插件",
+      { type: "warning" },
+    );
+  } catch {
+    return;
+  }
+  uninstallingKey.value = `${row.plugin_id}:${row.version}`;
+  try {
+    await aetpApi.assets.uninstallNodePlugin(props.nodeId, row.plugin_id, row.version);
+    ElMessage.success("插件卸载请求已下发");
+    await operationsQuery.refetch();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "插件卸载失败");
+  } finally {
+    uninstallingKey.value = "";
+  }
 }
 function operationLabel(kind: RemoteOperation["kind"]) {
   return { diagnostics: "诊断", plugin_sync: "插件同步", log_level: "日志级别", drain: "排空", restart: "重启" }[kind];

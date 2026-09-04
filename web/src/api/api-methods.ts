@@ -183,6 +183,15 @@ export const aetpApi = {
     pluginSync(nodeId: string, body: { items: unknown[]; drain_timeout_s?: number; restart_after?: boolean }) {
       return api.post<PluginSyncView>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/maintenance/sync`, body, idempotencyHeaders("plugin-sync"));
     },
+    reconcileNodePlugins(nodeId: string) {
+      return api.post<PluginSyncView | null>(`/api/v2/nodes/${encodeURIComponent(nodeId)}/plugin-sync/reconcile`);
+    },
+    uninstallNodePlugin(nodeId: string, pluginId: string, version: string) {
+      return api.delete<PluginSyncView>(
+        `/api/v2/nodes/${encodeURIComponent(nodeId)}/plugins/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}`,
+        idempotencyHeaders("node-plugin-uninstall"),
+      );
+    },
   },
 
   plugins: {
