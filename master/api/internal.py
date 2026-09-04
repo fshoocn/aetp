@@ -6,12 +6,74 @@ from pathlib import Path
 from urllib.parse import quote
 
 from aetp_protocol.ids import BusinessId, PluginId, SemVer
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
 from master.api.dependencies import ScriptStorageServiceDep, UowFactoryDep
 
 router = APIRouter(prefix="/api/v2/internal", tags=["internal"])
+
+
+@router.post("/runs/{run_id}/artifacts")
+async def upload_run_artifact(
+    run_id: str,
+    request: Request,
+    project_id: str,
+    node_id: str,
+    shard_id: str,
+    expires: int,
+    signature: str,
+    attempt_id: str | None = None,
+    kind: str = "report",
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI 文件参数
+) -> dict[str, object]:
+    """接收 Agent 上传的 Run 产物（签名 multipart）。
+
+    校验限时 HMAC 上传 URL（范围=run/project/node/shard/attempt）后，把文件交给
+    ArtifactService.register_artifact 写文件 + 登记引用。返回
+    ``{artifact_id, run_id, kind, filename, size, sha256}``。
+    """
+    container = request.app.state.container
+    signing = container.artifact_upload_signing_service()
+    if not signing.verify(
+        run_id,
+        project_id,
+        node_id,
+        shard_id,
+        attempt_id,
+        expires,
+        signature,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Artifact 上传签名无效或已过期",
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="产物文件为空")
+    try:
+        artifact = container.artifact_service().register_artifact(
+            run_id=run_id,
+            project_id=project_id,
+            node_id=node_id,
+            kind=kind,
+            filename=file.filename or "artifact",
+            data=data,
+            shard_id=shard_id,
+            attempt_id=attempt_id,
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except ValueError as exc:
+        # ARTIFACT_UPLOAD_CONFLICT / attempt 不一致等业务冲突 → 409
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "artifact_id": artifact.artifact_id,
+        "run_id": artifact.run_id,
+        "kind": artifact.kind.value,
+        "filename": artifact.filename,
+        "size": artifact.size,
+        "sha256": artifact.sha256,
+    }
 
 
 @router.get("/plugins/{plugin_id}/{version}/download")
