@@ -218,7 +218,13 @@ export const aetpApi = {
     uploadScriptDefinition(
       projectId: string,
       file: File,
-      fields: { name: string; executorPluginId: string; executorVersion: string; configuration?: Record<string, unknown> },
+      fields: {
+        name: string;
+        executorPluginId: string;
+        executorVersion: string;
+        configuration?: Record<string, unknown>;
+        cases?: { stable_key: string; name: string; parent_path?: string; tags?: string[] }[];
+      },
     ) {
       const form = new FormData();
       form.append("file", file);
@@ -226,6 +232,9 @@ export const aetpApi = {
       form.append("executor_plugin_id", fields.executorPluginId);
       form.append("executor_version", fields.executorVersion);
       form.append("configuration", JSON.stringify(fields.configuration ?? {}));
+      if (fields.cases?.length) {
+        form.append("cases", JSON.stringify(fields.cases));
+      }
       return api.upload<ScriptDefinition>(
         `${API_BASE}/projects/${encodeURIComponent(projectId)}/script-definitions/upload`,
         form,

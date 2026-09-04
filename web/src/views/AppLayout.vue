@@ -38,10 +38,6 @@
           <el-icon><Grid /></el-icon>
           <template #title>插件中心</template>
         </el-menu-item>
-        <el-menu-item index="/plugin-ui">
-          <el-icon><Monitor /></el-icon>
-          <template #title>插件 UI</template>
-        </el-menu-item>
         <el-menu-item v-if="canManageProject" index="/project-nodes">
           <el-icon><Connection /></el-icon>
           <template #title>项目节点</template>
@@ -128,7 +124,7 @@
       </el-header>
 
       <el-main class="workspace">
-        <div v-if="!projectStore.currentProjectId && !['Dashboard', 'Devices', 'Users', 'Projects', 'PluginUiHost'].includes(String(route.name))" class="no-project">
+        <div v-if="!projectStore.currentProjectId && !['Dashboard', 'Devices', 'Users', 'Projects'].includes(String(route.name))" class="no-project">
           <el-result icon="info" title="还没有可用项目" sub-title="请联系平台管理员将你的账户加入项目后再开始工作" />
         </div>
         <router-view v-else v-slot="{ Component }">
@@ -144,7 +140,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, Bell, Collection, Connection, Cpu, Document, Expand, Fold, Grid, List, Monitor, Odometer, Tickets, TrendCharts, UserFilled } from "@element-plus/icons-vue";
+import { ArrowDown, Bell, Collection, Connection, Cpu, Document, Expand, Fold, Grid, List, Odometer, Tickets, TrendCharts, UserFilled } from "@element-plus/icons-vue";
 import { useAuthStore } from "@/stores/auth";
 import { useProjectStore } from "@/stores/project";
 
@@ -166,7 +162,6 @@ const pageTitle = computed(() => ({
   Runs: "运行记录",
   RunDetail: "运行详情",
   Plugins: "插件中心",
-  PluginUiHost: "插件 UI",
   ProjectNodes: "项目节点",
   Devices: "节点与设备",
   Members: "成员与权限",
