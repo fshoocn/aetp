@@ -186,12 +186,24 @@ function applyTheme(type, color) {
 }
 
 function onPresetChange() {
+    if (!presets[preset.value]) {
+        preset.value = 'Aura';
+    }
+    if (!primaryColors.value.some((color) => color.name === layoutConfig.primary)) {
+        layoutConfig.primary = 'emerald';
+    }
+    if (layoutConfig.surface && !surfaces.value.some((surface) => surface.name === layoutConfig.surface)) {
+        layoutConfig.surface = null;
+    }
+
     layoutConfig.preset = preset.value;
     const presetValue = presets[preset.value];
     const surfacePalette = surfaces.value.find((s) => s.name === layoutConfig.surface)?.palette;
 
     $t().preset(presetValue).preset(getPresetExt()).surfacePalette(surfacePalette).use({ useDefaultOptions: true });
 }
+
+onPresetChange();
 </script>
 
 <template>
