@@ -8,7 +8,7 @@
 
     1. 不出现 uvicorn / hypercorn 等服务器名 —— 服务器只活在后端实现文件里；
     2. 不暴露框架内部对象 —— 不返回 Starlette 的 Route/Mount，
-       只返回本包自己的 :class:`~master.plugins.webapi.types.RouteRecord`；
+       只返回本包自己的 :class:`~common.plugins.webapi.types.RouteRecord`；
     3. 响应构造器只依赖 ``starlette.responses`` —— 它们是 ASGI 无关的纯对象，
        换任何 ASGI 服务器都不受影响。
 

@@ -264,7 +264,7 @@ def build_endpoint(record: RouteRecord) -> Callable[[Request], Awaitable[Respons
 class RouteRegistry:
     """路由表：管理 :class:`RouteRecord`，并按需同步到 Starlette 应用。
 
-    该对象由 :class:`~master.plugins.webapi.uvicorn_web_service.UvicornWebApiService` 持有，
+    该对象由 :class:`~common.plugins.webapi.uvicorn_web_service.UvicornWebApiService` 持有，
     生命周期与 webapi 插件 fiber 一致。``app`` 为 ``None`` 时只做登记（服务器尚未启动），
     绑定后再统一挂载，因此插件加载顺序不受限制。
     """

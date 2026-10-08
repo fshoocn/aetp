@@ -16,9 +16,11 @@ from urllib.request import Request, urlopen
 from cordis_port import Context
 
 from common.cordis_utils import unload_all
-from master.plugins.webapi import WebApiPlugin
-from master.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
-from master.plugins.webui import WebUiPlugin
+from common.plugins.webapi import WebApiPlugin
+from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
+from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
+
+_SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
 
 
 def _free_port() -> int:
@@ -69,21 +71,27 @@ async def _arequest(
     )
 
 
-def _plugin_archive(plugin_id: str = "uploaded-sample", plugin_class: str = "UploadedPlugin") -> bytes:
+def _plugin_archive(
+    plugin_id: str = "uploaded-sample",
+    plugin_class: str = "UploadedPlugin",
+    *,
+    role: str | None = None,
+    requires: list[str] | None = None,
+) -> bytes:
+    manifest: dict[str, object] = {
+        "id": plugin_id,
+        "name": plugin_id,
+        "version": "1.0.0",
+        "entrypoint": f"plugin:{plugin_class}",
+        "resource_root": "ui",
+    }
+    if role is not None:
+        manifest["role"] = role
+    if requires is not None:
+        manifest["requires"] = requires
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
-        package.writestr(
-            "plugin.json",
-            json.dumps(
-                {
-                    "id": plugin_id,
-                    "name": plugin_id,
-                    "version": "1.0.0",
-                    "entrypoint": f"plugin:{plugin_class}",
-                    "resource_root": "ui",
-                }
-            ),
-        )
+        package.writestr("plugin.json", json.dumps(manifest))
         package.writestr(
             "plugin.py",
             (
@@ -112,14 +120,14 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.port: int = _free_port()
         self.base_url: str = f"http://127.0.0.1:{self.port}"
+        await self.context.plugin(WebApiPlugin, {"port": self.port})
         await self.context.plugin(
-            WebApiPlugin,
-            {
-                "port": self.port,
-                "plugin_install_root": str(Path(self.temp_dir.name) / "installed"),
-            },
+            PluginManagerPlugin,
+            {"install_root": str(Path(self.temp_dir.name) / "installed")},
         )
-        await self.context.plugin(WebUiPlugin)
+        plugins = self.context.plugins
+        await plugins.install_source(_SOURCE_ROOT / "masterplugins" / "webui")
+        await plugins.enable("webui")
 
     async def asyncTearDown(self) -> None:
         await unload_all(self.context)
@@ -140,7 +148,10 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
         status, body = await _arequest(self.base_url, "/api/plugins")
         self.assertEqual(status, 200)
-        self.assertEqual(len(json.loads(body)["plugins"]), 1)
+        uploaded_list = [
+            item for item in json.loads(body)["plugins"] if item["id"] != "webui"
+        ]
+        self.assertEqual(len(uploaded_list), 1)
 
         status, body = await _arequest(self.base_url, "/api/plugins/uploaded-sample/enable", method="POST")
         self.assertEqual(status, 200, body.decode("utf-8"))
@@ -167,7 +178,10 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         status, body = await _arequest(self.base_url, "/api/plugins/uploaded-sample", method="DELETE")
         self.assertEqual(status, 200)
         _, plugins_body = await _arequest(self.base_url, "/api/plugins")
-        self.assertEqual(json.loads(plugins_body)["plugins"], [])
+        remaining = [
+            item for item in json.loads(plugins_body)["plugins"] if item["id"] != "webui"
+        ]
+        self.assertEqual(remaining, [])
         _, ui_body = await _arequest(self.base_url, "/api/web/ui")
         self.assertFalse(any(item["owner"] == "uploaded-sample" for item in json.loads(ui_body)))
 
@@ -203,6 +217,83 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200, body.decode("utf-8"))
         self.assertEqual((await _arequest(self.base_url, "/api/same-id"))[0], 404)
         self.assertEqual((await _arequest(self.base_url, "/api/same_id"))[0], 200)
+
+    async def test_role_requires_metadata_and_package_service(self) -> None:
+        archive = _plugin_archive(
+            "executor-sample",
+            "ExecutorPlugin",
+            role="executor",
+            requires=["can-bus", "iso-tp"],
+        )
+        status, body = await _arequest(
+            self.base_url,
+            "/api/plugins/upload",
+            method="POST",
+            body=archive,
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 200)
+        plugin = json.loads(body)["plugin"]
+        self.assertEqual(plugin["role"], "executor")
+        self.assertEqual(plugin["requires"], ["can-bus", "iso-tp"])
+
+        # 默认值：不写 role / requires 时为 platform / []
+        status, body = await _arequest(
+            self.base_url,
+            "/api/plugins/upload",
+            method="POST",
+            body=_plugin_archive("plain-sample", "PlainPlugin"),
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 200)
+        plain = json.loads(body)["plugin"]
+        self.assertEqual(plain["role"], "platform")
+        self.assertEqual(plain["requires"], [])
+
+        # ctx.plugins 服务：未来的主从通信插件走这里读清单 / 取原始包
+        service = self.context.plugins
+        listing = await service.list_plugins()
+        record = next(item for item in listing if item["id"] == "executor-sample")
+        self.assertEqual(record["role"], "executor")
+        self.assertEqual(await service.package_bytes("executor-sample"), archive)
+
+        await service.uninstall("executor-sample")
+        with self.assertRaises(PluginManagerError):
+            await service.package_bytes("executor-sample")
+
+    async def test_manifest_rejects_invalid_role_and_requires(self) -> None:
+        status, body = await _arequest(
+            self.base_url,
+            "/api/plugins/upload",
+            method="POST",
+            body=_plugin_archive("bad-role", "BadRole", role="weird"),
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("role", json.loads(body)["error"])
+
+        status, body = await _arequest(
+            self.base_url,
+            "/api/plugins/upload",
+            method="POST",
+            body=_plugin_archive("bad-requires", "BadRequires", requires=["ok", ""]),
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("requires", json.loads(body)["error"])
+
+    async def test_install_source_installs_and_rejects_duplicates(self) -> None:
+        service = self.context.plugins
+        # setup 已从 masterplugins/webui 安装；重复安装同一插件源应被拒
+        with self.assertRaises(PluginManagerError):
+            await service.install_source(_SOURCE_ROOT / "masterplugins" / "webui")
+
+        with self.assertRaises(PluginManagerError):
+            await service.install_source(_SOURCE_ROOT / "masterplugins" / "nope")
+
+        record = next(item for item in await service.list_plugins() if item["id"] == "webui")
+        self.assertEqual(record["role"], "platform")
+        self.assertTrue(await service.package_bytes("webui"))
 
     async def test_upload_rejects_zip_path_traversal(self) -> None:
         archive = BytesIO()

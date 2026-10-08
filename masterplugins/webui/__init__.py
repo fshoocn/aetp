@@ -2,14 +2,14 @@
 
 对外只暴露三样东西::
 
-    from master.plugins.webui import WebUiPlugin, WebUiConfig, UiContribution
+    from masterplugins.webui import WebUiPlugin, WebUiConfig, UiContribution
 
 * :class:`WebUiPlugin`  —— 插件本体（也是 ``ctx.webui`` 服务），
   ``ctx.plugin(WebUiPlugin, {...})`` 加载它；
 * :class:`WebUiConfig`  —— 配置模型（``ui_directory`` 指向 Vue 构建产物）；
 * :class:`UiContribution` —— 插件 UI contribution 数据结构。
 
-与 :mod:`master.plugins.webapi` 的分工：
+与 :mod:`common.plugins.webapi` 的分工：
 
 * **webapi**：服务器、``ctx.webapi``、业务 API 路由 —— 永远需要；
 * **webui**：``/ui-static``、SPA 回退、``ctx.webui.register_ui``、``/api/web/ui`` ——

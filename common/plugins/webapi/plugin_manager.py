@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import json
 import os
@@ -22,8 +23,18 @@ from cordis_port import Context, Fiber
 MAX_ARCHIVE_SIZE: Final[int] = 32 * 1024 * 1024
 MAX_EXTRACTED_SIZE: Final[int] = 128 * 1024 * 1024
 MAX_ARCHIVE_FILES: Final[int] = 2048
+MAX_REQUIRES: Final[int] = 32
 PLUGIN_ID: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 ENTRYPOINT: Final[re.Pattern[str]] = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*):([A-Za-z_][A-Za-z0-9_]*)$")
+#: 插件归属角色：``platform`` 装在主节点（默认），``executor`` 装在执行测试的节点。
+#: 当前仅作为元数据记录与展示；按角色分发到从节点由后续的主从通信插件负责。
+PLUGIN_ROLES: Final[tuple[str, ...]] = ("platform", "executor")
+#: 安装/归档时跳过的目录（构建缓存与依赖，不属于插件包内容）
+EXCLUDED_DIRS: Final[frozenset[str]] = frozenset(
+    {"node_modules", "__pycache__", ".git", ".venv", "venv"}
+)
+#: 安装/归档时跳过的文件后缀
+EXCLUDED_SUFFIXES: Final[tuple[str, ...]] = (".pyc", ".pyo")
 
 
 class _PluginManifest(TypedDict):
@@ -33,6 +44,8 @@ class _PluginManifest(TypedDict):
     entrypoint: str
     resource_root: str | None
     config: dict[str, object]
+    role: str
+    requires: list[str]
 
 
 class _PluginRecord(_PluginManifest):
@@ -40,12 +53,14 @@ class _PluginRecord(_PluginManifest):
     last_error: str | None
 
 
-class _PublicPluginRecord(TypedDict):
+class PublicPluginRecord(TypedDict):
     id: str
     name: str
     version: str
     entrypoint: str
     resource_root: str | None
+    role: str
+    requires: list[str]
     enabled: bool
     last_error: str | None
 
@@ -67,6 +82,8 @@ class PluginManager:
         self.install_root: Path = install_root.resolve()
         self.install_root.mkdir(parents=True, exist_ok=True)
         self.registry_file: Path = self.install_root / "registry.json"
+        #: 原始插件包归档目录（保留上传 ZIP，供未来主从分发与回溯）
+        self.archives_dir: Path = self.install_root / ".archives"
         self.records: dict[str, _PluginRecord] = self._read_registry()
         self.fibers: dict[str, Fiber] = {}
         self._operation_lock = asyncio.Lock()
@@ -84,12 +101,43 @@ class PluginManager:
             future.cancel()
             raise PluginManagerError("插件操作超时", 504) from None
 
-    async def list_plugins(self) -> list[_PublicPluginRecord]:
+    async def list_plugins(self) -> list[PublicPluginRecord]:
         return [self._public_record(record) for record in sorted(self.records.values(), key=lambda item: item["id"])]
 
-    async def install_archive(self, archive: bytes) -> _PublicPluginRecord:
+    async def install_archive(self, archive: bytes) -> PublicPluginRecord:
         async with self._operation_lock:
             return await self._install_archive(archive)
+
+    async def install_source(self, source_dir: str | Path) -> PublicPluginRecord:
+        """从本地插件源目录安装（与上传 ZIP 同一条安装链路）。
+
+        源目录是「未安装的插件源文件」（如 ``masterplugins/webui``）；安装产物
+        落到本节点安装目录，原始包归档保留，后续可经 :meth:`package_bytes`
+        读出用于分发。``node_modules`` 等构建缓存不进包。
+        """
+        async with self._operation_lock:
+            source = Path(source_dir).expanduser().resolve()
+            if not source.is_dir():
+                raise PluginManagerError(f"插件源目录不存在：{source}")
+            return await self._install_archive(self._zip_directory(source))
+
+    @staticmethod
+    def _zip_directory(source: Path) -> bytes:
+        """把插件源目录打包成 ZIP（排除构建缓存与依赖目录）。"""
+        buffer = BytesIO()
+        total_size = 0
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as package:
+            for path in sorted(source.rglob("*")):
+                relative = path.relative_to(source)
+                if any(part in EXCLUDED_DIRS for part in relative.parts):
+                    continue
+                if not path.is_file() or path.suffix.lower() in EXCLUDED_SUFFIXES:
+                    continue
+                total_size += path.stat().st_size
+                if total_size > MAX_EXTRACTED_SIZE:
+                    raise PluginManagerError("插件源目录内容超过 128 MiB", 413)
+                package.write(path, relative.as_posix())
+        return buffer.getvalue()
 
     async def _install_archive(self, archive: bytes) -> _PublicPluginRecord:
         if not archive:
@@ -108,6 +156,9 @@ class PluginManager:
 
             destination = self.install_root / plugin_id
             os.replace(extracted, destination)
+            archive_path = self._archive_path(plugin_id)
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            archive_path.write_bytes(archive)
             record: _PluginRecord = {
                 **manifest,
                 "enabled": False,
@@ -119,6 +170,8 @@ class PluginManager:
             except Exception:
                 self.records.pop(plugin_id, None)
                 shutil.rmtree(destination, ignore_errors=True)
+                archive_path.unlink(missing_ok=True)
+                self._prune_archives_dir()
                 raise
             return self._public_record(record)
         except PluginManagerError:
@@ -128,7 +181,7 @@ class PluginManager:
         finally:
             shutil.rmtree(staging_root, ignore_errors=True)
 
-    async def enable(self, plugin_id: str) -> _PublicPluginRecord:
+    async def enable(self, plugin_id: str) -> PublicPluginRecord:
         async with self._operation_lock:
             return await self._enable(plugin_id)
 
@@ -195,7 +248,7 @@ class PluginManager:
         except OSError as registry_error:
             self.ctx.logger.error("插件 %s 启用失败状态无法写入注册表：%s", plugin_id, registry_error)
 
-    async def disable(self, plugin_id: str) -> _PublicPluginRecord:
+    async def disable(self, plugin_id: str) -> PublicPluginRecord:
         async with self._operation_lock:
             return await self._disable(plugin_id)
 
@@ -221,6 +274,8 @@ class PluginManager:
         if package_root.parent != self.install_root:
             raise PluginManagerError("插件安装目录无效", 400)
         shutil.rmtree(package_root)
+        self._archive_path(plugin_id).unlink(missing_ok=True)
+        self._prune_archives_dir()
         self.records.pop(plugin_id, None)
         self._write_registry()
         if record.get("enabled"):
@@ -289,6 +344,8 @@ class PluginManager:
             raise PluginManagerError("config 必须是 JSON 对象")
         config = cast(dict[str, object], config)
 
+        role, requires = self._validate_role(manifest)
+
         resource_root = manifest.get("resource_root")
         if resource_root is not None:
             if not isinstance(resource_root, str) or not resource_root.strip():
@@ -309,11 +366,42 @@ class PluginManager:
             "entrypoint": entrypoint,
             "resource_root": resource_root,
             "config": config,
+            "role": role,
+            "requires": requires,
         }
+
+    @staticmethod
+    def _validate_role(manifest: dict[str, object]) -> tuple[str, list[str]]:
+        """校验 ``role`` 与 ``requires`` 归属元数据（都可省略）。"""
+        role = manifest.get("role", "platform")
+        if role is None:
+            role = "platform"
+        if not isinstance(role, str) or role not in PLUGIN_ROLES:
+            raise PluginManagerError(
+                f"role 必须是 {' / '.join(PLUGIN_ROLES)} 之一，收到 {role!r}"
+            )
+        requires_raw = manifest.get("requires", [])
+        if requires_raw is None:
+            requires_raw = []
+        if (
+            not isinstance(requires_raw, list)
+            or len(requires_raw) > MAX_REQUIRES
+            or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 64
+                for item in requires_raw
+            )
+        ):
+            raise PluginManagerError(
+                "requires 必须是字符串列表（每项非空且不超过 64 字符，最多 32 项）"
+            )
+        return role, [cast(str, item).strip() for item in cast(list[object], requires_raw)]
 
     def _load_plugin_class(
         self, package_root: Path, package_name: str, entrypoint: str
     ) -> type[object]:
+        # 合成模块名由 plugin_id 决定：重装/重复启用时必须先清掉旧模块，
+        # 否则 importlib 会命中缓存，代码和资源路径都还是上一份安装的。
+        self._remove_modules(package_name)
         module_path, class_name = entrypoint.split(":", 1)
         package = types.ModuleType(package_name)
         package.__path__ = [str(package_root)]
@@ -338,13 +426,35 @@ class PluginManager:
             raise PluginManagerError(f"找不到插件：{plugin_id}", 404)
         return record
 
-    def _public_record(self, record: _PluginRecord) -> _PublicPluginRecord:
+    def _archive_path(self, plugin_id: str) -> Path:
+        return self.archives_dir / f"{plugin_id}.zip"
+
+    def _prune_archives_dir(self) -> None:
+        """归档目录空了就移除，保证安装根目录不残留空壳。"""
+        with contextlib.suppress(OSError):
+            self.archives_dir.rmdir()
+
+    def package_path(self, plugin_id: str) -> Path:
+        """取插件包原始 ZIP 的归档路径（供分发/回溯）。"""
+        self._get_record(plugin_id)
+        path = self._archive_path(plugin_id)
+        if not path.is_file():
+            raise PluginManagerError(f"插件包归档不存在：{plugin_id}", 404)
+        return path
+
+    def package_bytes(self, plugin_id: str) -> bytes:
+        """读取插件包原始 ZIP 字节（主从分发时由通信插件调用）。"""
+        return self.package_path(plugin_id).read_bytes()
+
+    def _public_record(self, record: _PluginRecord) -> PublicPluginRecord:
         return {
             "id": record["id"],
             "name": record["name"],
             "version": record["version"],
             "entrypoint": record["entrypoint"],
             "resource_root": record.get("resource_root"),
+            "role": record.get("role", "platform"),
+            "requires": list(record.get("requires") or []),
             "enabled": bool(record.get("enabled")),
             "last_error": record.get("last_error"),
         }
@@ -371,4 +481,4 @@ class PluginManager:
         os.replace(temporary, self.registry_file)
 
 
-__all__: list[str] = ["PluginManager", "PluginManagerError"]
+__all__: list[str] = ["PluginManager", "PluginManagerError", "PublicPluginRecord"]

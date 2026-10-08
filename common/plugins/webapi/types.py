@@ -1,7 +1,7 @@
 """webapi 插件的数据模型（路由记录等）。
 
 本模块只有纯数据结构，不依赖 cordis 也不依赖 starlette，便于被任何一方引用 ——
-尤其是 :class:`~master.plugins.webapi.interface.WebApiService` 这类**接口**：
+尤其是 :class:`~common.plugins.webapi.interface.WebApiService` 这类**接口**：
 接口返回的数据类型不应把具体框架（Starlette）或运行时（cordis）拖进来，
 否则「替换底层实现」时连带要把接口一起改掉。
 """

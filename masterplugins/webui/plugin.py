@@ -2,7 +2,7 @@
 
 使用方式（在 ``master/main.py`` 里）::
 
-    from master.plugins.webui import WebUiPlugin
+    from masterplugins.webui import WebUiPlugin
 
     await ctx.plugin(WebUiPlugin)      # 依赖 webapi，需先加载 WebApiPlugin
 
@@ -91,7 +91,7 @@ class WebUiPlugin(Service[WebUiConfig]):
             api.static("/ui-static", ui_directory, name="web.ui-static")
         else:
             self.ctx.logger.warning(
-                "Vue 构建目录不存在：%s（在 master/plugins/webui/frontend 运行 npm run build 生成）",
+                "Vue 构建目录不存在：%s（在 masterplugins/webui/frontend 运行 npm run build 生成）",
                 ui_directory,
             )
 

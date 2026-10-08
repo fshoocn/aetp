@@ -1,4 +1,4 @@
-"""uvicorn 后端 —— :class:`~master.plugins.webapi.interface.WebApiService` 的默认实现。
+"""uvicorn 后端 —— :class:`~common.plugins.webapi.interface.WebApiService` 的默认实现。
 
 **所有 uvicorn 相关的代码都在本文件**：
 
@@ -7,8 +7,8 @@
   并以 cordis ``Service``（``provide = "webapi"``）的身份注册为 ``ctx.webapi``。
 
 换服务器（hypercorn / daphne …）时只需要换这个文件：新增一个同接口的实现，
-再改 :mod:`master.plugins.webapi.plugin` 构造里那一行。接口
-:class:`~master.plugins.webapi.interface.WebApiService` 与所有业务插件都保持不动。
+再改 :mod:`common.plugins.webapi.plugin` 构造里那一行。接口
+:class:`~common.plugins.webapi.interface.WebApiService` 与所有业务插件都保持不动。
 
 为什么放在独立线程而不是复用调用方的 asyncio 循环？
 

@@ -2,18 +2,18 @@
 
 对外只暴露四样东西::
 
-    from master.plugins.webapi import WebApiPlugin, WebApiService, UvicornWebApiService, WebApiConfig
+    from common.plugins.webapi import WebApiPlugin, WebApiService, UvicornWebApiService, WebApiConfig
 
 * :class:`WebApiPlugin`    —— 插件本体，``ctx.plugin(WebApiPlugin, {...})`` 加载它；
 * :class:`WebApiService`   —— **接口**，业务插件通过 ``ctx.webapi`` 依赖的契约；
 * :class:`UvicornWebApiService` —— 接口的 uvicorn + Starlette 实现（默认后端）；
 * :class:`WebApiConfig`    —— 配置模型。
 
-换服务器时，只需要改 :class:`~master.plugins.webapi.plugin.WebApiPlugin` 构造里
+换服务器时，只需要改 :class:`~common.plugins.webapi.plugin.WebApiPlugin` 构造里
 那一行 ``UvicornWebApiService(ctx, config)``（换成同接口的其他后端），
 接口与所有业务插件保持不动。
 
-UI 是可拆卸的上层插件（:mod:`master.plugins.webui`）：SPA 静态资源、页面回退
+UI 是可拆卸的上层插件（:mod:`masterplugins.webui`）：SPA 静态资源、页面回退
 与 ``register_ui`` 都在那里；不加载 webui 即为纯 API 部署。
 
 模块结构::

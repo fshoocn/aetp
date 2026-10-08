@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import cast
 
 #: 字段类型表：字段名 -> (类型元组, 说明)。用于 ``validate`` 的逐项检查。
@@ -13,7 +12,6 @@ _FIELDS: dict[str, tuple[tuple[type[object], ...], str]] = {
     "access_log": ((bool,), "是否打印访问日志"),
     "log_level": ((str,), "uvicorn 日志级别"),
     "start_timeout": ((int, float), "启动等待秒数"),
-    "plugin_install_root": ((str, Path), "插件安装目录"),
 }
 
 #: 允许的日志级别
@@ -36,7 +34,6 @@ class WebApiConfig:
     access_log: bool = False
     log_level: str = "warning"
     start_timeout: float = 10.0
-    plugin_install_root: str = str(Path(__file__).resolve().parent.parent / "installed")
 
     def __init__(self, **values: object) -> None:
         """按字段表填充配置；未给出的字段取类属性默认值。"""

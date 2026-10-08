@@ -2,17 +2,20 @@
 
 使用方式（在 ``master/main.py`` 里）::
 
-    from master.plugins.webapi import WebApiPlugin
+    from common.plugins.webapi import WebApiPlugin
 
     await ctx.plugin(WebApiPlugin, {"port": 8080})
 
 加载流程：
 
-1. 构造 :class:`~master.plugins.webapi.uvicorn_web_service.UvicornWebApiService`
+1. 构造 :class:`~common.plugins.webapi.uvicorn_web_service.UvicornWebApiService`
    （**构造即注册为 ``ctx.webapi``**）；
 2. ``init()`` 注册内置自省接口并启动 uvicorn；
-3. 自动加载依赖 ``webapi`` 的插件管理 API；
-4. 卸载时先清理管理 API，再由 effect 调用 :meth:`_shutdown` 停止服务器。
+3. 卸载时由 effect 调用 :meth:`_shutdown` 停止服务器。
+
+插件管理 API（:class:`~common.plugins.webapi.plugin_manager_plugin.PluginManagerPlugin`）
+由**入口**在 webapi 就绪后单独加载——不在本插件内嵌加载，避免「webapi 尚未 ACTIVE
+就加载依赖方」触发二轮加载、``ctx.plugins`` 短暂不可用的时序窗口。
 
 ``await ctx.plugin(...)`` 返回时 ``init()`` 已经跑完、端口已经在监听
 （``start()`` 会阻塞到就绪），因此 ``ctx.webapi`` 对后续插件**立刻可用**，
@@ -20,7 +23,7 @@
 ``ctx.webapi.is_running()``。
 
 UI 是可拆卸的上层：SPA 静态资源、页面回退与 ``register_ui`` 都在
-``master.plugins.webui`` 插件里；不加载它就是纯 API 服务。
+``masterplugins.webui`` 插件里；不加载它就是纯 API 服务。
 
 为什么不把 ``provide`` 写在插件类上
 -----------------------------------
@@ -88,13 +91,6 @@ class WebApiPlugin:
         # 业务插件先清理并非「后注册先销毁」，而是 web fiber 进入 UNLOADING 时
         # 会先 notify 依赖方，它们的卸载任务先排入事件循环（见 cordis _update_state）。
         self.ctx.fiber.effect(lambda: self._shutdown, "plugins.webapi.shutdown")
-
-        from .plugin_manager_plugin import PluginManagerPlugin
-
-        await self.ctx.plugin(
-            PluginManagerPlugin,
-            {"install_root": self.config.plugin_install_root},
-        )
 
     # -- 内置接口（属于本插件，随它一同卸载） --------------------------------
     def _register_builtins(self) -> None:

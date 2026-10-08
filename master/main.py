@@ -26,7 +26,7 @@ from pathlib import Path
 from types import FrameType
 
 # 直接 ``python master/main.py`` 运行时，sys.path[0] 是 ``master/`` 而非仓库根，
-# 会导致 ``common`` / ``plugins`` 无法导入。这里把仓库根补进 sys.path。
+# 会导致 ``common`` / ``masterplugins`` 无法导入。这里把仓库根补进 sys.path。
 _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -34,8 +34,8 @@ if str(_REPO_ROOT) not in sys.path:
 from cordis_port import Context
 
 from common import cordis_utils
-from master.plugins.webapi import WebApiPlugin
-from master.plugins.webui import WebUiPlugin
+from common.plugins.webapi import WebApiPlugin
+from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 
 def _install_stop_handler(
@@ -83,8 +83,18 @@ async def boot() -> None:
     # 2. API 服务：应最先加载 —— 其他插件依赖它注册路由
     await ctx.plugin(WebApiPlugin, {"port": 8080})
 
-    # 3. UI 宿主（可拆卸上层）：注释掉下面一行即为纯 API（无头）部署
-    await ctx.plugin(WebUiPlugin)
+    # 2b. 插件管理（安装能力 ctx.plugins）：在 webapi 就绪后由入口加载。
+    #     安装目录是「节点数据」目录，由入口显式传入（主节点 = master/plugins）
+    await ctx.plugin(
+        PluginManagerPlugin,
+        {"install_root": str(Path(__file__).resolve().parent / "plugins")},
+    )
+
+    # 3. UI 宿主：从 masterplugins 的插件源安装并启用（跳过这段即为纯 API 无头模式）
+    plugins = ctx.plugins
+    if "webui" not in {item["id"] for item in await plugins.list_plugins()}:
+        await plugins.install_source(_REPO_ROOT / "masterplugins" / "webui")
+    await plugins.enable("webui")
 
     # 4. 报告服务地址
     address = ctx.webapi.address()

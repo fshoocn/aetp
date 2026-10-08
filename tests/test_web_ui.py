@@ -14,10 +14,12 @@ from cordis_port import Context
 from starlette.requests import Request as StarletteRequest
 
 from common.cordis_utils import unload_all
-from master.plugins.webapi import WebApiPlugin
-from master.plugins.webapi.router import RouteRegistry
-from master.plugins.webapi.types import RouteRecord
-from master.plugins.webui import WebUiPlugin
+from common.plugins.webapi import WebApiPlugin
+from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
+from common.plugins.webapi.router import RouteRegistry
+from common.plugins.webapi.types import RouteRecord
+
+_SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
 
 
 def _free_port() -> int:
@@ -118,14 +120,14 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.context: Context = Context()
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.port: int = _free_port()
+        await self.context.plugin(WebApiPlugin, {"port": self.port})
         await self.context.plugin(
-            WebApiPlugin,
-            {
-                "port": self.port,
-                "plugin_install_root": str(Path(self.temp_dir.name) / "installed"),
-            },
+            PluginManagerPlugin,
+            {"install_root": str(Path(self.temp_dir.name) / "installed")},
         )
-        await self.context.plugin(WebUiPlugin)
+        plugins = self.context.plugins
+        await plugins.install_source(_SOURCE_ROOT / "masterplugins" / "webui")
+        await plugins.enable("webui")
 
     async def asyncTearDown(self) -> None:
         await unload_all(self.context)
