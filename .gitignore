@@ -32,10 +32,9 @@ env/
 ENV/
 .python-version
 **/node_modules/
-plugins/web/static/ui/dist/
-plugins/installed/
-**/node_modules/
-plugins/web/static/ui/dist/
+masterplugins/webui/static/ui/dist/
+master/plugins/
+slave/plugins/
 
 # ---------------------------------------------------------------
 # 测试与覆盖率
