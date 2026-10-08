@@ -1,7 +1,7 @@
 import { createApp } from 'vue';
 import App from './App.vue';
-import router from './router';
-import { initializePluginUi } from './plugins/ui-runtime';
+import router from './router/index.js';
+import { initializePluginUi } from './plugins/ui-runtime.js';
 
 import Aura from '@primeuix/themes/aura';
 import PrimeVue from 'primevue/config';

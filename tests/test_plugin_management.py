@@ -16,8 +16,8 @@ from urllib.request import Request, urlopen
 from cordis_port import Context
 
 from common.cordis_utils import unload_all
-from plugins.web import WebPlugin
-from plugins.web.plugin_manager import PluginManager, PluginManagerError
+from master.plugins.web import WebPlugin
+from master.plugins.web.plugin_manager import PluginManager, PluginManagerError
 
 
 def _free_port() -> int:

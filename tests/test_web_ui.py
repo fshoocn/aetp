@@ -14,9 +14,9 @@ from cordis_port import Context
 from starlette.requests import Request as StarletteRequest
 
 from common.cordis_utils import unload_all
-from plugins.web import WebPlugin
-from plugins.web.router import RouteRegistry
-from plugins.web.types import RouteRecord
+from master.plugins.web import WebPlugin
+from master.plugins.web.router import RouteRegistry
+from master.plugins.web.types import RouteRecord
 
 
 def _free_port() -> int:

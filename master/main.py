@@ -34,7 +34,7 @@ if str(_REPO_ROOT) not in sys.path:
 from cordis_port import Context
 
 from common import cordis_utils
-from plugins.web import WebPlugin
+from master.plugins.web import WebPlugin
 
 
 def _install_stop_handler(
