@@ -26,7 +26,7 @@ const containerClass = computed(() => {
             <div class="layout-main">
                 <router-view />
             </div>
-            <AppFooter />
+            <!-- <AppFooter /> -->
         </div>
         <div class="layout-mask animate-fadein" @click="hideMobileMenu" />
     </div>
