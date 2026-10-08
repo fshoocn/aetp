@@ -1,23 +1,22 @@
-"""Web 服务的**接口**：只声明「web 服务长什么样」，不含任何实现。
+"""webapi 服务的**接口**：只声明「API 服务长什么样」，不含任何实现。
 
-业务插件依赖的就是这个契约（通过 ``ctx.web`` 拿到的正是它的实现）。
+业务插件依赖的就是这个契约（通过 ``ctx.webapi`` 拿到的正是它的实现）。
 换底层服务器 / 框架时本模块**不动**，业务插件一行都不用改 —— 新后端只要
-实现 :class:`WebService` 即可。
+实现 :class:`WebApiService` 即可。
 
 设计约束（都是为了「后端可整体替换」）::
 
     1. 不出现 uvicorn / hypercorn 等服务器名 —— 服务器只活在后端实现文件里；
     2. 不暴露框架内部对象 —— 不返回 Starlette 的 Route/Mount，
-       只返回本包自己的 :class:`~plugins.web.types.RouteRecord`；
+       只返回本包自己的 :class:`~master.plugins.webapi.types.RouteRecord`；
     3. 响应构造器只依赖 ``starlette.responses`` —— 它们是 ASGI 无关的纯对象，
        换任何 ASGI 服务器都不受影响。
 
 模块结构::
 
-    interface.py            本文件：接口 WebService（换后端时不动）
-    uvicorn_web_service.py  uvicorn 后端：UvicornWebService + UvicornHost
+    interface.py            本文件：接口 WebApiService（换后端时不动）
+    uvicorn_web_service.py  uvicorn 后端：UvicornWebApiService + UvicornHost
     router.py               路由表与 Starlette 挂载
-    layout.py               页面布局与导航栏渲染
     responses.py            handler 返回值 → HTTP 响应
     config.py               配置模型（标准 Schema）
     types.py                纯数据结构
@@ -26,36 +25,35 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from cordis_port import Context, Fiber
+from starlette.requests import Request
 from starlette.responses import (
     FileResponse,
     HTMLResponse,
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    Response,
     StreamingResponse,
 )
 
-from .config import WebConfig
+from .config import WebApiConfig
 from .types import (
     RouteHandler,
     RouteKind,
     RouteRecord,
     RouteRegistration,
     StreamContent,
-    UiContribution,
-    UiFormat,
-    UiKind,
 )
 
 
-class WebService(ABC):
-    """web 服务的抽象接口。
+class WebApiService(ABC):
+    """webapi 服务的抽象接口。
 
-    覆盖路由、插件 UI contributions、HTTP 响应和运行时查询能力：
+    覆盖路由、404 回退、HTTP 响应和运行时查询能力：
 
     =========================  =============================================
     能力                        方法
@@ -63,7 +61,7 @@ class WebService(ABC):
     路由注册                    :meth:`route` / :meth:`get` / :meth:`post` /
                                 :meth:`put` / :meth:`patch` / :meth:`delete` /
                                 :meth:`api` / :meth:`static`
-    插件 UI                     :meth:`register_ui` / :meth:`ui_contributions`
+    404 回退                    :meth:`set_fallback`
     路由管理                    :meth:`remove` / :meth:`routes` / :meth:`has_route`
     响应构造                    :meth:`json` / :meth:`html` / :meth:`text` /
                                 :meth:`redirect` / :meth:`file` / :meth:`stream`
@@ -72,14 +70,14 @@ class WebService(ABC):
 
     实现方还需满足两条**隐含契约**（无法用 ``abstractmethod`` 表达，但必须做到）：
 
-        * :meth:`register_ui` / :meth:`route` 注册的条目要绑定到**调用方插件的 fiber**，
+        * :meth:`route` 注册的条目要绑定到**调用方插件的 fiber**，
             插件卸载时自动注销；
     * 实例需持有 ``ctx``，因为调用方身份正是从它推导出来的。
     """
 
     # ---------------------------------------------------------------- 构造
     @abstractmethod
-    def __init__(self, ctx: Context, config: WebConfig) -> None:
+    def __init__(self, ctx: Context, config: WebApiConfig) -> None:
         """构造服务。
 
         参数:
@@ -242,27 +240,17 @@ class WebService(ABC):
         """
 
     @abstractmethod
-    def register_ui(
-        self,
-        contribution_id: str,
-        *,
-        kind: UiKind,
-        format: UiFormat,
-        resource_root: str | Path,
-        entry: str,
-        path: str | None = None,
-        title: str | None = None,
-        menu_group: str | None = None,
-        menu_icon: str | None = None,
-        menu_order: float = 0,
-        target: str | None = None,
-        order: float = 0,
-    ) -> UiContribution:
-        """注册插件页面、插槽组件或 JS 扩展，并绑定到调用插件的生命周期。"""
+    def set_fallback(
+        self, handler: Callable[[Request], Response | None] | None
+    ) -> None:
+        """设置（或清除）404 回退处理器。
 
-    @abstractmethod
-    def ui_contributions(self) -> list[UiContribution]:
-        """返回插件前端扩展清单。"""
+        未命中路由时调用 ``handler(request)``：返回响应则直接发送，返回
+        ``None`` 则退回默认的 JSON 404；传 ``None`` 表示清除。
+
+        由 UI 宿主（webui 插件）用它实现 SPA 深层 URL 回退；纯 API 部署
+        不设置即可。实现按「后设置者覆盖」处理。
+        """
 
     # -------------------------------------------------------------- 路由管理
     @abstractmethod
@@ -357,4 +345,4 @@ class WebService(ABC):
         """返回形如 ``http://127.0.0.1:8080`` 的访问地址；未启动时返回 ``None``。"""
 
 
-__all__: list[str] = ["WebService"]
+__all__: list[str] = ["WebApiService"]

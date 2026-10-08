@@ -14,9 +14,10 @@ from cordis_port import Context
 from starlette.requests import Request as StarletteRequest
 
 from common.cordis_utils import unload_all
-from master.plugins.web import WebPlugin
-from master.plugins.web.router import RouteRegistry
-from master.plugins.web.types import RouteRecord
+from master.plugins.webapi import WebApiPlugin
+from master.plugins.webapi.router import RouteRegistry
+from master.plugins.webapi.types import RouteRecord
+from master.plugins.webui import WebUiPlugin
 
 
 def _free_port() -> int:
@@ -89,7 +90,7 @@ class RouteRegistryTests(unittest.TestCase):
 
         registry.add(get_route, get_owner)
         registry.add(post_route, post_owner)
-        self.assertEqual(get_owner.labels, ["ctx.web.route('/shared')"])
+        self.assertEqual(get_owner.labels, ["ctx.webapi.route('/shared')"])
         get_owner.dispose()
 
         self.assertEqual(registry.get_all("/shared"), [post_route])
@@ -97,10 +98,10 @@ class RouteRegistryTests(unittest.TestCase):
 
 class SampleUiPlugin:
     name: ClassVar[str] = "test-ui"
-    inject: ClassVar[list[str]] = ["web"]
+    inject: ClassVar[list[str]] = ["webapi", "webui"]
 
     def __init__(self, ctx: Context, config: dict[str, str]) -> None:
-        ctx.web.register_ui(
+        ctx.webui.register_ui(
             "dashboard",
             kind="page",
             format="vue",
@@ -118,12 +119,13 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.port: int = _free_port()
         await self.context.plugin(
-            WebPlugin,
+            WebApiPlugin,
             {
                 "port": self.port,
                 "plugin_install_root": str(Path(self.temp_dir.name) / "installed"),
             },
         )
+        await self.context.plugin(WebUiPlugin)
 
     async def asyncTearDown(self) -> None:
         await unload_all(self.context)

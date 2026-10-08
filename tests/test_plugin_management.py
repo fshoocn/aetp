@@ -16,8 +16,9 @@ from urllib.request import Request, urlopen
 from cordis_port import Context
 
 from common.cordis_utils import unload_all
-from master.plugins.web import WebPlugin
-from master.plugins.web.plugin_manager import PluginManager, PluginManagerError
+from master.plugins.webapi import WebApiPlugin
+from master.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
+from master.plugins.webui import WebUiPlugin
 
 
 def _free_port() -> int:
@@ -88,15 +89,15 @@ def _plugin_archive(plugin_id: str = "uploaded-sample", plugin_class: str = "Upl
             (
                 f"class {plugin_class}:\n"
                 f"    name = {plugin_id!r}\n"
-                "    inject = ['web']\n"
+                "    inject = ['webapi', 'webui']\n"
                 "\n"
                 "    def __init__(self, ctx, config):\n"
-                "        ctx.web.register_ui(\n"
+                "        ctx.webui.register_ui(\n"
                 "            'home', kind='page', format='vue', resource_root=config['resource_root'],\n"
                 f"            entry='Home.vue', path='/plugins/{plugin_id}', title={plugin_id!r},\n"
                 "        )\n"
                 "\n"
-                f"        @ctx.web.get('/api/{plugin_id}', kind='api')\n"
+                f"        @ctx.webapi.get('/api/{plugin_id}', kind='api')\n"
                 "        def status(request):\n"
                 "            return {'active': True}\n"
             ),
@@ -112,12 +113,13 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.port: int = _free_port()
         self.base_url: str = f"http://127.0.0.1:{self.port}"
         await self.context.plugin(
-            WebPlugin,
+            WebApiPlugin,
             {
                 "port": self.port,
                 "plugin_install_root": str(Path(self.temp_dir.name) / "installed"),
             },
         )
+        await self.context.plugin(WebUiPlugin)
 
     async def asyncTearDown(self) -> None:
         await unload_all(self.context)
@@ -261,7 +263,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
         class ConcurrentPlugin:
             name: str = "concurrent-enable-test"
-            inject: tuple[str, ...] = ("web",)
+            inject: tuple[str, ...] = ("webapi",)
 
             def __init__(self, ctx: Context, config: object) -> None:
                 del ctx, config
@@ -295,7 +297,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
         class BlockingPlugin:
             name: str = "cancelled-enable-test"
-            inject: tuple[str, ...] = ("web",)
+            inject: tuple[str, ...] = ("webapi",)
 
             def __init__(self, ctx: Context, config: object) -> None:
                 del ctx, config

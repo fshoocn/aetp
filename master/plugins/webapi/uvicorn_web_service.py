@@ -1,14 +1,14 @@
-"""uvicorn 后端 —— :class:`~plugins.web.interface.WebService` 的默认实现。
+"""uvicorn 后端 —— :class:`~master.plugins.webapi.interface.WebApiService` 的默认实现。
 
 **所有 uvicorn 相关的代码都在本文件**：
 
 * :class:`UvicornHost` —— 把 Starlette 应用跑在一个后台线程里；
-* :class:`UvicornWebService` —— 把路由 / 布局 / 响应拼成一个 WebService，
-  并以 cordis ``Service``（``provide = "web"``）的身份注册为 ``ctx.web``。
+* :class:`UvicornWebApiService` —— 把路由 / 响应拼成一个 WebApiService，
+  并以 cordis ``Service``（``provide = "webapi"``）的身份注册为 ``ctx.webapi``。
 
 换服务器（hypercorn / daphne …）时只需要换这个文件：新增一个同接口的实现，
-再改 :mod:`plugins.web.plugin` 构造里那一行。接口
-:class:`~plugins.web.interface.WebService` 与所有业务插件都保持不动。
+再改 :mod:`master.plugins.webapi.plugin` 构造里那一行。接口
+:class:`~master.plugins.webapi.interface.WebApiService` 与所有业务插件都保持不动。
 
 为什么放在独立线程而不是复用调用方的 asyncio 循环？
 
@@ -32,10 +32,9 @@ server/thread 并置空自己的字段），真正的 ``join()`` 放在锁外执
 """
 from __future__ import annotations
 
-import re
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -52,8 +51,8 @@ from starlette.responses import (
     StreamingResponse,
 )
 
-from .config import WebConfig
-from .interface import WebService
+from .config import WebApiConfig
+from .interface import WebApiService
 from .router import (
     RouteError,
     RouteRegistry,
@@ -69,9 +68,6 @@ from .types import (
     RouteRecord,
     RouteRegistration,
     StreamContent,
-    UiContribution,
-    UiFormat,
-    UiKind,
 )
 
 if TYPE_CHECKING:
@@ -91,13 +87,12 @@ class UvicornHost:
         server: 底层 ``uvicorn.Server`` 实例（启动后才非 ``None``）。
     """
 
-    def __init__(self, config: WebConfig) -> None:
-        self.config: WebConfig = config
+    def __init__(self, config: WebApiConfig) -> None:
+        self.config: WebApiConfig = config
         self.app: Starlette = Starlette()
         self.thread: threading.Thread | None = None
         self.server: uvicorn.Server | None = None
         self._lock = threading.Lock()
-        self._installed_fallback: bool = False
 
     # -- 启动 ----------------------------------------------------------------
     def start(self) -> None:
@@ -107,8 +102,6 @@ class UvicornHost:
             ServerError: 端口被占用、绑定失败或超过 ``start_timeout`` 仍未就绪。
         """
         import uvicorn
-
-        self.install_fallback_index()
 
         options = uvicorn.Config(
             self.app,
@@ -183,88 +176,47 @@ class UvicornHost:
             server is not None and server.started and thread is not None and thread.is_alive()
         )
 
-    # -- 兜底 404 页 ---------------------------------------------------------
-    def install_fallback_index(self) -> None:
-        """安装 SPA 路由回退及明确的 API/静态资源 404。
-
-        页面导航 URL 返回构建后的 ``index.html``，而 API 和静态前缀保持真实 404，
-        避免 SPA 回退吞掉拼错的 API 或缺失资源。
-
-        仅安装一次。
-        """
-        if self._installed_fallback:
-            return
-        self._installed_fallback = True
-        self.app.add_exception_handler(404, self._fallback_404)
-
-    async def _fallback_404(self, request: Request, _exc: Exception) -> Response:
-        """为 SPA 前端路由回退；API 与静态路径仍返回 404。"""
-        del _exc
-        path = request.url.path
-        if path == "/api" or path.startswith("/api/"):
-            return JSONResponse({"detail": "Not Found"}, status_code=404)
-        if path == "/ui-static" or path.startswith("/ui-static/"):
-            return PlainTextResponse("Not Found", status_code=404)
-        if path == "/plugin-ui" or path.startswith("/plugin-ui/"):
-            return PlainTextResponse("Not Found", status_code=404)
-        if request.method not in {"GET", "HEAD"}:
-            return PlainTextResponse("Not Found", status_code=404)
-
-        ui_index = Path(request.app.state.ui_directory) / "index.html"
-        if not ui_index.is_file():
-            return JSONResponse(
-                {"detail": "Vue UI is not built; run npm run build in plugins/web/frontend"},
-                status_code=503,
-            )
-        if request.method == "HEAD":
-            return Response(
-                status_code=200,
-                media_type="text/html",
-                headers={"Content-Length": str(ui_index.stat().st_size)},
-            )
-        return FileResponse(ui_index)
-
-
-class UvicornWebService(Service[WebConfig], WebService):
-    """基于 uvicorn 托管、Starlette 路由的 :class:`WebService` 实现。
+class UvicornWebApiService(Service[WebApiConfig], WebApiService):
+    """基于 uvicorn 托管、Starlette 路由的 :class:`WebApiService` 实现。
 
     同时具备两个身份：
 
-    * **cordis Service**（``provide = "web"``）—— 构造即注册为 ``ctx.web``；
-    * **WebService 接口实现** —— 业务插件通过 ``ctx.web`` 拿到的就是本实例。
+    * **cordis Service**（``provide = "webapi"``）—— 构造即注册为 ``ctx.webapi``；
+    * **WebApiService 接口实现** —— 业务插件通过 ``ctx.webapi`` 拿到的就是本实例。
 
     两条**隐含契约**在这里兑现：
 
-    1. ``route()`` / ``register_ui()`` 把注册项绑到**调用方 fiber** 的 effect 上，
+    1. ``route()`` 把注册项绑到**调用方 fiber** 的 effect 上，
        插件卸载时自动注销；
     2. 实例持有 ``ctx``，调用方身份从 :meth:`_caller_fiber` 推导。
 
     示例::
 
-        ctx.web.register_ui(
-            "dashboard", kind="page", format="vue", resource_root=".../ui",
-            entry="Dashboard.vue", path="/tests", title="测试管理",
-        )
+        @ctx.webapi.get("/api/ping", kind="api")
+        def ping(request):
+            return {"ok": True}
     """
 
-    #: 服务名，其他插件用 ``inject = ["web"]`` 依赖它
-    provide: str | None = "web"
-    #: 插件名（本类也能被 ``ctx.plugin(UvicornWebService, {...})`` 直接加载）
-    name: str = "web"
+    #: 服务名，其他插件用 ``inject = ["webapi"]`` 依赖它
+    provide: str | None = "webapi"
+    #: 插件名（本类也能被 ``ctx.plugin(UvicornWebApiService, {...})`` 直接加载）
+    name: str = "webapi"
     #: 配置模型，供 cordis 校验 ``ctx.plugin(..., {...})`` 传入的配置
-    Config: type[WebConfig] = WebConfig
+    Config: type[WebApiConfig] = WebApiConfig
 
-    def __init__(self, ctx: Context, config: WebConfig | None = None) -> None:
-        # 注意 MRO：基类是 (Service, WebService)，这里**显式**调用 Service 的构造，
-        # 而不是 super().__init__ —— super 会先碰到抽象的 WebService.__init__
+    def __init__(self, ctx: Context, config: WebApiConfig | None = None) -> None:
+        # 注意 MRO：基类是 (Service, WebApiService)，这里**显式**调用 Service 的构造，
+        # 而不是 super().__init__ —— super 会先碰到抽象的 WebApiService.__init__
         # （只有一句 docstring，什么都不做），导致服务注册被跳过。
-        cast(type[Service[WebConfig]], Service).__init__(self, ctx)
+        cast(type[Service[WebApiConfig]], Service).__init__(self, ctx)
 
-        self.config: WebConfig = config if isinstance(config, WebConfig) else WebConfig()
+        self.config: WebApiConfig = (
+            config if isinstance(config, WebApiConfig) else WebApiConfig()
+        )
         self._registry: RouteRegistry = RouteRegistry()
-        self._ui: dict[str, UiContribution] = {}
         self._host: UvicornHost | None = None
         self._provided_ctx: Context = ctx
+        self._fallback: Callable[[Request], Response | None] | None = None
 
     # ---------------------------------------------------------- cordis 集成
     @property
@@ -314,17 +266,9 @@ class UvicornWebService(Service[WebConfig], WebService):
         # 先把 app 交给路由表，再启动：这样启动期间注册的路由也能被匹配到
         self._attach_app(host.app)
         self._attach_server(host)
-        ui_directory = Path(self.config.ui_directory).expanduser().resolve()
-        host.app.state.ui_directory = str(ui_directory)
-        if ui_directory.is_dir():
-            from starlette.staticfiles import StaticFiles
-
-            host.app.mount(
-                "/ui-static",
-                app=StaticFiles(directory=str(ui_directory)),
-                name="ui-static",
-            )
-        host.install_fallback_index()
+        # 404 统一走回退链：set_fallback 的处理器（如 webui 的 SPA 回退）优先，
+        # 返回 None 则落到默认 JSON 404。
+        host.app.add_exception_handler(404, self._not_found)
         host.start()
 
     def stop(self) -> None:
@@ -461,107 +405,21 @@ class UvicornWebService(Service[WebConfig], WebService):
         self._registry.add(record, owner_fiber=caller_fiber)
         return record
 
-    def register_ui(
-        self,
-        contribution_id: str,
-        *,
-        kind: UiKind,
-        format: UiFormat,
-        resource_root: str | Path,
-        entry: str,
-        path: str | None = None,
-        title: str | None = None,
-        menu_group: str | None = None,
-        menu_icon: str | None = None,
-        menu_order: float = 0,
-        target: str | None = None,
-        order: float = 0,
-    ) -> UiContribution:
-        """登记插件 UI contribution 和显式配置的静态资源根目录。"""
-        if not contribution_id or not re.fullmatch(r"[A-Za-z0-9_.-]+", contribution_id):
-            raise ValueError("contribution_id 只能包含字母、数字、点、下划线和连字符")
-        accepted_formats = {
-            "page": {"vue"},
-            "slot": {"vue", "html"},
-            "script": {"js"},
-        }
-        if kind not in accepted_formats or format not in accepted_formats[kind]:
-            raise ValueError(f"不支持的 UI 类型与资源格式组合：{kind!r}/{format!r}")
-        if kind == "page" and (not path or not title):
-            raise ValueError("page contribution 必须提供 path 和 title")
-        if kind == "slot" and not target:
-            raise ValueError("slot contribution 必须提供 target")
-        if not isinstance(cast(object, entry), str) or not entry.strip():
-            raise ValueError("entry 必须是 resource_root 下的相对文件路径")
+    def set_fallback(
+        self, handler: Callable[[Request], Response | None] | None
+    ) -> None:
+        """设置（或清除）404 回退处理器（后设置者覆盖）。"""
+        self._fallback = handler
 
-        entry_path = Path(entry.replace("\\", "/"))
-        if entry_path.is_absolute() or any(part in {"", ".", ".."} for part in entry_path.parts):
-            raise ValueError("entry 必须是 resource_root 下不含路径穿越的相对路径")
-        allowed_suffixes: tuple[str, ...]
-        if format == "vue":
-            allowed_suffixes = (".vue",)
-        elif format == "html":
-            allowed_suffixes = (".html",)
-        else:
-            allowed_suffixes = (".js", ".mjs")
-        if entry_path.suffix.lower() not in allowed_suffixes:
-            raise ValueError(f"{format} contribution 的 entry 扩展名不正确")
-
-        root = Path(resource_root).expanduser().resolve()
-        if not root.is_dir():
-            raise ValueError(f"插件 UI 资源目录不存在：{root}")
-        resolved_entry = (root / entry_path).resolve()
-        if not resolved_entry.is_relative_to(root) or not resolved_entry.is_file():
-            raise ValueError(f"插件 UI 入口文件不存在或超出资源目录：{entry}")
-
-        caller_fiber = self._caller_fiber()
-        owner = _fiber_name(caller_fiber)
-        owner_slug = re.sub(r"[^A-Za-z0-9_-]+", "-", owner).strip("-") or "plugin"
-        full_id = f"{owner}:{contribution_id}"
-        if full_id in self._ui:
-            raise ValueError(f"UI contribution 已注册：{full_id}")
-
-        static_path = f"/plugin-ui/{owner_slug}/{contribution_id}"
-        resource_record = RouteRecord(
-            path=static_path,
-            kind="static",
-            methods=frozenset({"GET"}),
-            owner=owner,
-            directory=str(root),
-        )
-        self._registry.add(resource_record)
-        item = UiContribution(
-            id=full_id,
-            kind=kind,
-            format=format,
-            owner=owner,
-            entry=f"{static_path}/{entry_path.as_posix()}",
-            path=normalize_path(path) if path else None,
-            title=title,
-            menu_group=menu_group,
-            menu_icon=menu_icon,
-            menu_order=menu_order,
-            target=target,
-            order=order,
-        )
-        self._ui[full_id] = item
-        caller_fiber.effect(
-            lambda: lambda: self._remove_ui(full_id),
-            f"ctx.web.register_ui({full_id!r})",
-        )
-        return item
-
-    def ui_contributions(self) -> list[UiContribution]:
-        """返回按类型、排序和 ID 稳定排序的前端扩展清单。"""
-        return sorted(
-            self._ui.values(),
-            key=lambda item: (item.kind, item.menu_order, item.order, item.title or item.id),
-        )
-
-    def _remove_ui(self, contribution_id: str) -> None:
-        item = self._ui.pop(contribution_id, None)
-        if item is not None:
-            self._registry.remove(f"/plugin-ui/{_owner_slug(item.owner)}/{contribution_id.rsplit(':', 1)[-1]}")
+    async def _not_found(self, request: Request, _exc: Exception) -> Response:
+        """404 总入口：先给回退处理器机会，否则返回 JSON 404。"""
+        del _exc
+        handler = self._fallback
+        if handler is not None:
+            response = handler(request)
+            if isinstance(response, Response):
+                return response
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
 
     # -------------------------------------------------------------- 路由管理
     def remove(self, path: str) -> bool:
@@ -675,12 +533,12 @@ class UvicornWebService(Service[WebConfig], WebService):
     def _dispose(self) -> None:
         """清空本服务持有的全部状态。"""
         self._registry.clear()
-        self._ui.clear()
+        self._fallback = None
         self._host = None
 
     def __repr__(self) -> str:
         state = "running" if self.is_running() else "stopped"
-        return f"UvicornWebService({state}, {len(self._registry)} routes, {len(self._ui)} ui)"
+        return f"UvicornWebApiService({state}, {len(self._registry)} routes)"
 
 
 def _fiber_name(fiber: Fiber | None) -> str:
@@ -688,9 +546,4 @@ def _fiber_name(fiber: Fiber | None) -> str:
     return getattr(fiber, "name", None) or "root"
 
 
-def _owner_slug(owner: str) -> str:
-    """把插件名转换为 URL path segment。"""
-    return re.sub(r"[^A-Za-z0-9_-]+", "-", owner).strip("-") or "plugin"
-
-
-__all__: list[str] = ["ServerError", "UvicornHost", "UvicornWebService"]
+__all__: list[str] = ["ServerError", "UvicornHost", "UvicornWebApiService"]

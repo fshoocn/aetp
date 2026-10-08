@@ -34,7 +34,8 @@ if str(_REPO_ROOT) not in sys.path:
 from cordis_port import Context
 
 from common import cordis_utils
-from master.plugins.web import WebPlugin
+from master.plugins.webapi import WebApiPlugin
+from master.plugins.webui import WebUiPlugin
 
 
 def _install_stop_handler(
@@ -79,22 +80,25 @@ async def boot() -> None:
     ctx: Context = Context()
     cordis_utils.set_ctx(ctx)
 
-    # 2. Web 服务：应最先加载 —— 其他插件依赖它来注册 UI contributions 与 API
-    await ctx.plugin(WebPlugin, {"port": 8080})
+    # 2. API 服务：应最先加载 —— 其他插件依赖它注册路由
+    await ctx.plugin(WebApiPlugin, {"port": 8080})
 
-    # 3. 报告服务地址
-    address = ctx.web.address()
+    # 3. UI 宿主（可拆卸上层）：注释掉下面一行即为纯 API（无头）部署
+    await ctx.plugin(WebUiPlugin)
+
+    # 4. 报告服务地址
+    address = ctx.webapi.address()
     ctx.logger.info("已就绪，访问 %s", address)
     print(f"\n  平台已启动：{address}\n  按 Ctrl+C 退出\n", flush=True)
 
-    # 4. 等待中断信号
+    # 5. 等待中断信号
     stop, restore_signal_handlers = _install_stop_handler(asyncio.get_running_loop())
     try:
         await stop.wait()
     finally:
         restore_signal_handlers()
 
-    # 5. 有序退出：卸载全部插件，触发各自清理（web 服务停止、端口释放）
+    # 6. 有序退出：卸载全部插件，触发各自清理（web 服务停止、端口释放）
     ctx.logger.info("正在停止…")
     await cordis_utils.unload_all(ctx)
     print("\n  已退出", flush=True)

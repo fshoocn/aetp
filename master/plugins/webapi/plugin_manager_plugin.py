@@ -15,7 +15,7 @@ from .plugin_manager import MAX_ARCHIVE_SIZE, PluginManager, PluginManagerError
 
 class PluginManagerPlugin:
     name: ClassVar[str] = "plugin-manager"
-    inject: ClassVar[list[str]] = ["web"]
+    inject: ClassVar[list[str]] = ["webapi"]
 
     def __init__(self, ctx: Context, config: dict[str, str | Path]) -> None:
         self.ctx: Context = ctx
@@ -37,9 +37,9 @@ class PluginManagerPlugin:
             return self.manager
 
         def error_response(error: PluginManagerError) -> JSONResponse:
-            return ctx.web.json({"error": str(error)}, status_code=error.status_code)
+            return ctx.webapi.json({"error": str(error)}, status_code=error.status_code)
 
-        @ctx.web.get("/api/plugins", kind="api", name="plugins.list")
+        @ctx.webapi.get("/api/plugins", kind="api", name="plugins.list")
         def list_plugins(_: Request) -> dict[str, object] | JSONResponse:
             try:
                 items = manager().run_from_web_thread(manager().list_plugins())
@@ -47,7 +47,7 @@ class PluginManagerPlugin:
             except PluginManagerError as error:
                 return error_response(error)
 
-        @ctx.web.post("/api/plugins/upload", kind="api", name="plugins.upload")
+        @ctx.webapi.post("/api/plugins/upload", kind="api", name="plugins.upload")
         async def upload_plugin(_request: Request) -> dict[str, object] | JSONResponse:
             try:
                 declared_size = _request.headers.get("content-length")
@@ -68,9 +68,9 @@ class PluginManagerPlugin:
             except PluginManagerError as error:
                 return error_response(error)
             except ValueError:
-                return ctx.web.json({"error": "Content-Length 无效"}, status_code=400)
+                return ctx.webapi.json({"error": "Content-Length 无效"}, status_code=400)
 
-        @ctx.web.post("/api/plugins/{plugin_id}/enable", kind="api", name="plugins.enable")
+        @ctx.webapi.post("/api/plugins/{plugin_id}/enable", kind="api", name="plugins.enable")
         def enable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             try:
                 item = manager().run_from_web_thread(manager().enable(plugin_id))
@@ -78,7 +78,7 @@ class PluginManagerPlugin:
             except PluginManagerError as error:
                 return error_response(error)
 
-        @ctx.web.post("/api/plugins/{plugin_id}/disable", kind="api", name="plugins.disable")
+        @ctx.webapi.post("/api/plugins/{plugin_id}/disable", kind="api", name="plugins.disable")
         def disable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             try:
                 item = manager().run_from_web_thread(manager().disable(plugin_id))
@@ -86,7 +86,7 @@ class PluginManagerPlugin:
             except PluginManagerError as error:
                 return error_response(error)
 
-        @ctx.web.delete("/api/plugins/{plugin_id}", kind="api", name="plugins.uninstall")
+        @ctx.webapi.delete("/api/plugins/{plugin_id}", kind="api", name="plugins.uninstall")
         def uninstall_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             try:
                 manager().run_from_web_thread(manager().uninstall(plugin_id))

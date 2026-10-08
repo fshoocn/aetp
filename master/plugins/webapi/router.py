@@ -264,8 +264,8 @@ def build_endpoint(record: RouteRecord) -> Callable[[Request], Awaitable[Respons
 class RouteRegistry:
     """路由表：管理 :class:`RouteRecord`，并按需同步到 Starlette 应用。
 
-    该对象由 :class:`~plugins.web.uvicorn_web_service.UvicornWebService` 持有，生命周期与
-    web 插件 fiber 一致。``app`` 为 ``None`` 时只做登记（服务器尚未启动），
+    该对象由 :class:`~master.plugins.webapi.uvicorn_web_service.UvicornWebApiService` 持有，
+    生命周期与 webapi 插件 fiber 一致。``app`` 为 ``None`` 时只做登记（服务器尚未启动），
     绑定后再统一挂载，因此插件加载顺序不受限制。
     """
 
@@ -393,7 +393,7 @@ class RouteRegistry:
             # 用 effect 绑定记录身份：同路径的其他方法或后续替代路由不受影响。
             owner_fiber.effect(
                 lambda: lambda: self._remove_record(record),
-                f"ctx.web.route({record.path!r})",
+                f"ctx.webapi.route({record.path!r})",
             )
 
     def remove(self, path: str) -> bool:

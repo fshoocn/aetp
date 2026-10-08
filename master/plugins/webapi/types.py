@@ -1,9 +1,9 @@
-"""Web 插件的数据模型。
+"""webapi 插件的数据模型（路由记录等）。
 
 本模块只有纯数据结构，不依赖 cordis 也不依赖 starlette，便于被任何一方引用 ——
-尤其是 :class:`~plugins.web.interface.WebService` 这类**接口**：接口返回的数据类型
-不应把具体框架（Starlette）或运行时（cordis）拖进来，否则「替换底层实现」时连带
-要把接口一起改掉。
+尤其是 :class:`~master.plugins.webapi.interface.WebApiService` 这类**接口**：
+接口返回的数据类型不应把具体框架（Starlette）或运行时（cordis）拖进来，
+否则「替换底层实现」时连带要把接口一起改掉。
 """
 
 from __future__ import annotations
@@ -23,8 +23,6 @@ HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 StreamContent = Iterable[str | bytes | memoryview] | AsyncIterable[str | bytes | memoryview]
 RouteHandler = Callable[..., object | Awaitable[object]]
 RouteRegistration = RouteHandler | Callable[[RouteHandler], RouteHandler]
-UiKind = Literal["page", "slot", "script"]
-UiFormat = Literal["vue", "html", "js"]
 HTTP_METHODS: tuple[HttpMethod, ...] = (
     "GET",
     "POST",
@@ -34,41 +32,6 @@ HTTP_METHODS: tuple[HttpMethod, ...] = (
     "HEAD",
     "OPTIONS",
 )
-
-
-@dataclass(frozen=True)
-class UiContribution:
-    """一项插件前端扩展声明。资源入口是同源 URL，供前端 runtime 加载。"""
-
-    id: str
-    kind: UiKind
-    format: UiFormat
-    owner: str
-    entry: str
-    path: str | None = None
-    title: str | None = None
-    menu_group: str | None = None
-    menu_icon: str | None = None
-    menu_order: float = 0
-    target: str | None = None
-    order: float = 0
-
-    def to_dict(self) -> dict[str, str | float | None]:
-        """返回适合 JSON 清单的普通字典。"""
-        return {
-            "id": self.id,
-            "kind": self.kind,
-            "format": self.format,
-            "owner": self.owner,
-            "entry": self.entry,
-            "path": self.path,
-            "title": self.title,
-            "menu_group": self.menu_group,
-            "menu_icon": self.menu_icon,
-            "menu_order": self.menu_order,
-            "target": self.target,
-            "order": self.order,
-        }
 
 
 @dataclass
@@ -126,7 +89,4 @@ __all__: list[str] = [
     "RouteRecord",
     "RouteRegistration",
     "StreamContent",
-    "UiContribution",
-    "UiFormat",
-    "UiKind",
 ]
