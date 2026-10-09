@@ -25,21 +25,12 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from common.node_runtime import NodeKind, run_node
+from common.node_runtime import run_node
 
 
 async def boot() -> None:
-    """按从节点（无头）形态装配并运行。"""
-    await run_node(
-        kind=NodeKind.SLAVE,
-        node_name="从节点",
-        web_config={"port": 8081},
-        install_root=Path(__file__).resolve().parent / "plugins",
-        plugin_sources=[
-            # 例：预装执行插件源
-            # _REPO_ROOT / "slaveplugins" / "executor-demo",
-        ],
-    )
+    """按 slave/config.ini 装配并运行从节点。"""
+    await run_node(config_path=Path(__file__).resolve().parent / "config.ini")
 
 
 if __name__ == "__main__":

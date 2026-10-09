@@ -3,6 +3,6 @@
     "name": "Web UI 宿主",
     "version": "1.0.0",
     "entrypoint": "plugin:WebUiPlugin",
-    "role": "platform",
+    "kind": "master",
     "requires": []
 }

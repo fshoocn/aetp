@@ -26,9 +26,12 @@ MAX_ARCHIVE_FILES: Final[int] = 2048
 MAX_REQUIRES: Final[int] = 32
 PLUGIN_ID: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 ENTRYPOINT: Final[re.Pattern[str]] = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*):([A-Za-z_][A-Za-z0-9_]*)$")
-#: 插件归属角色：``platform`` 装在主节点（默认），``executor`` 装在执行测试的节点。
-#: 当前仅作为元数据记录与展示；按角色分发到从节点由后续的主从通信插件负责。
-PLUGIN_ROLES: Final[tuple[str, ...]] = ("platform", "executor")
+#: 插件目标节点类型（``plugin.json`` 的 ``kind``，**必填**，单值或列表）：
+#: ``master`` / ``slave`` / ``any``（不限）。这是插件的归属与安装准入（取值与
+#: :class:`common.node_runtime.NodeKind` 一致）；列表 = 同时支持多种节点，
+#: 如 ``["master", "slave"]``（主从通用）。安装前校验覆盖当前节点；
+#: ``kind = slave`` 的插件也是未来分发到从节点的候选。
+PLUGIN_KINDS: Final[tuple[str, ...]] = ("master", "slave", "any")
 #: 安装/归档时跳过的目录（构建缓存与依赖，不属于插件包内容）
 EXCLUDED_DIRS: Final[frozenset[str]] = frozenset(
     {"node_modules", "__pycache__", ".git", ".venv", "venv"}
@@ -44,8 +47,8 @@ class _PluginManifest(TypedDict):
     entrypoint: str
     resource_root: str | None
     config: dict[str, object]
-    role: str
     requires: list[str]
+    kind: list[str]
 
 
 class _PluginRecord(_PluginManifest):
@@ -59,8 +62,8 @@ class PublicPluginRecord(TypedDict):
     version: str
     entrypoint: str
     resource_root: str | None
-    role: str
     requires: list[str]
+    kind: list[str]
     enabled: bool
     last_error: str | None
 
@@ -75,6 +78,10 @@ class PluginManagerError(ValueError):
 
 #: requires 字段校验失败的统一提示（形状与内容两处检查共用）
 _REQUIRES_ERROR: Final[str] = "requires 必须是字符串列表（每项非空且不超过 64 字符，最多 32 项）"
+#: kind 字段校验失败的统一提示
+_KIND_ERROR: Final[str] = (
+    f"plugin.json 必须提供 kind（{' / '.join(PLUGIN_KINDS)} 之一，单值或列表）"
+)
 
 
 def _validate_requires(value: object) -> list[str]:
@@ -169,24 +176,26 @@ class PluginManager:
         extracted.mkdir()
         try:
             manifest = self._extract_and_read_manifest(archive, extracted)
+            self._check_node_kind(manifest)
             plugin_id = manifest["id"]
             if plugin_id in self.records or (self.install_root / plugin_id).exists():
                 raise PluginManagerError(f"插件 {plugin_id!r} 已安装", 409)
 
+            # 校验全部通过后才落地；落地任一步失败（含取消）都回滚，不留孤儿数据
             destination = self.install_root / plugin_id
-            os.replace(extracted, destination)
             archive_path = self._archive_path(plugin_id)
-            archive_path.parent.mkdir(parents=True, exist_ok=True)
-            archive_path.write_bytes(archive)
             record: _PluginRecord = {
                 **manifest,
                 "enabled": False,
                 "last_error": None,
             }
-            self.records[plugin_id] = record
             try:
+                os.replace(extracted, destination)
+                archive_path.parent.mkdir(parents=True, exist_ok=True)
+                archive_path.write_bytes(archive)
+                self.records[plugin_id] = record
                 self._write_registry()
-            except Exception:
+            except BaseException:
                 self.records.pop(plugin_id, None)
                 shutil.rmtree(destination, ignore_errors=True)
                 archive_path.unlink(missing_ok=True)
@@ -363,7 +372,8 @@ class PluginManager:
             raise PluginManagerError("config 必须是 JSON 对象")
         config = cast(dict[str, object], config)
 
-        role, requires = self._validate_role(manifest)
+        requires = _validate_requires(manifest.get("requires", []))
+        kind = self._validate_kind(manifest)
 
         resource_root = manifest.get("resource_root")
         if resource_root is not None:
@@ -385,21 +395,62 @@ class PluginManager:
             "entrypoint": entrypoint,
             "resource_root": resource_root,
             "config": config,
-            "role": role,
             "requires": requires,
+            "kind": kind,
         }
 
     @staticmethod
-    def _validate_role(manifest: dict[str, object]) -> tuple[str, list[str]]:
-        """校验 ``role`` 与 ``requires`` 归属元数据（都可省略）。"""
-        role = manifest.get("role", "platform")
-        if role is None:
-            role = "platform"
-        if not isinstance(role, str) or role not in PLUGIN_ROLES:
+    def _validate_kind(manifest: dict[str, object]) -> list[str]:
+        """校验 ``kind``（目标节点类型，必填，单值或列表）并归一化为列表。
+
+        合法值 ``master`` / ``slave`` / ``any``（不限）；``any`` 不能与其他值并列。
+        """
+        raw = manifest.get("kind")
+        values: list[object]
+        if isinstance(raw, str):
+            values = [raw]
+        elif isinstance(raw, list):
+            values = cast(list[object], raw)
+        else:
+            raise PluginManagerError(_KIND_ERROR)
+        kinds: list[str] = []
+        for item in values:
+            if not isinstance(item, str):
+                raise PluginManagerError(_KIND_ERROR)
+            kind = item.strip().lower()
+            if kind not in PLUGIN_KINDS:
+                raise PluginManagerError(
+                    f"kind 必须是 {' / '.join(PLUGIN_KINDS)} 之一（单值或列表），收到 {item!r}"
+                )
+            if kind not in kinds:
+                kinds.append(kind)
+        if not kinds:
+            raise PluginManagerError(_KIND_ERROR)
+        if "any" in kinds and len(kinds) > 1:
+            raise PluginManagerError("kind 为 any（不限）时不能与其他值并列")
+        return kinds
+
+    def _check_node_kind(self, manifest: _PluginManifest) -> None:
+        """安装前校验插件的目标 ``kind`` 覆盖当前节点（``any`` 或列表含当前节点）。
+
+        抛出:
+            PluginManagerError: 环境没有 ``node_kind`` 服务（无法校验），
+                或不支持当前节点类型。
+        """
+        target = manifest.get("kind") or []
+        if "any" in target:
+            return
+        node_kind = self.ctx.get("node_kind")
+        if node_kind is None:
             raise PluginManagerError(
-                f"role 必须是 {' / '.join(PLUGIN_ROLES)} 之一，收到 {role!r}"
+                f"插件 {manifest['id']!r} 支持 {' / '.join(target)} 节点，"
+                "当前环境没有 node_kind 服务，无法校验"
             )
-        return role, _validate_requires(manifest.get("requires", []))
+        if str(node_kind) not in target:
+            raise PluginManagerError(
+                f"插件 {manifest['id']!r} 支持 {' / '.join(target)} 节点，"
+                f"不能安装到 {node_kind!s} 节点"
+            )
 
     def _load_plugin_class(
         self, package_root: Path, package_name: str, entrypoint: str
@@ -451,6 +502,13 @@ class PluginManager:
         """读取插件包原始 ZIP 字节（主从分发时由通信插件调用）。"""
         return self.package_path(plugin_id).read_bytes()
 
+    def package_source(self, source_dir: str | Path) -> bytes:
+        """把插件源目录打成 zip 包（插件的交付形态，内容与安装包一致）。"""
+        source = Path(source_dir).expanduser().resolve()
+        if not source.is_dir():
+            raise PluginManagerError(f"插件源目录不存在：{source}")
+        return self._zip_directory(source)
+
     def _public_record(self, record: _PluginRecord) -> PublicPluginRecord:
         return {
             "id": record["id"],
@@ -458,7 +516,7 @@ class PluginManager:
             "version": record["version"],
             "entrypoint": record["entrypoint"],
             "resource_root": record.get("resource_root"),
-            "role": record.get("role", "platform"),
+            "kind": record.get("kind") or ["any"],
             "requires": list(record.get("requires") or []),
             "enabled": bool(record.get("enabled")),
             "last_error": record.get("last_error"),

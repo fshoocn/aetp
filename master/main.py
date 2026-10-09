@@ -1,8 +1,7 @@
-"""AETP 主节点入口。
+"""AETP 主节点入口（薄启动器）。
 
-按主节点形态调用 :func:`common.node_runtime.run_node` —— Web 配置
-``{"port": 8080}``、安装目录 ``master/plugins``、预装 UI 插件源
-``masterplugins/webui``。装配细节、信号处理与退出清理见
+读取本目录的 ``master/config.ini`` 装配并运行：节点类型 / 名称 / 安装目录 /
+预装插件源 / web 端口全部来自该配置文件。装配细节、信号处理与退出清理见
 :mod:`common.node_runtime`。
 """
 
@@ -19,18 +18,12 @@ _REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from common.node_runtime import NodeKind, run_node
+from common.node_runtime import run_node
 
 
 async def boot() -> None:
-    """按主节点形态装配并运行（UI 随启动预装，跳过 sources 即无头）。"""
-    await run_node(
-        kind=NodeKind.MASTER,
-        node_name="主节点",
-        web_config={"port": 8080},
-        install_root=Path(__file__).resolve().parent / "plugins",
-        plugin_sources=[_REPO_ROOT / "masterplugins" / "webui"],
-    )
+    """按 master/config.ini 装配并运行主节点。"""
+    await run_node(config_path=Path(__file__).resolve().parent / "config.ini")
 
 
 if __name__ == "__main__":

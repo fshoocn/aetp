@@ -56,7 +56,7 @@ class PluginManagerPlugin(Service[dict[str, str | Path]]):
         return self.manager
 
     async def list_plugins(self) -> list[PublicPluginRecord]:
-        """列出已安装插件（含 role / requires / enabled 状态）。"""
+        """列出已安装插件（含 kind / requires / enabled）。"""
         return await self._require_manager().list_plugins()
 
     async def install_archive(self, archive: bytes) -> PublicPluginRecord:
@@ -82,6 +82,10 @@ class PluginManagerPlugin(Service[dict[str, str | Path]]):
     async def package_bytes(self, plugin_id: str) -> bytes:
         """读取插件包原始 ZIP（保留归档，供分发/回溯）。"""
         return self._require_manager().package_bytes(plugin_id)
+
+    async def package_source(self, source_dir: str | Path) -> bytes:
+        """把插件源目录打成 zip 包（插件的交付形态）。"""
+        return self._require_manager().package_source(source_dir)
 
     # -- HTTP 层（面向操作者）-------------------------------------------------
     def _register_routes(self) -> None:

@@ -4,6 +4,7 @@ import json
 import socket
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -15,8 +16,12 @@ from common.node_runtime import (
     NodeKind,
     assemble_node,
     ensure_installed,
+    load_node_profile,
     source_plugin_id,
 )
+from common.plugins.appconfig import AppConfig
+from common.plugins.webapi import WebApiPlugin
+from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 
 def _free_port() -> int:
@@ -46,7 +51,7 @@ def _write_source(root: Path, plugin_id: str) -> Path:
                 "name": plugin_id,
                 "version": "1.0.0",
                 "entrypoint": "plugin:DemoPlugin",
-                "role": "executor",
+                "kind": "slave",
                 "requires": ["can-bus"],
             }
         ),
@@ -84,14 +89,19 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         root = Path(self.temp_dir.name)
         source = _write_source(root, "executor-demo")
         self.assertEqual(source_plugin_id(source), "executor-demo")
-
-        self.context = await assemble_node(
-            kind=NodeKind.SLAVE,
-            node_name="测试从节点",
-            web_config={"port": self.port},
-            install_root=root / "plugins",
-            plugin_sources=[source],
+        config_path = root / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = slave\n"
+            "name = 测试从节点\n"
+            "install_root = plugins\n"
+            f"plugins = {source}\n"
+            "\n[web]\n"
+            f"port = {self.port}\n",
+            encoding="utf-8",
         )
+
+        self.context = await assemble_node(config_path=config_path)
 
         # 节点类型注册为 node_kind 服务，插件声明 inject 后可读
         self.assertEqual(self.context.node_kind, NodeKind.SLAVE)
@@ -114,8 +124,119 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         # 归属元数据随安装保留（供未来的分发插件筛选）
         record = plugins[0]
-        self.assertEqual(record["role"], "executor")
+        self.assertEqual(record["kind"], ["slave"])
         self.assertEqual(record["requires"], ["can-bus"])
+
+
+class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    """插件以 zip 包交付：source_plugin_id / ensure_installed 支持 zip。"""
+
+    async def asyncSetUp(self) -> None:
+        self.context: Context | None = None
+        self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
+
+    async def asyncTearDown(self) -> None:
+        if self.context is not None:
+            await unload_all(self.context)
+        self.temp_dir.cleanup()
+
+    async def test_install_from_zip_package(self) -> None:
+        root = Path(self.temp_dir.name)
+        source = _write_source(root, "executor-demo")
+        package = root / "executor-demo.zip"
+        with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(source.rglob("*")):
+                if path.is_file():
+                    archive.write(path, path.relative_to(source).as_posix())
+
+        self.context = Context()
+        self.context.provide("node_kind", NodeKind.SLAVE)
+        await self.context.plugin(WebApiPlugin, {"port": _free_port()})
+        await self.context.plugin(
+            PluginManagerPlugin, {"install_root": str(root / "plugins")}
+        )
+
+        self.assertEqual(source_plugin_id(package), "executor-demo")
+        self.assertEqual(await ensure_installed(self.context, package), "executor-demo")
+        plugins = await self.context.plugins.list_plugins()
+        self.assertEqual([item["id"] for item in plugins], ["executor-demo"])
+        self.assertTrue((root / "plugins" / "executor-demo").is_dir())
+
+        # 幂等：重复 ensure 不重复安装
+        self.assertEqual(await ensure_installed(self.context, package), "executor-demo")
+        plugins = await self.context.plugins.list_plugins()
+        self.assertEqual([item["id"] for item in plugins], ["executor-demo"])
+
+
+class NodeProfileTests(unittest.TestCase):
+    """config.ini 的 [node] / [web] 两节 → NodeProfile。"""
+
+    def test_profile_reads_node_and_web_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "config.ini"
+            path.write_text(
+                "[node]\n"
+                "kind = master\n"
+                "name = 主节点\n"
+                "install_root = data/plugins\n"
+                "plugins = sources/one, sources/two\n"
+                "\n[web]\n"
+                "host = 0.0.0.0\n"
+                "port = 9000\n"
+                "access_log = true\n"
+                "start_timeout = 2.5\n"
+                "cors_origins = http://a, http://b\n",
+                encoding="utf-8",
+            )
+            profile = load_node_profile(AppConfig.from_file(path), base_dir=root)
+
+        self.assertEqual(profile.kind, NodeKind.MASTER)
+        self.assertEqual(profile.name, "主节点")
+        self.assertEqual(profile.install_root, root / "data/plugins")
+        self.assertEqual(
+            profile.plugin_sources,
+            (root / "sources/one", root / "sources/two"),
+        )
+        self.assertEqual(
+            profile.web_config,
+            {
+                "host": "0.0.0.0",
+                "port": 9000,
+                "access_log": True,
+                "start_timeout": 2.5,
+                "cors_origins": ["http://a", "http://b"],
+            },
+        )
+
+    def test_defaults_invalid_kind_and_missing_section(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "config.ini"
+
+            # 未写的键取默认：name 取 kind，install_root 取 plugins
+            path.write_text("[node]\nkind = slave\n\n[web]\nport = 9001\n", encoding="utf-8")
+            profile = load_node_profile(AppConfig.from_file(path), base_dir=root)
+            self.assertEqual(profile.kind, NodeKind.SLAVE)
+            self.assertEqual(profile.name, "slave")
+            self.assertEqual(profile.install_root, root / "plugins")
+            self.assertEqual(profile.web_config, {"port": 9001})
+
+            path.write_text("[node]\nkind = both\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_node_profile(AppConfig.from_file(path), base_dir=root)
+
+            path.write_text("[node]\nname = x\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_node_profile(AppConfig.from_file(path), base_dir=root)
+
+            path.write_text("[node]\nkind = slave\nextra = 1\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_node_profile(AppConfig.from_file(path), base_dir=root)
+
+            path.write_text("[web]\nport = 1\n", encoding="utf-8")
+            with self.assertRaises(KeyError):
+                load_node_profile(AppConfig.from_file(path), base_dir=root)
 
 
 if __name__ == "__main__":

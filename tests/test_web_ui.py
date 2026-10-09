@@ -120,6 +120,7 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.context: Context = Context()
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.port: int = _free_port()
+        self.context.provide("node_kind", "master")
         await self.context.plugin(WebApiPlugin, {"port": self.port})
         await self.context.plugin(
             PluginManagerPlugin,

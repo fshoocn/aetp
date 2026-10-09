@@ -1,6 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { request } from '@/service/backend';
+import { getBackendUrl, request } from '@/service/backend';
+
+// 非同源时在页头提示数据来源；切换后端会整页刷新，无需响应式
+const backendUrl = getBackendUrl();
 
 const plugins = ref([]);
 const loading = ref(true);
@@ -106,6 +109,9 @@ onMounted(loadPlugins);
                 <p class="plugin-management__eyebrow">AETP / EXTENSIONS</p>
                 <h1>插件管理</h1>
                 <p class="plugin-management__subtitle">上传插件包，并管理插件运行状态。</p>
+                <p v-if="backendUrl" class="plugin-management__source">
+                    <i class="pi pi-server" aria-hidden="true" /> 数据来源：{{ backendUrl }}
+                </p>
             </div>
             <label class="plugin-management__upload" :class="{ 'is-disabled': uploading }">
                 <i :class="uploading ? 'pi pi-spin pi-spinner' : 'pi pi-upload'" aria-hidden="true" />
@@ -228,6 +234,17 @@ onMounted(loadPlugins);
     margin: 0.3rem 0 0;
     color: var(--p-text-muted-color);
     font-size: 0.875rem;
+}
+.plugin-management__source {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0;
+    padding: 0.22rem 0.65rem;
+    border: 1px solid var(--p-primary-color);
+    border-radius: 999px;
+    color: var(--p-primary-color);
+    font-size: 0.78rem;
 }
 .plugin-management__upload {
     display: inline-flex;

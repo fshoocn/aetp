@@ -75,8 +75,8 @@ def _plugin_archive(
     plugin_id: str = "uploaded-sample",
     plugin_class: str = "UploadedPlugin",
     *,
-    role: str | None = None,
     requires: list[str] | None = None,
+    kind: str | list[str] | None = "master",
 ) -> bytes:
     manifest: dict[str, object] = {
         "id": plugin_id,
@@ -85,10 +85,10 @@ def _plugin_archive(
         "entrypoint": f"plugin:{plugin_class}",
         "resource_root": "ui",
     }
-    if role is not None:
-        manifest["role"] = role
     if requires is not None:
         manifest["requires"] = requires
+    if kind is not None:
+        manifest["kind"] = kind
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
         package.writestr("plugin.json", json.dumps(manifest))
@@ -120,6 +120,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.port: int = _free_port()
         self.base_url: str = f"http://127.0.0.1:{self.port}"
+        self.context.provide("node_kind", "master")
         await self.context.plugin(WebApiPlugin, {"port": self.port})
         await self.context.plugin(
             PluginManagerPlugin,
@@ -132,6 +133,51 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await unload_all(self.context)
         self.temp_dir.cleanup()
+
+    async def test_install_validates_node_kind(self) -> None:
+        """安装前校验目标 kind 覆盖当前节点（准入门槛），校验失败不留数据。"""
+        plugins = self.context.plugins  # asyncSetUp 已提供 node_kind=master
+
+        # any 不限；单值一致；列表含当前节点（主从通用）→ 允许
+        record = await plugins.install_archive(_plugin_archive("k-any", kind="any"))
+        self.assertEqual(record["kind"], ["any"])
+        record = await plugins.install_archive(_plugin_archive("k-master", kind="master"))
+        self.assertEqual(record["kind"], ["master"])
+        record = await plugins.install_archive(
+            _plugin_archive("k-both", kind=["master", "slave"])
+        )
+        self.assertEqual(record["kind"], ["master", "slave"])
+
+        # 不支持当前节点 / 非法值 / 未声明 / any 混写 → 拒绝
+        rejected_archives = [
+            _plugin_archive("k-slave", kind="slave"),
+            _plugin_archive("k-bad", kind="both"),
+            _plugin_archive("k-missing", kind=None),
+            _plugin_archive("k-mixed", kind=["any", "master"]),
+        ]
+        for archive in rejected_archives:
+            with self.assertRaises(PluginManagerError):
+                await plugins.install_archive(archive)
+
+        # 没有 node_kind 服务的环境：无法校验即拒绝
+        bare: Context = Context()
+        await bare.plugin(WebApiPlugin, {"port": _free_port()})
+        await bare.plugin(
+            PluginManagerPlugin,
+            {"install_root": str(Path(self.temp_dir.name) / "bare")},
+        )
+        with self.assertRaises(PluginManagerError):
+            await bare.plugins.install_archive(_plugin_archive("k-bare"))
+        await unload_all(bare)
+
+        # 校验失败不留数据：无暂存目录、无插件目录、无归档、注册表无残留
+        installed_root = Path(self.temp_dir.name) / "installed"
+        self.assertEqual(list(installed_root.glob(".upload-*")), [])
+        for rejected in ("k-slave", "k-bad", "k-missing", "k-mixed"):
+            self.assertFalse((installed_root / rejected).exists())
+            self.assertFalse((installed_root / ".archives" / f"{rejected}.zip").exists())
+        ids = sorted(item["id"] for item in await plugins.list_plugins())
+        self.assertEqual(ids, ["k-any", "k-both", "k-master", "webui"])
 
     async def test_upload_enable_disable_and_uninstall(self) -> None:
         status, body = await _arequest(
@@ -218,11 +264,11 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await _arequest(self.base_url, "/api/same-id"))[0], 404)
         self.assertEqual((await _arequest(self.base_url, "/api/same_id"))[0], 200)
 
-    async def test_role_requires_metadata_and_package_service(self) -> None:
+    async def test_kind_requires_metadata_and_package_service(self) -> None:
         archive = _plugin_archive(
-            "executor-sample",
-            "ExecutorPlugin",
-            role="executor",
+            "both-sample",
+            "BothPlugin",
+            kind=["master", "slave"],
             requires=["can-bus", "iso-tp"],
         )
         status, body = await _arequest(
@@ -234,10 +280,10 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 200)
         plugin = json.loads(body)["plugin"]
-        self.assertEqual(plugin["role"], "executor")
+        self.assertEqual(plugin["kind"], ["master", "slave"])
         self.assertEqual(plugin["requires"], ["can-bus", "iso-tp"])
 
-        # 默认值：不写 role / requires 时为 platform / []
+        # requires 缺省为空列表；kind 单值归一化为列表
         status, body = await _arequest(
             self.base_url,
             "/api/plugins/upload",
@@ -247,30 +293,40 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 200)
         plain = json.loads(body)["plugin"]
-        self.assertEqual(plain["role"], "platform")
+        self.assertEqual(plain["kind"], ["master"])
         self.assertEqual(plain["requires"], [])
 
         # ctx.plugins 服务：未来的主从通信插件走这里读清单 / 取原始包
         service = self.context.plugins
         listing = await service.list_plugins()
-        record = next(item for item in listing if item["id"] == "executor-sample")
-        self.assertEqual(record["role"], "executor")
-        self.assertEqual(await service.package_bytes("executor-sample"), archive)
+        record = next(item for item in listing if item["id"] == "both-sample")
+        self.assertEqual(record["kind"], ["master", "slave"])
+        self.assertEqual(await service.package_bytes("both-sample"), archive)
 
-        await service.uninstall("executor-sample")
+        await service.uninstall("both-sample")
         with self.assertRaises(PluginManagerError):
-            await service.package_bytes("executor-sample")
+            await service.package_bytes("both-sample")
 
-    async def test_manifest_rejects_invalid_role_and_requires(self) -> None:
+    async def test_manifest_rejects_invalid_kind_and_requires(self) -> None:
         status, body = await _arequest(
             self.base_url,
             "/api/plugins/upload",
             method="POST",
-            body=_plugin_archive("bad-role", "BadRole", role="weird"),
+            body=_plugin_archive("bad-kind", "BadKind", kind="weird"),
             content_type="application/zip",
         )
         self.assertEqual(status, 400)
-        self.assertIn("role", json.loads(body)["error"])
+        self.assertIn("kind", json.loads(body)["error"])
+
+        status, body = await _arequest(
+            self.base_url,
+            "/api/plugins/upload",
+            method="POST",
+            body=_plugin_archive("no-kind", "NoKind", kind=None),
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("kind", json.loads(body)["error"])
 
         status, body = await _arequest(
             self.base_url,
@@ -292,7 +348,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             await service.install_source(_SOURCE_ROOT / "masterplugins" / "nope")
 
         record = next(item for item in await service.list_plugins() if item["id"] == "webui")
-        self.assertEqual(record["role"], "platform")
+        self.assertEqual(record["kind"], ["master"])
         self.assertTrue(await service.package_bytes("webui"))
 
     async def test_upload_rejects_zip_path_traversal(self) -> None:
