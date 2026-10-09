@@ -1,6 +1,7 @@
 <script setup>
 import { useLayout } from '@/layout/composables/layout';
 import AppConfigurator from './AppConfigurator.vue';
+import BackendSwitcher from './BackendSwitcher.vue';
 import PluginUiOutlet from '@/plugins/PluginUiOutlet.vue';
 
 const { toggleMenu, toggleDarkMode, isDarkTheme } = useLayout();
@@ -37,6 +38,7 @@ const { toggleMenu, toggleDarkMode, isDarkTheme } = useLayout();
 
         <div class="layout-topbar-actions">
             <PluginUiOutlet name="app:header-actions" />
+            <BackendSwitcher />
             <div class="layout-config-menu">
                 <button type="button" class="layout-topbar-action" @click="toggleDarkMode">
                     <i :class="['pi', { 'pi-moon': isDarkTheme, 'pi-sun': !isDarkTheme }]"></i>

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { PluginLoadedSfc } from './ui-runtime';
 import { pluginUiState } from './ui-state';
+import { resolveUrl } from '@/service/backend';
 
 const props = defineProps({
     name: { type: String, required: true }
@@ -26,7 +27,7 @@ async function loadHtml(contribution) {
     const requestId = (requests.get(contribution.id) || 0) + 1;
     requests.set(contribution.id, requestId);
     try {
-        const response = await fetch(contribution.entry);
+        const response = await fetch(resolveUrl(contribution.entry));
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const content = await response.text();
         if (requests.get(contribution.id) === requestId) html.value[contribution.id] = content;

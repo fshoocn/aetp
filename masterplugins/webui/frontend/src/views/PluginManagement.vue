@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { request } from '@/service/backend';
 
 const plugins = ref([]);
 const loading = ref(true);
@@ -11,13 +12,6 @@ const uploadInput = ref(null);
 const dragActive = ref(false);
 
 const enabledCount = computed(() => plugins.value.filter((plugin) => plugin.enabled).length);
-
-async function request(url, options = {}) {
-    const response = await fetch(url, options);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `请求失败 (${response.status})`);
-    return data;
-}
 
 async function loadPlugins({ preserveError = false } = {}) {
     loading.value = true;

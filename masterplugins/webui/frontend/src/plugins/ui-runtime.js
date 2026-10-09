@@ -1,6 +1,7 @@
 import * as Vue from 'vue';
 import { h, onBeforeUnmount, shallowRef } from 'vue';
 import router from '@/router';
+import { resolveUrl } from '@/service/backend';
 import { pluginUiState } from './ui-state';
 
 const scriptDisposers = [];
@@ -19,7 +20,7 @@ function createLoaderOptions(contribution, styles = []) {
     return {
         moduleCache,
         async getFile(url) {
-            const response = await fetch(url);
+            const response = await fetch(resolveUrl(url));
             if (!response.ok) {
                 throw new Error(`无法加载插件 UI 资源 ${url}: ${response.status}`);
             }
@@ -47,7 +48,7 @@ function attachStyle(contributionId, compiledStyle) {
 }
 
 export async function initializePluginUi() {
-    const response = await fetch('/api/web/ui');
+    const response = await fetch(resolveUrl('/api/web/ui'));
     if (!response.ok) {
         throw new Error(`获取插件 UI 清单失败: ${response.status}`);
     }
@@ -82,14 +83,14 @@ function registerPage(contribution) {
 
 async function activateScript(contribution) {
     try {
-        const module = await import(/* @vite-ignore */ contribution.entry);
+        const module = await import(/* @vite-ignore */ resolveUrl(contribution.entry));
         if (typeof module.activate !== 'function') {
             throw new TypeError(`插件脚本 ${contribution.id} 必须导出 activate(context)`);
         }
 
         const dispose = await module.activate({
             api: {
-                request: (url, options) => fetch(url, options)
+                request: (url, options) => fetch(resolveUrl(url), options)
             },
             router,
             slots: {
@@ -150,7 +151,7 @@ export function createLoadedSfc() {
                 styles.push(attachStyle(props.contribution.id, compiledStyle));
             }
 
-            loadSfc(props.contribution.entry, createLoaderOptions(props.contribution, styles))
+            loadSfc(resolveUrl(props.contribution.entry), createLoaderOptions(props.contribution, styles))
                 .then((loaded) => {
                     if (disposed) styles.forEach((style) => style.remove());
                     else component.value = loaded;

@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, cast
 
 from cordis_port import Context, Fiber, Service
 from starlette.applications import Starlette
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import (
     FileResponse,
@@ -90,6 +91,15 @@ class UvicornHost:
     def __init__(self, config: WebApiConfig) -> None:
         self.config: WebApiConfig = config
         self.app: Starlette = Starlette()
+        origins = [str(origin) for origin in config.cors_origins]
+        if origins:
+            # 跨源场景（如前端切换后端地址）需要 CORS；cors_origins 为空即关闭
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=origins,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
         self.thread: threading.Thread | None = None
         self.server: uvicorn.Server | None = None
         self._lock = threading.Lock()

@@ -171,5 +171,47 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_request(base_url, manifest[0]["entry"])[0], 404)
 
 
+class CorsTests(unittest.IsolatedAsyncioTestCase):
+    """webapi 的 CORS 支持（前端跨源切换后端地址的前提）。"""
+
+    async def asyncSetUp(self) -> None:
+        self.open_port: int = _free_port()
+        self.off_port: int = _free_port()
+        self.open_context: Context = Context()
+        self.off_context: Context = Context()
+        self.addAsyncCleanup(unload_all, self.open_context)
+        self.addAsyncCleanup(unload_all, self.off_context)
+        await self.open_context.plugin(WebApiPlugin, {"port": self.open_port})
+        await self.off_context.plugin(
+            WebApiPlugin, {"port": self.off_port, "cors_origins": []}
+        )
+
+    def test_allow_origin_and_preflight_by_default(self) -> None:
+        base_url = f"http://127.0.0.1:{self.open_port}"
+        origin = {"Origin": "http://127.0.0.1:8080"}
+
+        request = Request(f"{base_url}/api/web/routes", headers=origin)
+        with urlopen(request, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers["Access-Control-Allow-Origin"], "*")
+
+        preflight = Request(
+            f"{base_url}/api/web/routes",
+            method="OPTIONS",
+            headers={**origin, "Access-Control-Request-Method": "GET"},
+        )
+        with urlopen(preflight, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers["Access-Control-Allow-Origin"], "*")
+
+    def test_disabled_when_origins_empty(self) -> None:
+        request = Request(
+            f"http://127.0.0.1:{self.off_port}/api/web/routes",
+            headers={"Origin": "http://127.0.0.1:8080"},
+        )
+        with urlopen(request, timeout=5) as response:
+            self.assertIsNone(response.headers["Access-Control-Allow-Origin"])
+
+
 if __name__ == "__main__":
     unittest.main()

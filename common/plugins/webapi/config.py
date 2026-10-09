@@ -12,6 +12,7 @@ _FIELDS: dict[str, tuple[tuple[type[object], ...], str]] = {
     "access_log": ((bool,), "是否打印访问日志"),
     "log_level": ((str,), "uvicorn 日志级别"),
     "start_timeout": ((int, float), "启动等待秒数"),
+    "cors_origins": ((list, tuple), "允许的跨源来源（CORS）"),
 }
 
 #: 允许的日志级别
@@ -34,6 +35,9 @@ class WebApiConfig:
     access_log: bool = False
     log_level: str = "warning"
     start_timeout: float = 10.0
+    #: 允许的跨源来源：``("*",)`` 表示不限（内网测试平台取向）；具体列表则回显
+    #: 对应 ``Origin``；空元组/列表 = 关闭 CORS。前端「切换后端地址」依赖此项。
+    cors_origins: tuple[str, ...] = ("*",)
 
     def __init__(self, **values: object) -> None:
         """按字段表填充配置；未给出的字段取类属性默认值。"""
@@ -109,6 +113,16 @@ class WebApiConfig:
                 ]
             }
         config.log_level = str(config.log_level).lower()
+        for origin in config.cors_origins:
+            if not isinstance(origin, str) or not origin.strip():
+                return {
+                    "issues": [
+                        {
+                            "message": "cors_origins 的每项需要非空字符串",
+                            "path": ["cors_origins"],
+                        }
+                    ]
+                }
         return {"value": config}
 
     # -- 配置合并（供 Service.__resolve_config__ 使用） -----------------------

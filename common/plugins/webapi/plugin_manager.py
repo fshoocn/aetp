@@ -73,6 +73,25 @@ class PluginManagerError(ValueError):
         self.status_code: int = status_code
 
 
+#: requires 字段校验失败的统一提示（形状与内容两处检查共用）
+_REQUIRES_ERROR: Final[str] = "requires 必须是字符串列表（每项非空且不超过 64 字符，最多 32 项）"
+
+
+def _validate_requires(value: object) -> list[str]:
+    """校验 ``requires`` 归属元数据：非空字符串列表（最多 32 项，每项 ≤64 字符）。"""
+    if value is None:
+        value = []
+    if not isinstance(value, list):
+        raise PluginManagerError(_REQUIRES_ERROR)
+    items = cast(list[object], value)
+    if len(items) > MAX_REQUIRES or any(
+        not isinstance(item, str) or not item.strip() or len(item) > 64
+        for item in items
+    ):
+        raise PluginManagerError(_REQUIRES_ERROR)
+    return [cast(str, item).strip() for item in items]
+
+
 class PluginManager:
     """从 ZIP 安装 Python 插件包，并维护启用 fiber 与持久化状态。"""
 
@@ -139,7 +158,7 @@ class PluginManager:
                 package.write(path, relative.as_posix())
         return buffer.getvalue()
 
-    async def _install_archive(self, archive: bytes) -> _PublicPluginRecord:
+    async def _install_archive(self, archive: bytes) -> PublicPluginRecord:
         if not archive:
             raise PluginManagerError("上传文件为空")
         if len(archive) > MAX_ARCHIVE_SIZE:
@@ -185,7 +204,7 @@ class PluginManager:
         async with self._operation_lock:
             return await self._enable(plugin_id)
 
-    async def _enable(self, plugin_id: str) -> _PublicPluginRecord:
+    async def _enable(self, plugin_id: str) -> PublicPluginRecord:
         record = self._get_record(plugin_id)
         if plugin_id in self.fibers:
             return self._public_record(record)
@@ -252,7 +271,7 @@ class PluginManager:
         async with self._operation_lock:
             return await self._disable(plugin_id)
 
-    async def _disable(self, plugin_id: str) -> _PublicPluginRecord:
+    async def _disable(self, plugin_id: str) -> PublicPluginRecord:
         record = self._get_record(plugin_id)
         fiber = self.fibers.pop(plugin_id, None)
         if fiber is not None:
@@ -380,21 +399,7 @@ class PluginManager:
             raise PluginManagerError(
                 f"role 必须是 {' / '.join(PLUGIN_ROLES)} 之一，收到 {role!r}"
             )
-        requires_raw = manifest.get("requires", [])
-        if requires_raw is None:
-            requires_raw = []
-        if (
-            not isinstance(requires_raw, list)
-            or len(requires_raw) > MAX_REQUIRES
-            or any(
-                not isinstance(item, str) or not item.strip() or len(item) > 64
-                for item in requires_raw
-            )
-        ):
-            raise PluginManagerError(
-                "requires 必须是字符串列表（每项非空且不超过 64 字符，最多 32 项）"
-            )
-        return role, [cast(str, item).strip() for item in cast(list[object], requires_raw)]
+        return role, _validate_requires(manifest.get("requires", []))
 
     def _load_plugin_class(
         self, package_root: Path, package_name: str, entrypoint: str
