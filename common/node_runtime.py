@@ -39,6 +39,7 @@ from cordis_port import Context
 from common import cordis_utils
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
+from common.plugins.webapi.plugin_manager import source_digest
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 
@@ -142,15 +143,28 @@ def source_plugin_id(source: Path) -> str:
 
 
 async def ensure_installed(ctx: Context, source: Path) -> str:
-    """确保插件源（源目录或 zip 交付包）在本节点安装并启用（幂等），返回插件 id。"""
+    """确保插件源（源目录或 zip 交付包）在本节点安装并启用（幂等），返回插件 id。
+
+    以**内容摘要**判定是否需要换装：已安装但源内容变了（如重新构建的
+    webui）则覆盖安装，解决「安装后改源码/构建产物不生效」；内容一致则
+    跳过安装只做启用。覆盖安装保留旧版归档一版，失败自动回滚（详见
+    :meth:`PluginManager._replace_install`）。
+    """
     plugins = ctx.plugins
     path = Path(source)
     plugin_id = source_plugin_id(path)
-    if plugin_id not in {item["id"] for item in await plugins.list_plugins()}:
+    digest = source_digest(path)
+    record = next((item for item in await plugins.list_plugins() if item["id"] == plugin_id), None)
+    if record is None:
         if path.suffix.lower() == ".zip":
             await plugins.install_archive(path.read_bytes())
         else:
             await plugins.install_source(path)
+    elif record.get("digest") != digest:
+        if path.suffix.lower() == ".zip":
+            await plugins.install_archive(path.read_bytes(), replace=True)
+        else:
+            await plugins.install_source(path, replace=True)
     await plugins.enable(plugin_id)
     return plugin_id
 

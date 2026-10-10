@@ -40,19 +40,40 @@ async function uploadFile(file) {
     error.value = '';
     notice.value = '';
     try {
-        const data = await request('/api/plugins/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/zip' },
-            body: file
-        });
+        const data = await sendUpload(file, false);
         notice.value = `已安装 ${data.plugin.name}，启用后刷新页面即可使用它的 UI。`;
         await loadPlugins();
     } catch (reason) {
-        error.value = reason instanceof Error ? reason.message : String(reason);
+        const details = reason instanceof Error ? reason.details : undefined;
+        if (details && details.code === 'already-installed') {
+            // 同 id 替换不区分版本方向，一律显示确认
+            const confirmed = window.confirm(
+                `插件 ${details.id}（版本 ${details.installed_version}）已安装。\n替换为版本 ${details.incoming_version} 吗？\n确认后旧版本归档保留一份，可回滚。`
+            );
+            if (confirmed) {
+                try {
+                    const data = await sendUpload(file, true);
+                    notice.value = `已替换 ${data.plugin.name}（${details.installed_version} → ${data.plugin.version}），刷新页面以更新菜单和 UI。`;
+                    await loadPlugins();
+                } catch (replaceReason) {
+                    error.value = replaceReason instanceof Error ? replaceReason.message : String(replaceReason);
+                }
+            }
+        } else {
+            error.value = reason instanceof Error ? reason.message : String(reason);
+        }
     } finally {
         uploading.value = false;
         if (uploadInput.value) uploadInput.value.value = '';
     }
+}
+
+function sendUpload(file, replace) {
+    return request(`/api/plugins/upload${replace ? '?replace=1' : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/zip' },
+        body: file
+    });
 }
 
 async function togglePlugin(plugin) {

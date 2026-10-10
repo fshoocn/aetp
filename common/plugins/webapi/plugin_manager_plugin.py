@@ -72,13 +72,17 @@ class PluginManagerPlugin(Service[None]):
         """列出已安装插件（含 kind / requires / enabled）。"""
         return await self._require_manager().list_plugins()
 
-    async def install_archive(self, archive: bytes) -> PublicPluginRecord:
-        """安装插件包（与 ``POST /api/plugins/upload`` 同一实现）。"""
-        return await self._require_manager().install_archive(archive)
+    async def install_archive(self, archive: bytes, *, replace: bool = False) -> PublicPluginRecord:
+        """安装插件包（与 ``POST /api/plugins/upload`` 同一实现）。
 
-    async def install_source(self, source_dir: str | Path) -> PublicPluginRecord:
+        ``replace=True`` 是调用方的**显式替换确认**：同 id 已安装时覆盖换装，
+        否则报 409 并携带新旧版本详情（不区分升级/降级，替换一律需确认）。
+        """
+        return await self._require_manager().install_archive(archive, replace=replace)
+
+    async def install_source(self, source_dir: str | Path, *, replace: bool = False) -> PublicPluginRecord:
         """从本地插件源目录安装（如 ``master/webui``）。"""
-        return await self._require_manager().install_source(source_dir)
+        return await self._require_manager().install_source(source_dir, replace=replace)
 
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         """启用插件并加载进本节点运行时。"""
@@ -110,7 +114,10 @@ class PluginManagerPlugin(Service[None]):
             return self.manager
 
         def error_response(error: PluginManagerError) -> JSONResponse:
-            return ctx.webapi.json({"error": str(error)}, status_code=error.status_code)
+            payload: dict[str, object] = {"error": str(error)}
+            if error.details:
+                payload["details"] = error.details
+            return ctx.webapi.json(payload, status_code=error.status_code)
 
         @ctx.webapi.get("/api/plugins", kind="api", name="plugins.list")
         def list_plugins(_: Request) -> dict[str, object] | JSONResponse:
@@ -133,9 +140,11 @@ class PluginManagerPlugin(Service[None]):
                     if total_size > MAX_ARCHIVE_SIZE:
                         raise PluginManagerError("插件 ZIP 最大允许 32 MiB", 413)
                     chunks.append(chunk)
+                # replace=1 是操作者在确认弹窗后给出的显式替换确认
+                replace = _request.query_params.get("replace", "") in {"1", "true", "yes"}
                 item = await asyncio.to_thread(
                     manager().run_from_web_thread,
-                    manager().install_archive(b"".join(chunks)),
+                    manager().install_archive(b"".join(chunks), replace=replace),
                 )
                 return {"plugin": item}
             except PluginManagerError as error:

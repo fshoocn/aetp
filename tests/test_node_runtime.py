@@ -127,6 +127,19 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["kind"], ["slave"])
         self.assertEqual(record["requires"], ["can-bus"])
 
+        # 源内容变化（如重新构建）→ 内容摘要不同 → 自动换装，新代码生效
+        plugin_file = source / "plugin.py"
+        plugin_file.write_text(
+            plugin_file.read_text(encoding="utf-8").replace(
+                "'active': True", "'active': 'rebuilt'"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(await ensure_installed(self.context, source), "executor-demo")
+        status, body = _request(self.base_url, "/api/executor-demo")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["active"], "rebuilt")
+
 
 class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):
     """插件以 zip 包交付：source_plugin_id / ensure_installed 支持 zip。"""

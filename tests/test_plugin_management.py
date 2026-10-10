@@ -23,6 +23,15 @@ from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 _SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
 
+#: test_upload_strips_bytecode_cache 用的最小合法清单
+_MANIFEST_BYTECODE: dict[str, object] = {
+    "id": "bytecode-sample",
+    "name": "bytecode-sample",
+    "version": "1.0.0",
+    "entrypoint": "plugin:BytecodePlugin",
+    "kind": "master",
+}
+
 
 def _free_port() -> int:
     with socket.socket() as probe:
@@ -78,11 +87,13 @@ def _plugin_archive(
     *,
     requires: list[str] | None = None,
     kind: str | list[str] | None = "master",
+    version: str = "1.0.0",
+    broken: bool = False,
 ) -> bytes:
     manifest: dict[str, object] = {
         "id": plugin_id,
         "name": plugin_id,
-        "version": "1.0.0",
+        "version": version,
         "entrypoint": f"plugin:{plugin_class}",
         "resource_root": "ui",
     }
@@ -90,6 +101,20 @@ def _plugin_archive(
         manifest["requires"] = requires
     if kind is not None:
         manifest["kind"] = kind
+    init_body = (
+        "        raise RuntimeError('broken on purpose')\n"
+        if broken
+        else (
+            "        ctx.webui.register_ui(\n"
+            "            'home', kind='page', format='vue', resource_root=config['resource_root'],\n"
+            f"            entry='Home.vue', path='/plugins/{plugin_id}', title={plugin_id!r},\n"
+            "        )\n"
+            "\n"
+            f"        @ctx.webapi.get('/api/{plugin_id}', kind='api')\n"
+            "        def status(request):\n"
+            f"            return {{'active': True, 'version': {version!r}}}\n"
+        )
+    )
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
         package.writestr("plugin.json", json.dumps(manifest))
@@ -101,14 +126,7 @@ def _plugin_archive(
                 "    inject = ['webapi', 'webui']\n"
                 "\n"
                 "    def __init__(self, ctx, config):\n"
-                "        ctx.webui.register_ui(\n"
-                "            'home', kind='page', format='vue', resource_root=config['resource_root'],\n"
-                f"            entry='Home.vue', path='/plugins/{plugin_id}', title={plugin_id!r},\n"
-                "        )\n"
-                "\n"
-                f"        @ctx.webapi.get('/api/{plugin_id}', kind='api')\n"
-                "        def status(request):\n"
-                "            return {'active': True}\n"
+                f"{init_body}"
             ),
         )
         package.writestr("ui/Home.vue", "<template><h1>Uploaded Sample</h1></template>")
@@ -355,9 +373,12 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_install_source_installs_and_rejects_duplicates(self) -> None:
         service = self.context.plugins
-        # setup 已从 master/webui 安装；重复安装同一插件源应被拒
-        with self.assertRaises(PluginManagerError):
+        # setup 已从 master/webui 安装；重复安装同一插件源应被拒（409 + 新旧版本详情）
+        with self.assertRaises(PluginManagerError) as caught:
             await service.install_source(_SOURCE_ROOT / "master" / "webui")
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(caught.exception.details["code"], "already-installed")
+        self.assertEqual(caught.exception.details["incoming_version"], "1.0.0")
 
         with self.assertRaises(PluginManagerError):
             await service.install_source(_SOURCE_ROOT / "masterplugins" / "nope")
@@ -365,6 +386,88 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         record = next(item for item in await service.list_plugins() if item["id"] == "webui")
         self.assertEqual(record["kind"], ["master"])
         self.assertTrue(await service.package_bytes("webui"))
+
+    async def test_replace_install_requires_confirmation_and_keeps_state(self) -> None:
+        """同 id 覆盖安装：未确认报 409（不区分升/降级），确认后替换且保留启用状态。"""
+        service = self.context.plugins
+        await service.install_archive(_plugin_archive("swap", "SwapPlugin", version="1.0.0"))
+        await service.enable("swap")
+
+        # 不区分版本方向：传入“更低”版本同样弹出 409（由界面显示确认）
+        with self.assertRaises(PluginManagerError) as caught:
+            await service.install_archive(_plugin_archive("swap", "SwapPlugin", version="0.9.0"))
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(
+            caught.exception.details,
+            {
+                "code": "already-installed",
+                "id": "swap",
+                "installed_version": "1.0.0",
+                "incoming_version": "0.9.0",
+            },
+        )
+
+        # 显式确认（replace=True）后覆盖安装：代码换成新版，启用状态保留
+        record = await service.install_archive(
+            _plugin_archive("swap", "SwapPlugin", version="2.0.0"), replace=True
+        )
+        self.assertEqual(record["version"], "2.0.0")
+        self.assertTrue(record["enabled"])
+        status, body = await _arequest(self.base_url, "/api/swap")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["version"], "2.0.0")
+
+        # 旧版 zip 归档保留一版供回滚
+        archives = Path(self.temp_dir.name) / "installed" / ".archives"
+        self.assertTrue((archives / "swap.zip").is_file())
+        self.assertTrue((archives / "swap.prev-1.0.0.zip").is_file())
+
+    async def test_replace_install_rolls_back_on_broken_new_version(self) -> None:
+        """新版启用失败：整体回滚到旧版（代码、注册表、归档），旧版继续运行。"""
+        service = self.context.plugins
+        await service.install_archive(_plugin_archive("rb", "RbPlugin", version="1.0.0"))
+        await service.enable("rb")
+
+        with self.assertRaises(PluginManagerError) as caught:
+            await service.install_archive(
+                _plugin_archive("rb", "RbPlugin", version="2.0.0", broken=True), replace=True
+            )
+        self.assertIn("回滚", str(caught.exception))
+
+        record = next(item for item in await service.list_plugins() if item["id"] == "rb")
+        self.assertEqual(record["version"], "1.0.0")
+        self.assertIn("覆盖安装失败", record["last_error"])
+
+        # 旧版代码仍在运行
+        status, body = await _arequest(self.base_url, "/api/rb")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["version"], "1.0.0")
+
+        # 归档回到旧版 zip，回滚备份不残留
+        archives = Path(self.temp_dir.name) / "installed" / ".archives"
+        self.assertFalse((archives / "rb.prev-1.0.0.zip").exists())
+        self.assertTrue((archives / "rb.zip").is_file())
+
+    async def test_upload_strips_bytecode_cache(self) -> None:
+        """上传包中的 __pycache__/旧 .pyc 被剔除，避免升级后命中旧字节码。"""
+        archive = BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
+            package.writestr("plugin.json", json.dumps(_MANIFEST_BYTECODE))
+            package.writestr("plugin.py", "class BytecodePlugin:\n    name = 'bytecode-sample'\n    inject = []\n    def __init__(self, ctx, config):\n        del ctx, config\n")
+            package.writestr("__pycache__/plugin.cpython-314.pyc", b"stale")
+            package.writestr("helper.pyc", b"stale")
+
+        status, body = await _arequest(
+            self.base_url,
+            "/api/plugins/upload",
+            method="POST",
+            body=archive.getvalue(),
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 200, body.decode("utf-8"))
+        package_root = Path(self.temp_dir.name) / "installed" / "bytecode-sample"
+        self.assertFalse((package_root / "__pycache__").exists())
+        self.assertFalse((package_root / "helper.pyc").exists())
 
     async def test_upload_rejects_zip_path_traversal(self) -> None:
         archive = BytesIO()

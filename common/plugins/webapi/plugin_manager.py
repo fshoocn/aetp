@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import importlib
 import json
 import os
@@ -40,6 +41,55 @@ EXCLUDED_DIRS: Final[frozenset[str]] = frozenset(
 EXCLUDED_SUFFIXES: Final[tuple[str, ...]] = (".pyc", ".pyo")
 
 
+def _is_excluded_entry(name: str) -> bool:
+    """包内容中跳过的条目：构建缓存目录、依赖目录与旧字节码（不进包、不解包）。"""
+    path = PurePosixPath(name.replace("\\", "/"))
+    return any(part in EXCLUDED_DIRS for part in path.parts) or path.suffix.lower() in EXCLUDED_SUFFIXES
+
+
+def _content_digest(entries: list[tuple[str, bytes]]) -> str:
+    """包内容摘要：相对路径 + 文件内容的稳定 sha256（与打包时间戳无关）。"""
+    hasher = hashlib.sha256()
+    for name, data in sorted(entries):
+        hasher.update(name.encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(hashlib.sha256(data).digest())
+    return hasher.hexdigest()
+
+
+def package_digest(root: Path) -> str:
+    """插件源/安装目录的内容摘要（跳过构建缓存与旧字节码）。"""
+    entries: list[tuple[str, bytes]] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in EXCLUDED_DIRS]
+        for filename in sorted(filenames):
+            path = Path(dirpath, filename)
+            if path.suffix.lower() in EXCLUDED_SUFFIXES:
+                continue
+            entries.append((path.relative_to(root).as_posix(), path.read_bytes()))
+    return _content_digest(entries)
+
+
+def archive_digest(archive: bytes) -> str:
+    """zip 交付包的内容摘要（口径与 :func:`package_digest` 一致）。"""
+    entries: list[tuple[str, bytes]] = []
+    with zipfile.ZipFile(BytesIO(archive)) as package:
+        for member in package.infolist():
+            if member.is_dir() or _is_excluded_entry(member.filename):
+                continue
+            name = PurePosixPath(member.filename.replace("\\", "/")).as_posix()
+            entries.append((name, package.read(member)))
+    return _content_digest(entries)
+
+
+def source_digest(source: str | Path) -> str:
+    """插件源（源目录或 zip 交付包）的内容摘要。"""
+    path = Path(source)
+    if path.suffix.lower() == ".zip":
+        return archive_digest(path.read_bytes())
+    return package_digest(path)
+
+
 class _PluginManifest(TypedDict):
     id: str
     name: str
@@ -54,6 +104,7 @@ class _PluginManifest(TypedDict):
 class _PluginRecord(_PluginManifest):
     enabled: bool
     last_error: str | None
+    digest: str
 
 
 class PublicPluginRecord(TypedDict):
@@ -66,14 +117,19 @@ class PublicPluginRecord(TypedDict):
     kind: list[str]
     enabled: bool
     last_error: str | None
+    digest: str
 
 
 class PluginManagerError(ValueError):
     """可直接返回给插件管理 API 的错误。"""
 
-    def __init__(self, message: str, status_code: int = 400) -> None:
+    def __init__(
+        self, message: str, status_code: int = 400, *, details: dict[str, object] | None = None
+    ) -> None:
         super().__init__(message)
         self.status_code: int = status_code
+        #: 结构化错误载荷（如同 id 冲突时的新旧版本），随 API 一并返回
+        self.details: dict[str, object] | None = details
 
 
 #: requires 字段校验失败的统一提示（形状与内容两处检查共用）
@@ -130,22 +186,25 @@ class PluginManager:
     async def list_plugins(self) -> list[PublicPluginRecord]:
         return [self._public_record(record) for record in sorted(self.records.values(), key=lambda item: item["id"])]
 
-    async def install_archive(self, archive: bytes) -> PublicPluginRecord:
+    async def install_archive(self, archive: bytes, *, replace: bool = False) -> PublicPluginRecord:
+        """安装插件包；同 id 已安装时需显式 ``replace=True`` 才覆盖替换。"""
         async with self._operation_lock:
-            return await self._install_archive(archive)
+            return await self._install_archive(archive, replace=replace)
 
-    async def install_source(self, source_dir: str | Path) -> PublicPluginRecord:
+    async def install_source(self, source_dir: str | Path, *, replace: bool = False) -> PublicPluginRecord:
         """从本地插件源目录安装（与上传 ZIP 同一条安装链路）。
 
         源目录是「未安装的插件源文件」（如 ``master/webui``）；安装产物
         落到本节点安装目录，原始包归档保留，后续可经 :meth:`package_bytes`
         读出用于分发。``node_modules`` 等构建缓存不进包。
+        同 id 已安装时需显式 ``replace=True`` 才覆盖替换（预装源更新换装
+        走这里），否则报 409 并携带新旧版本信息。
         """
         async with self._operation_lock:
             source = Path(source_dir).expanduser().resolve()
             if not source.is_dir():
                 raise PluginManagerError(f"插件源目录不存在：{source}")
-            return await self._install_archive(self._zip_directory(source))
+            return await self._install_archive(self._zip_directory(source), replace=replace)
 
     @staticmethod
     def _zip_directory(source: Path) -> bytes:
@@ -165,7 +224,7 @@ class PluginManager:
                 package.write(path, relative.as_posix())
         return buffer.getvalue()
 
-    async def _install_archive(self, archive: bytes) -> PublicPluginRecord:
+    async def _install_archive(self, archive: bytes, *, replace: bool = False) -> PublicPluginRecord:
         if not archive:
             raise PluginManagerError("上传文件为空")
         if len(archive) > MAX_ARCHIVE_SIZE:
@@ -178,16 +237,34 @@ class PluginManager:
             manifest = self._extract_and_read_manifest(archive, extracted)
             self._check_node_kind(manifest)
             plugin_id = manifest["id"]
-            if plugin_id in self.records or (self.install_root / plugin_id).exists():
-                raise PluginManagerError(f"插件 {plugin_id!r} 已安装", 409)
+            # 摘要按 zip 条目（名字 + 内容）计算：与 ensure_installed 的
+            # source_digest 同口径，保证启动比对不会因口径不同而每次误换装
+            digest = archive_digest(archive)
+            existing = self.records.get(plugin_id)
+            destination = self.install_root / plugin_id
+            if existing is not None or destination.exists():
+                if not replace:
+                    raise PluginManagerError(
+                        f"插件 {plugin_id!r} 已安装（版本 {existing.get('version') if existing else '未知'}），"
+                        f"新包版本 {manifest['version']}；如需替换请显式确认",
+                        409,
+                        details={
+                            "code": "already-installed",
+                            "id": plugin_id,
+                            "installed_version": existing.get("version") if existing else None,
+                            "incoming_version": manifest["version"],
+                        },
+                    )
+                await self._replace_install(plugin_id, manifest, extracted, archive, digest, staging_root)
+                return self._public_record(self.records[plugin_id])
 
             # 校验全部通过后才落地；落地任一步失败（含取消）都回滚，不留孤儿数据
-            destination = self.install_root / plugin_id
             archive_path = self._archive_path(plugin_id)
             record: _PluginRecord = {
                 **manifest,
                 "enabled": False,
                 "last_error": None,
+                "digest": digest,
             }
             try:
                 os.replace(extracted, destination)
@@ -208,6 +285,91 @@ class PluginManager:
             raise PluginManagerError(f"插件包无法安装：{exc}") from exc
         finally:
             shutil.rmtree(staging_root, ignore_errors=True)
+
+    async def _replace_install(
+        self,
+        plugin_id: str,
+        manifest: _PluginManifest,
+        extracted: Path,
+        archive: bytes,
+        digest: str,
+        staging_root: Path,
+    ) -> None:
+        """覆盖安装同 id 插件：停旧 → 原子换目录 → 启新版；任一步失败整体回滚到旧版。
+
+        旧版 zip 归档保留一版（``{id}.prev-{旧版本}.zip``）供回溯；原启用状态
+        保留——旧版启用中则新版落地后重新启用，新版启用失败同样回滚。
+        """
+        record = self.records[plugin_id]
+        previous: _PluginRecord = {**record}
+        was_enabled = plugin_id in self.fibers
+        destination = self.install_root / plugin_id
+        archive_path = self._archive_path(plugin_id)
+        backup_dir = staging_root / "previous"
+        # 旧版归档保留一版供回滚/回溯；版本串中的非法文件名字符归一为 `_`
+        old_version = re.sub(r"[^\w.-]", "_", str(record.get("version") or "unknown"))
+        backup_archive = self.archives_dir / f"{plugin_id}.prev-{old_version}.zip"
+        module_name = self._module_name(plugin_id)
+        fiber: Fiber | None = self.fibers.pop(plugin_id, None)
+        moved = False
+        try:
+            if fiber is not None:
+                await fiber.dispose()
+            self._remove_modules(module_name)
+            # 原子换目录：旧目录先进暂存区，新版就位后旧版随 finally 清理
+            if destination.exists():
+                os.replace(destination, backup_dir)
+                moved = True
+            os.replace(extracted, destination)
+            backup_archive.parent.mkdir(parents=True, exist_ok=True)
+            if archive_path.is_file():
+                backup_archive.write_bytes(archive_path.read_bytes())
+            archive_path.write_bytes(archive)
+            self.records[plugin_id] = {
+                **manifest,
+                "enabled": was_enabled,
+                "last_error": None,
+                "digest": digest,
+            }
+            self._write_registry()
+            if was_enabled:
+                await self._enable(plugin_id)
+        except BaseException as exc:
+            # 整体回滚：目录、归档、注册表与 fiber 状态全部还原旧版
+            self.fibers.pop(plugin_id, None)
+            self._remove_modules(module_name)
+            shutil.rmtree(destination, ignore_errors=True)
+            if moved:
+                os.replace(backup_dir, destination)
+            self.records[plugin_id] = {
+                **previous,
+                "enabled": False,
+                "last_error": f"覆盖安装失败：{exc}",
+            }
+            if backup_archive.is_file():
+                archive_path.write_bytes(backup_archive.read_bytes())
+                backup_archive.unlink(missing_ok=True)
+            self._prune_archives_dir()
+            try:
+                self._write_registry()
+                if was_enabled:
+                    await self._enable(plugin_id)  # 回滚后重新启用旧版
+                # _enable 成功会清空 last_error；再补上失败原因，让界面能告知替换未生效
+                self.records[plugin_id] = {
+                    **self.records[plugin_id],
+                    "last_error": f"覆盖安装失败：{exc}",
+                }
+                self._write_registry()
+            except OSError as registry_error:
+                self.ctx.logger.error("插件 %s 回滚状态无法写入注册表：%s", plugin_id, registry_error)
+            except PluginManagerError as rollback_error:
+                self.ctx.logger.error("插件 %s 回滚后重新启用失败：%s", plugin_id, rollback_error)
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            status_code = exc.status_code if isinstance(exc, PluginManagerError) else 400
+            raise PluginManagerError(
+                f"覆盖安装 {plugin_id!r} 失败，已回滚到旧版本：{exc}", status_code
+            ) from exc
 
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         async with self._operation_lock:
@@ -301,8 +463,17 @@ class PluginManager:
         package_root = (self.install_root / plugin_id).resolve()
         if package_root.parent != self.install_root:
             raise PluginManagerError("插件安装目录无效", 400)
-        shutil.rmtree(package_root)
+        try:
+            shutil.rmtree(package_root)
+        except OSError as exc:
+            raise PluginManagerError(
+                f"插件 {plugin_id!r} 卸载失败：{exc.strerror or exc}"
+                "（常见原因是插件文件被占用，请关闭相关进程后重试）"
+            ) from exc
         self._archive_path(plugin_id).unlink(missing_ok=True)
+        # 覆盖安装留下的旧版归档一并清理，避免残留孤儿 zip（id 前缀精确匹配）
+        for stale in self.archives_dir.glob(f"{plugin_id}.prev-*.zip"):
+            stale.unlink(missing_ok=True)
         self._prune_archives_dir()
         self.records.pop(plugin_id, None)
         self._write_registry()
@@ -341,7 +512,11 @@ class PluginManager:
 
                 if "plugin.json" not in {member.filename for member in members}:
                     raise PluginManagerError("ZIP 根目录必须包含 plugin.json")
-                package.extractall(destination)
+                # 上传包同样剔除构建缓存与旧字节码：旧 pyc 会让「升级后仍跑旧代码」
+                for member in members:
+                    if _is_excluded_entry(member.filename):
+                        continue
+                    package.extract(member, destination)
         except zipfile.BadZipFile as exc:
             raise PluginManagerError("上传文件不是有效 ZIP") from exc
 
@@ -520,6 +695,7 @@ class PluginManager:
             "requires": list(record.get("requires") or []),
             "enabled": bool(record.get("enabled")),
             "last_error": record.get("last_error"),
+            "digest": record.get("digest") or "",
         }
 
     def _read_registry(self) -> dict[str, _PluginRecord]:

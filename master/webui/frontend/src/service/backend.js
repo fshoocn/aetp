@@ -73,12 +73,16 @@ export function resolveUrl(path) {
     return text.startsWith('/') ? `${backendUrl}${text}` : `${backendUrl}/${text}`;
 }
 
-/** 发送 JSON 请求（自动拼当前后端地址），失败时抛带后端错误信息的 Error。 */
+/** 发送 JSON 请求（自动拼当前后端地址），失败时抛带后端错误信息的 Error。
+ *  后端若返回结构化 `details`（如同 id 冲突的新旧版本），挂在 `error.details` 上。 */
 export async function request(url, options = {}) {
     const response = await fetch(resolveUrl(url), options);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-        throw new Error(data.error || `请求失败 (${response.status})`);
+        const error = new Error(data.error || `请求失败 (${response.status})`);
+        error.details = data.details;
+        error.status = response.status;
+        throw error;
     }
     return data;
 }
