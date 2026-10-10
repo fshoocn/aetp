@@ -1,8 +1,8 @@
-"""webui 插件：可拆卸的 UI 宿主层（SPA 静态资源、页面回退、插件 UI 注册）。
+"""webui 插件：主节点内嵌必备的 UI 宿主层（SPA 静态资源、页面回退、插件 UI 注册）。
 
 使用方式（在 ``master/main.py`` 里）::
 
-    from masterplugins.webui import WebUiPlugin
+    from master.webui import WebUiPlugin
 
     await ctx.plugin(WebUiPlugin)      # 依赖 webapi，需先加载 WebApiPlugin
 
@@ -91,7 +91,7 @@ class WebUiPlugin(Service[WebUiConfig]):
             api.static("/ui-static", ui_directory, name="web.ui-static")
         else:
             self.ctx.logger.warning(
-                "Vue 构建目录不存在：%s（在 masterplugins/webui/frontend 运行 npm run build 生成）",
+                "Vue 构建目录不存在：%s（在 master/webui/frontend 运行 npm run build 生成）",
                 ui_directory,
             )
 

@@ -32,7 +32,6 @@ env/
 ENV/
 .python-version
 **/node_modules/
-masterplugins/webui/static/ui/dist/
 master/plugins/
 slave/plugins/
 

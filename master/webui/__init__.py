@@ -1,8 +1,8 @@
-"""webui 包：可拆卸的 UI 宿主插件（叠在 webapi 之上的展示层）。
+"""webui 包：主节点内嵌必备的 UI 宿主插件（叠在 webapi 之上的展示层）。
 
 对外只暴露三样东西::
 
-    from masterplugins.webui import WebUiPlugin, WebUiConfig, UiContribution
+    from master.webui import WebUiPlugin, WebUiConfig, UiContribution
 
 * :class:`WebUiPlugin`  —— 插件本体（也是 ``ctx.webui`` 服务），
   ``ctx.plugin(WebUiPlugin, {...})`` 加载它；

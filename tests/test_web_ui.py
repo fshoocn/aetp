@@ -127,7 +127,7 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             {"install_root": str(Path(self.temp_dir.name) / "installed")},
         )
         plugins = self.context.plugins
-        await plugins.install_source(_SOURCE_ROOT / "masterplugins" / "webui")
+        await plugins.install_source(_SOURCE_ROOT / "master" / "webui")
         await plugins.enable("webui")
 
     async def asyncTearDown(self) -> None:

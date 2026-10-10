@@ -64,7 +64,7 @@ class PluginManagerPlugin(Service[dict[str, str | Path]]):
         return await self._require_manager().install_archive(archive)
 
     async def install_source(self, source_dir: str | Path) -> PublicPluginRecord:
-        """从本地插件源目录安装（如 ``masterplugins/webui``）。"""
+        """从本地插件源目录安装（如 ``master/webui``）。"""
         return await self._require_manager().install_source(source_dir)
 
     async def enable(self, plugin_id: str) -> PublicPluginRecord:

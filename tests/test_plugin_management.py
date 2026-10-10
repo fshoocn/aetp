@@ -127,7 +127,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             {"install_root": str(Path(self.temp_dir.name) / "installed")},
         )
         plugins = self.context.plugins
-        await plugins.install_source(_SOURCE_ROOT / "masterplugins" / "webui")
+        await plugins.install_source(_SOURCE_ROOT / "master" / "webui")
         await plugins.enable("webui")
 
     async def asyncTearDown(self) -> None:
@@ -340,9 +340,9 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_install_source_installs_and_rejects_duplicates(self) -> None:
         service = self.context.plugins
-        # setup 已从 masterplugins/webui 安装；重复安装同一插件源应被拒
+        # setup 已从 master/webui 安装；重复安装同一插件源应被拒
         with self.assertRaises(PluginManagerError):
-            await service.install_source(_SOURCE_ROOT / "masterplugins" / "webui")
+            await service.install_source(_SOURCE_ROOT / "master" / "webui")
 
         with self.assertRaises(PluginManagerError):
             await service.install_source(_SOURCE_ROOT / "masterplugins" / "nope")

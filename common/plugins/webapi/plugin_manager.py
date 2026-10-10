@@ -137,7 +137,7 @@ class PluginManager:
     async def install_source(self, source_dir: str | Path) -> PublicPluginRecord:
         """从本地插件源目录安装（与上传 ZIP 同一条安装链路）。
 
-        源目录是「未安装的插件源文件」（如 ``masterplugins/webui``）；安装产物
+        源目录是「未安装的插件源文件」（如 ``master/webui``）；安装产物
         落到本节点安装目录，原始包归档保留，后续可经 :meth:`package_bytes`
         读出用于分发。``node_modules`` 等构建缓存不进包。
         """

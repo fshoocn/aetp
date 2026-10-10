@@ -23,7 +23,7 @@
 ``ctx.webapi.is_running()``。
 
 UI 是可拆卸的上层：SPA 静态资源、页面回退与 ``register_ui`` 都在
-``masterplugins.webui`` 插件里；不加载它就是纯 API 服务。
+``master.webui`` 插件里；不加载它就是纯 API 服务。
 
 为什么不把 ``provide`` 写在插件类上
 -----------------------------------

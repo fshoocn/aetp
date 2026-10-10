@@ -13,8 +13,8 @@
 那一行 ``UvicornWebApiService(ctx, config)``（换成同接口的其他后端），
 接口与所有业务插件保持不动。
 
-UI 是可拆卸的上层插件（:mod:`masterplugins.webui`）：SPA 静态资源、页面回退
-与 ``register_ui`` 都在那里；不加载 webui 即为纯 API 部署。
+UI 是可拆卸的上层插件（:mod:`master.webui`，源在 ``master/webui/``）：SPA
+静态资源、页面回退与 ``register_ui`` 都在那里；不加载 webui 即为纯 API 部署。
 
 模块结构::
 
