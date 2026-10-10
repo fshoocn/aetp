@@ -5,9 +5,9 @@
 其余装配完全一致：
 
 1. 创建 cordis 内核并加载 :class:`AppConfigPlugin`（应用配置 ``ctx.appconfig``，
-   读执行根目录的 ``config.ini``）与 :class:`WebApiPlugin`（HTTP 服务）；
-2. 加载 :class:`PluginManagerPlugin`（安装能力 ``ctx.plugins``，``install_root``
-   指向本节点的安装目录）；
+   读执行根目录的 ``config.ini``）；
+2. 加载 :class:`WebApiPlugin`（通过 ``appconfig`` 注入读取 ``[web]``）与
+   :class:`PluginManagerPlugin`（通过 ``appconfig`` 注入读取 ``[node].install_root``）；
 3. 逐个「确保安装并启用」 ``plugin_sources`` 里的插件源目录（幂等）——
    传空列表即为纯 API（无头）节点；
 4. :func:`run_node` 额外负责打印地址、等待 Ctrl+C / SIGTERM 并有序退出。
@@ -37,7 +37,7 @@ from typing import cast
 from cordis_port import Context
 
 from common import cordis_utils
-from common.plugins.appconfig import AppConfig, AppConfigPlugin, ConfigSection
+from common.plugins.appconfig import AppConfig, AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
@@ -61,29 +61,27 @@ _NODE_KEYS: frozenset[str] = frozenset({"kind", "name", "install_root", "plugins
 
 @dataclass(frozen=True)
 class NodeProfile:
-    """节点 ``config.ini``（``[node]`` + ``[web]`` 两节）的解析结果。
+    """节点 ``config.ini`` 的 ``[node]`` 节解析结果。
 
-    节点类型、节点名、安装目录、预装插件源与 web 配置全部来自配置文件。
+    Web 与插件安装目录配置由对应插件通过 ``ctx.appconfig`` 读取。
     """
 
     kind: NodeKind
     name: str
-    install_root: Path
     plugin_sources: tuple[Path, ...]
-    web_config: dict[str, object]
 
 
 def load_node_profile(config: AppConfig, *, base_dir: Path) -> NodeProfile:
-    """从应用配置里读出本节点的节点配置（``[node]`` / ``[web]`` 两节）。
+    """从应用配置里读出本节点的启动信息（``[node]`` 节）。
 
     参数:
         config: :meth:`AppConfig.from_file` 生成的配置类。
-        base_dir: 相对路径（``install_root`` / ``plugins``）的解析基准，
+        base_dir: 相对路径（``plugins``）的解析基准，
             取 ``config.ini`` 所在目录（节点的执行根目录）。
 
     抛出:
         KeyError: 配置里没有 ``[node]`` 节。
-        ValueError: ``kind`` 缺失 / 非法、``[node]`` 出现未知键、web 字段类型不对。
+        ValueError: ``kind`` 缺失 / 非法或 ``[node]`` 出现未知键。
     """
     if "node" not in config.sections():
         raise KeyError("config.ini 缺少 [node] 节")
@@ -105,11 +103,6 @@ def load_node_profile(config: AppConfig, *, base_dir: Path) -> NodeProfile:
             f"kind 无效：{raw_kind!r}（可选 {' / '.join(NodeKind)}）"
         ) from exc
 
-    raw_root = section.get("install_root")
-    install_root = Path(raw_root) if raw_root else Path("plugins")
-    if not install_root.is_absolute():
-        install_root = base_dir / install_root
-
     sources: list[Path] = []
     for item in _split_list(section.get("plugins")):
         source = Path(item)
@@ -118,35 +111,13 @@ def load_node_profile(config: AppConfig, *, base_dir: Path) -> NodeProfile:
     return NodeProfile(
         kind=kind,
         name=section.get("name") or str(kind),
-        install_root=install_root,
         plugin_sources=tuple(sources),
-        web_config=_web_config(config.section("web")),
     )
 
 
 def _split_list(raw: str | None) -> list[str]:
     """把逗号分隔的 ini 值拆成列表（去掉空白与空项）。"""
     return [part.strip() for part in (raw or "").split(",") if part.strip()]
-
-
-def _web_config(section: ConfigSection) -> dict[str, object]:
-    """``[web]`` 节 → 传给 ``WebApiConfig`` 的配置（按类型转换）。
-
-    未知键不在这里拦截，由 :class:`WebApiConfig` 的校验报错。
-    """
-    values: dict[str, object] = {}
-    for key in section:
-        if key == "port":
-            values[key] = section.get_int(key)
-        elif key == "access_log":
-            values[key] = section.get_bool(key)
-        elif key == "start_timeout":
-            values[key] = section.get_float(key)
-        elif key == "cors_origins":
-            values[key] = _split_list(section.get(key))
-        else:
-            values[key] = section.get(key)
-    return values
 
 
 def source_plugin_id(source: Path) -> str:
@@ -184,6 +155,31 @@ async def ensure_installed(ctx: Context, source: Path) -> str:
     return plugin_id
 
 
+def _resolve_config(config_path: str | Path) -> tuple[Path, NodeProfile]:
+    """解析节点配置文件，返回绝对路径与节点启动信息（每次启动只解析这一次）。"""
+    config_file = Path(config_path).expanduser().resolve()
+    profile = load_node_profile(
+        AppConfig.from_file(config_file), base_dir=config_file.parent
+    )
+    return config_file, profile
+
+
+async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
+    """按已解析的 profile 装配内核：配置服务 → Web / 插件管理 → 预装插件。"""
+    ctx: Context = Context()
+    cordis_utils.set_ctx(ctx)
+    ctx.provide("node_kind", profile.kind)
+
+    await ctx.plugin(AppConfigPlugin, {"path": str(config_file)})
+    await ctx.plugin(WebApiPlugin)
+    await ctx.plugin(PluginManagerPlugin)
+    for source in profile.plugin_sources:
+        await ensure_installed(ctx, source)
+
+    ctx.logger.info("%s 装配完成", profile.name)
+    return ctx
+
+
 async def assemble_node(
     *,
     config_path: str | Path = "config.ini",
@@ -194,28 +190,11 @@ async def assemble_node(
         config_path: 节点配置文件路径（默认 ``config.ini``；入口通常传
             ``<节点目录>/config.ini``，如 ``master/config.ini``）。
 
-    节点类型、节点名、安装目录、预装插件源与 web 配置**全部**来自配置文件
-    （见 :func:`load_node_profile`）。
+    节点类型、节点名和预装插件源由 :func:`load_node_profile` 解析；Web 与安装目录
+    由各自插件经 ``ctx.appconfig`` 读取。
     """
-    config_file = Path(config_path).expanduser().resolve()
-    profile = load_node_profile(
-        AppConfig.from_file(config_file), base_dir=config_file.parent
-    )
-
-    ctx: Context = Context()
-    cordis_utils.set_ctx(ctx)
-    ctx.provide("node_kind", profile.kind)
-
-    await ctx.plugin(AppConfigPlugin, {"path": str(config_file)})
-    await ctx.plugin(WebApiPlugin, profile.web_config)
-    await ctx.plugin(PluginManagerPlugin, {"install_root": str(profile.install_root)})
-    for source in profile.plugin_sources:
-        await ensure_installed(ctx, source)
-
-    ctx.logger.info(
-        "%s 装配完成（安装目录 %s）", profile.name, profile.install_root
-    )
-    return ctx
+    config_file, profile = _resolve_config(config_path)
+    return await _assemble(config_file, profile)
 
 
 async def run_node(
@@ -227,11 +206,8 @@ async def run_node(
     **为什么需要「阻塞」**：web 服务跑在后台线程里，主协程一旦返回，
     ``asyncio.run`` 结束、进程退出，线程被连带杀掉。
     """
-    config_file = Path(config_path).expanduser().resolve()
-    profile = load_node_profile(
-        AppConfig.from_file(config_file), base_dir=config_file.parent
-    )
-    ctx = await assemble_node(config_path=config_file)
+    config_file, profile = _resolve_config(config_path)
+    ctx = await _assemble(config_file, profile)
 
     address = ctx.webapi.address()
     ctx.logger.info("已就绪，访问 %s", address)

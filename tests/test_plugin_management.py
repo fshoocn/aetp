@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from cordis_port import Context
 
 from common.cordis_utils import unload_all
+from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
@@ -121,11 +122,18 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.port: int = _free_port()
         self.base_url: str = f"http://127.0.0.1:{self.port}"
         self.context.provide("node_kind", "master")
-        await self.context.plugin(WebApiPlugin, {"port": self.port})
-        await self.context.plugin(
-            PluginManagerPlugin,
-            {"install_root": str(Path(self.temp_dir.name) / "installed")},
+        config_path = Path(self.temp_dir.name) / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            f"install_root = {Path(self.temp_dir.name) / 'installed'}\n"
+            "\n[web]\n"
+            f"port = {self.port}\n",
+            encoding="utf-8",
         )
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(WebApiPlugin)
+        await self.context.plugin(PluginManagerPlugin)
         plugins = self.context.plugins
         await plugins.install_source(_SOURCE_ROOT / "master" / "webui")
         await plugins.enable("webui")
@@ -161,11 +169,18 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
         # 没有 node_kind 服务的环境：无法校验即拒绝
         bare: Context = Context()
-        await bare.plugin(WebApiPlugin, {"port": _free_port()})
-        await bare.plugin(
-            PluginManagerPlugin,
-            {"install_root": str(Path(self.temp_dir.name) / "bare")},
+        bare_config_path = Path(self.temp_dir.name) / "bare.ini"
+        bare_config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            f"install_root = {Path(self.temp_dir.name) / 'bare'}\n"
+            "\n[web]\n"
+            f"port = {_free_port()}\n",
+            encoding="utf-8",
         )
+        await bare.plugin(AppConfigPlugin, {"path": str(bare_config_path)})
+        await bare.plugin(WebApiPlugin)
+        await bare.plugin(PluginManagerPlugin)
         with self.assertRaises(PluginManagerError):
             await bare.plugins.install_archive(_plugin_archive("k-bare"))
         await unload_all(bare)

@@ -14,6 +14,7 @@ from cordis_port import Context
 from starlette.requests import Request as StarletteRequest
 
 from common.cordis_utils import unload_all
+from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 from common.plugins.webapi.router import RouteRegistry
@@ -121,11 +122,18 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.port: int = _free_port()
         self.context.provide("node_kind", "master")
-        await self.context.plugin(WebApiPlugin, {"port": self.port})
-        await self.context.plugin(
-            PluginManagerPlugin,
-            {"install_root": str(Path(self.temp_dir.name) / "installed")},
+        config_path = Path(self.temp_dir.name) / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            f"install_root = {Path(self.temp_dir.name) / 'installed'}\n"
+            "\n[web]\n"
+            f"port = {self.port}\n",
+            encoding="utf-8",
         )
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(WebApiPlugin)
+        await self.context.plugin(PluginManagerPlugin)
         plugins = self.context.plugins
         await plugins.install_source(_SOURCE_ROOT / "master" / "webui")
         await plugins.enable("webui")
@@ -178,14 +186,30 @@ class CorsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.open_port: int = _free_port()
         self.off_port: int = _free_port()
+        self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
         self.open_context: Context = Context()
         self.off_context: Context = Context()
         self.addAsyncCleanup(unload_all, self.open_context)
         self.addAsyncCleanup(unload_all, self.off_context)
-        await self.open_context.plugin(WebApiPlugin, {"port": self.open_port})
-        await self.off_context.plugin(
-            WebApiPlugin, {"port": self.off_port, "cors_origins": []}
+
+        open_config_path = Path(self.temp_dir.name) / "open.ini"
+        open_config_path.write_text(
+            "[web]\n" f"port = {self.open_port}\n", encoding="utf-8"
         )
+        off_config_path = Path(self.temp_dir.name) / "off.ini"
+        off_config_path.write_text(
+            "[web]\n"
+            f"port = {self.off_port}\n"
+            "cors_origins =\n",
+            encoding="utf-8",
+        )
+        await self.open_context.plugin(
+            AppConfigPlugin, {"path": str(open_config_path)}
+        )
+        await self.off_context.plugin(AppConfigPlugin, {"path": str(off_config_path)})
+        await self.open_context.plugin(WebApiPlugin)
+        await self.off_context.plugin(WebApiPlugin)
 
     def test_allow_origin_and_preflight_by_default(self) -> None:
         base_url = f"http://127.0.0.1:{self.open_port}"

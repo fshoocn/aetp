@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import cast
 
 #: 字段类型表：字段名 -> (类型元组, 说明)。用于 ``validate`` 的逐项检查。
@@ -26,7 +27,8 @@ class WebApiConfig:
 
         WebApiConfig.port      # 8080
 
-    实例字段与类属性同名；``ctx.plugin(WebApiPlugin, {...})`` 传字典即可覆盖。
+    实例字段与类属性同名；节点配置由 ``WebApiPlugin`` 从 ``config.ini`` 的
+    ``[web]`` 节读取。
     """
 
     # -- 默认值（类属性当默认值，实例可覆盖） --------------------------------
@@ -113,7 +115,7 @@ class WebApiConfig:
                 ]
             }
         config.log_level = str(config.log_level).lower()
-        for origin in config.cors_origins:
+        for origin in cast(list[object] | tuple[object, ...], config.cors_origins):
             if not isinstance(origin, str) or not origin.strip():
                 return {
                     "issues": [
@@ -124,6 +126,37 @@ class WebApiConfig:
                     ]
                 }
         return {"value": config}
+
+    @classmethod
+    def from_ini(cls, values: Mapping[str, str]) -> WebApiConfig:
+        """从 ini 的 ``[web]`` 键值（全字符串）构建配置实例。
+
+        数值 / 布尔 / 逗号列表就地转换；转换失败的键保留原字符串，
+        交给 :meth:`validate` 报告统一的类型问题（未知键同理）。
+        """
+        converted: dict[str, object] = {}
+        for key, raw in values.items():
+            if key == "port":
+                converted[key] = _to_number(int, raw)
+            elif key == "access_log":
+                converted[key] = _to_bool(raw)
+            elif key == "start_timeout":
+                converted[key] = _to_number(float, raw)
+            elif key == "cors_origins":
+                converted[key] = [
+                    part.strip() for part in raw.split(",") if part.strip()
+                ]
+            else:
+                converted[key] = raw
+
+        validation = cls.validate(converted)
+        if "issues" in validation:
+            issues = cast(dict[str, list[dict[str, str | list[str]]]], validation)[
+                "issues"
+            ]
+            messages = "; ".join(str(issue["message"]) for issue in issues)
+            raise ValueError(f"web 配置无效：{messages}")
+        return cast(dict[str, WebApiConfig], validation)["value"]
 
     # -- 配置合并（供 Service.__resolve_config__ 使用） -----------------------
     @classmethod
@@ -167,6 +200,28 @@ def _describe(expected: tuple[type[object], ...]) -> str:
     """把类型元组渲染成人类可读的说明（``str | None`` 之类）。"""
     names = [t.__name__ for t in expected]
     return " 或 ".join(names)
+
+
+def _to_number(converter: type[int | float], raw: str) -> object:
+    """把 ini 字符串转成数值；失败保留原字符串，由 ``validate`` 报类型问题。"""
+    try:
+        return converter(raw.strip())
+    except ValueError:
+        return raw
+
+
+_TRUE_WORDS: frozenset[str] = frozenset({"1", "yes", "true", "on"})
+_FALSE_WORDS: frozenset[str] = frozenset({"0", "no", "false", "off"})
+
+
+def _to_bool(raw: str) -> object:
+    """把 ini 布尔写法转成 ``bool``；写法不合法保留原字符串。"""
+    word = raw.strip().lower()
+    if word in _TRUE_WORDS:
+        return True
+    if word in _FALSE_WORDS:
+        return False
+    return raw
 
 
 __all__: list[str] = ["WebApiConfig"]

@@ -28,17 +28,30 @@ from .plugin_manager import (
 )
 
 
-class PluginManagerPlugin(Service[dict[str, str | Path]]):
-    """插件管理插件（同时是 ``ctx.plugins`` 服务的载体）。"""
+class PluginManagerPlugin(Service[None]):
+    """插件管理插件（同时是 ``ctx.plugins`` 服务的载体）。
+
+    依赖 ``appconfig`` 与 ``webapi``，并从 ``[node].install_root`` 读取安装目录。
+    """
 
     name: str = "plugin-manager"
     provide: str | None = "plugins"
-    inject: ClassVar[list[str]] = ["webapi"]
+    inject: ClassVar[list[str]] = ["appconfig", "webapi"]
 
-    def __init__(self, ctx: Context, config: dict[str, str | Path]) -> None:
+    def __init__(self, ctx: Context, _config: object | None = None) -> None:
+        if _config is not None:
+            raise TypeError("PluginManagerPlugin 配置请写入 config.ini 的 [node] 节")
         super().__init__(ctx)      # ← 最先调用：注册 ctx.plugins
         self.ctx: Context = ctx
-        self.install_root: Path = Path(config["install_root"]).resolve()
+        appconfig = ctx.appconfig
+        install_root = Path(
+            appconfig.get("node", "install_root", "plugins") or "plugins"
+        ).expanduser()
+        config_path = appconfig.path_loaded
+        if not install_root.is_absolute():
+            base_dir = config_path.parent if config_path is not None else Path.cwd()
+            install_root = base_dir / install_root
+        self.install_root: Path = install_root.resolve()
         self.manager: PluginManager | None = None
 
     async def init(self) -> None:

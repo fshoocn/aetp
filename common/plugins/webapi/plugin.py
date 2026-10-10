@@ -2,9 +2,11 @@
 
 使用方式（在 ``master/main.py`` 里）::
 
+    from common.plugins.appconfig import AppConfigPlugin
     from common.plugins.webapi import WebApiPlugin
 
-    await ctx.plugin(WebApiPlugin, {"port": 8080})
+    await ctx.plugin(AppConfigPlugin, {"path": "master/config.ini"})
+    await ctx.plugin(WebApiPlugin)
 
 加载流程：
 
@@ -51,9 +53,7 @@ from .uvicorn_web_service import UvicornWebApiService
 
 
 class WebApiPlugin:
-    """webapi 插件。配置留空即用 :class:`WebApiConfig` 的默认值::
-
-        {"host": "127.0.0.1", "port": 8080}
+    """webapi 插件：依赖 ``ctx.appconfig`` 并读取 ``[web]`` 配置节。
 
     需要「web 就绪」这个时机的插件，直接声明 ``inject = ["webapi"]`` ——
     cordis 会按依赖顺序加载，等到它执行 ``__init__`` / ``init`` 时端口已经在
@@ -66,13 +66,14 @@ class WebApiPlugin:
     """
 
     name: ClassVar[str] = "webapi"
-    Config: ClassVar[type[WebApiConfig]] = WebApiConfig
+    inject: ClassVar[list[str]] = ["appconfig"]
 
-    def __init__(self, ctx: Context, config: WebApiConfig | None = None) -> None:
+    def __init__(self, ctx: Context, _config: object | None = None) -> None:
+        if _config is not None:
+            raise TypeError("WebApiPlugin 配置请写入 config.ini 的 [web] 节")
         self.ctx: Context = ctx
-        # 保存为属性：init() 在后面才被 cordis 调用，那时局部变量已失效
-        self.config: WebApiConfig = (
-            config if isinstance(config, WebApiConfig) else WebApiConfig()
+        self.config: WebApiConfig = WebApiConfig.from_ini(
+            ctx.appconfig.section("web").to_dict()
         )
         self.service: WebApiService = UvicornWebApiService(ctx, self.config)
 

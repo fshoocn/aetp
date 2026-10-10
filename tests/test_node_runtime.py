@@ -19,8 +19,8 @@ from common.node_runtime import (
     load_node_profile,
     source_plugin_id,
 )
-from common.plugins.appconfig import AppConfig
-from common.plugins.webapi import WebApiPlugin
+from common.plugins.appconfig import AppConfig, AppConfigPlugin
+from common.plugins.webapi import WebApiConfig, WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 
@@ -151,10 +151,18 @@ class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.context = Context()
         self.context.provide("node_kind", NodeKind.SLAVE)
-        await self.context.plugin(WebApiPlugin, {"port": _free_port()})
-        await self.context.plugin(
-            PluginManagerPlugin, {"install_root": str(root / "plugins")}
+        config_path = root / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = slave\n"
+            f"install_root = {root / 'plugins'}\n"
+            "\n[web]\n"
+            f"port = {_free_port()}\n",
+            encoding="utf-8",
         )
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(WebApiPlugin)
+        await self.context.plugin(PluginManagerPlugin)
 
         self.assertEqual(source_plugin_id(package), "executor-demo")
         self.assertEqual(await ensure_installed(self.context, package), "executor-demo")
@@ -169,9 +177,9 @@ class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NodeProfileTests(unittest.TestCase):
-    """config.ini 的 [node] / [web] 两节 → NodeProfile。"""
+    """config.ini 的 [node] 节 → NodeProfile。"""
 
-    def test_profile_reads_node_and_web_fields(self) -> None:
+    def test_profile_reads_node_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             path = root / "config.ini"
@@ -179,34 +187,16 @@ class NodeProfileTests(unittest.TestCase):
                 "[node]\n"
                 "kind = master\n"
                 "name = 主节点\n"
-                "install_root = data/plugins\n"
-                "plugins = sources/one, sources/two\n"
-                "\n[web]\n"
-                "host = 0.0.0.0\n"
-                "port = 9000\n"
-                "access_log = true\n"
-                "start_timeout = 2.5\n"
-                "cors_origins = http://a, http://b\n",
+                "plugins = sources/one, sources/two\n",
                 encoding="utf-8",
             )
             profile = load_node_profile(AppConfig.from_file(path), base_dir=root)
 
         self.assertEqual(profile.kind, NodeKind.MASTER)
         self.assertEqual(profile.name, "主节点")
-        self.assertEqual(profile.install_root, root / "data/plugins")
         self.assertEqual(
             profile.plugin_sources,
             (root / "sources/one", root / "sources/two"),
-        )
-        self.assertEqual(
-            profile.web_config,
-            {
-                "host": "0.0.0.0",
-                "port": 9000,
-                "access_log": True,
-                "start_timeout": 2.5,
-                "cors_origins": ["http://a", "http://b"],
-            },
         )
 
     def test_defaults_invalid_kind_and_missing_section(self) -> None:
@@ -215,12 +205,10 @@ class NodeProfileTests(unittest.TestCase):
             path = root / "config.ini"
 
             # 未写的键取默认：name 取 kind，install_root 取 plugins
-            path.write_text("[node]\nkind = slave\n\n[web]\nport = 9001\n", encoding="utf-8")
+            path.write_text("[node]\nkind = slave\n", encoding="utf-8")
             profile = load_node_profile(AppConfig.from_file(path), base_dir=root)
             self.assertEqual(profile.kind, NodeKind.SLAVE)
             self.assertEqual(profile.name, "slave")
-            self.assertEqual(profile.install_root, root / "plugins")
-            self.assertEqual(profile.web_config, {"port": 9001})
 
             path.write_text("[node]\nkind = both\n", encoding="utf-8")
             with self.assertRaises(ValueError):
@@ -237,6 +225,39 @@ class NodeProfileTests(unittest.TestCase):
             path.write_text("[web]\nport = 1\n", encoding="utf-8")
             with self.assertRaises(KeyError):
                 load_node_profile(AppConfig.from_file(path), base_dir=root)
+
+    def test_web_config_adapter_converts_ini_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.ini"
+            path.write_text(
+                "[web]\n"
+                "host = 0.0.0.0\n"
+                "port = 9000\n"
+                "access_log = true\n"
+                "log_level = INFO\n"
+                "start_timeout = 2.5\n"
+                "cors_origins = http://a, http://b\n",
+                encoding="utf-8",
+            )
+            web_config = WebApiConfig.from_ini(AppConfig.from_file(path).to_dict()["web"])
+
+        self.assertEqual(
+            web_config.to_dict(),
+            {
+                "host": "0.0.0.0",
+                "port": 9000,
+                "access_log": True,
+                "log_level": "info",
+                "start_timeout": 2.5,
+                "cors_origins": ["http://a", "http://b"],
+            },
+        )
+
+        # 写法非法 → ValueError，指明字段与允许类型
+        with self.assertRaisesRegex(ValueError, "监听端口 需要 int"):
+            WebApiConfig.from_ini({"port": "abc"})
+        with self.assertRaisesRegex(ValueError, "未知配置项"):
+            WebApiConfig.from_ini({"nope": "1"})
 
 
 if __name__ == "__main__":

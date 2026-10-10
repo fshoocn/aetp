@@ -4,7 +4,7 @@
 
     from common.plugins.webapi import WebApiPlugin, WebApiService, UvicornWebApiService, WebApiConfig
 
-* :class:`WebApiPlugin`    —— 插件本体，``ctx.plugin(WebApiPlugin, {...})`` 加载它；
+* :class:`WebApiPlugin`    —— 插件本体，依赖 ``appconfig`` 并读取 ``[web]`` 配置；
 * :class:`WebApiService`   —— **接口**，业务插件通过 ``ctx.webapi`` 依赖的契约；
 * :class:`UvicornWebApiService` —— 接口的 uvicorn + Starlette 实现（默认后端）；
 * :class:`WebApiConfig`    —— 配置模型。
