@@ -1,0 +1,8 @@
+{
+    "id": "heartbeat",
+    "name": "心跳上报",
+    "version": "1.0.0",
+    "entrypoint": "plugin:HeartbeatPlugin",
+    "kind": "slave",
+    "requires": []
+}
