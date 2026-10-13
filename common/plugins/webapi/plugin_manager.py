@@ -33,9 +33,10 @@ ENTRYPOINT: Final[re.Pattern[str]] = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*):([A
 #: 如 ``["master", "slave"]``（主从通用）。安装前校验覆盖当前节点；
 #: ``kind = slave`` 的插件也是未来分发到从节点的候选。
 PLUGIN_KINDS: Final[tuple[str, ...]] = ("master", "slave", "any")
-#: 安装/归档时跳过的目录（构建缓存与依赖，不属于插件包内容）
+#: 安装/归档时跳过的目录（构建缓存、依赖与前端源码——交付包只带运行时所需，
+#: 前端构建产物在 ``static/``；打包与 digest 比对共用本清单，口径一致）
 EXCLUDED_DIRS: Final[frozenset[str]] = frozenset(
-    {"node_modules", "__pycache__", ".git", ".venv", "venv"}
+    {"node_modules", "__pycache__", ".git", ".venv", "venv", "frontend"}
 )
 #: 安装/归档时跳过的文件后缀
 EXCLUDED_SUFFIXES: Final[tuple[str, ...]] = (".pyc", ".pyo")
@@ -540,10 +541,13 @@ class PluginManager:
         error: str,
     ) -> None:
         if fiber is not None:
-            try:
-                await fiber.dispose()
-            except Exception as cleanup_error:  # noqa: BLE001 - 回滚清理尽力而为，不掩盖原始错误
-                self.ctx.logger.error("插件 %s 启用回滚时清理 Fiber 失败：%s", plugin_id, cleanup_error)
+            # 回滚清理尽力而为（gather 收集任意异常），不掩盖原始错误
+            outcome = await asyncio.gather(fiber.dispose(), return_exceptions=True)
+            cleanup_error = outcome[0]
+            if isinstance(cleanup_error, BaseException):
+                self.ctx.logger.error(
+                    "插件 %s 启用回滚时清理 Fiber 失败：%s", plugin_id, cleanup_error
+                )
         self.fibers.pop(plugin_id, None)
         self._remove_modules(module_name)
         record = self._get_record(plugin_id)

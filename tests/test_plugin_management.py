@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import socket
 import sys
 import tempfile
 import types as module_types
@@ -10,11 +9,11 @@ import unittest
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 from cordis_port import Context
 
+from _helpers import arequest as _arequest
+from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
 from common.node_runtime import ensure_installed
 from common.plugins.appconfig import AppConfigPlugin
@@ -32,54 +31,6 @@ _MANIFEST_BYTECODE: dict[str, object] = {
     "entrypoint": "plugin:BytecodePlugin",
     "kind": "master",
 }
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
-
-
-def _request(
-    base_url: str,
-    path: str,
-    *,
-    method: str = "GET",
-    body: bytes | None = None,
-    content_type: str | None = None,
-) -> tuple[int, bytes]:
-    headers = {"Content-Type": content_type} if content_type else {}
-    request = Request(f"{base_url}{path}", data=body, headers=headers, method=method)
-    try:
-        response = urlopen(request, timeout=5)
-    except HTTPError as error:
-        response = error
-    if response is None:
-        raise RuntimeError("HTTP 请求没有返回响应")
-    with response:
-        status = response.status
-        body = response.read()
-        if not isinstance(status, int) or not isinstance(body, bytes):
-            raise RuntimeError("HTTP 响应的状态码或正文类型无效")  # noqa: TRY004
-        return status, body
-
-
-async def _arequest(
-    base_url: str,
-    path: str,
-    *,
-    method: str = "GET",
-    body: bytes | None = None,
-    content_type: str | None = None,
-) -> tuple[int, bytes]:
-    return await asyncio.to_thread(
-        _request,
-        base_url,
-        path,
-        method=method,
-        body=body,
-        content_type=content_type,
-    )
 
 
 def _plugin_archive(
@@ -568,7 +519,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(details["incoming_version"], "1.0.0")
 
         with self.assertRaises(PluginManagerError):
-            await service.install_source(_SOURCE_ROOT / "masterplugins" / "nope")
+            await service.install_source(_SOURCE_ROOT / "master" / "nope")
 
         record = next(item for item in await service.list_plugins() if item["id"] == "webui")
         self.assertEqual(record["kind"], ["master"])

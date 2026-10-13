@@ -1,6 +1,6 @@
-# 主模块心跳插件设计文档（masterplugins/heartbeat）
+# 主模块心跳插件设计文档（master/heartbeat）
 
-> 状态：设计稿（未实现）。从模块侧（`slaveplugins/heartbeat`）已实现，
+> 状态：设计稿（未实现）。从模块侧（`slave/heartbeat`）已实现，
 > 本文是主模块侧对应插件的实现蓝图。
 
 ## 1. 目标
@@ -13,7 +13,7 @@
 
 ## 2. 与从模块的协议契约
 
-从模块 `slaveplugins/heartbeat` 发送的载荷（`slaveplugins/heartbeat/plugin.py`
+从模块 `slave/heartbeat` 发送的载荷（`slave/heartbeat/plugin.py`
 的 `_build_payload`）：
 
 ```json
@@ -54,7 +54,7 @@ Content-Type: application/json
 - **幂等**：同一 `node_id` 重复上报是常态（每 interval 一次），按 upsert 处理；
 - **时间基准以主模块接收时刻为准**，`sent_at` 只用于粗略的时钟偏差观测；
 - **应答携带 `config` 即配置同步**（已实现，从模块侧见
-  `slaveplugins/heartbeat/config.py` 的 `apply_server`）：`interval` / `timeout` /
+  `slave/heartbeat/config.py` 的 `apply_server`）：`interval` / `timeout` /
   `max_backoff` 由**主模块设定**，从模块本地 ini 值只是启动兜底；主模块改配置
   后最迟一个心跳周期自动下发到全部从模块，不需要逐台改 ini。注册后的首次
   心跳应答即返回心跳间隔；`master_url` / `path` 仅由从模块本地 config.ini
@@ -69,7 +69,7 @@ Content-Type: application/json
   不要往里塞大对象；从模块不跟随重定向、不走环境代理，3xx 一律视为
   错误状态；
 - 从模块把 2xx 之外的状态（4xx/5xx）与网络异常统一视为失败，进入退避重试
-  （见 `slaveplugins/heartbeat/sender.py`），因此主模块**不需要**为临时错误返回
+  （见 `slave/heartbeat/sender.py`），因此主模块**不需要**为临时错误返回
   重试指令，只需正常时返回 2xx。
 
 ### 2.1 能力信封（capabilities）
@@ -97,7 +97,7 @@ Content-Type: application/json
 | `detail` | **原样透传** | 详情渲染（通用 JSON 树） |
 | 未知信封字段 | 忽略（向前兼容） | — |
 
-收集端（从模块 `slaveplugins/heartbeat/capabilities.py`，主模块直接复用
+收集端（从模块 `slave/heartbeat/capabilities.py`，主模块直接复用
 `parse_capability` / `capabilities_digest` / `select_capabilities`）已保证：
 坏条目就地丢弃并上报（进状态接口的 `extension_errors`），条目经 JSON
 往返归一化、摘要与顺序无关。
@@ -171,7 +171,7 @@ ctx.events.emit("heartbeat/node-status", {
 `{"error": {"message": ..., "code": ...}}` + 恰当的 HTTP 状态码。
 
 **可扩展返回值**：所有 GET 查询接口与从模块侧
-`GET /api/heartbeat/status`（已实现，见 `slaveplugins/heartbeat/plugin.py`
+`GET /api/heartbeat/status`（已实现，见 `slave/heartbeat/plugin.py`
 的 `STATUS_EVENT`）采用同一契约 —— 响应构造好后派发
 `heartbeat/collect-*` 事件并把响应 dict 传给监听器，其他插件把自家数据
 写进 `response["extensions"]["<插件名>"]` 槽位（核心字段只读，避免撞名）；
@@ -198,7 +198,7 @@ ctx.webui.register_ui(
 )
 ```
 
-页面功能（`masterplugins/heartbeat/ui/NodesPage.vue`，PrimeVue 组件）：
+页面功能（`master/heartbeat/ui/NodesPage.vue`，PrimeVue 组件）：
 
 1. **节点列表**：DataTable 展示 `node_id / kind / status / address / last_seen /
    missed / seq`，状态列用 Tag 着色（online 绿 / offline 橙 / lost 红）；
@@ -219,7 +219,7 @@ sweep_interval = 5.0      # 扫描周期秒数
 history_size = 200        # 状态转换历史保留条数
 ```
 
-配置模型 `HeartbeatServerConfig` 复用 `slaveplugins/heartbeat/config.py`
+配置模型 `HeartbeatServerConfig` 复用 `slave/heartbeat/config.py`
 的 `_FIELDS` + `from_ini` + `validate` 模式（含未知键拒绝、正数校验）。
 
 ## 7. 异常与边界场景
@@ -239,7 +239,7 @@ history_size = 200        # 状态转换历史保留条数
 ## 8. 插件结构
 
 ```
-masterplugins/heartbeat/
+master/heartbeat/
     plugin.json          # id: "heartbeat-server", kind: ["master"]
     __init__.py
     config.py            # HeartbeatServerConfig（[heartbeat] 节）
@@ -273,7 +273,7 @@ class HeartbeatServerPlugin:
 2. **状态机**：online → offline → lost 阈值推进；恢复后回落；`seq` 重启检测；
 3. **API**：nodes 列表 / 详情 / 移除 / 标记离线；capabilities 三轴筛选
    （kind / labels / q）；
-4. **集成**：与 `slaveplugins/heartbeat` 对打（复用
+4. **集成**：与 `slave/heartbeat` 对打（复用
    `tests/test_heartbeat.py` 的 `_RecordingMaster` 思路反向验证），
    验证「主模块上线 → 从模块感知」「从模块停 → 主模块判离线」全链路；
 5. **清理**：插件卸载后 sweeper 停止、路由注销、UI 贡献移除。

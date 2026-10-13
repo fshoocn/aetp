@@ -1,0 +1,61 @@
+# 工具链统一配置：ruff / pyright 以此为准（CLI 与 IDE 共用）。
+# 项目不是可安装的 Python 包（无 [project] 节），本文件只承载工具配置。
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+src = ["common", "master", "slave", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E4",   # 语法级 pycodestyle（默认核心）
+    "E7",
+    "E9",
+    "W",    # pycodestyle 警告
+    "F",    # pyflakes
+    "I",    # isort 导入排序
+    "S",    # bandit 安全
+    "B",    # bugbear 常见陷阱
+    "BLE",  # 盲 except
+    "TRY",  # 异常处理反模式
+    "RUF",  # ruff 专属规则
+    "SLF",  # 私有成员访问
+]
+ignore = [
+    "E501",    # 行宽交给格式化工具，不在 lint 层卡
+    "S101",    # assert：内部不变量与测试断言可接受
+    "S104",    # 监听地址由 config.ini 决定（服务端产品默认全接口合理）
+    "S310",    # URL scheme 已在 config 校验（master_url 必须 http/https）
+    "RUF001",  # 中文全角标点（，：（）等）是刻意的，非同形异义攻击
+    "RUF002",
+    "RUF003",
+    "TRY003",  # 长消息内联是本项目风格（中文错误消息直接可展示）
+    "TRY300",  # 回滚 / 安装流程的 try-else 结构刻意为之（大段 try 包裹落地与回滚）
+    "TRY301",
+    "TRY400",  # cordis Logger 无 exception 方法，error + 异常实参是等效做法
+    "B008",    # 函数调用做默认值：inject/manifest 声明式代码常用
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试里访问私有成员 / 抛裸异常做替身是常规操作
+"tests/**" = ["SLF", "S105", "TRY", "B"]
+# 入口脚本必须先补 sys.path 再 import 仓库内包（直接 python main.py 运行）
+"master/main.py" = ["E402"]
+"slave/main.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["common", "master", "slave"]
+
+[tool.pyright]
+include = ["common", "master", "slave", "tests"]
+exclude = [
+    "**/__pycache__",
+    "**/node_modules",
+    "master/plugins",
+    "slave/plugins",
+    "master/webui/frontend",
+]
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"

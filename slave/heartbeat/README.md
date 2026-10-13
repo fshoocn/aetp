@@ -41,7 +41,7 @@
 ```ini
 [node]
 kind = slave
-plugins = ../slaveplugins/heartbeat
+plugins = heartbeat
 
 [heartbeat]
 master_url = http://127.0.0.1:8080   # 主模块地址（必填）
@@ -53,7 +53,7 @@ max_backoff = 60.0                    # 失败重试间隔上限秒数
 2. 其他插件挂载能力信息（可选）：
 
 ```python
-from slaveplugins.heartbeat import CAP_EVENT, capability
+from slave.heartbeat import CAP_EVENT, capability
 
 class MyPlugin:
     def init(self):

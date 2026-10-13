@@ -1,0 +1,10 @@
+# 开发 / 测试依赖（运行时依赖见 requirements.txt）
+#
+# pyright 不在 pip 清单里：它经 npm 分发，统一用 npx 运行——
+#     npx -y pyright
+# 类型规则以仓库根 pyproject.toml 的 [tool.pyright] 为准（与 IDE 共用）。
+
+-r requirements.txt
+
+pytest==8.4.2
+ruff==0.16.4

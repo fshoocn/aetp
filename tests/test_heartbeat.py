@@ -1,4 +1,4 @@
-"""心跳插件（slaveplugins/heartbeat）的单元 / 集成测试。
+"""心跳插件（slave/heartbeat）的单元 / 集成测试。
 
 覆盖场景：主模块不在线、掉线、上线恢复、HTTP 错误、配置校验、自省接口、
 插件卸载清理。
@@ -8,22 +8,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import socket
 import tempfile
 import time
 import unittest
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.error import URLError
 
 from cordis_port import Context
 
+from _helpers import free_port as _free_port
+from _helpers import request as _request
 from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
-from slaveplugins.heartbeat import (
+from slave.heartbeat import (
     CAP_EVENT,
     SEQ_MAX,
     STATUS_EVENT,
@@ -40,28 +40,8 @@ from slaveplugins.heartbeat import (
     parse_capability,
     select_capabilities,
 )
-from slaveplugins.heartbeat.capabilities import collect_capabilities
-from slaveplugins.heartbeat.sender import parse_response_body
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
-
-
-def _request(base_url: str, path: str) -> tuple[int, bytes]:
-    request = Request(f"{base_url}{path}")
-    try:
-        response = urlopen(request, timeout=5)
-    except HTTPError as error:
-        response = error
-    with response:
-        status = response.status
-        body = response.read()
-    if not isinstance(status, int) or not isinstance(body, bytes):
-        raise TypeError("HTTP 响应的状态码或正文类型无效")
-    return status, body
+from slave.heartbeat.capabilities import collect_capabilities
+from slave.heartbeat.sender import parse_response_body
 
 
 def _status_dict(base_url: str) -> dict[str, object]:

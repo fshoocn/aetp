@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
-import socket
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 from cordis_port import Context
 
+from _helpers import free_port as _free_port
+from _helpers import request as _request
 from common.cordis_utils import unload_all
 from common.node_runtime import (
     NodeKind,
@@ -22,26 +21,6 @@ from common.node_runtime import (
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
 from common.plugins.webapi import WebApiConfig, WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
-
-
-def _request(base_url: str, path: str) -> tuple[int, bytes]:
-    request = Request(f"{base_url}{path}")
-    try:
-        response = urlopen(request, timeout=5)
-    except HTTPError as error:
-        response = error
-    with response:
-        status = response.status
-        body = response.read()
-    if not isinstance(status, int) or not isinstance(body, bytes):
-        raise TypeError("HTTP 响应的状态码或正文类型无效")
-    return status, body
 
 
 def _write_source(root: Path, plugin_id: str) -> Path:

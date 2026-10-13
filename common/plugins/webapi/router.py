@@ -164,7 +164,9 @@ def _resolved_annotations(handler: RouteHandler) -> dict[str, object]:
     """
     try:
         return get_type_hints(handler)
-    except Exception:  # noqa: BLE001 - 注解求值失败不应影响路由注册
+    except (NameError, TypeError):
+        # 注解求值失败（引用了未导入的名字等）不应影响路由注入：
+        # 此时退化为「不注入、也不转换」，由 handler 从 request.path_params 自行读取
         return {}
 
 

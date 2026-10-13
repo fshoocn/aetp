@@ -1,4 +1,4 @@
-"""从节点心跳插件（``slaveplugins/heartbeat``）。
+"""从节点心跳插件（``slave/heartbeat``）。
 
 向主模块周期性发送心跳，维护主模块在线状态感知：
 
@@ -9,7 +9,7 @@
 * :mod:`.plugin` —— cordis 插件入口（``plugin.json`` 的 entrypoint）。
 
 主模块侧（接收心跳、从模块管理页面）的设计文档见
-``masterplugins/heartbeat/DESIGN.md``。
+``master/heartbeat/DESIGN.md``。
 """
 
 from .capabilities import (

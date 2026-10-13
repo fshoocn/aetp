@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import socket
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -13,6 +12,7 @@ from urllib.request import Request, urlopen
 from cordis_port import Context
 from starlette.requests import Request as StarletteRequest
 
+from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
@@ -21,12 +21,6 @@ from common.plugins.webapi.router import RouteRegistry
 from common.plugins.webapi.types import RouteRecord
 
 _SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
 
 
 def _request(base_url: str, path: str, method: str = "GET") -> tuple[int, str, bytes]:
