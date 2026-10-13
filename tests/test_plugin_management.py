@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from cordis_port import Context
 
 from common.cordis_utils import unload_all
+from common.node_runtime import ensure_installed
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
@@ -89,6 +90,7 @@ def _plugin_archive(
     kind: str | list[str] | None = "master",
     version: str = "1.0.0",
     broken: bool = False,
+    readme: str | None = None,
 ) -> bytes:
     manifest: dict[str, object] = {
         "id": plugin_id,
@@ -130,6 +132,8 @@ def _plugin_archive(
             ),
         )
         package.writestr("ui/Home.vue", "<template><h1>Uploaded Sample</h1></template>")
+        if readme is not None:
+            package.writestr("README.md", readme)
     return archive.getvalue()
 
 
@@ -145,6 +149,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             "[node]\n"
             "kind = master\n"
             f"install_root = {Path(self.temp_dir.name) / 'installed'}\n"
+            f"plugins = {_SOURCE_ROOT / 'master' / 'webui'}\n"
             "\n[web]\n"
             f"port = {self.port}\n",
             encoding="utf-8",
@@ -210,7 +215,18 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((installed_root / rejected).exists())
             self.assertFalse((installed_root / ".archives" / f"{rejected}.zip").exists())
         ids = sorted(item["id"] for item in await plugins.list_plugins())
-        self.assertEqual(ids, ["k-any", "k-both", "k-master", "webui"])
+        self.assertEqual(
+            ids,
+            [
+                "appconfig",
+                "k-any",
+                "k-both",
+                "k-master",
+                "plugin-manager",
+                "webapi",
+                "webui",
+            ],
+        )
 
     async def test_upload_enable_disable_and_uninstall(self) -> None:
         status, body = await _arequest(
@@ -228,7 +244,9 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         status, body = await _arequest(self.base_url, "/api/plugins")
         self.assertEqual(status, 200)
         uploaded_list = [
-            item for item in json.loads(body)["plugins"] if item["id"] != "webui"
+            item
+            for item in json.loads(body)["plugins"]
+            if item["id"] != "webui" and not item["builtin"]
         ]
         self.assertEqual(len(uploaded_list), 1)
 
@@ -258,7 +276,9 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         _, plugins_body = await _arequest(self.base_url, "/api/plugins")
         remaining = [
-            item for item in json.loads(plugins_body)["plugins"] if item["id"] != "webui"
+            item
+            for item in json.loads(plugins_body)["plugins"]
+            if item["id"] != "webui" and not item["builtin"]
         ]
         self.assertEqual(remaining, [])
         _, ui_body = await _arequest(self.base_url, "/api/web/ui")
@@ -340,6 +360,52 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PluginManagerError):
             await service.package_bytes("both-sample")
 
+    async def test_plugin_readme_documented_and_served(self) -> None:
+        """描述文件约定：包根 README.md；列表带 has_readme，接口返回原文。"""
+        readme = "# 示例插件\n\n功能：演示。\n\n能力接口：`GET /api/example`。\n"
+        plugins = self.context.plugins
+        record = await plugins.install_archive(
+            _plugin_archive("doc-sample", "DocPlugin", readme=readme), replace=True
+        )
+        self.assertTrue(record["has_readme"])
+        self.assertEqual(await plugins.plugin_readme("doc-sample"), readme)
+
+        status, body = await _arequest(
+            self.base_url, "/api/plugins/doc-sample/readme"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {"id": "doc-sample", "content": readme})
+
+    async def test_plugin_without_readme_reports_absent(self) -> None:
+        """无 README.md：has_readme 为假，接口 404（前端据此隐藏「文档」入口）。"""
+        plugins = self.context.plugins
+        record = await plugins.install_archive(
+            _plugin_archive("nodoc-sample", "NoDocPlugin", readme=None), replace=True
+        )
+        self.assertFalse(record["has_readme"])
+
+        status, body = await _arequest(
+            self.base_url, "/api/plugins/nodoc-sample/readme"
+        )
+        self.assertEqual(status, 404)
+        self.assertIn("README", json.loads(body)["error"])
+
+    async def test_plugin_readme_rejects_oversized_and_unknown(self) -> None:
+        """描述文件超限报 413；未知插件报 404。"""
+        plugins = self.context.plugins
+        await plugins.install_archive(
+            _plugin_archive("big-readme", "BigDoc", readme="x" * (10 * 1024 * 1024 + 1)),
+            replace=True,
+        )
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.plugin_readme("big-readme")
+        self.assertEqual(caught.exception.status_code, 413)
+
+        status, _body = await _arequest(self.base_url, "/api/plugins/big-readme/readme")
+        self.assertEqual(status, 413)
+        status, _body = await _arequest(self.base_url, "/api/plugins/ghost/readme")
+        self.assertEqual(status, 404)
+
     async def test_manifest_rejects_invalid_kind_and_requires(self) -> None:
         status, body = await _arequest(
             self.base_url,
@@ -371,14 +437,135 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 400)
         self.assertIn("requires", json.loads(body)["error"])
 
+    async def test_builtin_plugins_listed_and_locked(self) -> None:
+        """内置插件展示于列表，但禁止安装 / 升级 / 启停 / 卸载。"""
+        plugins = self.context.plugins
+        listing = {item["id"]: item for item in await plugins.list_plugins()}
+        for plugin_id in ("appconfig", "webapi", "plugin-manager"):
+            record = listing[plugin_id]
+            self.assertTrue(record["builtin"])
+            self.assertTrue(record["protected"])
+            self.assertTrue(record["enabled"])  # 恒为运行中
+
+        # 影子安装：同 id 上传一律拒绝（否则与直装服务同名冲突）
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.install_archive(
+                _plugin_archive("webapi", "ShadowWebApi"), replace=True
+            )
+        self.assertEqual(caught.exception.status_code, 403)
+        status, _body = await _arequest(
+            self.base_url,
+            "/api/plugins/upload?replace=1",
+            method="POST",
+            body=_plugin_archive("appconfig", "ShadowConfig"),
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 403)
+
+        for action in (plugins.enable, plugins.disable, plugins.uninstall):
+            with self.assertRaises(PluginManagerError):
+                await action("appconfig")
+
+    async def test_registry_drops_builtin_shadow_records(self) -> None:
+        """遗留注册表里的内置 id 影子记录读取即丢弃（展示真身内置记录）。"""
+        install_root = Path(self.temp_dir.name) / "shadow-root"
+        install_root.mkdir()
+        (install_root / "registry.json").write_text(
+            json.dumps(
+                {
+                    "webapi": {
+                        "id": "webapi",
+                        "name": "影子",
+                        "version": "9.9.9",
+                        "entrypoint": "plugin:Shadow",
+                        "resource_root": None,
+                        "config": {},
+                        "requires": [],
+                        "kind": ["any"],
+                        "enabled": False,
+                        "last_error": None,
+                        "digest": "deadbeef",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        manager = PluginManager(
+            self.context, asyncio.get_running_loop(), install_root
+        )
+        listing = {item["id"]: item for item in await manager.list_plugins()}
+        self.assertNotIn("webapi", manager.records)  # 影子被丢弃
+        self.assertTrue(listing["webapi"]["builtin"])  # 展示的是内置真身
+        self.assertEqual(listing["webapi"]["name"], "Web API 服务")
+
+    async def test_protected_webui_lifecycle_resets_on_restart(self) -> None:
+        """预装 webui 允许停用 / 卸载；重启（ensure_installed）自动重装重置。"""
+        plugins = self.context.plugins
+        listing = {item["id"]: item for item in await plugins.list_plugins()}
+        self.assertTrue(listing["webui"]["protected"])
+        self.assertFalse(listing["webui"]["builtin"])
+
+        # 停用正常（不是锁定操作）
+        record = await plugins.disable("webui")
+        self.assertFalse(record["enabled"])
+
+        # 卸载正常
+        await plugins.uninstall("webui")
+        self.assertNotIn(
+            "webui", {item["id"] for item in await plugins.list_plugins()}
+        )
+
+        # 重启语义：ensure_installed（启动预装链路）自动重装并启用
+        self.assertEqual(
+            await ensure_installed(self.context, _SOURCE_ROOT / "master" / "webui"),
+            "webui",
+        )
+        listing = {item["id"]: item for item in await plugins.list_plugins()}
+        self.assertTrue(listing["webui"]["enabled"])
+        self.assertTrue(listing["webui"]["protected"])
+
+    async def test_preinstalled_marker_follows_config_ini(self) -> None:
+        """protected 由 config.ini 的 [node] plugins 推导：dir / zip 源均识别，
+        坏源只告警跳过，上传的插件不带标记。"""
+        zip_path = Path(self.temp_dir.name) / "extra.zip"
+        zip_path.write_bytes(_plugin_archive("extra-sample", "ExtraPlugin"))
+        config_path = Path(self.temp_dir.name) / "derive.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            f"install_root = {Path(self.temp_dir.name) / 'derive-installed'}\n"
+            f"plugins = {_SOURCE_ROOT / 'master' / 'webui'},"
+            f" {zip_path}, {Path(self.temp_dir.name) / 'missing'}\n"
+            "\n[web]\n"
+            f"port = {_free_port()}\n",
+            encoding="utf-8",
+        )
+        context: Context = Context()
+        context.provide("node_kind", "master")
+        await context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await context.plugin(WebApiPlugin)
+        await context.plugin(PluginManagerPlugin)
+        try:
+            plugins = context.plugins
+            await plugins.install_source(_SOURCE_ROOT / "master" / "webui")
+            await plugins.install_archive(zip_path.read_bytes())
+            await plugins.install_archive(_plugin_archive("plain-sample", "PlainPlugin"))
+            listing = {item["id"]: item for item in await plugins.list_plugins()}
+            self.assertTrue(listing["webui"]["protected"])  # config 列出的目录源
+            self.assertTrue(listing["extra-sample"]["protected"])  # zip 源同样识别
+            self.assertFalse(listing["plain-sample"]["protected"])  # 上传的不算
+        finally:
+            await unload_all(context)
+
     async def test_install_source_installs_and_rejects_duplicates(self) -> None:
         service = self.context.plugins
         # setup 已从 master/webui 安装；重复安装同一插件源应被拒（409 + 新旧版本详情）
         with self.assertRaises(PluginManagerError) as caught:
             await service.install_source(_SOURCE_ROOT / "master" / "webui")
         self.assertEqual(caught.exception.status_code, 409)
-        self.assertEqual(caught.exception.details["code"], "already-installed")
-        self.assertEqual(caught.exception.details["incoming_version"], "1.0.0")
+        details = caught.exception.details or {}
+        self.assertEqual(details["code"], "already-installed")
+        self.assertEqual(details["incoming_version"], "1.0.0")
 
         with self.assertRaises(PluginManagerError):
             await service.install_source(_SOURCE_ROOT / "masterplugins" / "nope")

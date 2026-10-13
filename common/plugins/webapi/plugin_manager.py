@@ -14,7 +14,7 @@ import sys
 import tempfile
 import types
 import zipfile
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Iterable
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Final, TypedDict, cast
@@ -39,6 +39,54 @@ EXCLUDED_DIRS: Final[frozenset[str]] = frozenset(
 )
 #: 安装/归档时跳过的文件后缀
 EXCLUDED_SUFFIXES: Final[tuple[str, ...]] = (".pyc", ".pyo")
+#: 插件描述文件（约定名，位于插件包根目录；Markdown 格式，讲述插件功能、
+#: 能力接口与使用方法）
+PLUGIN_README: Final[str] = "README.md"
+#: 描述文件读取上限（插件文档可能含图片链接/长接口列表，放宽到 10 MiB）
+MAX_README_BYTES: Final[int] = 10 * 1024 * 1024
+
+#: ``common/plugins/`` 目录（内置插件的包根都在这里）
+_PLUGINS_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
+
+
+class _BuiltinSpec(TypedDict):
+    """内置插件的展示元数据（``root`` 是包根，描述文件 README.md 所在）。"""
+
+    name: str
+    version: str
+    entrypoint: str
+    kind: list[str]
+    root: Path
+
+
+#: 内置插件（``common/plugins/`` 直装、由 node_runtime 装配，不走安装器）：
+#: 列表照常展示，但**禁止安装 / 升级 / 启停 / 卸载**——上传同 id 插件包
+#: 一律拒绝，否则会装出与内置服务同名冲突的「影子插件」。
+BUILTIN_PLUGINS: Final[dict[str, _BuiltinSpec]] = {
+    "appconfig": {
+        "name": "应用配置",
+        "version": "1.0.0",
+        "entrypoint": "common.plugins.appconfig:AppConfigPlugin",
+        "kind": ["any"],
+        "root": _PLUGINS_ROOT / "appconfig",
+    },
+    "webapi": {
+        "name": "Web API 服务",
+        "version": "1.0.0",
+        "entrypoint": "common.plugins.webapi:WebApiPlugin",
+        "kind": ["any"],
+        "root": _PLUGINS_ROOT / "webapi",
+    },
+    "plugin-manager": {
+        "name": "插件管理",
+        "version": "1.0.0",
+        "entrypoint": "common.plugins.webapi.plugin_manager_plugin:PluginManagerPlugin",
+        "kind": ["any"],
+        "root": _PLUGINS_ROOT / "webapi",
+    },
+}
+
+
 
 
 def _is_excluded_entry(name: str) -> bool:
@@ -90,6 +138,27 @@ def source_digest(source: str | Path) -> str:
     return package_digest(path)
 
 
+def source_plugin_id(source: str | Path) -> str:
+    """从插件源（源目录或 zip 交付包）的 ``plugin.json`` 读取插件 id。"""
+    source = Path(source)
+    if source.suffix.lower() == ".zip":
+        try:
+            with zipfile.ZipFile(source) as package:
+                raw = package.read("plugin.json")
+        except (OSError, KeyError, zipfile.BadZipFile) as exc:
+            raise ValueError(f"插件包无法读取 plugin.json：{source}：{exc}") from exc
+        manifest: object = json.loads(raw)
+    else:
+        manifest_path = source / "plugin.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise TypeError(f"plugin.json 根值必须是对象：{source}")
+    plugin_id = cast(dict[str, object], manifest).get("id")
+    if not isinstance(plugin_id, str) or not plugin_id:
+        raise ValueError(f"插件源缺少有效 id：{source}")
+    return plugin_id
+
+
 class _PluginManifest(TypedDict):
     id: str
     name: str
@@ -118,6 +187,13 @@ class PublicPluginRecord(TypedDict):
     enabled: bool
     last_error: str | None
     digest: str
+    #: 是否带描述文件（插件包根目录 README.md，前端据此控制「文档」入口）
+    has_readme: bool
+    #: 内置插件（common/ 直装）：不可安装 / 升级 / 启停 / 卸载
+    builtin: bool
+    #: 预装插件（config.ini 的 ``[node] plugins`` 列出的插件源）：启停与
+    #: 卸载均允许，但下次启动会被 ``ensure_installed`` 重装并重置状态
+    protected: bool
 
 
 class PluginManagerError(ValueError):
@@ -158,7 +234,13 @@ def _validate_requires(value: object) -> list[str]:
 class PluginManager:
     """从 ZIP 安装 Python 插件包，并维护启用 fiber 与持久化状态。"""
 
-    def __init__(self, ctx: Context, loop: asyncio.AbstractEventLoop, install_root: Path) -> None:
+    def __init__(
+        self,
+        ctx: Context,
+        loop: asyncio.AbstractEventLoop,
+        install_root: Path,
+        preinstalled_ids: Iterable[str] = (),
+    ) -> None:
         self.ctx: Context = ctx
         self.loop: asyncio.AbstractEventLoop = loop
         self.install_root: Path = install_root.resolve()
@@ -166,6 +248,9 @@ class PluginManager:
         self.registry_file: Path = self.install_root / "registry.json"
         #: 原始插件包归档目录（保留上传 ZIP，供未来主从分发与回溯）
         self.archives_dir: Path = self.install_root / ".archives"
+        #: 预装插件 id（config.ini 的 ``[node] plugins`` 插件源解析而来）：
+        #: 启停 / 卸载均允许，但下次启动 ``ensure_installed`` 会重装重置
+        self.preinstalled_ids: frozenset[str] = frozenset(preinstalled_ids)
         self.records: dict[str, _PluginRecord] = self._read_registry()
         self.fibers: dict[str, Fiber] = {}
         self._operation_lock = asyncio.Lock()
@@ -184,7 +269,36 @@ class PluginManager:
             raise PluginManagerError("插件操作超时", 504) from None
 
     async def list_plugins(self) -> list[PublicPluginRecord]:
-        return [self._public_record(record) for record in sorted(self.records.values(), key=lambda item: item["id"])]
+        records = [self._public_record(record) for record in self.records.values()]
+        return sorted([*self._builtin_records(), *records], key=lambda item: item["id"])
+
+    def _builtin_records(self) -> list[PublicPluginRecord]:
+        """内置插件的展示记录：不落 registry，状态恒为运行中。"""
+        return [
+            {
+                "id": plugin_id,
+                "name": spec["name"],
+                "version": spec["version"],
+                "entrypoint": spec["entrypoint"],
+                "resource_root": None,
+                "kind": list(spec["kind"]),
+                "requires": [],
+                "enabled": True,
+                "last_error": None,
+                "digest": "",
+                "has_readme": (spec["root"] / PLUGIN_README).is_file(),
+                "builtin": True,
+                "protected": True,
+            }
+            for plugin_id, spec in sorted(BUILTIN_PLUGINS.items())
+        ]
+
+    def _reject_builtin(self, plugin_id: str, action: str) -> None:
+        """内置插件随平台直装，不经插件管理器安装，拒绝任何变装操作。"""
+        if plugin_id in BUILTIN_PLUGINS:
+            raise PluginManagerError(
+                f"内置插件 {plugin_id!r} 随平台直装，不支持{action}", 403
+            )
 
     async def install_archive(self, archive: bytes, *, replace: bool = False) -> PublicPluginRecord:
         """安装插件包；同 id 已安装时需显式 ``replace=True`` 才覆盖替换。"""
@@ -235,6 +349,7 @@ class PluginManager:
         extracted.mkdir()
         try:
             manifest = self._extract_and_read_manifest(archive, extracted)
+            self._reject_builtin(manifest["id"], "安装 / 升级")
             self._check_node_kind(manifest)
             plugin_id = manifest["id"]
             # 摘要按 zip 条目（名字 + 内容）计算：与 ensure_installed 的
@@ -372,6 +487,7 @@ class PluginManager:
             ) from exc
 
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
+        self._reject_builtin(plugin_id, "启停")
         async with self._operation_lock:
             return await self._enable(plugin_id)
 
@@ -439,6 +555,7 @@ class PluginManager:
             self.ctx.logger.error("插件 %s 启用失败状态无法写入注册表：%s", plugin_id, registry_error)
 
     async def disable(self, plugin_id: str) -> PublicPluginRecord:
+        self._reject_builtin(plugin_id, "停用")
         async with self._operation_lock:
             return await self._disable(plugin_id)
 
@@ -453,6 +570,7 @@ class PluginManager:
         return self._public_record(record)
 
     async def uninstall(self, plugin_id: str) -> None:
+        self._reject_builtin(plugin_id, "卸载")
         async with self._operation_lock:
             await self._uninstall(plugin_id)
 
@@ -652,6 +770,10 @@ class PluginManager:
                 sys.modules.pop(module_name, None)
 
     def _get_record(self, plugin_id: str) -> _PluginRecord:
+        if plugin_id in BUILTIN_PLUGINS:
+            raise PluginManagerError(
+                f"内置插件 {plugin_id!r} 随平台直装，没有安装记录", 404
+            )
         record = self.records.get(plugin_id)
         if record is None:
             raise PluginManagerError(f"找不到插件：{plugin_id}", 404)
@@ -684,6 +806,33 @@ class PluginManager:
             raise PluginManagerError(f"插件源目录不存在：{source}")
         return self._zip_directory(source)
 
+    async def plugin_readme(self, plugin_id: str) -> str:
+        """读取插件描述文件（插件包根目录的 README.md，Markdown 文本）。
+
+        描述文件讲述插件的功能、能力接口与使用方法，在插件管理页弹窗
+        展示。文件名固定（无路径拼接，无穿越风险）；缺失报 404、超大
+        报 413、非 UTF-8 报 400。内置插件读源码包根（``common/plugins/``）。
+        """
+        spec = BUILTIN_PLUGINS.get(plugin_id)
+        if spec is not None:
+            package_root = spec["root"]
+        else:
+            package_root = (self.install_root / plugin_id).resolve()
+            self._get_record(plugin_id)
+            if package_root.parent != self.install_root:
+                raise PluginManagerError("插件安装目录无效", 400)
+        path = package_root / PLUGIN_README
+        if not path.is_file():
+            raise PluginManagerError(
+                f"插件 {plugin_id!r} 没有描述文件 {PLUGIN_README}", 404
+            )
+        if path.stat().st_size > MAX_README_BYTES:
+            raise PluginManagerError("插件描述文件最大允许 10 MiB", 413)
+        try:
+            return path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise PluginManagerError("插件描述文件不是有效的 UTF-8 文本") from exc
+
     def _public_record(self, record: _PluginRecord) -> PublicPluginRecord:
         return {
             "id": record["id"],
@@ -696,6 +845,9 @@ class PluginManager:
             "enabled": bool(record.get("enabled")),
             "last_error": record.get("last_error"),
             "digest": record.get("digest") or "",
+            "has_readme": (self.install_root / record["id"] / PLUGIN_README).is_file(),
+            "builtin": False,
+            "protected": record["id"] in self.preinstalled_ids,
         }
 
     def _read_registry(self) -> dict[str, _PluginRecord]:
@@ -709,6 +861,10 @@ class PluginManager:
             raise TypeError("插件注册表根值必须是对象")
         records: dict[str, _PluginRecord] = {}
         for plugin_id, raw_record in cast(dict[str, object], data).items():
+            # 防影子插件：遗留注册表里的内置 id 一律丢弃（安装现已拒绝，
+            # 这里清掉保护上线前的残留，避免与直装服务同名冲突）
+            if plugin_id in BUILTIN_PLUGINS:
+                continue
             if not isinstance(raw_record, dict):
                 raise TypeError(f"插件 {plugin_id!r} 的注册表记录必须是对象")
             records[plugin_id] = cast(_PluginRecord, raw_record)

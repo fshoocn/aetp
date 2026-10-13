@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { getBackendUrl, request } from '@/service/backend';
+import MarkdownDoc from '@/components/MarkdownDoc.vue';
 
 // 非同源时在页头提示数据来源；切换后端会整页刷新，无需响应式
 const backendUrl = getBackendUrl();
@@ -13,6 +14,13 @@ const error = ref('');
 const notice = ref('');
 const uploadInput = ref(null);
 const dragActive = ref(false);
+
+// 描述文件弹窗（README.md，Markdown 渲染）
+const docsVisible = ref(false);
+const docsPlugin = ref(null);
+const docsContent = ref('');
+const docsLoading = ref(false);
+const docsError = ref('');
 
 const enabledCount = computed(() => plugins.value.filter((plugin) => plugin.enabled).length);
 
@@ -113,6 +121,22 @@ function replacePlugin(updated) {
     plugins.value = plugins.value.map((plugin) => (plugin.id === updated.id ? updated : plugin));
 }
 
+async function openDocs(plugin) {
+    docsPlugin.value = plugin;
+    docsContent.value = '';
+    docsError.value = '';
+    docsLoading.value = true;
+    docsVisible.value = true;
+    try {
+        const data = await request(`/api/plugins/${encodeURIComponent(plugin.id)}/readme`);
+        docsContent.value = data.content;
+    } catch (reason) {
+        docsError.value = reason instanceof Error ? reason.message : String(reason);
+    } finally {
+        docsLoading.value = false;
+    }
+}
+
 function onDrop(event) {
     dragActive.value = false;
     if (uploading.value) return;
@@ -197,7 +221,22 @@ onMounted(loadPlugins);
                         </tr>
                         <tr v-for="plugin in plugins" v-else :key="plugin.id">
                             <td>
-                                <strong>{{ plugin.name }}</strong>
+                                <button
+                                    v-if="plugin.has_readme"
+                                    class="plugin-management__doc-link"
+                                    type="button"
+                                    title="查看插件文档"
+                                    @click="openDocs(plugin)"
+                                >
+                                    <strong>{{ plugin.name }}</strong>
+                                </button>
+                                <strong v-else>{{ plugin.name }}</strong>
+                                <span v-if="plugin.builtin" class="plugin-management__badge plugin-management__badge--builtin">内置</span>
+                                <span
+                                    v-else-if="plugin.protected"
+                                    class="plugin-management__badge plugin-management__badge--protected"
+                                    title="平台预装：停用 / 卸载后重启会自动重装"
+                                >预装</span>
                                 <small>{{ plugin.id }}</small>
                                 <small v-if="plugin.last_error" class="plugin-management__plugin-error">{{ plugin.last_error }}</small>
                             </td>
@@ -213,11 +252,33 @@ onMounted(loadPlugins);
                             </td>
                             <td>
                                 <div class="plugin-management__actions">
-                                    <button type="button" :disabled="pending === plugin.id" @click="togglePlugin(plugin)">
-                                        <i :class="plugin.enabled ? 'pi pi-stop' : 'pi pi-play'" aria-hidden="true" />
-                                        {{ plugin.enabled ? '停用' : '启用' }}
+                                    <button type="button" title="查看插件文档" :disabled="!plugin.has_readme" @click="openDocs(plugin)">
+                                        <i class="pi pi-book" aria-hidden="true" />
+                                        文档
                                     </button>
-                                    <button class="is-danger" type="button" :disabled="pending === plugin.id" @click="uninstallPlugin(plugin)"><i class="pi pi-trash" aria-hidden="true" /> 卸载</button>
+                                    <template v-if="!plugin.builtin">
+                                        <button
+                                            type="button"
+                                            :disabled="pending === plugin.id"
+                                            :title="plugin.protected ? '平台预装插件：重启后会自动重装' : ''"
+                                            @click="togglePlugin(plugin)"
+                                        >
+                                            <i :class="plugin.enabled ? 'pi pi-stop' : 'pi pi-play'" aria-hidden="true" />
+                                            {{ plugin.enabled ? '停用' : '启用' }}
+                                        </button>
+                                        <button
+                                            class="is-danger"
+                                            type="button"
+                                            :disabled="pending === plugin.id"
+                                            :title="plugin.protected ? '平台预装插件：重启后会自动重装' : ''"
+                                            @click="uninstallPlugin(plugin)"
+                                        >
+                                            <i class="pi pi-trash" aria-hidden="true" /> 卸载
+                                        </button>
+                                    </template>
+                                    <span v-else class="plugin-management__locked" title="内置插件随平台直装，不可安装 / 升级 / 启停 / 卸载">
+                                        <i class="pi pi-lock" aria-hidden="true" /> 随平台直装
+                                    </span>
                                 </div>
                             </td>
                         </tr>
@@ -225,6 +286,14 @@ onMounted(loadPlugins);
                 </table>
             </div>
         </section>
+
+        <Dialog v-model:visible="docsVisible" modal :header="docsPlugin ? `${docsPlugin.name} · v${docsPlugin.version}` : '插件文档'" :style="{ width: '44rem', maxWidth: '92vw' }">
+            <div class="plugin-management__docs">
+                <p v-if="docsLoading" class="plugin-management__docs-state"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> 正在读取描述文件…</p>
+                <p v-else-if="docsError" class="plugin-management__docs-state plugin-management__docs-state--error"><i class="pi pi-exclamation-circle" aria-hidden="true" /> {{ docsError }}</p>
+                <MarkdownDoc v-else :source="docsContent" />
+            </div>
+        </Dialog>
     </main>
 </template>
 
@@ -427,6 +496,59 @@ onMounted(loadPlugins);
 }
 .plugin-management__table code {
     white-space: nowrap;
+}
+.plugin-management__doc-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--p-primary-color);
+    font: inherit;
+    cursor: pointer;
+    text-align: left;
+    text-decoration: underline;
+}
+.plugin-management__doc-link:hover strong {
+    text-decoration: underline;
+}
+.plugin-management__badge {
+    display: inline-block;
+    margin-left: 0.45rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    vertical-align: middle;
+}
+.plugin-management__badge--builtin {
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+}
+.plugin-management__badge--protected {
+    border: 1px solid var(--p-primary-color);
+    color: var(--p-primary-color);
+}
+.plugin-management__locked {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--p-text-muted-color);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+.plugin-management__docs {
+    max-height: min(62vh, 40rem);
+    overflow-y: auto;
+    padding: 0.25rem 0.15rem;
+}
+.plugin-management__docs-state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1rem 0;
+    color: var(--p-text-muted-color);
+}
+.plugin-management__docs-state--error {
+    color: var(--p-red-600);
 }
 .plugin-management__empty {
     padding: 1.5rem !important;

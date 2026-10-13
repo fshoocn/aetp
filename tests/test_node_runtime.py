@@ -37,7 +37,11 @@ def _request(base_url: str, path: str) -> tuple[int, bytes]:
     except HTTPError as error:
         response = error
     with response:
-        return response.status, response.read()
+        status = response.status
+        body = response.read()
+    if not isinstance(status, int) or not isinstance(body, bytes):
+        raise TypeError("HTTP 响应的状态码或正文类型无效")
+    return status, body
 
 
 def _write_source(root: Path, plugin_id: str) -> Path:
@@ -119,7 +123,11 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         # 幂等：重复 ensure 不报错、不重复安装
         self.assertEqual(await ensure_installed(self.context, source), "executor-demo")
-        plugins = await self.context.plugins.list_plugins()
+        plugins = [
+            item
+            for item in await self.context.plugins.list_plugins()
+            if not item["builtin"]
+        ]
         self.assertEqual([item["id"] for item in plugins], ["executor-demo"])
 
         # 归属元数据随安装保留（供未来的分发插件筛选）
@@ -179,13 +187,21 @@ class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(source_plugin_id(package), "executor-demo")
         self.assertEqual(await ensure_installed(self.context, package), "executor-demo")
-        plugins = await self.context.plugins.list_plugins()
+        plugins = [
+            item
+            for item in await self.context.plugins.list_plugins()
+            if not item["builtin"]
+        ]
         self.assertEqual([item["id"] for item in plugins], ["executor-demo"])
         self.assertTrue((root / "plugins" / "executor-demo").is_dir())
 
         # 幂等：重复 ensure 不重复安装
         self.assertEqual(await ensure_installed(self.context, package), "executor-demo")
-        plugins = await self.context.plugins.list_plugins()
+        plugins = [
+            item
+            for item in await self.context.plugins.list_plugins()
+            if not item["builtin"]
+        ]
         self.assertEqual([item["id"] for item in plugins], ["executor-demo"])
 
 

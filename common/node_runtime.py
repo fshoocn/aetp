@@ -24,22 +24,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import signal
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from types import FrameType
-from typing import cast
 
 from cordis_port import Context
 
 from common import cordis_utils
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
-from common.plugins.webapi.plugin_manager import source_digest
+from common.plugins.webapi.plugin_manager import source_digest, source_plugin_id
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 
@@ -119,27 +116,6 @@ def load_node_profile(config: AppConfig, *, base_dir: Path) -> NodeProfile:
 def _split_list(raw: str | None) -> list[str]:
     """把逗号分隔的 ini 值拆成列表（去掉空白与空项）。"""
     return [part.strip() for part in (raw or "").split(",") if part.strip()]
-
-
-def source_plugin_id(source: Path) -> str:
-    """从插件源（源目录或 zip 交付包）的 ``plugin.json`` 读取插件 id。"""
-    source = Path(source)
-    if source.suffix.lower() == ".zip":
-        try:
-            with zipfile.ZipFile(source) as package:
-                raw = package.read("plugin.json")
-        except (OSError, KeyError, zipfile.BadZipFile) as exc:
-            raise ValueError(f"插件包无法读取 plugin.json：{source}：{exc}") from exc
-        manifest: object = json.loads(raw)
-    else:
-        manifest_path = source / "plugin.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict):
-        raise TypeError(f"plugin.json 根值必须是对象：{source}")
-    plugin_id = cast(dict[str, object], manifest).get("id")
-    if not isinstance(plugin_id, str) or not plugin_id:
-        raise ValueError(f"插件源缺少有效 id：{source}")
-    return plugin_id
 
 
 async def ensure_installed(ctx: Context, source: Path) -> str:
