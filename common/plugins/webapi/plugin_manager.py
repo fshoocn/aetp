@@ -14,7 +14,7 @@ import sys
 import tempfile
 import types
 import zipfile
-from collections.abc import Coroutine, Iterable
+from collections.abc import Coroutine, Iterable, Mapping
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Final, TypedDict, cast
@@ -188,9 +188,11 @@ class PublicPluginRecord(TypedDict):
     enabled: bool
     last_error: str | None
     digest: str
+    #: 持久化的插件配置（plugin.json 的 ``config`` 与 ``update_config`` 改动的合并结果）
+    config: dict[str, object]
     #: 是否带描述文件（插件包根目录 README.md，前端据此控制「文档」入口）
     has_readme: bool
-    #: 内置插件（common/ 直装）：不可安装 / 升级 / 启停 / 卸载
+    #: 内置插件（common/ 直装）：不可安装 / 升级 / 启停 / 卸载 / 配置修改
     builtin: bool
     #: 预装插件（config.ini 的 ``[node] plugins`` 列出的插件源）：启停与
     #: 卸载均允许，但下次启动会被 ``ensure_installed`` 重装并重置状态
@@ -287,6 +289,7 @@ class PluginManager:
                 "enabled": True,
                 "last_error": None,
                 "digest": "",
+                "config": {},
                 "has_readme": (spec["root"] / PLUGIN_README).is_file(),
                 "builtin": True,
                 "protected": True,
@@ -602,6 +605,87 @@ class PluginManager:
         if record.get("enabled"):
             record["enabled"] = False
 
+    async def update_config(
+        self, plugin_id: str, config: Mapping[str, object]
+    ) -> PublicPluginRecord:
+        """部分更新插件配置（给出要改的键即可，其余键保留）。
+
+        * **运行中**：经 ``fiber.update`` 校验并热更新；Schema 校验失败报 422
+          且不保存；``internal/commit`` 钩子把新值写回 ``config.ini`` 对应节；
+        * **未启用**：只保存进安装记录，下次 ``enable`` 时生效（启用链路校验）。
+
+        两处持久化（安装记录 + ``config.ini``）保持一致，重启后行为不变。
+
+        抛出 :class:`PluginManagerError`：内置插件 403、未知插件 404、
+        配置为空 400、校验失败 / 重载失败 422。
+        """
+        self._reject_builtin(plugin_id, "配置修改")
+        async with self._operation_lock:
+            return await self._update_config(plugin_id, config)
+
+    async def _update_config(
+        self, plugin_id: str, config: Mapping[str, object]
+    ) -> PublicPluginRecord:
+        record = self._get_record(plugin_id)
+        if not config:
+            raise PluginManagerError("配置不能为空（部分更新：给出要改的键即可）", 400)
+        merged = {**dict(record.get("config") or {}), **dict(config)}
+        fiber = self.fibers.get(plugin_id)
+        if fiber is None:
+            # 未启用：只保存，下次 enable 时生效（启用链路负责 Schema 校验）
+            record["config"] = merged
+            self._write_registry()
+            return self._public_record(record)
+
+        # 运行时配置与 _enable 同口径：resource_root 由安装记录注入
+        runtime = dict(merged)
+        resource_root = record.get("resource_root")
+        if resource_root:
+            package_root = self.install_root / plugin_id
+            runtime["resource_root"] = str((package_root / resource_root).resolve())
+        try:
+            outcome = fiber.update(runtime)
+        except PluginManagerError:
+            raise
+        except TypeError as exc:  # 含 Schema 校验失败的 ValidationError（继承 TypeError）
+            raise PluginManagerError(f"配置校验失败：{exc}", 422) from exc
+        except OSError as exc:  # internal/commit 写回 config.ini 失败
+            raise PluginManagerError(f"配置写回 config.ini 失败：{exc}", 500) from exc
+        except Exception as exc:
+            raise PluginManagerError(f"配置更新失败：{exc}", 422) from exc
+
+        # 校验已通过、internal/commit 已写回 config.ini：安装记录同步更新
+        record["config"] = merged
+        record["last_error"] = None
+        self._write_registry()
+        if outcome is None:
+            return self._public_record(record)  # 重启被钩子否决
+
+        try:
+            await outcome
+        except Exception as exc:
+            raise self._reload_error(record, exc) from exc
+        state = getattr(getattr(fiber, "state", None), "name", "")
+        if state != "ACTIVE":
+            raise self._reload_error(
+                record, getattr(fiber, "_error", None) or state or "状态未激活"
+            )
+        return self._public_record(record)
+
+    def _reload_error(
+        self, record: _PluginRecord, reason: object
+    ) -> PluginManagerError:
+        """重载失败的统一处理：错误记入安装记录并构造 422（配置本身已保存）。"""
+        message = f"配置已保存，但插件重载失败：{reason}"
+        record["last_error"] = message
+        try:
+            self._write_registry()
+        except OSError as registry_error:
+            self.ctx.logger.error(
+                "插件 %s 更新失败状态无法写入注册表：%s", record["id"], registry_error
+            )
+        return PluginManagerError(message, 422)
+
     async def restore_enabled(self) -> None:
         for plugin_id, record in list(self.records.items()):
             if not record.get("enabled"):
@@ -849,6 +933,7 @@ class PluginManager:
             "enabled": bool(record.get("enabled")),
             "last_error": record.get("last_error"),
             "digest": record.get("digest") or "",
+            "config": dict(record.get("config") or {}),
             "has_readme": (self.install_root / record["id"] / PLUGIN_README).is_file(),
             "builtin": False,
             "protected": record["id"] in self.preinstalled_ids,

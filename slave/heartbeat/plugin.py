@@ -73,13 +73,13 @@ class HeartbeatPlugin:
 
     name: ClassVar[str] = "heartbeat"
     inject: ClassVar[list[str]] = ["appconfig", "webapi", "node_kind"]
+    #: 配置模型（标准 Schema）：驱动校验、``[heartbeat]`` 默认值注入与写回
+    Config: ClassVar[type[HeartbeatConfig]] = HeartbeatConfig
 
-    def __init__(self, ctx: Context, config: object | None = None) -> None:
-        if config:
-            raise TypeError("HeartbeatPlugin 配置请写入 config.ini 的 [heartbeat] 节")
+    def __init__(self, ctx: Context, config: HeartbeatConfig | None = None) -> None:
         self.ctx: Context = ctx
-        self.config: HeartbeatConfig = HeartbeatConfig.from_ini(
-            ctx.appconfig.section("heartbeat").to_dict()
+        self.config: HeartbeatConfig = (
+            config if isinstance(config, HeartbeatConfig) else HeartbeatConfig()
         )
         self._node_id: str = (
             ctx.appconfig.section("node").get("name") or str(ctx.node_kind)

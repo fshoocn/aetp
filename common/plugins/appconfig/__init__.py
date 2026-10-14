@@ -10,7 +10,12 @@
 
 from __future__ import annotations
 
-from .config import AppConfig, ConfigSection
+from .config import AppConfig, ConfigSection, write_ini_values
 from .plugin import AppConfigPlugin
 
-__all__: list[str] = ["AppConfig", "AppConfigPlugin", "ConfigSection"]
+__all__: list[str] = [
+    "AppConfig",
+    "AppConfigPlugin",
+    "ConfigSection",
+    "write_ini_values",
+]

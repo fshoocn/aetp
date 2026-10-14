@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from cordis_port import Context, Service
 from starlette.requests import Request
@@ -128,6 +129,16 @@ class PluginManagerPlugin(Service[None]):
         """停用并删除插件包。"""
         await self._require_manager().uninstall(plugin_id)
 
+    async def update_config(
+        self, plugin_id: str, config: Mapping[str, object]
+    ) -> PublicPluginRecord:
+        """部分更新插件配置（与 ``PATCH /api/plugins/{id}/config`` 同一实现）。
+
+        运行中的插件经 ``fiber.update`` 热更新并写回 ``config.ini`` 对应节；
+        未启用的只保存进安装记录，下次启用生效。内置插件拒绝（403）。
+        """
+        return await self._require_manager().update_config(plugin_id, config)
+
     async def plugin_readme(self, plugin_id: str) -> str:
         """读取插件描述文件（README.md，Markdown 文本）。"""
         return await self._require_manager().plugin_readme(plugin_id)
@@ -209,6 +220,30 @@ class PluginManagerPlugin(Service[None]):
             try:
                 manager().run_from_web_thread(manager().uninstall(plugin_id))
                 return {"ok": True, "id": plugin_id}
+            except PluginManagerError as error:
+                return error_response(error)
+
+        @ctx.webapi.patch(
+            "/api/plugins/{plugin_id}/config", kind="api", name="plugins.update_config"
+        )
+        async def update_plugin_config(
+            _request: Request, plugin_id: str
+        ) -> dict[str, object] | JSONResponse:
+            """部分更新插件配置（请求体 JSON 对象 = 要改的键值，其余键保留）。"""
+            try:
+                try:
+                    body: object = await _request.json()
+                except ValueError as error:
+                    raise PluginManagerError(
+                        f"请求体不是合法 JSON：{error}", 400
+                    ) from error
+                if not isinstance(body, dict):
+                    raise PluginManagerError("请求体必须是 JSON 对象", 400)
+                item = await asyncio.to_thread(
+                    manager().run_from_web_thread,
+                    manager().update_config(plugin_id, cast(dict[str, object], body)),
+                )
+                return {"plugin": item}
             except PluginManagerError as error:
                 return error_response(error)
 

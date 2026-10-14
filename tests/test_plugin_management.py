@@ -88,6 +88,54 @@ def _plugin_archive(
     return archive.getvalue()
 
 
+def _config_plugin_archive(plugin_id: str = "config-sample") -> bytes:
+    """带 ``FieldConfig`` schema（``ini_section = "sample"``）的测试插件包。
+
+    ``port == 6666`` 时构造抛错，用于验证「配置已保存但插件重载失败」。
+    """
+    manifest: dict[str, object] = {
+        "id": plugin_id,
+        "name": plugin_id,
+        "version": "1.0.0",
+        "entrypoint": "plugin:ConfigPlugin",
+        "kind": "master",
+    }
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr("plugin.json", json.dumps(manifest))
+        package.writestr(
+            "plugin.py",
+            (
+                "from common.config_base import FieldConfig\n"
+                "\n"
+                "\n"
+                "class SampleConfig(FieldConfig):\n"
+                "    ini_section = 'sample'\n"
+                "    _FIELDS = {\n"
+                "        'port': ((int,), 'port（监听端口）'),\n"
+                "        'host': ((str,), 'host（监听地址）'),\n"
+                "    }\n"
+                "    port: int = 80\n"
+                "    host: str = '127.0.0.1'\n"
+                "\n"
+                "\n"
+                "class ConfigPlugin:\n"
+                f"    name = {plugin_id!r}\n"
+                "    inject = ['appconfig']\n"
+                "    Config = SampleConfig\n"
+                "\n"
+                "    def __init__(self, ctx, config):\n"
+                "        del ctx\n"
+                "        self.config = (\n"
+                "            config if isinstance(config, SampleConfig) else SampleConfig()\n"
+                "        )\n"
+                "        if self.config.port == 6666:\n"
+                "            raise RuntimeError('bad port on purpose')\n"
+            ),
+        )
+    return archive.getvalue()
+
+
 class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.context: Context = Context()
@@ -389,7 +437,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("requires", json.loads(body)["error"])
 
     async def test_builtin_plugins_listed_and_locked(self) -> None:
-        """内置插件展示于列表，但禁止安装 / 升级 / 启停 / 卸载。"""
+        """内置插件展示于列表，但禁止安装 / 升级 / 启停 / 卸载 / 配置修改。"""
         plugins = self.context.plugins
         listing = {item["id"]: item for item in await plugins.list_plugins()}
         for plugin_id in ("appconfig", "webapi", "plugin-manager"):
@@ -416,6 +464,93 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         for action in (plugins.enable, plugins.disable, plugins.uninstall):
             with self.assertRaises(PluginManagerError):
                 await action("appconfig")
+
+        # 配置修改同样禁止（内置插件随平台直装，配置由平台管理）
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.update_config("appconfig", {"path": "x"})
+        self.assertEqual(caught.exception.status_code, 403)
+
+    async def test_update_config_merges_persists_and_reloads(self) -> None:
+        """部分更新：合并进安装记录、热更新运行时，并写回 config.ini 的对应节。"""
+        plugins = self.context.plugins
+        await plugins.install_archive(_config_plugin_archive())
+        await plugins.enable("config-sample")
+        config_path = Path(self.temp_dir.name) / "config.ini"
+
+        record = await plugins.update_config("config-sample", {"port": 9001})
+        self.assertEqual(record["config"], {"port": 9001})
+        text = config_path.read_text(encoding="utf-8")
+        self.assertIn("[sample]", text)
+        self.assertIn("port = 9001", text)
+
+        # 第二次部分更新是合并（不覆盖整个配置）
+        record = await plugins.update_config("config-sample", {"host": "10.0.0.1"})
+        self.assertEqual(record["config"], {"port": 9001, "host": "10.0.0.1"})
+        self.assertIn("host = 10.0.0.1", config_path.read_text(encoding="utf-8"))
+
+        # HTTP 入口与服务同一条链路
+        status, payload = await _arequest(
+            self.base_url,
+            "/api/plugins/config-sample/config",
+            method="PATCH",
+            body=json.dumps({"port": 9002}).encode(),
+            content_type="application/json",
+        )
+        self.assertEqual(status, 200)
+        updated = json.loads(payload)["plugin"]
+        self.assertEqual(updated["config"], {"port": 9002, "host": "10.0.0.1"})
+
+    async def test_update_config_rejects_invalid_and_locked(self) -> None:
+        """校验失败 / 空配置 / 未知插件 / 内置插件 / 非法请求体：报错明确且不落盘。"""
+        plugins = self.context.plugins
+        await plugins.install_archive(_config_plugin_archive())
+        await plugins.enable("config-sample")
+        config_path = Path(self.temp_dir.name) / "config.ini"
+
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.update_config("config-sample", {"port": "abc"})
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("port", str(caught.exception))  # 类型问题消息内含字段名
+        self.assertNotIn("[sample]", config_path.read_text(encoding="utf-8"))
+
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.update_config("config-sample", {})
+        self.assertEqual(caught.exception.status_code, 400)
+
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.update_config("nope", {"port": 1})
+        self.assertEqual(caught.exception.status_code, 404)
+
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.update_config("webapi", {"port": 1})
+        self.assertEqual(caught.exception.status_code, 403)
+
+        status, _payload = await _arequest(
+            self.base_url,
+            "/api/plugins/config-sample/config",
+            method="PATCH",
+            body=b"not json",
+            content_type="application/json",
+        )
+        self.assertEqual(status, 400)
+
+    async def test_update_config_saves_when_disabled_and_reports_reload_failure(self) -> None:
+        """未启用只保存（启用时生效）；重载失败如实报 422 且配置已保存。"""
+        plugins = self.context.plugins
+        await plugins.install_archive(_config_plugin_archive("config-offline"))
+        record = await plugins.update_config("config-offline", {"port": 9100})
+        self.assertEqual(record["config"], {"port": 9100})  # 未启用：只存记录
+        self.assertFalse(record["enabled"])
+
+        await plugins.install_archive(_config_plugin_archive("config-crash"))
+        await plugins.enable("config-crash")
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.update_config("config-crash", {"port": 6666})
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("配置已保存", str(caught.exception))
+        listing = {item["id"]: item for item in await plugins.list_plugins()}
+        self.assertEqual(listing["config-crash"]["config"], {"port": 6666})
+        self.assertIsNotNone(listing["config-crash"]["last_error"])
 
     async def test_registry_drops_builtin_shadow_records(self) -> None:
         """遗留注册表里的内置 id 影子记录读取即丢弃（展示真身内置记录）。"""

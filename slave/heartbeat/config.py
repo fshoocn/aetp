@@ -22,6 +22,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from typing import ClassVar
+
+from common.config_base import FieldConfig, Issue
 
 #: ``[heartbeat]`` 节允许的键
 _KEYS: frozenset[str] = frozenset(
@@ -54,8 +57,25 @@ def _positive_seconds(name: str, raw: object) -> float:
     return value
 
 
-class HeartbeatConfig:
-    """心跳插件配置；类属性即默认值，实例由 :meth:`from_ini` 从 ini 构建。"""
+class HeartbeatConfig(FieldConfig):
+    """心跳插件配置；类属性即默认值，实例由 :meth:`from_ini` 从 ini 构建。
+
+    ``ini_section = "heartbeat"`` 把 ``config.ini`` 的 ``[heartbeat]`` 节接到
+    appconfig 的配置注入 / 写回钩子上：加载时注入默认值，``fiber.update``
+    提交时把新值写回该节。类型错误的说明内嵌字段名（如 ``interval``），
+    便于用户对照 ini 键名定位。
+    """
+
+    #: 对应 ``config.ini`` 的 ``[heartbeat]`` 节
+    ini_section: ClassVar[str | None] = "heartbeat"
+    #: 字段类型表：字段名 -> (类型元组, 说明)；驱动默认值、类型校验与 ini 序列化
+    _FIELDS: ClassVar[dict[str, tuple[tuple[type[object], ...], str]]] = {
+        "master_url": ((str,), "master_url（主模块基地址）"),
+        "path": ((str,), "path（心跳接口路径）"),
+        "interval": ((int, float), "interval（心跳间隔秒数）"),
+        "timeout": ((int, float), "timeout（单次请求超时秒数）"),
+        "max_backoff": ((int, float), "max_backoff（失败重试间隔上限秒数）"),
+    }
 
     #: 主模块基地址（必填），如 ``http://127.0.0.1:8080``
     master_url: str = ""
@@ -68,59 +88,42 @@ class HeartbeatConfig:
     #: 失败重试间隔上限（秒）；主模块可下发覆盖
     max_backoff: float = 60.0
 
-    def __init__(self, **values: object) -> None:
-        for name in sorted(_KEYS):
-            setattr(self, name, values.get(name, getattr(type(self), name)))
-
     def endpoint(self) -> str:
         """完整心跳接口地址（``master_url`` + ``path``）。"""
         return f"{self.master_url.rstrip('/')}/{self.path.lstrip('/')}"
 
-    @classmethod
-    def from_ini(cls, values: Mapping[str, str]) -> HeartbeatConfig:
-        """从 ini 的 ``[heartbeat]`` 键值（全字符串）构建并校验配置。
-
-        抛出:
-            ValueError: 出现未知键、数值无法转换或校验不通过。
-        """
-        unknown = [key for key in values if key not in _KEYS]
-        if unknown:
-            raise ValueError(
-                f"config.ini 的 [heartbeat] 节有未知键：{', '.join(unknown)}"
-                f"（可选：{', '.join(sorted(_KEYS))}）"
-            )
-        converted: dict[str, object] = {}
-        for key, raw in values.items():
-            if key in {"interval", "timeout", "max_backoff"}:
-                try:
-                    converted[key] = float(raw.strip())
-                except (ValueError, OverflowError) as exc:
-                    raise ValueError(f"配置 [heartbeat].{key} 不是数字：{raw!r}") from exc
-            else:
-                converted[key] = raw.strip()
-        config = cls(**converted)
-        config.validate()
-        return config
-
-    def validate(self) -> None:
-        """校验配置；不合法抛 :class:`ValueError`（信息可直接展示给用户）。"""
+    def _validate_extra(self) -> list[Issue]:
+        """master_url 必填与协议、path 前缀、三个运行参数收敛为有限正数。"""
+        issues: list[Issue] = []
         if not self.master_url:
-            raise ValueError(
-                "config.ini 的 [heartbeat] 节缺少 master_url（主模块地址，"
-                "如 http://127.0.0.1:8080）"
+            issues.append(
+                {
+                    "message": "config.ini 的 [heartbeat] 节缺少 master_url"
+                    "（主模块地址，如 http://127.0.0.1:8080）",
+                    "path": ["master_url"],
+                }
             )
-        if not self.master_url.startswith(("http://", "https://")):
-            raise ValueError(
-                f"配置 [heartbeat].master_url 需以 http:// 或 https:// 开头："
-                f"{self.master_url!r}"
+        elif not self.master_url.startswith(("http://", "https://")):
+            issues.append(
+                {
+                    "message": f"配置 [heartbeat].master_url 需以 http:// 或 https:// 开头："
+                    f"{self.master_url!r}",
+                    "path": ["master_url"],
+                }
             )
         if not self.path.startswith("/"):
-            raise ValueError(f"配置 [heartbeat].path 需以 / 开头：{self.path!r}")
+            issues.append(
+                {
+                    "message": f"配置 [heartbeat].path 需以 / 开头：{self.path!r}",
+                    "path": ["path"],
+                }
+            )
         for name in ("interval", "timeout", "max_backoff"):
             try:
                 setattr(self, name, _positive_seconds(name, getattr(self, name)))
             except (TypeError, ValueError) as exc:
-                raise ValueError(f"配置 [heartbeat].{exc}") from exc
+                issues.append({"message": f"配置 [heartbeat].{exc}", "path": [name]})
+        return issues
 
     # -- 主模块下发（配置同步） ---------------------------------------------
     def apply_server(

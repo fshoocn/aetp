@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import configparser
+import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
@@ -179,6 +180,37 @@ class AppConfig:
         """按键取布尔值；写法不合法抛 :class:`ValueError`。"""
         return self.section(section).get_bool(key, fallback)
 
+    # -- 写回 ---------------------------------------------------------------
+    def update_section(
+        self,
+        name: str,
+        values: Mapping[str, str],
+        *,
+        path: str | Path | None = None,
+    ) -> None:
+        """更新配置节键值并写回 ini 文件（外科手术式行编辑，保留注释）。
+
+        键统一按小写归一（与 ``configparser`` 的读取口径一致）：文件里已有
+        的键就地替换，新键插到该节末尾，节不存在则在文件尾追加新节；
+        其余行（注释、排版、其它节）一字不动。
+
+        参数:
+            name: 节名（区分大小写）。
+            values: ``{键: 值}``，值需是字符串。
+            path: 写回目标文件；缺省用 :attr:`path`（写回后同步为来源文件）。
+
+        抛出:
+            ValueError: 未给 ``path`` 且实例没有来源文件（如空配置）。
+        """
+        target = Path(path).expanduser() if path is not None else self.path
+        if target is None:
+            raise ValueError("配置对象没有来源文件，update_section 需要显式传入 path")
+        updates = {str(key).lower(): str(value) for key, value in values.items()}
+        current = self._sections.get(name, ConfigSection(name, {})).to_dict()
+        self._sections[name] = ConfigSection(name, {**current, **updates})
+        write_ini_values(target, {name: updates})
+        self.path = target
+
     def to_dict(self) -> dict[str, dict[str, str]]:
         """导出为 ``{节: {键: 值}}``。"""
         return {name: section.to_dict() for name, section in self._sections.items()}
@@ -187,4 +219,75 @@ class AppConfig:
         return f"AppConfig({self.path}, sections={self.sections()})"
 
 
-__all__: list[str] = ["AppConfig", "ConfigSection"]
+#: ini 节头：``[name]``（行尾可跟注释，兼容 configparser 的宽容口径）
+_SECTION_HEADER: re.Pattern[str] = re.compile(r"^\s*\[([^\[\]]+)\]")
+#: ini 键行：``key = value`` / ``key : value``（键名宽容匹配）
+_KEY_LINE: re.Pattern[str] = re.compile(r"^\s*([^=:\s][^=:]*?)\s*[=:]")
+
+
+def write_ini_values(
+    path: str | Path, changes: Mapping[str, Mapping[str, str]]
+) -> None:
+    """把 ``{节: {键: 值}}`` 外科手术式写回 ini 文件，保留注释与排版。
+
+    与 ``configparser`` 的整表序列化不同，本函数只改被点名的键值行：已有键
+    就地替换，新键插到该节末尾，节不存在则在文件尾追加新节；文件其余行
+    一字不动，因此手工维护的注释不会丢。
+
+    参数:
+        path: ini 文件路径；文件不存在时按新文件创建。
+        changes: ``{节名: {键: 值}}``；值需是字符串（:meth:`FieldConfig.to_ini`
+            的产出口径）。
+    """
+    resolved = Path(path).expanduser()
+    raw = resolved.read_bytes().decode("utf-8") if resolved.is_file() else ""
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    lines = raw.splitlines()
+    for section, values in changes.items():
+        lines = _apply_section(lines, section, values)
+    text = newline.join(lines)
+    if lines:
+        text += newline
+    resolved.write_bytes(text.encode("utf-8"))
+
+
+def _apply_section(
+    lines: list[str], section: str, values: Mapping[str, str]
+) -> list[str]:
+    """在行列表里更新一个节的键值（见 :func:`write_ini_values` 的语义）。"""
+    start: int | None = None
+    end = len(lines)
+    for index, line in enumerate(lines):
+        match = _SECTION_HEADER.match(line)
+        if match is None:
+            continue
+        if start is not None:
+            end = index
+            break
+        if match.group(1).strip() == section:
+            start = index + 1
+
+    if start is None:
+        addition = [f"[{section}]"]
+        addition += [f"{key} = {value}" for key, value in values.items()]
+        if lines and lines[-1].strip():
+            lines.append("")
+        return lines + addition
+
+    updated = list(lines)
+    body = updated[start:end]
+    for key, value in values.items():
+        for offset, line in enumerate(body):
+            match = _KEY_LINE.match(line)
+            if match is not None and match.group(1).strip().lower() == key.lower():
+                body[offset] = f"{match.group(1).strip()} = {value}"
+                break
+        else:
+            insert_at = len(body)
+            while insert_at > 0 and not body[insert_at - 1].strip():
+                insert_at -= 1
+            body.insert(insert_at, f"{key} = {value}")
+    return updated[:start] + body + updated[end:]
+
+
+__all__: list[str] = ["AppConfig", "ConfigSection", "write_ini_values"]

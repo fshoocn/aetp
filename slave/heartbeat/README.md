@@ -11,7 +11,9 @@
   `interval × 2^n` 退避（封顶 `max_backoff`），只在状态转换时打日志；
 - **配置同步**：`interval` / `timeout` / `max_backoff` 由主模块在心跳应答的
   `config` 字段下发，最迟一个心跳周期生效；`master_url` / `path` 仅本地
-  `config.ini` 管理（主模块不可下发）；
+  `config.ini` 管理（主模块不可下发）。`[heartbeat]` 节值由 appconfig 的
+  `internal/config` 钩子注入为默认值（`HeartbeatConfig.ini_section =
+  "heartbeat"`），`fiber.update({...})` 提交时经 `internal/commit` 写回；
 - **自省接口**：`GET /api/heartbeat/status` 返回状态快照，可被其他插件扩展。
 
 ## 能力接口

@@ -53,7 +53,7 @@ from .uvicorn_web_service import UvicornWebApiService
 
 
 class WebApiPlugin:
-    """webapi 插件：依赖 ``ctx.appconfig`` 并读取 ``[web]`` 配置节。
+    """webapi 插件：依赖 ``ctx.appconfig`` 并解析 ``[web]`` 配置节。
 
     需要「web 就绪」这个时机的插件，直接声明 ``inject = ["webapi"]`` ——
     cordis 会按依赖顺序加载，等到它执行 ``__init__`` / ``init`` 时端口已经在
@@ -61,19 +61,26 @@ class WebApiPlugin:
     ``ctx.webapi.is_running()``；不声明依赖的插件不该关心 web 的时序，
     靠事件去「凑时序」是脆弱的。
 
+    配置不再手工接线：``WebApiConfig.ini_section = "web"``，``[web]`` 节值由
+    appconfig 的 ``internal/config`` 钩子注入为默认值（显式传入 /
+    ``fiber.update`` 覆盖 ini 值），``fiber.update(...)`` 提交时经
+    ``internal/commit`` 写回该节。
+
     属性:
         service: 本插件持有的 :class:`WebApiService` 实现。
     """
 
     name: ClassVar[str] = "webapi"
     inject: ClassVar[list[str]] = ["appconfig"]
+    #: 配置模型（标准 Schema）：驱动校验、默认值注入与写回
+    Config: ClassVar[type[WebApiConfig]] = WebApiConfig
 
-    def __init__(self, ctx: Context, _config: object | None = None) -> None:
-        if _config is not None:
-            raise TypeError("WebApiPlugin 配置请写入 config.ini 的 [web] 节")
+    def __init__(
+        self, ctx: Context, config: WebApiConfig | None = None
+    ) -> None:
         self.ctx: Context = ctx
-        self.config: WebApiConfig = WebApiConfig.from_ini(
-            ctx.appconfig.section("web").to_dict()
+        self.config: WebApiConfig = (
+            config if isinstance(config, WebApiConfig) else WebApiConfig()
         )
         self.service: WebApiService = UvicornWebApiService(ctx, self.config)
 
