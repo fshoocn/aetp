@@ -5,8 +5,9 @@
 其余插件包在需要时经 ``ctx.plugins.install_source`` 安装到各节点的
 ``<节点>/plugins/`` 安装目录后再启用。
 
-目录约定：**预装插件源放节点目录下**（``master/webui``、``slave/heartbeat``
-等，随节点分发、列入 config.ini 的 ``plugins`` 即随启动预装）；
+目录约定：**独立插件源放仓库根** ``plugins/``（如 ``plugins/heartbeat``，
+可打包分发 / 上传安装，列入节点 config.ini 的 ``plugins`` 即随启动预装）；
+**随节点交付的预装源放节点目录**（如 ``master/webui``）；
 ``<节点>/plugins/`` 安装目录只放**可选插件**（经 Web 上传 / 分发落地的
 安装产物，含 registry 与归档）。
 """

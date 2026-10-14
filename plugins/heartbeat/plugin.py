@@ -3,8 +3,8 @@
 职责：
 
 1. 从 ``config.ini`` 的 ``[heartbeat]`` 节读主模块地址与心跳参数
-   （见 :mod:`slave.heartbeat.config`）；
-2. 启动心跳循环（:class:`~slave.heartbeat.monitor.HeartbeatMonitor`），
+   （见 :mod:`plugins.heartbeat.config`）；
+2. 启动心跳循环（:class:`~plugins.heartbeat.monitor.HeartbeatMonitor`），
    覆盖主模块不在线 / 掉线 / 上线三种场景，失败自动退避重试；
 3. 在本节点 ``ctx.webapi`` 注册 ``GET /api/heartbeat/status`` 自省接口
    （返回值带 ``extensions`` 展示扩展槽与 ``capabilities`` 能力信封列表，
@@ -23,10 +23,10 @@
 其中 ``interval`` / ``timeout`` / ``max_backoff`` 是**启动兜底值** ——
 真正生效的运行参数由主模块在心跳响应的 ``config`` 字段里下发，主模块
 改配置后最迟一个心跳周期自动同步到本模块（见
-:meth:`~slave.heartbeat.config.HeartbeatConfig.apply_server`）。
+:meth:`~plugins.heartbeat.config.HeartbeatConfig.apply_server`）。
 
-状态机与退避策略见 :mod:`slave.heartbeat.monitor`；传输层
-（标准库 urllib、异常归一化）见 :mod:`slave.heartbeat.sender`。
+状态机与退避策略见 :mod:`plugins.heartbeat.monitor`；传输层
+（标准库 urllib、异常归一化）见 :mod:`plugins.heartbeat.sender`。
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ class HeartbeatPlugin:
         能力同步用「摘要 + 按需全量」：平时只带 ``caps_digest``，摘要变了
         或主模块回 ``need_caps`` 时才带全量 ``capabilities``（能力信息变化
         频率低，不必每拍重发）。信封契约见
-        :mod:`slave.heartbeat.capabilities`。
+        :mod:`plugins.heartbeat.capabilities`。
         """
         self._seq = next_seq(self._seq)
         entries, problems = await collect_capabilities(self.ctx)
