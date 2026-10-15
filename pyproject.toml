@@ -44,7 +44,7 @@ ignore = [
 "slave/main.py" = ["E402"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["common", "master", "plugins", "slave"]
+known-first-party = ["common", "master", "master_plugins", "slave", "slave_plugins"]
 
 [tool.pyright]
 include = ["common", "master", "slave", "tests"]

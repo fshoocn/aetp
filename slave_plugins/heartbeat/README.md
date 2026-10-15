@@ -55,7 +55,7 @@ max_backoff = 60.0                    # 失败重试间隔上限秒数
 2. 其他插件挂载能力信息（可选）：
 
 ```python
-from plugins.heartbeat import CAP_EVENT, capability
+from slave_plugins.heartbeat import CAP_EVENT, capability
 
 class MyPlugin:
     def init(self):

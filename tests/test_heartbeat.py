@@ -1,4 +1,4 @@
-"""心跳插件（plugins/heartbeat）的单元 / 集成测试。
+"""心跳插件（slave_plugins/heartbeat）的单元 / 集成测试。
 
 覆盖场景：主模块不在线、掉线、上线恢复、HTTP 错误、配置校验、自省接口、
 插件卸载清理。
@@ -23,7 +23,7 @@ from _helpers import request as _request
 from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
-from plugins.heartbeat import (
+from slave_plugins.heartbeat import (
     CAP_EVENT,
     SEQ_MAX,
     STATUS_EVENT,
@@ -40,8 +40,8 @@ from plugins.heartbeat import (
     parse_capability,
     select_capabilities,
 )
-from plugins.heartbeat.capabilities import collect_capabilities
-from plugins.heartbeat.sender import parse_response_body
+from slave_plugins.heartbeat.capabilities import collect_capabilities
+from slave_plugins.heartbeat.sender import parse_response_body
 
 
 def _status_dict(base_url: str) -> dict[str, object]:

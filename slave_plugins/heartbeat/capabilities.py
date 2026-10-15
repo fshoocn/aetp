@@ -4,7 +4,7 @@
 仅供展示的数据保持自由**。消费方（主模块）只解析信封，``detail``
 原样透传，解析成本与 ``detail`` 复杂度无关。
 
-信封契约（协议详见 ``master/heartbeat/DESIGN.md`` §2 / §3）::
+信封契约（协议详见 ``master_plugins/heartbeat/DESIGN.md`` §2 / §3）::
 
     {
       "kind": "executor",            # 必填：能力大类（筛选主键）

@@ -1,0 +1,8 @@
+{
+    "id": "heartbeat-server",
+    "name": "主模块心跳",
+    "version": "1.0.0",
+    "entrypoint": "plugin:HeartbeatServerPlugin",
+    "kind": "master",
+    "requires": []
+}
