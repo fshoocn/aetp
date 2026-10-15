@@ -6,9 +6,11 @@
 
 1. 创建 cordis 内核并加载 :class:`AppConfigPlugin`（应用配置 ``ctx.appconfig``，
    读执行根目录的 ``config.ini``）；
-2. 加载 :class:`WebApiPlugin`（通过 ``appconfig`` 注入读取 ``[web]``）与
+2. 加载 :class:`~common.plugins.db.DbPlugin`（数据库服务 ``ctx.db``，经
+   ``appconfig`` 注入读取 ``[db]``）；
+3. 加载 :class:`WebApiPlugin`（通过 ``appconfig`` 注入读取 ``[web]``）与
    :class:`PluginManagerPlugin`（通过 ``appconfig`` 注入读取 ``[node].install_root``）；
-3. 逐个「确保安装并启用」 ``plugin_sources`` 里的插件源目录（幂等）——
+4. 逐个「确保安装并启用」 ``plugin_sources`` 里的插件源目录（幂等）——
    传空列表即为纯 API（无头）节点；
 4. :func:`run_node` 额外负责打印地址、等待 Ctrl+C / SIGTERM 并有序退出。
 
@@ -35,6 +37,7 @@ from cordis_port import Context
 
 from common import cordis_utils
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
+from common.plugins.db import DbPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import source_digest, source_plugin_id
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
@@ -155,12 +158,13 @@ def _resolve_config(config_path: str | Path) -> tuple[Path, NodeProfile]:
 
 
 async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
-    """按已解析的 profile 装配内核：配置服务 → Web / 插件管理 → 预装插件。"""
+    """按已解析的 profile 装配内核：配置服务 → 数据库 → Web / 插件管理 → 预装插件。"""
     ctx: Context = Context()
     cordis_utils.set_ctx(ctx)
     ctx.provide("node_kind", profile.kind)
 
     await ctx.plugin(AppConfigPlugin, {"path": str(config_file)})
+    await ctx.plugin(DbPlugin)
     await ctx.plugin(WebApiPlugin)
     await ctx.plugin(PluginManagerPlugin)
     for source in profile.plugin_sources:

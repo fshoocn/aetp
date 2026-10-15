@@ -175,7 +175,7 @@ class FieldConfig:
         if value is None:
             return {}
         if isinstance(value, cls):
-            items: dict[str, object] = value.to_dict()
+            items: dict[str, object] = value.raw_dict()
         elif isinstance(value, Mapping):
             items = {
                 str(key).lower(): item
@@ -187,9 +187,17 @@ class FieldConfig:
         return {name: _stringify_ini(item) for name, item in items.items() if item is not None}
 
     # -- 便利方法 -------------------------------------------------------------
-    def to_dict(self) -> dict[str, object]:
-        """导出为字典（便于日志、自省与层合并）。"""
+    def raw_dict(self) -> dict[str, object]:
+        """导出**未做展示掩码**的原始值（:meth:`to_ini` 序列化专用）。
+
+        子类覆写 :meth:`to_dict` 做展示掩码（如连接串密码）时，写回
+        ``config.ini`` 仍以本方法为准，保证掩码不落盘、凭证不回显。
+        """
         return {name: getattr(self, name) for name in self._FIELDS}
+
+    def to_dict(self) -> dict[str, object]:
+        """导出为字典（便于日志、自省与层合并）；展示用途，可覆写做掩码。"""
+        return self.raw_dict()
 
 
 def _describe(expected: tuple[type[object], ...]) -> str:

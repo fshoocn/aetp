@@ -20,6 +20,10 @@ from pathlib import Path, PurePosixPath
 from typing import Final, TypedDict, cast
 
 from cordis_port import Context, Fiber
+from sqlalchemy.exc import SQLAlchemyError
+
+from common.plugins.db.registry import DataDependency, parse_dependencies
+from common.plugins.db.service import DbDependencyError, DbError
 
 MAX_ARCHIVE_SIZE: Final[int] = 32 * 1024 * 1024
 MAX_EXTRACTED_SIZE: Final[int] = 128 * 1024 * 1024
@@ -70,6 +74,13 @@ BUILTIN_PLUGINS: Final[dict[str, _BuiltinSpec]] = {
         "entrypoint": "common.plugins.appconfig:AppConfigPlugin",
         "kind": ["any"],
         "root": _PLUGINS_ROOT / "appconfig",
+    },
+    "db": {
+        "name": "数据库服务",
+        "version": "1.0.0",
+        "entrypoint": "common.plugins.db:DbPlugin",
+        "kind": ["any"],
+        "root": _PLUGINS_ROOT / "db",
     },
     "webapi": {
         "name": "Web API 服务",
@@ -169,6 +180,8 @@ class _PluginManifest(TypedDict):
     config: dict[str, object]
     requires: list[str]
     kind: list[str]
+    #: 数据依赖（plugin.json 的 dependencies）：跨插件读表的显式声明
+    dependencies: list[DataDependency]
 
 
 class _PluginRecord(_PluginManifest):
@@ -190,6 +203,8 @@ class PublicPluginRecord(TypedDict):
     digest: str
     #: 持久化的插件配置（plugin.json 的 ``config`` 与 ``update_config`` 改动的合并结果）
     config: dict[str, object]
+    #: 数据依赖（plugin.json 的 ``dependencies``）：跨插件读表的显式声明
+    dependencies: list[DataDependency]
     #: 是否带描述文件（插件包根目录 README.md，前端据此控制「文档」入口）
     has_readme: bool
     #: 内置插件（common/ 直装）：不可安装 / 升级 / 启停 / 卸载 / 配置修改
@@ -290,6 +305,7 @@ class PluginManager:
                 "last_error": None,
                 "digest": "",
                 "config": {},
+                "dependencies": [],
                 "has_readme": (spec["root"] / PLUGIN_README).is_file(),
                 "builtin": True,
                 "protected": True,
@@ -355,6 +371,7 @@ class PluginManager:
             manifest = self._extract_and_read_manifest(archive, extracted)
             self._reject_builtin(manifest["id"], "安装 / 升级")
             self._check_node_kind(manifest)
+            self._check_data_dependencies(manifest)
             plugin_id = manifest["id"]
             # 摘要按 zip 条目（名字 + 内容）计算：与 ensure_installed 的
             # source_digest 同口径，保证启动比对不会因口径不同而每次误换装
@@ -504,6 +521,7 @@ class PluginManager:
         module_name = self._module_name(plugin_id)
         fiber: Fiber | None = None
         try:
+            await self._check_data_requirements(record)
             plugin_class = self._load_plugin_class(package_root, module_name, record["entrypoint"])
             config = dict(record.get("config") or {})
             resource_root = record.get("resource_root")
@@ -561,30 +579,43 @@ class PluginManager:
         except OSError as registry_error:
             self.ctx.logger.error("插件 %s 启用失败状态无法写入注册表：%s", plugin_id, registry_error)
 
-    async def disable(self, plugin_id: str) -> PublicPluginRecord:
+    async def disable(self, plugin_id: str, *, reason: str | None = None) -> PublicPluginRecord:
+        """停用插件；``reason`` 会记入安装记录的 ``last_error``（如数据依赖失效）。"""
         self._reject_builtin(plugin_id, "停用")
         async with self._operation_lock:
-            return await self._disable(plugin_id)
+            return await self._disable(plugin_id, reason=reason)
 
-    async def _disable(self, plugin_id: str) -> PublicPluginRecord:
+    async def _disable(self, plugin_id: str, *, reason: str | None = None) -> PublicPluginRecord:
         record = self._get_record(plugin_id)
         fiber = self.fibers.pop(plugin_id, None)
         if fiber is not None:
             await fiber.dispose()
         self._remove_modules(self._module_name(plugin_id))
         record["enabled"] = False
+        if reason is not None:
+            record["last_error"] = reason
         self._write_registry()
         return self._public_record(record)
 
-    async def uninstall(self, plugin_id: str) -> None:
+    async def uninstall(
+        self, plugin_id: str, *, keep_data: bool = False, drop: bool = False
+    ) -> None:
+        """停用并删除插件包；同步清理它认领的数据表（db 就绪时）。
+
+        * ``keep_data=True``：数据表与归属登记保留（重装复用）；
+        * ``drop=True``：被其他插件依赖时强制删除数据（默认拒绝卸载）。
+        """
         self._reject_builtin(plugin_id, "卸载")
         async with self._operation_lock:
-            await self._uninstall(plugin_id)
+            await self._uninstall(plugin_id, keep_data=keep_data, drop=drop)
 
-    async def _uninstall(self, plugin_id: str) -> None:
+    async def _uninstall(
+        self, plugin_id: str, *, keep_data: bool = False, drop: bool = False
+    ) -> None:
         record = self._get_record(plugin_id)
         if plugin_id in self.fibers:
             await self._disable(plugin_id)
+        await self._drop_plugin_data(plugin_id, keep_data=keep_data, drop=drop)
         package_root = (self.install_root / plugin_id).resolve()
         if package_root.parent != self.install_root:
             raise PluginManagerError("插件安装目录无效", 400)
@@ -755,6 +786,10 @@ class PluginManager:
 
         requires = _validate_requires(manifest.get("requires", []))
         kind = self._validate_kind(manifest)
+        try:
+            dependencies = parse_dependencies(manifest.get("dependencies"))
+        except (TypeError, ValueError) as exc:
+            raise PluginManagerError(str(exc)) from exc
 
         resource_root = manifest.get("resource_root")
         if resource_root is not None:
@@ -778,6 +813,7 @@ class PluginManager:
             "config": config,
             "requires": requires,
             "kind": kind,
+            "dependencies": dependencies,
         }
 
     @staticmethod
@@ -831,6 +867,62 @@ class PluginManager:
             raise PluginManagerError(
                 f"插件 {manifest['id']!r} 支持 {' / '.join(target)} 节点，"
                 f"不能安装到 {node_kind!s} 节点"
+            )
+
+    def _check_data_dependencies(self, manifest: _PluginManifest) -> None:
+        """安装前数据依赖预检：装 B 即提示 A 未安装（比加载拒载反馈更早）。"""
+        missing = [
+            dependency["plugin"]
+            for dependency in manifest["dependencies"]
+            if dependency["plugin"] not in self.records and dependency["plugin"] not in BUILTIN_PLUGINS
+        ]
+        if missing:
+            unique = ", ".join(sorted(set(missing)))
+            raise PluginManagerError(
+                f"插件 {manifest['id']!r} 的数据依赖未安装：{unique}；请先安装并启用生产方插件",
+                409,
+                details={"code": "missing-data-dependencies", "plugins": sorted(set(missing))},
+            )
+
+    async def _check_data_requirements(self, record: _PluginRecord) -> None:
+        """启用前校验数据依赖（锁步模型）：表不存在 / requires 不符即拒载。
+
+        db 未就绪（无 ``db`` 服务）时跳过——数据依赖校验是 db 插件的能力。
+        """
+        dependencies = list(record.get("dependencies") or [])
+        if not dependencies:
+            return
+        db = self.ctx.get("db", strict=False)
+        if db is None:
+            self.ctx.logger.warning(
+                "插件 %s 声明了数据依赖，但 db 服务未就绪，跳过校验", record["id"]
+            )
+            return
+        await db.check_dependencies(record["id"], dependencies)
+
+    async def _drop_plugin_data(
+        self, plugin_id: str, *, keep_data: bool, drop: bool
+    ) -> None:
+        """卸载时清理插件认领的数据表（在删除插件包**之前**调用）。
+
+        * 被其他插件依赖时默认**拒绝卸载**（``drop=True`` 强删）——抛错阻断，
+          插件包不动；
+        * 其余清理失败**不阻断卸载**：登记保留 + 错误日志，待孤儿回收
+          （DESIGN §4.3）；
+        * db 未就绪时跳过（无数据能力可清理）。
+        """
+        db = self.ctx.get("db", strict=False)
+        if db is None:
+            return
+        try:
+            await db.drop_owner(plugin_id, keep_data=keep_data, force=drop)
+        except DbDependencyError as exc:
+            raise PluginManagerError(str(exc), 409) from exc
+        except (DbError, OSError, SQLAlchemyError) as exc:
+            self.ctx.logger.error(
+                "插件 %s 的数据清理失败（不阻断卸载，登记保留待孤儿回收）：%s",
+                plugin_id,
+                exc,
             )
 
     def _load_plugin_class(
@@ -934,6 +1026,7 @@ class PluginManager:
             "last_error": record.get("last_error"),
             "digest": record.get("digest") or "",
             "config": dict(record.get("config") or {}),
+            "dependencies": list(record.get("dependencies") or []),
             "has_readme": (self.install_root / record["id"] / PLUGIN_README).is_file(),
             "builtin": False,
             "protected": record["id"] in self.preinstalled_ids,

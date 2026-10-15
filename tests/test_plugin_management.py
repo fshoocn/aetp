@@ -218,6 +218,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             ids,
             [
                 "appconfig",
+                "db",
                 "k-any",
                 "k-both",
                 "k-master",
@@ -440,7 +441,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         """内置插件展示于列表，但禁止安装 / 升级 / 启停 / 卸载 / 配置修改。"""
         plugins = self.context.plugins
         listing = {item["id"]: item for item in await plugins.list_plugins()}
-        for plugin_id in ("appconfig", "webapi", "plugin-manager"):
+        for plugin_id in ("appconfig", "db", "webapi", "plugin-manager"):
             record = listing[plugin_id]
             self.assertTrue(record["builtin"])
             self.assertTrue(record["protected"])

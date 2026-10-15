@@ -1,6 +1,6 @@
 # 主模块心跳插件设计文档（master_plugins/heartbeat）
 
-> 状态：✅ 已实现（`master_plugins/heartbeat/`，随主节点预装；测试见
+> 状态：✅ 已实现（`master_plugins/heartbeat/`，测试见
 > `tests/test_heartbeat_server.py`）。从模块侧（`slave_plugins/heartbeat`）已实现，
 > 本文是主模块侧对应插件的实现蓝图；与实现的少量差异见文末「实现备注」。
 

@@ -23,8 +23,11 @@ from pathlib import Path
 from typing import ClassVar, cast
 
 from cordis_port import Context, Service
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from common.plugins.db.service import DbError
 
 from .plugin_manager import (
     MAX_ARCHIVE_SIZE,
@@ -64,6 +67,8 @@ class PluginManagerPlugin(Service[None]):
             config_path.parent if config_path is not None else Path.cwd(),
         )
         self.manager: PluginManager | None = None
+        #: ``db/schema-changed`` 触发的消费方复检任务（强引用防 GC）
+        self._recheck_tasks: set[asyncio.Task[None]] = set()
 
     def _preinstalled_ids(self, raw: str, base_dir: Path) -> frozenset[str]:
         """从 ``[node] plugins``（逗号分隔的插件源路径）解析预装插件 id。
@@ -92,6 +97,42 @@ class PluginManagerPlugin(Service[None]):
         )
         self._register_routes()
         await self.manager.restore_enabled()
+        # 锁步模型（DESIGN §4.5）：db 结构变化 → 复检消费方数据依赖，未过则停用并报错
+        self.ctx.on("db/schema-changed", self._on_schema_changed)
+
+    # -- db/schema-changed：消费方依赖复检 ------------------------------------
+    def _on_schema_changed(self, payload: object) -> None:
+        """``db/schema-changed`` 同步入口：转成异步任务复检消费方。"""
+        try:
+            task = asyncio.create_task(self._recheck_consumers(payload))
+        except RuntimeError as exc:
+            self.ctx.logger.error("数据依赖复检调度失败：%s", exc)
+            return
+        self._recheck_tasks.add(task)  # 强引用防 GC（RUF006）
+        task.add_done_callback(self._recheck_tasks.discard)
+
+    async def _recheck_consumers(self, payload: object) -> None:
+        """复检受影响 owner 的消费方，失配即停用并记明原因（已加载的 B 不带着坏依赖继续跑）。"""
+        manager = self.manager
+        data = cast(dict[object, object], payload) if isinstance(payload, dict) else None
+        owner = data.get("owner") if data is not None else None
+        if manager is None or not isinstance(owner, str):
+            return
+        db = self.ctx.get("db", strict=False)
+        if db is None:
+            return
+        try:
+            failures = await db.recheck_consumers(owner)
+        except (DbError, SQLAlchemyError) as exc:
+            self.ctx.logger.error("消费方数据依赖复检失败（owner=%s）：%s", owner, exc)
+            return
+        for consumer, reason in failures:
+            try:
+                if consumer in manager.fibers:
+                    await manager.disable(consumer, reason=reason)
+                    self.ctx.logger.warning("消费方 %s 因数据依赖失效已停用：%s", consumer, reason)
+            except (PluginManagerError, DbError, RuntimeError, SQLAlchemyError) as exc:
+                self.ctx.logger.error("停用消费方 %s 失败：%s", consumer, exc)
 
     # -- ctx.plugins 服务 API -------------------------------------------------
     #
@@ -125,9 +166,17 @@ class PluginManagerPlugin(Service[None]):
         """停用插件并卸载其 fiber。"""
         return await self._require_manager().disable(plugin_id)
 
-    async def uninstall(self, plugin_id: str) -> None:
-        """停用并删除插件包。"""
-        await self._require_manager().uninstall(plugin_id)
+    async def uninstall(
+        self, plugin_id: str, *, keep_data: bool = False, drop: bool = False
+    ) -> None:
+        """停用并删除插件包；同步清理它认领的数据表。
+
+        ``keep_data=True`` 保留数据表（重装复用）；``drop=True`` 强制删除
+        被依赖插件的数据（默认拒绝卸载）。
+        """
+        await self._require_manager().uninstall(
+            plugin_id, keep_data=keep_data, drop=drop
+        )
 
     async def update_config(
         self, plugin_id: str, config: Mapping[str, object]
@@ -216,9 +265,14 @@ class PluginManagerPlugin(Service[None]):
                 return error_response(error)
 
         @ctx.webapi.delete("/api/plugins/{plugin_id}", kind="api", name="plugins.uninstall")
-        def uninstall_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
+        def uninstall_plugin(request: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             try:
-                manager().run_from_web_thread(manager().uninstall(plugin_id))
+                # keep_data=1 保留数据表；drop=1 强制删除被依赖插件的数据
+                keep_data = request.query_params.get("keep_data", "") in {"1", "true", "yes"}
+                drop = request.query_params.get("drop", "") in {"1", "true", "yes"}
+                manager().run_from_web_thread(
+                    manager().uninstall(plugin_id, keep_data=keep_data, drop=drop)
+                )
                 return {"ok": True, "id": plugin_id}
             except PluginManagerError as error:
                 return error_response(error)
