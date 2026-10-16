@@ -259,7 +259,7 @@ def build_endpoint(record: RouteRecord) -> Callable[[Request], Awaitable[Respons
             result = await result
         return to_response(result, record)
 
-    functools.wraps(handler)(endpoint)
+    endpoint = functools.wraps(handler)(endpoint)
     return endpoint
 
 
