@@ -219,6 +219,27 @@ class NodeRegistryTests(unittest.TestCase):
         self.registry.accept(_beat_payload(seq=2, address="http://127.0.0.1:9000"))
         self.assertIn("address", [entry["kind"] for entry in self.registry.history()])
 
+    def test_address_clear_and_unreported(self) -> None:
+        """空串 = 主动清除地址（记清除事件）；键缺失 / 非字符串 = 未上报（不动）。"""
+        record, _ = self.registry.accept(_beat_payload())
+        self.assertEqual(record.address, "http://127.0.0.1:8081")
+
+        # 未上报（键缺失 / 非字符串）：旧地址保持不动，不记事件
+        unreported = _beat_payload(seq=2)
+        unreported.pop("address")
+        self.registry.accept(unreported)
+        self.registry.accept({**_beat_payload(seq=3), "address": 42})
+        self.assertEqual(record.address, "http://127.0.0.1:8081")
+        self.assertNotIn("address", [entry["kind"] for entry in self.registry.history()])
+
+        # 主动清空：旧地址被清除，并记录「清除」事件
+        self.registry.accept(_beat_payload(seq=4, address=""))
+        self.assertEqual(record.address, "")
+        entry = self.registry.history("从节点-1")[-1]
+        self.assertEqual(entry["kind"], "address")
+        self.assertEqual(entry["from"], "http://127.0.0.1:8081")
+        self.assertEqual(entry["to"], "")
+
     def test_state_machine_and_events(self) -> None:
         record, _ = self.registry.accept(_beat_payload())
         self.registry.sweep()

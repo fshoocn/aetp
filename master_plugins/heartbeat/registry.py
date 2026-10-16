@@ -130,12 +130,15 @@ class NodeRegistry:
         record.missed = 0
         record.node_kind = _text(payload.get("node_kind"), record.node_kind)
 
-        address = _text(payload.get("address"), record.address)
-        if record.address and address and address != record.address:
-            self._record_history(
-                record, "address", **{"from": record.address, "to": address}
-            )
-        if address:
+        # 区分「未上报」（键缺失 / 非字符串，保持旧值）与「主动清空」（空串
+        # = 清除旧地址）：空串是合法值，不能再用真值判断挡住清除
+        raw_address = payload.get("address")
+        address = raw_address if isinstance(raw_address, str) else None
+        if address is not None and address != record.address:
+            if record.address:
+                self._record_history(
+                    record, "address", **{"from": record.address, "to": address}
+                )
             record.address = address
 
         seq = _require_seq(payload.get("seq"))
