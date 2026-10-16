@@ -483,6 +483,12 @@ class PluginManager:
             archive_path.write_bytes(archive)
             self.records[plugin_id] = {
                 **manifest,
+                # 升级不重置用户持久化配置：旧值优先，新清单里的新键补默认值。
+                # 新版本若删了旧键，启用时会显式报「未知配置项」而不是静默丢配置
+                "config": {
+                    **dict(manifest.get("config") or {}),
+                    **dict(previous.get("config") or {}),
+                },
                 "enabled": was_enabled,
                 "last_error": None,
                 "digest": digest,

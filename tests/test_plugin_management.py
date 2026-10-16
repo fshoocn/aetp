@@ -774,6 +774,19 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((archives / "rb.prev-1.0.0.zip").exists())
         self.assertTrue((archives / "rb.zip").is_file())
 
+    async def test_replace_install_keeps_persisted_config(self) -> None:
+        """覆盖安装保留用户持久化配置：升级不再把配置打回默认值。"""
+        service = self.context.plugins
+        await service.install_archive(_config_plugin_archive("upgrade-cfg"))
+        await service.enable("upgrade-cfg")
+        await service.update_config("upgrade-cfg", {"port": 9100})
+
+        # 同 id 换装：配置保留，重新启用后运行态同样生效
+        await service.install_archive(_config_plugin_archive("upgrade-cfg"), replace=True)
+        listing = {item["id"]: item for item in await service.list_plugins()}
+        self.assertEqual(listing["upgrade-cfg"]["config"], {"port": 9100})
+        self.assertTrue(listing["upgrade-cfg"]["enabled"])
+
     async def test_upload_strips_bytecode_cache(self) -> None:
         """上传包中的 __pycache__/旧 .pyc 被剔除，避免升级后命中旧字节码。"""
         archive = BytesIO()
