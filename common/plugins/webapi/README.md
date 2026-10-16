@@ -12,7 +12,9 @@
 - **路由表**：`ctx.webapi.get/post/delete/static` 登记路由，随插件卸载
   自动清理；
 - **插件管理**（plugin-manager）：插件包安装 / 启停 / 卸载 / 覆盖升级 /
-  归档回溯，暴露 `ctx.plugins` 服务与 `/api/plugins` 管理 API。
+  归档回溯，暴露 `ctx.plugins` 服务与 `/api/plugins` 管理 API。**本插件
+  不带 UI**——「插件管理」页面是 `webui` 插件的 SPA 自带页面（`/plugins`），
+  调用这里的管理 API；不加载 webui 即纯 API（无头）部署。
 
 ## 能力接口
 

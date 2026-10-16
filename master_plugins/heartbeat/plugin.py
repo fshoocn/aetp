@@ -105,7 +105,7 @@ class HeartbeatServerPlugin:
             title="从模块管理",
             menu_group="",
             menu_icon="pi pi-desktop",
-            menu_order=1,
+            menu_order=99,
         )
         self._task = asyncio.create_task(self._sweep_loop())
         self._task.add_done_callback(self._log_task_exit)

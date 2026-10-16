@@ -6,7 +6,8 @@
 ## 功能
 
 - **SPA 宿主**：`/` 提供 Vue 单页应用（插件管理、从模块管理等页面），
-  `/ui-static` 提供构建产物；
+  `/ui-static` 提供构建产物；其中「插件管理」页是 SPA **自带页面**，数据来自
+  `plugin-manager` 的 `/api/plugins*` 管理 API（plugin-manager 自身不带 UI）；
 - **插件 UI 托管**：插件注册的 Vue 页面 / 组件由本插件统一挂载到
   `/plugin-ui/<owner>/<id>`，随插件卸载自动移除；
 - **多后端**：页面可切换到其他 AETP 节点的后端（跨源时需目标节点允许 CORS）。
@@ -57,3 +58,11 @@ class MyPlugin:
 
 前端源码在 `frontend/`（Vue 3 + PrimeVue + Vite），`npm run build` 产物
 落到 `static/ui/dist`。
+
+## 侧边栏菜单
+
+页面在侧边栏的呈现由 `register_ui` 的三个菜单参数决定：`menu_group` 分组
+（不填并入 AETP 组）、`menu_icon` 图标、`menu_order` **菜单权重**（越小越靠前）。
+组内与分组间均按权重排序；宿主自带的「插件管理」页权重默认 **100**（即最低，
+排最后）。**整个菜单权重最靠前的条目即默认首页**（`/` 重定向目标）；没有插件
+页面时菜单里只有「插件管理」，首页即插件管理页。
