@@ -48,8 +48,9 @@ from .types import HTTP_METHODS, HttpMethod, RouteHandler, RouteKind, RouteRecor
 METHODS: tuple[HttpMethod, ...] = HTTP_METHODS
 
 
-class RouteError(ValueError):
-    """路由注册失败（路径非法、重复注册、handler 不可调用等）。"""
+class RouteError(ValueError, LookupError):
+    """路由错误：注册失败（路径非法、重复注册等，``ValueError`` 语义）与
+    按名查路由失败（``LookupError`` 语义，兑现 :meth:`WebService.url_for` 的契约）。"""
 
 
 class _EffectOwner(Protocol):

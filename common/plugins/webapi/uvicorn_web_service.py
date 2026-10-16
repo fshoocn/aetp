@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, cast
 
 from cordis_port import Context, Fiber, Service
 from starlette.applications import Starlette
+from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -52,6 +53,7 @@ from starlette.responses import (
     Response,
     StreamingResponse,
 )
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import WebApiConfig
 from .interface import WebApiService
@@ -81,6 +83,30 @@ class ServerError(RuntimeError):
     """服务器启动或停止失败。"""
 
 
+class _SecurityHeadersMiddleware:
+    """为所有响应补基础安全头（``X-Content-Type-Options: nosniff``）。
+
+    纯 ASGI 中间件：只在响应头补字段，不动响应体；静态资源（插件 UI、
+    构建产物）与 API 响应统一受益。
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def sender(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("X-Content-Type-Options", "nosniff")
+            await send(message)
+
+        await self.app(scope, receive, sender)
+
+
 class UvicornHost:
     """在后台线程中托管一个 uvicorn 服务器。
 
@@ -92,6 +118,7 @@ class UvicornHost:
     def __init__(self, config: WebApiConfig) -> None:
         self.config: WebApiConfig = config
         self.app: Starlette = Starlette()
+        self.app.add_middleware(_SecurityHeadersMiddleware)
         origins = [str(origin) for origin in config.cors_origins]
         if origins:
             # 跨源场景（如前端切换后端地址）需要 CORS；cors_origins 为空即关闭

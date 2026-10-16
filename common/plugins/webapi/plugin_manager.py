@@ -134,13 +134,13 @@ def _content_digest(entries: list[tuple[str, bytes]]) -> str:
 
 
 def package_digest(root: Path) -> str:
-    """插件源/安装目录的内容摘要（跳过构建缓存与旧字节码）。"""
+    """插件源/安装目录的内容摘要（跳过构建缓存、旧字节码与符号链接）。"""
     entries: list[tuple[str, bytes]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [name for name in dirnames if name not in EXCLUDED_DIRS]
         for filename in sorted(filenames):
             path = Path(dirpath, filename)
-            if path.suffix.lower() in EXCLUDED_SUFFIXES:
+            if path.suffix.lower() in EXCLUDED_SUFFIXES or path.is_symlink():
                 continue
             entries.append((path.relative_to(root).as_posix(), path.read_bytes()))
     return _content_digest(entries)
@@ -169,16 +169,20 @@ def source_digest(source: str | Path) -> str:
 def source_plugin_id(source: str | Path) -> str:
     """从插件源（源目录或 zip 交付包）的 ``plugin.json`` 读取插件 id。"""
     source = Path(source)
+    manifest: object
     if source.suffix.lower() == ".zip":
         try:
             with zipfile.ZipFile(source) as package:
                 raw = package.read("plugin.json")
-        except (OSError, KeyError, zipfile.BadZipFile) as exc:
+            manifest = json.loads(raw)
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile, RecursionError) as exc:
             raise ValueError(f"插件包无法读取 plugin.json：{source}：{exc}") from exc
-        manifest: object = json.loads(raw)
     else:
         manifest_path = source / "plugin.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError) as exc:
+            raise ValueError(f"插件源无法读取 plugin.json：{source}：{exc}") from exc
     if not isinstance(manifest, dict):
         raise TypeError(f"plugin.json 根值必须是对象：{source}")
     plugin_id = cast(dict[str, object], manifest).get("id")
@@ -363,7 +367,7 @@ class PluginManager:
 
     @staticmethod
     def _zip_directory(source: Path) -> bytes:
-        """把插件源目录打包成 ZIP（排除构建缓存与依赖目录）。"""
+        """把插件源目录打包成 ZIP（排除构建缓存、依赖目录与符号链接）。"""
         buffer = BytesIO()
         total_size = 0
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as package:
@@ -371,6 +375,8 @@ class PluginManager:
                 relative = path.relative_to(source)
                 if any(part in EXCLUDED_DIRS for part in relative.parts):
                     continue
+                if path.is_symlink():
+                    continue  # 不跟随符号链接：防把源外文件打进包
                 if not path.is_file() or path.suffix.lower() in EXCLUDED_SUFFIXES:
                     continue
                 total_size += path.stat().st_size
@@ -736,7 +742,7 @@ class PluginManager:
     async def _uninstall(
         self, plugin_id: str, *, keep_data: bool = False, drop: bool = False
     ) -> None:
-        record = self._get_record(plugin_id)
+        self._get_record(plugin_id)  # 未知插件 404 校验
         if plugin_id in self.fibers:
             await self._disable(plugin_id)
         await self._drop_plugin_data(plugin_id, keep_data=keep_data, drop=drop)
@@ -757,8 +763,6 @@ class PluginManager:
         self._prune_archives_dir()
         self.records.pop(plugin_id, None)
         self._write_registry()
-        if record.get("enabled"):
-            record["enabled"] = False
 
     async def update_config(
         self, plugin_id: str, config: Mapping[str, object]
@@ -1184,9 +1188,21 @@ class PluginManager:
         return records
 
     def _write_registry(self) -> None:
-        temporary = self.registry_file.with_suffix(".tmp")
-        temporary.write_text(json.dumps(self.records, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary, self.registry_file)
+        """原子写注册表（唯一临时文件 + fsync + 替换）：崩溃不半截，多实例不互踩。"""
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{self.registry_file.name}.",
+            suffix=".tmp",
+            dir=self.registry_file.parent,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(self.records, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.registry_file)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
 
 
 __all__: list[str] = ["PluginManager", "PluginManagerError", "PublicPluginRecord", "builtin_specs"]

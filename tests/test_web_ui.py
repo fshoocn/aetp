@@ -175,7 +175,6 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unified_error_envelope(self) -> None:
         """错误信封统一 ``{"error"}``：404 与路径参数转换失败的 400 都带真实原因。"""
-
         def typed_handler(_request: StarletteRequest, item_id: int) -> dict[str, int]:
             return {"item_id": item_id}
 
@@ -191,6 +190,12 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         status, _, body = _request(base_url, "/api/missing")
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body)["error"], "Not Found")
+
+    async def test_security_headers(self) -> None:
+        """响应统一携带 nosniff 安全头（静态与 API 同款）。"""
+        request = Request(f"http://127.0.0.1:{self.port}/api/web/ui")
+        with urlopen(request, timeout=5) as response:
+            self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
 
 
 class CorsTests(unittest.IsolatedAsyncioTestCase):
