@@ -24,7 +24,9 @@ export const menuModel = computed(() => {
             label: page.title,
             icon: page.menu_icon || 'pi pi-fw pi-box',
             to: page.path,
-            order: page.menu_order,
+            // 缺失 / 非法的 menu_order 会把排序算成 NaN（首页漂移）：
+            // 与后端 register_ui 的默认权重 0 对齐，保证排序确定
+            order: Number.isFinite(Number(page.menu_order)) ? Number(page.menu_order) : 0,
             id: page.id
         };
         const groupName = (typeof page.menu_group === 'string' ? page.menu_group.trim() : '') || 'AETP';

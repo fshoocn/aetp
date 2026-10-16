@@ -37,7 +37,9 @@ const itemClick = (event, item) => {
 
     if (item.items) {
         if (isActive.value) {
-            layoutState.activePath = layoutState.activePath.replace(item.path, '');
+            // 折叠子菜单：从活动路径摘掉本级路径（只认尾部匹配，防首匹配误替换）
+            const current = layoutState.activePath || '';
+            layoutState.activePath = current.endsWith(item.path) ? current.slice(0, -item.path.length) : current;
         } else {
             layoutState.activePath = fullPath.value;
             layoutState.menuHoverActive = true;

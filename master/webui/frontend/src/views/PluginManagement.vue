@@ -302,7 +302,7 @@ onMounted(loadPlugins);
                             </IconField>
                             <Button text icon="pi pi-plus" label="展开全部" @click="expandAll" />
                             <Button text icon="pi pi-minus" label="收起全部" @click="collapseAll" />
-                            <Button text icon="pi pi-refresh" label="刷新" :loading="loading" @click="loadPlugins" />
+                            <Button text icon="pi pi-refresh" label="刷新" :loading="loading" @click="loadPlugins()" />
                         </div>
                     </div>
                 </template>

@@ -63,6 +63,7 @@ watch(
 const layoutState = reactive({
     staticMenuInactive: false,
     overlayMenuActive: false,
+    mobileMenuActive: false,
     profileSidebarVisible: false,
     configSidebarVisible: false,
     sidebarExpanded: false,
@@ -79,7 +80,7 @@ export function useLayout() {
             return;
         }
 
-        document.startViewTransition(() => executeDarkModeToggle(event));
+        document.startViewTransition(() => executeDarkModeToggle());
     };
 
     const executeDarkModeToggle = () => {

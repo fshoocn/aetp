@@ -13,6 +13,14 @@ export default defineConfig({
         outDir: fileURLToPath(new URL('../static/ui/dist', import.meta.url)),
         emptyOutDir: true
     },
+    // 开发态把后端接口代理给本机节点（/ui-static 是 vite 自己的产物不代理；
+    // 生产由后端同源托管，无需代理）
+    server: {
+        proxy: {
+            '/api': 'http://127.0.0.1:8080',
+            '/plugin-ui': 'http://127.0.0.1:8080'
+        }
+    },
     optimizeDeps: {
         noDiscovery: true
     },
