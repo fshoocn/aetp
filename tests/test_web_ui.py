@@ -116,13 +116,23 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.port: int = _free_port()
         self.context.provide("node_kind", "master")
+        # 自备 SPA 产物替身：真实产物（static/ui/dist）是 gitignored 的构建输出，
+        # 测试不能依赖前端已构建（新克隆 / CI 上没有它照样要能跑）
+        ui_dist = Path(self.temp_dir.name) / "ui-dist"
+        ui_dist.mkdir()
+        (ui_dist / "index.html").write_text(
+            '<!doctype html><script type="module" src="/ui-static/assets/app.js"></script>',
+            encoding="utf-8",
+        )
         config_path = Path(self.temp_dir.name) / "config.ini"
         config_path.write_text(
             "[node]\n"
             "kind = master\n"
             f"install_root = {Path(self.temp_dir.name) / 'installed'}\n"
             "\n[web]\n"
-            f"port = {self.port}\n",
+            f"port = {self.port}\n"
+            "\n[webui]\n"
+            f"ui_directory = {ui_dist}\n",
             encoding="utf-8",
         )
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
