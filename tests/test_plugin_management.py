@@ -20,7 +20,10 @@ from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import DbPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
-from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
+from common.plugins.webapi.plugin_manager_plugin import (
+    MAX_CONFIG_BODY_BYTES,
+    PluginManagerPlugin,
+)
 
 _SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
 
@@ -538,6 +541,16 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             content_type="application/json",
         )
         self.assertEqual(status, 400)
+
+        # 请求体超限：413 拒绝（与其它入口同口径的输入上限）
+        status, _payload = await _arequest(
+            self.base_url,
+            "/api/plugins/config-sample/config",
+            method="PATCH",
+            body=b"x" * (MAX_CONFIG_BODY_BYTES + 1),
+            content_type="application/json",
+        )
+        self.assertEqual(status, 413)
 
     async def test_update_config_saves_when_disabled_and_reports_reload_failure(self) -> None:
         """未启用只保存（启用时生效）；重载失败如实报 422 且配置已保存。"""

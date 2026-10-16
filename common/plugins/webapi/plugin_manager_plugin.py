@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import ClassVar, cast
@@ -35,6 +36,35 @@ from .plugin_manager import (
     PublicPluginRecord,
     source_plugin_id,
 )
+
+#: 配置类接口的请求体上限（与 plugin.json 同量级；其余入口：ZIP 32 MiB、心跳 1 MiB）
+MAX_CONFIG_BODY_BYTES: int = 64 * 1024
+#: 超限请求的引流额度：拒绝前最多再读这么多字节丢弃，防无限长流挂死
+_DRAIN_SLACK: int = 256 * 1024
+
+
+async def _read_body_capped(request: Request, *, limit: int, message: str) -> bytes:
+    """读请求体（超限抛 413）。
+
+    超限不立刻中断读取，而是继续**引流丢弃**（最多再读 :data:`_DRAIN_SLACK`
+    字节）再拒绝：请求体读完后连接才能优雅收尾，否则服务端带未读数据关
+    连接触发 RST，客户端连拒绝响应都读不到。
+    """
+    chunks: list[bytes] = []
+    total = 0
+    overflow = False
+    async for chunk in request.stream():
+        total += len(chunk)
+        if overflow or total > limit:
+            overflow = True
+            chunks.clear()
+            if total > limit + _DRAIN_SLACK:
+                break  # 引流额度用完：不再陪恶意长流耗着
+            continue
+        chunks.append(chunk)
+    if overflow:
+        raise PluginManagerError(message, 413)
+    return b"".join(chunks)
 
 
 class PluginManagerPlugin(Service[None]):
@@ -228,27 +258,20 @@ class PluginManagerPlugin(Service[None]):
         @ctx.webapi.post("/api/plugins/upload", kind="api", name="plugins.upload")
         async def upload_plugin(_request: Request) -> dict[str, object] | JSONResponse:
             try:
-                declared_size = _request.headers.get("content-length")
-                if declared_size and int(declared_size) > MAX_ARCHIVE_SIZE:
-                    raise PluginManagerError("插件 ZIP 最大允许 32 MiB", 413)
-                chunks: list[bytes] = []
-                total_size = 0
-                async for chunk in _request.stream():
-                    total_size += len(chunk)
-                    if total_size > MAX_ARCHIVE_SIZE:
-                        raise PluginManagerError("插件 ZIP 最大允许 32 MiB", 413)
-                    chunks.append(chunk)
+                archive = await _read_body_capped(
+                    _request,
+                    limit=MAX_ARCHIVE_SIZE,
+                    message="插件 ZIP 最大允许 32 MiB",
+                )
                 # replace=1 是操作者在确认弹窗后给出的显式替换确认
                 replace = _request.query_params.get("replace", "") in {"1", "true", "yes"}
                 item = await asyncio.to_thread(
                     manager().run_from_web_thread,
-                    manager().install_archive(b"".join(chunks), replace=replace),
+                    manager().install_archive(archive, replace=replace),
                 )
                 return {"plugin": item}
             except PluginManagerError as error:
                 return error_response(error)
-            except ValueError:
-                return ctx.webapi.json({"error": "Content-Length 无效"}, status_code=400)
 
         @ctx.webapi.post("/api/plugins/{plugin_id}/enable", kind="api", name="plugins.enable")
         def enable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
@@ -287,8 +310,13 @@ class PluginManagerPlugin(Service[None]):
         ) -> dict[str, object] | JSONResponse:
             """部分更新插件配置（请求体 JSON 对象 = 要改的键值，其余键保留）。"""
             try:
+                raw_body = await _read_body_capped(
+                    _request,
+                    limit=MAX_CONFIG_BODY_BYTES,
+                    message="配置请求体最大允许 64 KiB",
+                )
                 try:
-                    body: object = await _request.json()
+                    body: object = json.loads(raw_body)
                 except (ValueError, RecursionError) as error:
                     raise PluginManagerError(
                         f"请求体不是合法 JSON：{error}", 400

@@ -15,6 +15,7 @@ from __future__ import annotations
 from .config import HeartbeatServerConfig
 from .plugin import HeartbeatServerPlugin
 from .registry import (
+    MAX_NODES,
     NODE_STATUS_EVENT,
     HeartbeatServerError,
     NodeRecord,
@@ -23,6 +24,7 @@ from .registry import (
 )
 
 __all__: list[str] = [
+    "MAX_NODES",
     "NODE_STATUS_EVENT",
     "HeartbeatServerConfig",
     "HeartbeatServerError",

@@ -25,6 +25,7 @@ from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from master_plugins.heartbeat import (
+    MAX_NODES,
     NODE_STATUS_EVENT,
     HeartbeatServerConfig,
     HeartbeatServerError,
@@ -333,6 +334,16 @@ class NodeRegistryTests(unittest.TestCase):
         ):
             with self.assertRaises(HeartbeatServerError):
                 self.registry.accept(payload)
+
+    def test_node_count_cap_rejects_new_nodes(self) -> None:
+        """节点数上限：满员后新节点 429 拒绝，已登记节点照常服务（防未认证灌内存）。"""
+        for index in range(MAX_NODES):
+            self.registry.accept(_beat_payload(node_id=f"节点-{index}"))
+        with self.assertRaises(HeartbeatServerError) as caught:
+            self.registry.accept(_beat_payload(node_id="超编节点"))
+        self.assertEqual(caught.exception.status_code, 429)
+        record, _ = self.registry.accept(_beat_payload(node_id="节点-0"))
+        self.assertEqual(record.node_id, "节点-0")
 
 
 class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):

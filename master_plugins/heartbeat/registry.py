@@ -30,6 +30,8 @@ NODE_STATUS_EVENT = "heartbeat/node-status"
 
 #: 节点标识长度上限（与 plugin.json 的 id 同量级）
 MAX_NODE_ID: int = 64
+#: 注册表节点数上限：心跳接口未认证，防恶意 / 异常上报灌内存（已登记节点不受影响）
+MAX_NODES: int = 1024
 #: 节点标识禁止的字符：路径分隔与控制字符（node_id 会出现在 URL 路径里）
 _FORBIDDEN_NODE_ID: frozenset[str] = frozenset({"/", "\\", "#", "?", "%", "\r", "\n", "\t"})
 
@@ -136,6 +138,12 @@ class NodeRegistry:
         now = self._wall()  # 墙钟：展示时间戳
         record = self._nodes.get(node_id)
         is_new = record is None
+        if is_new and len(self._nodes) >= MAX_NODES:
+            raise HeartbeatServerError(
+                f"节点数已达上限（{MAX_NODES}），拒绝登记新节点：{node_id}",
+                429,
+                code="too_many_nodes",
+            )
         if record is None:
             record = NodeRecord(node_id=node_id, first_seen=now)
             self._nodes[node_id] = record
@@ -348,6 +356,7 @@ def _text(value: object, fallback: str) -> str:
 
 
 __all__: list[str] = [
+    "MAX_NODES",
     "MAX_NODE_ID",
     "NODE_STATUS_EVENT",
     "HeartbeatServerError",
