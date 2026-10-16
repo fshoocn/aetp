@@ -103,9 +103,9 @@ class HeartbeatServerPlugin:
             entry="NodesPage.vue",
             path="/nodes",
             title="从模块管理",
-            menu_group="节点",
+            menu_group="",
             menu_icon="pi pi-desktop",
-            menu_order=20,
+            menu_order=1,
         )
         self._task = asyncio.create_task(self._sweep_loop())
         self._task.add_done_callback(self._log_task_exit)

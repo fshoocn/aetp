@@ -67,36 +67,52 @@ class _BuiltinSpec(TypedDict):
 #: 内置插件（``common/plugins/`` 直装、由 node_runtime 装配，不走安装器）：
 #: 列表照常展示，但**禁止安装 / 升级 / 启停 / 卸载**——上传同 id 插件包
 #: 一律拒绝，否则会装出与内置服务同名冲突的「影子插件」。
-BUILTIN_PLUGINS: Final[dict[str, _BuiltinSpec]] = {
-    "appconfig": {
-        "name": "应用配置",
-        "version": "1.0.0",
-        "entrypoint": "common.plugins.appconfig:AppConfigPlugin",
-        "kind": ["any"],
-        "root": _PLUGINS_ROOT / "appconfig",
-    },
-    "db": {
-        "name": "数据库服务",
-        "version": "1.0.0",
-        "entrypoint": "common.plugins.db:DbPlugin",
-        "kind": ["any"],
-        "root": _PLUGINS_ROOT / "db",
-    },
-    "webapi": {
-        "name": "Web API 服务",
-        "version": "1.0.0",
-        "entrypoint": "common.plugins.webapi:WebApiPlugin",
-        "kind": ["any"],
-        "root": _PLUGINS_ROOT / "webapi",
-    },
-    "plugin-manager": {
-        "name": "插件管理",
-        "version": "1.0.0",
-        "entrypoint": "common.plugins.webapi.plugin_manager_plugin:PluginManagerPlugin",
-        "kind": ["any"],
-        "root": _PLUGINS_ROOT / "webapi",
-    },
-}
+#:
+#: 内置身份**自动识别**（不维护手写清单）：凡从 ``common.plugins`` 包树
+#: 加载的插件类即内置，展示元数据取插件类属性，见 :func:`builtin_specs`。
+
+
+def is_builtin_plugin(plugin: object) -> bool:
+    """插件类是否内置：定义在 ``common.plugins`` 包树下即内置。"""
+    module = getattr(plugin, "__module__", "") or ""
+    return module == "common.plugins" or module.startswith("common.plugins.")
+
+
+def _builtin_entrypoint(plugin: type) -> str:
+    """插件类的规范导入路径：包 ``__init__`` 重导出时取包路径，否则取定义模块。"""
+    module = plugin.__module__
+    package = module.rpartition(".")[0]
+    if package and getattr(sys.modules.get(package), plugin.__name__, None) is plugin:
+        module = package
+    return f"{module}:{plugin.__name__}"
+
+
+def builtin_specs(ctx: Context) -> dict[str, _BuiltinSpec]:
+    """当前上下文**已加载**的内置插件元数据（key 为插件 id）。
+
+    事实源是 cordis 注册表里已加载的插件：凡从 ``common.plugins`` 包树加载的
+    插件类默认即内置（安装插件是 ``_aetp_plugin_*`` 合成模块名，天然不命中）。
+    展示名 / 版本取插件类属性 ``display_name`` / ``version``（缺省回退
+    id / ``1.0.0``），``entrypoint`` 取规范导入路径，``root`` 为类定义所在
+    目录（描述文件 README.md 所在）。
+    """
+    specs: dict[str, _BuiltinSpec] = {}
+    for runtime in list(ctx.registry.values()):
+        plugin = runtime.callback
+        if not isinstance(plugin, type) or not is_builtin_plugin(plugin):
+            continue
+        plugin_id = getattr(plugin, "name", None) or runtime.name
+        if not isinstance(plugin_id, str) or not plugin_id:
+            continue
+        module_file = getattr(sys.modules.get(plugin.__module__), "__file__", None)
+        specs[plugin_id] = {
+            "name": getattr(plugin, "display_name", None) or plugin_id,
+            "version": getattr(plugin, "version", None) or "1.0.0",
+            "entrypoint": _builtin_entrypoint(plugin),
+            "kind": list(getattr(plugin, "kind", None) or ["any"]),
+            "root": Path(module_file).parent if module_file else _PLUGINS_ROOT,
+        }
+    return specs
 
 
 
@@ -273,6 +289,10 @@ class PluginManager:
         self.fibers: dict[str, Fiber] = {}
         self._operation_lock = asyncio.Lock()
 
+    def _builtins(self) -> dict[str, _BuiltinSpec]:
+        """内置插件元数据（按已加载插件动态发现，见 :func:`builtin_specs`）。"""
+        return builtin_specs(self.ctx)
+
     @staticmethod
     def _module_name(plugin_id: str) -> str:
         return f"_aetp_plugin_{plugin_id.encode('ascii').hex()}"
@@ -310,12 +330,12 @@ class PluginManager:
                 "builtin": True,
                 "protected": True,
             }
-            for plugin_id, spec in sorted(BUILTIN_PLUGINS.items())
+            for plugin_id, spec in sorted(self._builtins().items())
         ]
 
     def _reject_builtin(self, plugin_id: str, action: str) -> None:
         """内置插件随平台直装，不经插件管理器安装，拒绝任何变装操作。"""
-        if plugin_id in BUILTIN_PLUGINS:
+        if plugin_id in self._builtins():
             raise PluginManagerError(
                 f"内置插件 {plugin_id!r} 随平台直装，不支持{action}", 403
             )
@@ -874,7 +894,7 @@ class PluginManager:
         missing = [
             dependency["plugin"]
             for dependency in manifest["dependencies"]
-            if dependency["plugin"] not in self.records and dependency["plugin"] not in BUILTIN_PLUGINS
+            if dependency["plugin"] not in self.records and dependency["plugin"] not in self._builtins()
         ]
         if missing:
             unique = ", ".join(sorted(set(missing)))
@@ -950,7 +970,7 @@ class PluginManager:
                 sys.modules.pop(module_name, None)
 
     def _get_record(self, plugin_id: str) -> _PluginRecord:
-        if plugin_id in BUILTIN_PLUGINS:
+        if plugin_id in self._builtins():
             raise PluginManagerError(
                 f"内置插件 {plugin_id!r} 随平台直装，没有安装记录", 404
             )
@@ -993,7 +1013,7 @@ class PluginManager:
         展示。文件名固定（无路径拼接，无穿越风险）；缺失报 404、超大
         报 413、非 UTF-8 报 400。内置插件读源码包根（``common/plugins/``）。
         """
-        spec = BUILTIN_PLUGINS.get(plugin_id)
+        spec = self._builtins().get(plugin_id)
         if spec is not None:
             package_root = spec["root"]
         else:
@@ -1045,7 +1065,7 @@ class PluginManager:
         for plugin_id, raw_record in cast(dict[str, object], data).items():
             # 防影子插件：遗留注册表里的内置 id 一律丢弃（安装现已拒绝，
             # 这里清掉保护上线前的残留，避免与直装服务同名冲突）
-            if plugin_id in BUILTIN_PLUGINS:
+            if plugin_id in self._builtins():
                 continue
             if not isinstance(raw_record, dict):
                 raise TypeError(f"插件 {plugin_id!r} 的注册表记录必须是对象")
@@ -1058,4 +1078,4 @@ class PluginManager:
         os.replace(temporary, self.registry_file)
 
 
-__all__: list[str] = ["PluginManager", "PluginManagerError", "PublicPluginRecord"]
+__all__: list[str] = ["PluginManager", "PluginManagerError", "PublicPluginRecord", "builtin_specs"]

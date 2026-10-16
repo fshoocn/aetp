@@ -17,6 +17,7 @@ from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
 from common.node_runtime import ensure_installed
 from common.plugins.appconfig import AppConfigPlugin
+from common.plugins.db import DbPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
@@ -150,10 +151,13 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             f"install_root = {Path(self.temp_dir.name) / 'installed'}\n"
             f"plugins = {_SOURCE_ROOT / 'master' / 'webui'}\n"
             "\n[web]\n"
-            f"port = {self.port}\n",
+            f"port = {self.port}\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(Path(self.temp_dir.name) / 'aetp.db').as_posix()}\n",
             encoding="utf-8",
         )
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)
         await self.context.plugin(WebApiPlugin)
         await self.context.plugin(PluginManagerPlugin)
         plugins = self.context.plugins

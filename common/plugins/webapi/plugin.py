@@ -71,6 +71,9 @@ class WebApiPlugin:
     """
 
     name: ClassVar[str] = "webapi"
+    #: 展示名与版本：内置插件没有 plugin.json，清单元数据由插件类属性提供
+    display_name: ClassVar[str] = "Web API 服务"
+    version: ClassVar[str] = "1.0.0"
     inject: ClassVar[list[str]] = ["appconfig"]
     #: 配置模型（标准 Schema）：驱动校验、默认值注入与写回
     Config: ClassVar[type[WebApiConfig]] = WebApiConfig

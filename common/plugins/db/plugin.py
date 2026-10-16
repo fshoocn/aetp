@@ -33,8 +33,11 @@ from .service import DbService
 class DbPlugin:
     """db 插件：依赖 ``ctx.appconfig`` 读 ``[db]`` 节，注册 ``ctx.db`` 服务。"""
 
-    #: 插件名
+    #: 插件名（即插件 id）
     name: ClassVar[str] = "db"
+    #: 展示名与版本：内置插件没有 plugin.json，清单元数据由插件类属性提供
+    display_name: ClassVar[str] = "数据库服务"
+    version: ClassVar[str] = "1.0.0"
     #: 依赖应用配置（读 ``[db]`` 节与 ``[node] install_root``）
     inject: ClassVar[list[str]] = ["appconfig"]
     #: 配置模型（标准 Schema）：驱动校验、默认值注入与写回
@@ -63,10 +66,10 @@ class DbPlugin:
         self.ctx.fiber.effect(lambda: self.service.shutdown, "plugins.db.shutdown")
 
     def _installed_plugin_ids(self) -> set[str]:
-        """现存插件 id 事实源：``registry.json`` + ``BUILTIN_PLUGINS``（不反向注入 plugin-manager）。"""
-        from common.plugins.webapi.plugin_manager import BUILTIN_PLUGINS
+        """现存插件 id 事实源：``registry.json`` + 已加载的内置插件（不反向注入 plugin-manager）。"""
+        from common.plugins.webapi.plugin_manager import builtin_specs
 
-        ids = set(BUILTIN_PLUGINS)
+        ids = set(builtin_specs(self.ctx))
         registry_file = _install_root(self.ctx)
         manifest = registry_file / "registry.json" if registry_file is not None else None
         if manifest is not None and manifest.is_file():

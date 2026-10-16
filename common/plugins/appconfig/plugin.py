@@ -41,8 +41,11 @@ class AppConfigPlugin(Service[dict[str, object]]):
 
     #: 服务名：其他插件 ``inject = ["appconfig"]`` 后经 ``ctx.appconfig`` 取配置
     provide: str | None = "appconfig"
-    #: 插件名
+    #: 插件名（即插件 id）
     name: str = "appconfig"
+    #: 展示名与版本：内置插件没有 plugin.json，清单元数据由插件类属性提供
+    display_name: ClassVar[str] = "应用配置"
+    version: ClassVar[str] = "1.0.0"
     #: 配置是最早就绪的基础服务，不依赖其他服务
     inject: ClassVar[list[str]] = []
 

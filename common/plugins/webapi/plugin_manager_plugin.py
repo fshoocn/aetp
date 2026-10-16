@@ -45,6 +45,9 @@ class PluginManagerPlugin(Service[None]):
     """
 
     name: str = "plugin-manager"
+    #: 展示名与版本：内置插件没有 plugin.json，清单元数据由插件类属性提供
+    display_name: ClassVar[str] = "插件管理"
+    version: ClassVar[str] = "1.0.0"
     provide: str | None = "plugins"
     inject: ClassVar[list[str]] = ["appconfig", "webapi"]
 
