@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getBackendUrl, request } from '@/service/backend';
 import MarkdownDoc from '@/components/MarkdownDoc.vue';
 
@@ -14,12 +14,13 @@ const error = ref('');
 const notice = ref('');
 const uploadRef = ref(null);
 
-// 描述文件弹窗（README.md，Markdown 渲染）
+// 描述文件弹窗（README.md，Markdown 渲染）；docsAbort 防止后完成的慢请求覆盖新内容
 const docsVisible = ref(false);
 const docsPlugin = ref(null);
 const docsContent = ref('');
 const docsLoading = ref(false);
 const docsError = ref('');
+let docsAbort = null;
 
 const enabledCount = computed(() => plugins.value.filter((plugin) => plugin.enabled).length);
 
@@ -202,20 +203,27 @@ function replacePlugin(updated) {
 }
 
 async function openDocs(plugin) {
+    docsAbort?.abort(); // 切换目标：中止旧请求，慢响应不得覆盖新内容
+    const controller = new AbortController();
+    docsAbort = controller;
     docsPlugin.value = plugin;
     docsContent.value = '';
     docsError.value = '';
     docsLoading.value = true;
     docsVisible.value = true;
     try {
-        const data = await request(`/api/plugins/${encodeURIComponent(plugin.id)}/readme`);
+        const data = await request(`/api/plugins/${encodeURIComponent(plugin.id)}/readme`, { signal: controller.signal });
+        if (docsAbort !== controller) return;
         docsContent.value = data.content;
     } catch (reason) {
+        if (controller.signal.aborted) return; // 主动取消：不写回过期状态
         docsError.value = reason instanceof Error ? reason.message : String(reason);
     } finally {
-        docsLoading.value = false;
+        if (docsAbort === controller) docsLoading.value = false;
     }
 }
+
+onBeforeUnmount(() => docsAbort?.abort());
 
 function onUploader(event) {
     if (uploading.value) return;
