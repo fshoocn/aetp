@@ -29,23 +29,14 @@ function renderInline(escaped) {
         codes.push(`<code>${code}</code>`);
         return `\u0000${codes.length - 1}\u0000`;
     });
-    text = text.replace(
-        /\[([^\]]+)\]\(([^)\s]+)\)/g,
-        (_match, label, url) => `<a href="${safeUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
-    );
+    text = text.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, url) => `<a href="${safeUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`);
     text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     text = text.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
     return text.replace(/\u0000(\d+)\u0000/g, (_match, index) => codes[Number(index)]);
 }
 
 function isBlockStart(line) {
-    return (
-        /^\s*```/.test(line) ||
-        /^(#{1,6})\s+/.test(line) ||
-        /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line) ||
-        /^\s*>\s?/.test(line) ||
-        /^\s*([-*+]|\d+\.)\s+/.test(line)
-    );
+    return /^\s*```/.test(line) || /^(#{1,6})\s+/.test(line) || /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line) || /^\s*>\s?/.test(line) || /^\s*([-*+]|\d+\.)\s+/.test(line);
 }
 
 /**
@@ -55,7 +46,9 @@ function isBlockStart(line) {
  * @returns {string} HTML 片段
  */
 export function renderMarkdown(source) {
-    const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n');
+    const lines = String(source ?? '')
+        .replace(/\r\n?/g, '\n')
+        .split('\n');
     const html = [];
     let index = 0;
     while (index < lines.length) {

@@ -76,7 +76,8 @@ function apply(value) {
 
     <Dialog v-model:visible="visible" header="切换后端地址" :modal="true" :style="{ width: '26rem' }">
         <p class="m-0 mb-3 text-sm opacity-80">
-            当前后端：<strong>{{ currentLabel }}</strong>。保存后插件 API 与 UI 资源改从新地址加载，页面自动刷新。
+            当前后端：<strong>{{ currentLabel }}</strong
+            >。保存后插件 API 与 UI 资源改从新地址加载，页面自动刷新。
         </p>
         <InputText v-model="input" class="w-full" placeholder="http://127.0.0.1:8080（留空 = 与页面同源）" @keyup.enter="apply(input)" />
         <p v-if="message" class="m-0 mt-2 text-sm" :class="isError ? 'text-red-500' : 'text-green-600'">{{ message }}</p>

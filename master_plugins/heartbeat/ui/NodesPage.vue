@@ -5,82 +5,109 @@
                 <h2>从模块管理</h2>
                 <p class="nodes-page__hint">按「最后心跳时间 + 超时阈值」判定在线状态；点击行查看状态历史</p>
             </div>
-            <div class="nodes-page__toolbar">
-                <button type="button" class="nodes-page__button" @click="toggleAuto">
-                    {{ auto ? '暂停自动刷新' : '恢复自动刷新' }}
-                </button>
-                <button type="button" class="nodes-page__button" @click="load">立即刷新</button>
+            <div class="nodes-page__actions">
+                <Button :label="auto ? '暂停自动刷新' : '恢复自动刷新'" severity="secondary" outlined size="small" @click="toggleAuto" />
+                <Button label="立即刷新" icon="pi pi-refresh" size="small" :loading="loading" @click="load()" />
             </div>
         </header>
 
-        <p v-if="error" class="nodes-page__error" role="alert">{{ error }}</p>
+        <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
 
-        <table class="nodes-page__table">
-            <thead>
-                <tr>
-                    <th>节点</th>
-                    <th>类型</th>
-                    <th>状态</th>
-                    <th>地址</th>
-                    <th>最近心跳</th>
-                    <th>错过周期</th>
-                    <th>seq</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr v-for="item in nodes" :key="item.node_id" @click="showDetail(item.node_id)">
-                    <td>{{ item.node_id }}</td>
-                    <td>{{ item.node_kind || '—' }}</td>
-                    <td>
-                        <span class="nodes-page__status" :class="'is-' + item.status">
-                            {{ statusText(item.status) }}
-                        </span>
-                    </td>
-                    <td>{{ item.address || '—' }}</td>
-                    <td>{{ formatTime(item.last_seen) }}</td>
-                    <td>{{ item.missed }}</td>
-                    <td>{{ item.seq }}</td>
-                    <td class="nodes-page__actions" @click.stop>
-                        <a
-                            v-if="item.address"
-                            class="nodes-page__link"
-                            :href="item.address"
-                            target="_blank"
-                            rel="noopener"
-                        >打开</a>
-                        <button
-                            type="button"
-                            class="nodes-page__button nodes-page__button--danger"
-                            @click="removeNode(item.node_id)"
-                        >移除</button>
-                    </td>
-                </tr>
-                <tr v-if="!nodes.length">
-                    <td colspan="8" class="nodes-page__empty">暂无从模块上报</td>
-                </tr>
-            </tbody>
-        </table>
+        <DataTable
+            :value="rows"
+            dataKey="node_id"
+            :filters="filters"
+            :globalFilterFields="['node_id', 'node_kind', 'status', 'address', 'last_seen_text']"
+            filterDisplay="row"
+            :loading="loading"
+            :rowHover="true"
+            scrollable
+            selectionMode="single"
+            v-model:selection="selected"
+            @row-select="onRowSelect"
+        >
+            <template #header>
+                <div class="nodes-page__toolbar">
+                    <IconField>
+                        <InputIcon><i class="pi pi-search" /></InputIcon>
+                        <InputText v-model="filters.global.value" placeholder="搜索节点 / 类型 / 地址…" />
+                    </IconField>
+                </div>
+            </template>
+            <Column field="node_id" header="节点" sortable filterMatchMode="contains" style="min-width: 8rem">
+                <template #filter="{ filterModel }">
+                    <InputText v-model="filterModel.value" placeholder="搜索" class="nodes-page__filter" />
+                </template>
+            </Column>
+            <Column field="node_kind" header="类型" sortable filterMatchMode="contains" style="min-width: 9rem">
+                <template #body="{ data }">{{ data.node_kind || '—' }}</template>
+                <template #filter="{ filterModel }">
+                    <InputText v-model="filterModel.value" placeholder="搜索" class="nodes-page__filter" />
+                </template>
+            </Column>
+            <Column field="status" header="状态" sortable filterMatchMode="equals" style="min-width: 8rem">
+                <template #body="{ data }">
+                    <Tag :value="statusText(data.status)" :severity="statusSeverity(data.status)" />
+                </template>
+                <template #filter="{ filterModel }">
+                    <Select v-model="filterModel.value" :options="statusFilterOptions" optionLabel="label" optionValue="value" placeholder="全部" showClear class="nodes-page__filter" />
+                </template>
+            </Column>
+            <Column field="address" header="地址" sortable filterMatchMode="contains" style="min-width: 10rem">
+                <template #body="{ data }">{{ data.address || '—' }}</template>
+                <template #filter="{ filterModel }">
+                    <InputText v-model="filterModel.value" placeholder="搜索" class="nodes-page__filter" />
+                </template>
+            </Column>
+            <Column field="last_seen" filterField="last_seen_text" header="最近心跳" sortable filterMatchMode="contains" style="min-width: 10rem">
+                <template #body="{ data }">{{ data.last_seen_text }}</template>
+                <template #filter="{ filterModel }">
+                    <InputText v-model="filterModel.value" placeholder="搜索" class="nodes-page__filter" />
+                </template>
+            </Column>
+            <Column field="missed" header="错过周期" sortable filterMatchMode="contains" style="min-width: 8rem">
+                <template #filter="{ filterModel }">
+                    <InputText v-model="filterModel.value" placeholder="搜索" class="nodes-page__filter" />
+                </template>
+            </Column>
+            <Column field="seq" header="seq" sortable filterMatchMode="contains" style="min-width: 7rem">
+                <template #filter="{ filterModel }">
+                    <InputText v-model="filterModel.value" placeholder="搜索" class="nodes-page__filter" />
+                </template>
+            </Column>
+            <Column header="操作" frozen alignFrozen="right" style="min-width: 12rem">
+                <template #body="{ data }">
+                    <div class="nodes-page__actions" @click.stop>
+                        <Button v-if="data.address" label="打开" icon="pi pi-external-link" size="small" severity="secondary" text @click="openAddress(data.address)" />
+                        <Button label="移除" icon="pi pi-trash" size="small" severity="danger" text @click="removeNode(data.node_id)" />
+                    </div>
+                </template>
+            </Column>
+            <template #empty>
+                <span class="nodes-page__muted">暂无从模块上报</span>
+            </template>
+        </DataTable>
 
-        <section v-if="detail" class="nodes-page__detail">
-            <h3>{{ detail.node.node_id }} · 详情</h3>
+        <Panel v-if="detail" :header="`${detail.node.node_id} · 详情`">
             <p class="nodes-page__hint">
                 首次上线 {{ formatTime(detail.node.first_seen) }}，能力
                 {{ detail.node.caps_count }} 项、未识别 {{ detail.node.unparsed_count }} 项
             </p>
 
             <h4>状态历史</h4>
-            <ul class="nodes-page__history">
-                <li v-for="(entry, index) in detail.history" :key="index">
-                    <span class="nodes-page__time">{{ formatTime(entry.at) }}</span>
-                    <span>{{ describeHistory(entry) }}</span>
-                </li>
-                <li v-if="!detail.history.length" class="nodes-page__empty">暂无状态转换</li>
-            </ul>
+            <Timeline v-if="detail.history.length" :value="detail.history">
+                <template #content="slotProps">
+                    <span class="nodes-page__time">{{ formatTime(slotProps.item.at) }}</span>
+                    <span>{{ describeHistory(slotProps.item) }}</span>
+                </template>
+            </Timeline>
+            <p v-else class="nodes-page__muted">暂无状态转换</p>
 
-            <h4 v-if="detail.unparsed.length">未识别能力条目</h4>
-            <pre v-if="detail.unparsed.length" class="nodes-page__raw">{{ pretty(detail.unparsed) }}</pre>
-        </section>
+            <template v-if="detail.unparsed.length">
+                <h4>未识别能力条目</h4>
+                <pre class="nodes-page__raw">{{ pretty(detail.unparsed) }}</pre>
+            </template>
+        </Panel>
     </section>
 </template>
 
@@ -110,20 +137,46 @@ export default {
             detail: null,
             error: '',
             auto: true,
-            timer: null
+            loading: false,
+            selected: null,
+            timer: null,
+            statusFilterOptions: [
+                { label: '在线', value: 'online' },
+                { label: '离线', value: 'offline' },
+                { label: '失联', value: 'lost' }
+            ],
+            // DataTable 的 filters 是「字段 → { value, matchMode }」元数据
+            filters: {
+                global: { value: null, matchMode: 'contains' },
+                node_id: { value: null, matchMode: 'contains' },
+                node_kind: { value: null, matchMode: 'contains' },
+                status: { value: null, matchMode: 'equals' },
+                address: { value: null, matchMode: 'contains' },
+                last_seen_text: { value: null, matchMode: 'contains' },
+                missed: { value: null, matchMode: 'contains' },
+                seq: { value: null, matchMode: 'contains' }
+            }
         };
+    },
+    computed: {
+        rows() {
+            // 展示行：补一个格式化后的最近心跳文本，供筛选用（排序仍按原始时间戳）
+            return this.nodes.map((node) => ({ ...node, last_seen_text: this.formatTime(node.last_seen) }));
+        }
     },
     mounted() {
         this.load();
         this.timer = window.setInterval(() => {
-            if (this.auto) this.load();
+            if (this.auto) this.load(true);
         }, 5000);
     },
     beforeUnmount() {
         if (this.timer) window.clearInterval(this.timer);
     },
     methods: {
-        async load() {
+        async load(silent) {
+            // 后台轮询（silent）不触发加载遮罩 / 转圈，仅首次进入与手动刷新显示
+            if (!silent) this.loading = true;
             try {
                 const response = await fetch(apiUrl('/api/heartbeat/nodes'));
                 const data = await response.json();
@@ -135,6 +188,8 @@ export default {
                 if (this.detail) await this.showDetail(this.detail.node.node_id, true);
             } catch (reason) {
                 this.error = String(reason && reason.message ? reason.message : reason);
+            } finally {
+                this.loading = false;
             }
         },
         async showDetail(nodeId, silent) {
@@ -171,6 +226,15 @@ export default {
         toggleAuto() {
             this.auto = !this.auto;
         },
+        onRowSelect(event) {
+            this.showDetail(event.data.node_id);
+        },
+        openAddress(address) {
+            window.open(address, '_blank', 'noopener');
+        },
+        statusSeverity(status) {
+            return { online: 'success', offline: 'warn', lost: 'danger' }[status] || 'secondary';
+        },
         statusText(status) {
             return STATUS_TEXT[status] || status;
         },
@@ -193,10 +257,12 @@ export default {
 </script>
 
 <style scoped>
+/* 插件 SFC 用不了运行时 Tailwind：仅保留布局所需的少量样式，
+   组件外观全部来自共享 PrimeVue 组件与宿主语义变量（见开发文档 §24） */
 .nodes-page {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.25rem;
 }
 
 .nodes-page__header {
@@ -210,41 +276,14 @@ export default {
     margin: 0;
 }
 
-.nodes-page__toolbar {
-    display: flex;
-    gap: 0.5rem;
-}
-
 .nodes-page__hint {
     margin: 0.25rem 0 0;
-    color: var(--text-color-secondary, #64748b);
+    color: var(--text-color-secondary);
     font-size: 0.875rem;
 }
 
-.nodes-page__error {
-    margin: 0;
-    color: #dc2626;
-}
-
-.nodes-page__table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.nodes-page__table th,
-.nodes-page__table td {
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--surface-border, #e2e8f0);
-    text-align: left;
-    font-size: 0.875rem;
-}
-
-.nodes-page__table tbody tr {
-    cursor: pointer;
-}
-
-.nodes-page__table tbody tr:hover {
-    background: var(--surface-hover, #f8fafc);
+.nodes-page__muted {
+    color: var(--text-color-secondary);
 }
 
 .nodes-page__actions {
@@ -253,76 +292,30 @@ export default {
     white-space: nowrap;
 }
 
-.nodes-page__button,
-.nodes-page__link {
-    padding: 0.25rem 0.625rem;
-    border: 1px solid var(--surface-border, #e2e8f0);
-    border-radius: 6px;
-    background: var(--surface-card, #ffffff);
-    color: var(--text-color, #334155);
-    font-size: 0.8125rem;
-    cursor: pointer;
-    text-decoration: none;
+.nodes-page__toolbar {
+    display: flex;
+    gap: 0.5rem;
 }
 
-.nodes-page__button--danger {
-    color: #dc2626;
-    border-color: #fecaca;
-}
-
-.nodes-page__status {
-    padding: 0.125rem 0.5rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    color: #ffffff;
-}
-
-.nodes-page__status.is-online {
-    background: #16a34a;
-}
-
-.nodes-page__status.is-offline {
-    background: #d97706;
-}
-
-.nodes-page__status.is-lost {
-    background: #dc2626;
-}
-
-.nodes-page__detail {
-    padding: 1rem;
-    border: 1px solid var(--surface-border, #e2e8f0);
-    border-radius: 8px;
-    background: var(--surface-card, #ffffff);
-}
-
-.nodes-page__detail h3,
-.nodes-page__detail h4 {
-    margin: 0.5rem 0;
-}
-
-.nodes-page__history {
-    margin: 0;
-    padding-left: 1.25rem;
-    font-size: 0.875rem;
+.nodes-page__filter {
+    width: 100%;
 }
 
 .nodes-page__time {
-    margin-right: 0.5rem;
-    color: var(--text-color-secondary, #64748b);
+    display: inline-block;
+    margin-right: 0.75rem;
+    color: var(--text-color-secondary);
+    font-variant-numeric: tabular-nums;
 }
 
 .nodes-page__raw {
     max-height: 16rem;
+    margin: 0;
     overflow: auto;
     padding: 0.75rem;
-    border-radius: 6px;
-    background: var(--surface-ground, #f1f5f9);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--content-border-radius);
+    background: var(--surface-card);
     font-size: 0.75rem;
-}
-
-.nodes-page__empty {
-    color: var(--text-color-secondary, #64748b);
-    text-align: center;
 }
 </style>

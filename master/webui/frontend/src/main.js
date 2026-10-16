@@ -2,6 +2,7 @@ import { createApp } from 'vue';
 import App from './App.vue';
 import router from './router/index.js';
 import { initializePluginUi } from './plugins/ui-runtime.js';
+import { registerSharedComponents } from './plugins/shared-components.js';
 
 import Aura from '@primeuix/themes/aura';
 import PrimeVue from 'primevue/config';
@@ -24,6 +25,8 @@ async function bootstrap() {
     });
     app.use(ToastService);
     app.use(ConfirmationService);
+    // 插件 SFC 的共享组件（运行时解析全局注册，见 src/plugins/shared-components.js）
+    registerSharedComponents(app);
 
     try {
         await initializePluginUi();

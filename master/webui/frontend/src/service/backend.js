@@ -33,7 +33,9 @@ export function getBackendUrl() {
  * @throws {TypeError} 非 http(s) 地址或无法解析的 URL
  */
 export function normalizeBackendUrl(value) {
-    const text = String(value ?? '').trim().replace(/\/+$/, '');
+    const text = String(value ?? '')
+        .trim()
+        .replace(/\/+$/, '');
     if (!text) return '';
     let parsed;
     try {

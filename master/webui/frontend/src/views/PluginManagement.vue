@@ -12,8 +12,7 @@ const uploading = ref(false);
 const pending = ref('');
 const error = ref('');
 const notice = ref('');
-const uploadInput = ref(null);
-const dragActive = ref(false);
+const uploadRef = ref(null);
 
 // 描述文件弹窗（README.md，Markdown 渲染）
 const docsVisible = ref(false);
@@ -23,6 +22,89 @@ const docsLoading = ref(false);
 const docsError = ref('');
 
 const enabledCount = computed(() => plugins.value.filter((plugin) => plugin.enabled).length);
+
+// 展示分组：用户安装 → 预装 → 内置（内置记录自带 protected=True，第二段须先排除 builtin）
+const pluginGroups = computed(() => [
+    {
+        key: 'installed',
+        label: '用户安装插件',
+        hint: 'ZIP 上传安装，可启停 / 卸载 / 覆盖升级',
+        items: plugins.value.filter((plugin) => !plugin.builtin && !plugin.protected)
+    },
+    {
+        key: 'preinstalled',
+        label: '预装插件',
+        hint: '平台预装：停用 / 卸载后重启会自动重装',
+        items: plugins.value.filter((plugin) => !plugin.builtin && plugin.protected)
+    },
+    {
+        key: 'builtin',
+        label: '内置插件',
+        hint: '随平台直装，不可安装 / 升级 / 启停 / 卸载',
+        items: plugins.value.filter((plugin) => plugin.builtin)
+    }
+]);
+
+// 表头搜索框：TreeTable 自带的全局过滤会按「先命中的列字段」裁剪子节点，跨列匹配会漏行，
+// 故全局搜索自己做（覆盖名称 / ID / 版本 / 状态 / 入口）；逐列筛选仍走 filters
+const query = ref('');
+
+function matchesQuery(plugin) {
+    const keyword = query.value.trim().toLowerCase();
+    if (!keyword) return true;
+    return [plugin.name, plugin.id, plugin.version, plugin.entrypoint, plugin.enabled ? '运行中' : '已停用'].some((value) => String(value).toLowerCase().includes(keyword));
+}
+
+// 表头排序：TreeTable 的 sortNodesSingle 只排根层（分组行之间），组内插件排序自己做；
+// 表头点击 / aria-sort 仍由 TreeTable 驱动，经 v-model 同步排序状态
+const sortField = ref(null);
+const sortOrder = ref(null);
+const collator = new Intl.Collator(undefined, { numeric: true });
+
+function toRowData(plugin) {
+    return {
+        ...plugin,
+        type: 'plugin',
+        status_text: plugin.enabled ? '运行中' : '已停用',
+        search_key: `${plugin.name} ${plugin.id}`
+    };
+}
+
+function compareRows(left, right) {
+    const direction = sortOrder.value === -1 ? -1 : 1;
+    return direction * collator.compare(left[sortField.value] ?? '', right[sortField.value] ?? '');
+}
+
+// TreeTable 分组节点：用户安装 / 预装 / 内置 各为一行可折叠的分组行，组内即插件行。
+// 插件行数据平铺（含排序 / 筛选用的派生字段）；分组行缺字段，排序时各组比较结果相等、顺序稳定
+const treeNodes = computed(() =>
+    pluginGroups.value
+        .map((group) => {
+            const rows = group.items.filter(matchesQuery).map(toRowData);
+            if (sortField.value && sortOrder.value) rows.sort(compareRows);
+            return {
+                key: `group:${group.key}`,
+                data: { type: 'group', label: group.label, hint: group.hint, count: rows.length },
+                children: rows.map((row) => ({ key: row.id, leaf: true, data: row }))
+            };
+        })
+        .filter((groupNode) => !query.value.trim() || groupNode.children.length > 0)
+);
+
+// 逐列筛选：TreeTable 的 filters 是「字段 → 原始值」，matchMode 由列的 filterMatchMode 声明
+const filters = ref({ search_key: null, version: null, status_text: null, entrypoint: null });
+const statusOptions = ['运行中', '已停用'];
+
+// 默认收起，「展开全部 / 收起全部」沿用模板 TableDoc 的 Row Expansion 惯例
+const expandedKeys = ref({});
+
+function expandAll() {
+    expandedKeys.value = { 'group:installed': true, 'group:preinstalled': true, 'group:builtin': true };
+}
+
+function collapseAll() {
+    expandedKeys.value = {};
+}
 
 async function loadPlugins({ preserveError = false } = {}) {
     loading.value = true;
@@ -55,9 +137,7 @@ async function uploadFile(file) {
         const details = reason instanceof Error ? reason.details : undefined;
         if (details && details.code === 'already-installed') {
             // 同 id 替换不区分版本方向，一律显示确认
-            const confirmed = window.confirm(
-                `插件 ${details.id}（版本 ${details.installed_version}）已安装。\n替换为版本 ${details.incoming_version} 吗？\n确认后旧版本归档保留一份，可回滚。`
-            );
+            const confirmed = window.confirm(`插件 ${details.id}（版本 ${details.installed_version}）已安装。\n替换为版本 ${details.incoming_version} 吗？\n确认后旧版本归档保留一份，可回滚。`);
             if (confirmed) {
                 try {
                     const data = await sendUpload(file, true);
@@ -72,7 +152,7 @@ async function uploadFile(file) {
         }
     } finally {
         uploading.value = false;
-        if (uploadInput.value) uploadInput.value.value = '';
+        uploadRef.value?.clear();
     }
 }
 
@@ -137,10 +217,9 @@ async function openDocs(plugin) {
     }
 }
 
-function onDrop(event) {
-    dragActive.value = false;
+function onUploader(event) {
     if (uploading.value) return;
-    const file = event.dataTransfer?.files?.[0];
+    const file = event.files?.[0];
     if (file) uploadFile(file);
 }
 
@@ -148,418 +227,165 @@ onMounted(loadPlugins);
 </script>
 
 <template>
-    <main class="plugin-management">
-        <header class="plugin-management__heading">
+    <main class="flex flex-col gap-6">
+        <header class="flex flex-wrap items-center justify-between gap-4">
             <div>
-                <p class="plugin-management__eyebrow">AETP / EXTENSIONS</p>
-                <h1>插件管理</h1>
-                <p class="plugin-management__subtitle">上传插件包，并管理插件运行状态。</p>
-                <p v-if="backendUrl" class="plugin-management__source">
-                    <i class="pi pi-server" aria-hidden="true" /> 数据来源：{{ backendUrl }}
-                </p>
+                <p class="text-primary font-semibold text-xs m-0 mb-2">AETP / EXTENSIONS</p>
+                <h1 class="text-2xl font-semibold m-0">插件管理</h1>
+                <p class="text-muted-color text-sm m-0 mt-2">上传插件包，并管理插件运行状态。</p>
+                <Tag v-if="backendUrl" class="mt-3" severity="secondary" icon="pi pi-server">数据来源：{{ backendUrl }}</Tag>
             </div>
-            <label class="plugin-management__upload" :class="{ 'is-disabled': uploading }">
-                <i :class="uploading ? 'pi pi-spin pi-spinner' : 'pi pi-upload'" aria-hidden="true" />
-                <span>{{ uploading ? '正在安装…' : '上传 ZIP' }}</span>
-                <input ref="uploadInput" type="file" accept=".zip,application/zip" :disabled="uploading" @change="uploadFile($event.target.files?.[0])" />
-            </label>
         </header>
 
-        <div
-            class="plugin-management__dropzone"
-            :class="{ 'is-active': dragActive, 'is-disabled': uploading }"
-            @dragenter.prevent="dragActive = true"
-            @dragover.prevent="dragActive = true"
-            @dragleave.prevent="dragActive = false"
-            @drop.prevent="onDrop"
+        <FileUpload
+            ref="uploadRef"
+            accept=".zip,application/zip"
+            :maxFileSize="33554432"
+            :multiple="false"
+            :showUploadButton="false"
+            :showCancelButton="false"
+            chooseLabel="选择 ZIP 插件包"
+            customUpload
+            auto
+            @uploader="onUploader"
         >
-            <i class="pi pi-inbox" aria-hidden="true" />
-            <span>将 ZIP 插件包拖放到此处，或使用“上传 ZIP”</span>
+            <template #empty>
+                <div class="flex items-center gap-3 text-muted-color text-sm">
+                    <i class="pi pi-upload text-primary" aria-hidden="true" />
+                    {{ uploading ? '正在安装…' : '将 ZIP 插件包拖放到此处，或点击「选择 ZIP 插件包」' }}
+                </div>
+            </template>
+        </FileUpload>
+
+        <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
+        <Message v-if="notice" severity="success" :closable="false" role="status">{{ notice }}</Message>
+
+        <section class="flex flex-wrap items-stretch gap-4" aria-label="插件统计">
+            <div class="flex items-center gap-3 border border-surface-300 rounded-border px-4 py-3">
+                <span class="text-muted-color text-sm">已安装</span><strong class="text-xl">{{ plugins.length }}</strong>
+            </div>
+            <div class="flex items-center gap-3 border border-surface-300 rounded-border px-4 py-3">
+                <span class="text-muted-color text-sm">运行中</span><strong class="text-xl">{{ enabledCount }}</strong>
+            </div>
+        </section>
+
+        <div class="card">
+            <TreeTable
+                :value="plugins.length === 0 ? [] : treeNodes"
+                v-model:expandedKeys="expandedKeys"
+                v-model:sortField="sortField"
+                v-model:sortOrder="sortOrder"
+                :filters="filters"
+                dataKey="key"
+                :loading="loading"
+                scrollable
+                tableStyle="min-width: 62rem"
+            >
+                <template #header>
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <span class="font-semibold text-xl">已安装插件</span>
+                            <p class="text-muted-color text-sm m-0 mt-2">按「用户安装 → 预装 → 内置」分组，可折叠；点表头排序，筛选行逐列过滤；停用保留文件，卸载会移除插件包。</p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <IconField>
+                                <InputIcon><i class="pi pi-search" /></InputIcon>
+                                <InputText v-model="query" placeholder="搜索名称 / ID / 版本 / 入口" />
+                            </IconField>
+                            <Button text icon="pi pi-plus" label="展开全部" @click="expandAll" />
+                            <Button text icon="pi pi-minus" label="收起全部" @click="collapseAll" />
+                            <Button text icon="pi pi-refresh" label="刷新" :loading="loading" @click="loadPlugins" />
+                        </div>
+                    </div>
+                </template>
+                <Column field="name" filterField="search_key" filterMatchMode="contains" sortable header="插件" :expander="true" style="min-width: 16rem">
+                    <template #filter>
+                        <InputText v-model="filters.search_key" placeholder="名称 / ID" class="w-full" />
+                    </template>
+                    <template #body="{ node }">
+                        <div v-if="node.data.type === 'group'" class="flex flex-wrap items-baseline gap-x-3">
+                            <span class="font-semibold whitespace-nowrap">{{ node.data.label }}</span>
+                            <span class="text-muted-color text-sm">{{ node.data.hint }} · {{ node.data.count }} 个</span>
+                        </div>
+                        <div v-else>
+                            <div class="flex flex-wrap items-baseline gap-x-2">
+                                <strong class="whitespace-nowrap">{{ node.data.name }}</strong>
+                                <small class="text-muted-color">{{ node.data.id }}</small>
+                            </div>
+                            <small v-if="node.data.last_error" class="block text-red-500 mt-1">{{ node.data.last_error }}</small>
+                        </div>
+                    </template>
+                </Column>
+                <Column field="version" filterMatchMode="contains" sortable header="版本" style="min-width: 9rem">
+                    <template #filter>
+                        <InputText v-model="filters.version" placeholder="版本" class="w-full" />
+                    </template>
+                    <template #body="{ node }">
+                        <template v-if="node.data.type !== 'group'">{{ node.data.version }}</template>
+                    </template>
+                </Column>
+                <Column field="status_text" filterMatchMode="equals" sortable header="状态" style="min-width: 9rem">
+                    <template #filter>
+                        <Select v-model="filters.status_text" :options="statusOptions" placeholder="全部" showClear class="w-full" />
+                    </template>
+                    <template #body="{ node }">
+                        <Tag v-if="node.data.type !== 'group'" :value="node.data.status_text" :severity="node.data.enabled ? 'success' : 'secondary'" />
+                    </template>
+                </Column>
+                <Column field="entrypoint" filterMatchMode="contains" sortable header="入口" style="min-width: 12rem">
+                    <template #filter>
+                        <InputText v-model="filters.entrypoint" placeholder="入口" class="w-full" />
+                    </template>
+                    <template #body="{ node }">
+                        <code v-if="node.data.type !== 'group'" class="whitespace-nowrap text-sm">{{ node.data.entrypoint }}</code>
+                    </template>
+                </Column>
+                <Column header="操作" frozen alignFrozen="right" style="min-width: 16rem">
+                    <template #body="{ node }">
+                        <div v-if="node.data.type !== 'group'" class="flex flex-wrap items-center gap-2">
+                            <Button text severity="secondary" size="small" icon="pi pi-book" label="文档" title="查看插件文档" :disabled="!node.data.has_readme" @click="openDocs(node.data)" />
+                            <template v-if="!node.data.builtin">
+                                <Button
+                                    text
+                                    severity="secondary"
+                                    size="small"
+                                    :icon="node.data.enabled ? 'pi pi-stop' : 'pi pi-play'"
+                                    :label="node.data.enabled ? '停用' : '启用'"
+                                    :disabled="pending === node.data.id"
+                                    :title="node.data.protected ? '平台预装插件：重启后会自动重装' : ''"
+                                    @click="togglePlugin(node.data)"
+                                />
+                                <Button
+                                    text
+                                    severity="danger"
+                                    size="small"
+                                    icon="pi pi-trash"
+                                    label="卸载"
+                                    :disabled="pending === node.data.id"
+                                    :title="node.data.protected ? '平台预装插件：重启后会自动重装' : ''"
+                                    @click="uninstallPlugin(node.data)"
+                                />
+                            </template>
+                            <span v-else class="flex items-center gap-2 text-muted-color text-sm whitespace-nowrap" title="内置插件随平台直装，不可安装 / 升级 / 启停 / 卸载">
+                                <i class="pi pi-lock" aria-hidden="true" /> 随平台直装
+                            </span>
+                        </div>
+                    </template>
+                </Column>
+                <template #empty>
+                    <span class="text-muted-color">{{ plugins.length ? '没有匹配当前搜索 / 筛选的插件' : '尚未安装插件' }}</span>
+                </template>
+            </TreeTable>
         </div>
 
-        <p v-if="error" class="plugin-management__message plugin-management__message--error" role="alert"><i class="pi pi-exclamation-circle" aria-hidden="true" /> {{ error }}</p>
-        <p v-if="notice" class="plugin-management__message plugin-management__message--success" role="status"><i class="pi pi-check-circle" aria-hidden="true" /> {{ notice }}</p>
-
-        <section class="plugin-management__summary" aria-label="插件统计">
-            <div>
-                <span>已安装</span><strong>{{ plugins.length }}</strong>
-            </div>
-            <div>
-                <span>运行中</span><strong>{{ enabledCount }}</strong>
-            </div>
-        </section>
-
-        <section class="plugin-management__list">
-            <div class="plugin-management__list-heading">
-                <div>
-                    <h2>已安装插件</h2>
-                    <p>停用保留文件；卸载会移除插件包。</p>
-                </div>
-                <button class="plugin-management__refresh" type="button" title="刷新列表" :disabled="loading" @click="loadPlugins">
-                    <i :class="loading ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" aria-hidden="true" />
-                    <span>刷新</span>
-                </button>
-            </div>
-
-            <div class="plugin-management__table-wrap">
-                <table class="plugin-management__table">
-                    <thead>
-                        <tr>
-                            <th>插件</th>
-                            <th>版本</th>
-                            <th>状态</th>
-                            <th>入口</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr v-if="loading">
-                            <td colspan="5" class="plugin-management__empty">正在读取插件列表…</td>
-                        </tr>
-                        <tr v-else-if="plugins.length === 0">
-                            <td colspan="5" class="plugin-management__empty">尚未安装插件</td>
-                        </tr>
-                        <tr v-for="plugin in plugins" v-else :key="plugin.id">
-                            <td>
-                                <button
-                                    v-if="plugin.has_readme"
-                                    class="plugin-management__doc-link"
-                                    type="button"
-                                    title="查看插件文档"
-                                    @click="openDocs(plugin)"
-                                >
-                                    <strong>{{ plugin.name }}</strong>
-                                </button>
-                                <strong v-else>{{ plugin.name }}</strong>
-                                <span v-if="plugin.builtin" class="plugin-management__badge plugin-management__badge--builtin">内置</span>
-                                <span
-                                    v-else-if="plugin.protected"
-                                    class="plugin-management__badge plugin-management__badge--protected"
-                                    title="平台预装：停用 / 卸载后重启会自动重装"
-                                >预装</span>
-                                <small>{{ plugin.id }}</small>
-                                <small v-if="plugin.last_error" class="plugin-management__plugin-error">{{ plugin.last_error }}</small>
-                            </td>
-                            <td>{{ plugin.version }}</td>
-                            <td>
-                                <span class="plugin-management__state" :class="plugin.enabled ? 'is-enabled' : 'is-disabled'">
-                                    <i :class="plugin.enabled ? 'pi pi-check-circle' : 'pi pi-pause-circle'" aria-hidden="true" />
-                                    {{ plugin.enabled ? '运行中' : '已停用' }}
-                                </span>
-                            </td>
-                            <td>
-                                <code>{{ plugin.entrypoint }}</code>
-                            </td>
-                            <td>
-                                <div class="plugin-management__actions">
-                                    <button type="button" title="查看插件文档" :disabled="!plugin.has_readme" @click="openDocs(plugin)">
-                                        <i class="pi pi-book" aria-hidden="true" />
-                                        文档
-                                    </button>
-                                    <template v-if="!plugin.builtin">
-                                        <button
-                                            type="button"
-                                            :disabled="pending === plugin.id"
-                                            :title="plugin.protected ? '平台预装插件：重启后会自动重装' : ''"
-                                            @click="togglePlugin(plugin)"
-                                        >
-                                            <i :class="plugin.enabled ? 'pi pi-stop' : 'pi pi-play'" aria-hidden="true" />
-                                            {{ plugin.enabled ? '停用' : '启用' }}
-                                        </button>
-                                        <button
-                                            class="is-danger"
-                                            type="button"
-                                            :disabled="pending === plugin.id"
-                                            :title="plugin.protected ? '平台预装插件：重启后会自动重装' : ''"
-                                            @click="uninstallPlugin(plugin)"
-                                        >
-                                            <i class="pi pi-trash" aria-hidden="true" /> 卸载
-                                        </button>
-                                    </template>
-                                    <span v-else class="plugin-management__locked" title="内置插件随平台直装，不可安装 / 升级 / 启停 / 卸载">
-                                        <i class="pi pi-lock" aria-hidden="true" /> 随平台直装
-                                    </span>
-                                </div>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
         <Dialog v-model:visible="docsVisible" modal :header="docsPlugin ? `${docsPlugin.name} · v${docsPlugin.version}` : '插件文档'" :style="{ width: '44rem', maxWidth: '92vw' }">
-            <div class="plugin-management__docs">
-                <p v-if="docsLoading" class="plugin-management__docs-state"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> 正在读取描述文件…</p>
-                <p v-else-if="docsError" class="plugin-management__docs-state plugin-management__docs-state--error"><i class="pi pi-exclamation-circle" aria-hidden="true" /> {{ docsError }}</p>
+            <div class="max-h-[min(62vh,40rem)] overflow-y-auto pr-2">
+                <p v-if="docsLoading" class="flex items-center gap-2 text-muted-color"><i class="pi pi-spin pi-spinner" aria-hidden="true" /> 正在读取描述文件…</p>
+                <p v-else-if="docsError" class="flex items-center gap-2 text-red-500"><i class="pi pi-exclamation-circle" aria-hidden="true" /> {{ docsError }}</p>
                 <MarkdownDoc v-else :source="docsContent" />
             </div>
         </Dialog>
     </main>
 </template>
 
-<style scoped>
-.plugin-management {
-    display: grid;
-    gap: 1.25rem;
-}
-.plugin-management__heading,
-.plugin-management__list-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-}
-.plugin-management__eyebrow {
-    margin: 0 0 0.3rem;
-    color: var(--p-primary-color);
-    font-size: 0.72rem;
-    font-weight: 700;
-}
-.plugin-management h1 {
-    margin: 0;
-    font-size: 1.55rem;
-}
-.plugin-management__subtitle,
-.plugin-management__list-heading p {
-    margin: 0.3rem 0 0;
-    color: var(--p-text-muted-color);
-    font-size: 0.875rem;
-}
-.plugin-management__source {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    margin: 0.5rem 0 0;
-    padding: 0.22rem 0.65rem;
-    border: 1px solid var(--p-primary-color);
-    border-radius: 999px;
-    color: var(--p-primary-color);
-    font-size: 0.78rem;
-}
-.plugin-management__upload {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    padding: 0.7rem 1rem;
-    border-radius: 0.4rem;
-    background: var(--p-primary-color);
-    color: var(--p-primary-contrast-color);
-    font-weight: 600;
-    cursor: pointer;
-}
-.plugin-management__upload.is-disabled {
-    opacity: 0.65;
-    cursor: wait;
-}
-.plugin-management__upload input {
-    display: none;
-}
-.plugin-management__dropzone {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.7rem;
-    min-height: 4.5rem;
-    border: 1px dashed var(--p-content-border-color);
-    border-radius: 0.45rem;
-    color: var(--p-text-muted-color);
-    font-size: 0.875rem;
-}
-.plugin-management__dropzone > i {
-    color: var(--p-primary-color);
-}
-.plugin-management__dropzone.is-active {
-    border-color: var(--p-primary-color);
-    background: var(--p-highlight-background);
-}
-.plugin-management__message {
-    display: flex;
-    align-items: start;
-    gap: 0.5rem;
-    margin: 0;
-    padding: 0.75rem 0.9rem;
-    border-radius: 0.4rem;
-    font-size: 0.875rem;
-}
-.plugin-management__message--error {
-    background: var(--p-red-50);
-    color: var(--p-red-700);
-}
-.plugin-management__message--success {
-    background: var(--p-green-50);
-    color: var(--p-green-700);
-}
-.plugin-management__summary {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(8rem, 12rem));
-    gap: 0.75rem;
-}
-.plugin-management__summary > div {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.8rem 1rem;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.45rem;
-    background: var(--p-content-background);
-}
-.plugin-management__summary span {
-    color: var(--p-text-muted-color);
-    font-size: 0.875rem;
-}
-.plugin-management__summary strong {
-    font-size: 1.15rem;
-    font-variant-numeric: tabular-nums;
-}
-.plugin-management__list {
-    display: grid;
-    gap: 0.85rem;
-}
-.plugin-management__list-heading h2 {
-    margin: 0;
-    font-size: 1.05rem;
-}
-.plugin-management__refresh,
-.plugin-management__actions button {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.35rem;
-    background: var(--p-content-background);
-    color: var(--p-text-color);
-    font: inherit;
-    cursor: pointer;
-}
-.plugin-management__refresh:disabled,
-.plugin-management__actions button:disabled {
-    opacity: 0.5;
-    cursor: wait;
-}
-.plugin-management__table-wrap {
-    overflow-x: auto;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.45rem;
-}
-.plugin-management__table {
-    width: 100%;
-    min-width: 740px;
-    border-collapse: collapse;
-    text-align: left;
-    font-size: 0.875rem;
-}
-.plugin-management__table th,
-.plugin-management__table td {
-    padding: 0.75rem 0.85rem;
-    border-bottom: 1px solid var(--p-content-border-color);
-    vertical-align: middle;
-}
-.plugin-management__table th {
-    color: var(--p-text-muted-color);
-    font-weight: 600;
-}
-.plugin-management__table tr:last-child td {
-    border-bottom: 0;
-}
-.plugin-management__table td:first-child {
-    min-width: 12rem;
-}
-.plugin-management__table td:first-child small {
-    display: block;
-    margin-top: 0.2rem;
-    color: var(--p-text-muted-color);
-}
-.plugin-management__plugin-error {
-    max-width: 24rem;
-    color: var(--p-red-600) !important;
-    white-space: normal;
-}
-.plugin-management__state {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    white-space: nowrap;
-}
-.plugin-management__state.is-enabled {
-    color: #16834a;
-}
-.plugin-management__state.is-disabled {
-    color: var(--p-text-muted-color);
-}
-.plugin-management__actions {
-    display: flex;
-    gap: 0.4rem;
-}
-.plugin-management__actions .is-danger {
-    color: var(--p-red-600);
-}
-.plugin-management__table code {
-    white-space: nowrap;
-}
-.plugin-management__doc-link {
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--p-primary-color);
-    font: inherit;
-    cursor: pointer;
-    text-align: left;
-    text-decoration: underline;
-}
-.plugin-management__doc-link:hover strong {
-    text-decoration: underline;
-}
-.plugin-management__badge {
-    display: inline-block;
-    margin-left: 0.45rem;
-    padding: 0.1rem 0.5rem;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    vertical-align: middle;
-}
-.plugin-management__badge--builtin {
-    background: var(--p-primary-color);
-    color: var(--p-primary-contrast-color);
-}
-.plugin-management__badge--protected {
-    border: 1px solid var(--p-primary-color);
-    color: var(--p-primary-color);
-}
-.plugin-management__locked {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--p-text-muted-color);
-    font-size: 0.82rem;
-    white-space: nowrap;
-}
-.plugin-management__docs {
-    max-height: min(62vh, 40rem);
-    overflow-y: auto;
-    padding: 0.25rem 0.15rem;
-}
-.plugin-management__docs-state {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 1rem 0;
-    color: var(--p-text-muted-color);
-}
-.plugin-management__docs-state--error {
-    color: var(--p-red-600);
-}
-.plugin-management__empty {
-    padding: 1.5rem !important;
-    color: var(--p-text-muted-color);
-    text-align: center;
-}
-@media (max-width: 640px) {
-    .plugin-management__heading,
-    .plugin-management__list-heading {
-        align-items: start;
-        flex-direction: column;
-    }
-}
-</style>
+
