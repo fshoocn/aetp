@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -228,3 +228,24 @@ async def collect_capabilities(
         entries.append(normalized)
     entries.sort(key=canonical_json)
     return entries, problems
+
+
+class CapProblemAlerter:
+    """能力收集问题的告警去重（「消失即复位」语义）。
+
+    同一问题在连续拍次中只经 ``emit`` 告警一次；问题消失一拍后复位，
+    再次出现会重新告警 —— 间歇性故障不致因去重而失聪。
+    """
+
+    def __init__(self, emit: Callable[[str], None]) -> None:
+        self._emit = emit
+        self._active: set[str] = set()
+
+    def report(self, problems: list[str]) -> None:
+        """上报一拍的问题列表：新问题经 ``emit`` 告警，并更新活跃问题集。"""
+        current: set[str] = set()
+        for problem in problems:
+            if problem not in self._active:
+                self._emit(problem)
+            current.add(problem)
+        self._active = current

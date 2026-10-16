@@ -38,7 +38,7 @@ from typing import ClassVar
 from cordis_port import Context, EventDispatchError
 from starlette.requests import Request
 
-from .capabilities import capabilities_digest, collect_capabilities
+from .capabilities import CapProblemAlerter, capabilities_digest, collect_capabilities
 from .config import HeartbeatConfig
 from .monitor import HeartbeatMonitor, MasterState
 from .sender import HeartbeatSender, HeartbeatSendError
@@ -87,7 +87,8 @@ class HeartbeatPlugin:
         self._seq: int = 0
         self._task: asyncio.Task[None] | None = None
         self._skip_warned: dict[str, str] = {}
-        self._cap_problems_seen: set[str] = set()
+        #: 能力问题告警去重（「消失即复位」语义，见 :class:`CapProblemAlerter`）
+        self._cap_alerts: CapProblemAlerter = CapProblemAlerter(self._log_cap_problem)
         #: 已确认送达主模块的能力摘要；``None`` 表示主模块缺当前能力集
         self._caps_sent_digest: str | None = None
         self._sender: HeartbeatSender = HeartbeatSender(self.config)
@@ -113,7 +114,7 @@ class HeartbeatPlugin:
         """
         self._seq = next_seq(self._seq)
         entries, problems = await collect_capabilities(self.ctx)
-        self._report_cap_problems(problems)
+        self._cap_alerts.report(problems)
         digest = capabilities_digest(entries)
         payload: dict[str, object] = {
             "node_id": self._node_id,
@@ -144,13 +145,8 @@ class HeartbeatPlugin:
                 self._caps_sent_digest = digest
         return response
 
-    def _report_cap_problems(self, problems: list[str]) -> None:
-        """能力条目问题只对新问题告警一次（每拍收集，避免刷屏）。"""
-        for problem in problems:
-            if problem in self._cap_problems_seen:
-                continue
-            self._cap_problems_seen.add(problem)
-            self.ctx.logger.warning("能力收集：%s", problem)
+    def _log_cap_problem(self, problem: str) -> None:
+        self.ctx.logger.warning("能力收集：%s", problem)
 
     # -- 生命周期 -----------------------------------------------------------
     async def init(self) -> object:

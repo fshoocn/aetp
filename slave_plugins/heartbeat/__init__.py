@@ -15,6 +15,7 @@
 from .capabilities import (
     CAP_EVENT,
     Capability,
+    CapProblemAlerter,
     capabilities_digest,
     capability,
     parse_capability,
@@ -29,6 +30,7 @@ __all__: list[str] = [
     "CAP_EVENT",
     "SEQ_MAX",
     "STATUS_EVENT",
+    "CapProblemAlerter",
     "Capability",
     "HeartbeatConfig",
     "HeartbeatMonitor",

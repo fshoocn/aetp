@@ -41,7 +41,7 @@ from slave_plugins.heartbeat import (
     parse_capability,
     select_capabilities,
 )
-from slave_plugins.heartbeat.capabilities import collect_capabilities
+from slave_plugins.heartbeat.capabilities import CapProblemAlerter, collect_capabilities
 from slave_plugins.heartbeat.sender import parse_response_body
 
 
@@ -353,6 +353,20 @@ class CapabilityCollectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([entry["id"] for entry in entries], ["ok"])
         self.assertEqual(len(problems), 1)
         self.assertIn("贡献者坏了", problems[0])
+
+
+class CapProblemAlarmTests(unittest.TestCase):
+    """能力问题告警去重：同一问题连续出现只告警一次，消失一拍后重现重新告警。"""
+
+    def test_realarms_after_problem_disappears(self) -> None:
+        warnings: list[str] = []
+        alerter = CapProblemAlerter(warnings.append)
+        alerter.report(["问题A"])
+        alerter.report(["问题A"])  # 连续出现不重复告警
+        self.assertEqual(warnings, ["问题A"])
+        alerter.report([])  # 消失一拍 → 复位
+        alerter.report(["问题A"])  # 重现 → 再次告警
+        self.assertEqual(warnings, ["问题A", "问题A"])
 
 
 class _ScriptedSender:
