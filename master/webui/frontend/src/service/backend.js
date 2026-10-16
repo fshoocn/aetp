@@ -12,6 +12,9 @@
 
 const STORAGE_KEY = 'aetp.backendUrl';
 
+/** JSON 请求默认超时（毫秒）：后端卡死时不让调用方无限挂起。 */
+const REQUEST_TIMEOUT_MS = 30000;
+
 function readStored() {
     try {
         return window.localStorage.getItem(STORAGE_KEY) || '';
@@ -76,9 +79,19 @@ export function resolveUrl(path) {
 }
 
 /** 发送 JSON 请求（自动拼当前后端地址），失败时抛带后端错误信息的 Error。
- *  后端若返回结构化 `details`（如同 id 冲突的新旧版本），挂在 `error.details` 上。 */
+ *  后端若返回结构化 `details`（如同 id 冲突的新旧版本），挂在 `error.details` 上。
+ *  默认 30 秒超时；调用方自带 `signal` 时由调用方控制取消（如弹窗竞态防护）。 */
 export async function request(url, options = {}) {
-    const response = await fetch(resolveUrl(url), options);
+    const signal = options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+        response = await fetch(resolveUrl(url), { ...options, signal });
+    } catch (reason) {
+        if (reason instanceof Error && (reason.name === 'TimeoutError' || reason.name === 'AbortError')) {
+            throw new Error('请求超时或已取消');
+        }
+        throw reason;
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
         const error = new Error(data.error || `请求失败 (${response.status})`);

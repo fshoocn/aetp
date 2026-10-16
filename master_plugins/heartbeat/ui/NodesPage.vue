@@ -128,6 +128,17 @@ function apiUrl(path) {
     return `${apiBase()}${path}`;
 }
 
+async function fetchJson(url, options) {
+    // 先判 ok 再解析：非 JSON 错误页（网关 5xx 等）不炸成「语法错误」
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+        const message = data && data.error ? data.error.message || String(data.error) : '';
+        throw new Error(message || `请求失败 (${response.status})`);
+    }
+    return data;
+}
+
 const STATUS_TEXT = { online: '在线', offline: '离线', lost: '失联' };
 
 export default {
@@ -140,6 +151,7 @@ export default {
             loading: false,
             selected: null,
             timer: null,
+            disposed: false,
             statusFilterOptions: [
                 { label: '在线', value: 'online' },
                 { label: '离线', value: 'offline' },
@@ -166,23 +178,18 @@ export default {
     },
     mounted() {
         this.load();
-        this.timer = window.setInterval(() => {
-            if (this.auto) this.load(true);
-        }, 5000);
+        this.schedulePoll();
     },
     beforeUnmount() {
-        if (this.timer) window.clearInterval(this.timer);
+        this.disposed = true;
+        if (this.timer) window.clearTimeout(this.timer);
     },
     methods: {
         async load(silent) {
             // 后台轮询（silent）不触发加载遮罩 / 转圈，仅首次进入与手动刷新显示
             if (!silent) this.loading = true;
             try {
-                const response = await fetch(apiUrl('/api/heartbeat/nodes'));
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error((data.error && data.error.message) || `请求失败 (${response.status})`);
-                }
+                const data = await fetchJson(apiUrl('/api/heartbeat/nodes'));
                 this.nodes = data.nodes || [];
                 this.error = '';
                 if (this.detail) await this.showDetail(this.detail.node.node_id, true);
@@ -194,14 +201,7 @@ export default {
         },
         async showDetail(nodeId, silent) {
             try {
-                const response = await fetch(
-                    apiUrl(`/api/heartbeat/nodes/${encodeURIComponent(nodeId)}`)
-                );
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error((data.error && data.error.message) || `请求失败 (${response.status})`);
-                }
-                this.detail = data;
+                this.detail = await fetchJson(apiUrl(`/api/heartbeat/nodes/${encodeURIComponent(nodeId)}`));
             } catch (reason) {
                 if (!silent) this.error = String(reason && reason.message ? reason.message : reason);
             }
@@ -209,19 +209,19 @@ export default {
         async removeNode(nodeId) {
             if (!window.confirm(`确认移除从模块「${nodeId}」的记录？`)) return;
             try {
-                const response = await fetch(
-                    apiUrl(`/api/heartbeat/nodes/${encodeURIComponent(nodeId)}`),
-                    { method: 'DELETE' }
-                );
-                const data = await response.json();
-                if (!response.ok) {
-                    throw new Error((data.error && data.error.message) || `请求失败 (${response.status})`);
-                }
+                await fetchJson(apiUrl(`/api/heartbeat/nodes/${encodeURIComponent(nodeId)}`), { method: 'DELETE' });
                 if (this.detail && this.detail.node.node_id === nodeId) this.detail = null;
                 await this.load();
             } catch (reason) {
                 this.error = String(reason && reason.message ? reason.message : reason);
             }
+        },
+        schedulePoll() {
+            // 超时链轮询：上一拍收完才排下一拍，慢请求不会叠加成轮询风暴
+            this.timer = window.setTimeout(async () => {
+                if (this.auto && !this.disposed) await this.load(true);
+                if (!this.disposed) this.schedulePoll();
+            }, 5000);
         },
         toggleAuto() {
             this.auto = !this.auto;

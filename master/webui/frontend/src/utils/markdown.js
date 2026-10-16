@@ -16,10 +16,19 @@ function escapeHtml(text) {
     return String(text).replace(/[&<>"']/g, (ch) => ESCAPES[ch]);
 }
 
-/** 链接协议白名单：放行 http(s) / mailto / 锚点 / 站内相对路径。 */
+/** 链接协议白名单：放行 http(s) / mailto / 锚点 / 站内相对路径。
+ *
+ * 先剔除控制字符（浏览器会吞掉 URL 里的 \t \n \r，可借道伪装 `//evil.com` /
+ * `javascript:`），再拒绝协议相对地址（`//host` 会跳外域）与反斜杠变体。 */
 function safeUrl(url) {
-    const trimmed = String(url).trim();
-    return /^(https?:|mailto:|#|\/|\.{0,2}\/)/i.test(trimmed) ? trimmed : '#';
+    const cleaned = [...String(url).trim()]
+        .filter((ch) => {
+            const code = ch.codePointAt(0);
+            return code >= 0x20 && code !== 0x7f;
+        })
+        .join('');
+    if (cleaned.startsWith('//') || cleaned.includes('\\')) return '#';
+    return /^(https?:|mailto:|#|\/|\.{0,2}\/)/i.test(cleaned) ? cleaned : '#';
 }
 
 /** 行内元素：代码 / 链接 / 粗体 / 斜体（入参已转义）。 */
