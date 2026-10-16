@@ -68,11 +68,13 @@ class HeartbeatPlugin:
     * ``appconfig`` —— 应用配置服务，由 ``AppConfigPlugin`` 提供；
     * ``webapi`` —— Web API 服务，由 ``WebApiPlugin`` 提供；
     * ``node_kind`` —— 节点类型值服务，由 ``common/node_runtime.py`` 装配时
-      ``ctx.provide("node_kind", kind)`` 注册，**没有对应插件**。
+      ``ctx.provide("node_kind", kind)`` 注册，**没有对应插件**；
+    * ``node_name`` —— 节点名值服务，同样由装配阶段注册（``[node] name``
+      缺省取本机设备名），心跳上报的 ``node_id`` 即取自此服务。
     """
 
     name: ClassVar[str] = "heartbeat"
-    inject: ClassVar[list[str]] = ["appconfig", "webapi", "node_kind"]
+    inject: ClassVar[list[str]] = ["appconfig", "webapi", "node_kind", "node_name"]
     #: 配置模型（标准 Schema）：驱动校验、``[heartbeat]`` 默认值注入与写回
     Config: ClassVar[type[HeartbeatConfig]] = HeartbeatConfig
 
@@ -81,9 +83,7 @@ class HeartbeatPlugin:
         self.config: HeartbeatConfig = (
             config if isinstance(config, HeartbeatConfig) else HeartbeatConfig()
         )
-        self._node_id: str = (
-            ctx.appconfig.section("node").get("name") or str(ctx.node_kind)
-        )
+        self._node_id: str = str(ctx.node_name)
         self._seq: int = 0
         self._task: asyncio.Task[None] | None = None
         self._skip_warned: dict[str, str] = {}

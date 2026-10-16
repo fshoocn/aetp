@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import tempfile
 import time
 import unittest
@@ -659,6 +660,10 @@ class HeartbeatPluginTests(unittest.IsolatedAsyncioTestCase):
         context = Context()
         context.provide("node_kind", "slave")
         await context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        context.provide(
+            "node_name",
+            context.appconfig.section("node").get("name") or socket.gethostname(),
+        )
         await context.plugin(WebApiPlugin)
         if setup is not None:
             setup(context)  # 心跳任务启动前注册监听器，避免竞态

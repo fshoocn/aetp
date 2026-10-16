@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import tempfile
 import unittest
 import zipfile
@@ -212,11 +213,11 @@ class NodeProfileTests(unittest.TestCase):
             root = Path(temporary)
             path = root / "config.ini"
 
-            # 未写的键取默认：name 取 kind，install_root 取 plugins
+            # 未写的键取默认：name 取本机设备名，install_root 取 plugins
             path.write_text("[node]\nkind = slave\n", encoding="utf-8")
             profile = load_node_profile(AppConfig.from_file(path), base_dir=root)
             self.assertEqual(profile.kind, NodeKind.SLAVE)
-            self.assertEqual(profile.name, "slave")
+            self.assertEqual(profile.name, socket.gethostname())
 
             path.write_text("[node]\nkind = both\n", encoding="utf-8")
             with self.assertRaises(ValueError):

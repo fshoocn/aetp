@@ -42,12 +42,12 @@ class HeartbeatServerPlugin:
     """主模块心跳插件（``heartbeat-server``）。
 
     ``inject`` 注入的是**服务**（不是插件名）：``appconfig`` / ``webapi`` /
-    ``webui`` 由同名插件提供，``node_kind`` 是装配时
-    ``ctx.provide("node_kind", kind)`` 注册的值服务，**没有对应插件**。
+    ``webui`` 由同名插件提供，``node_kind`` / ``node_name`` 是装配时
+    ``ctx.provide(...)`` 注册的值服务，**没有对应插件**。
     """
 
     name: ClassVar[str] = "heartbeat-server"
-    inject: ClassVar[list[str]] = ["appconfig", "webapi", "webui", "node_kind"]
+    inject: ClassVar[list[str]] = ["appconfig", "webapi", "webui", "node_kind", "node_name"]
     #: 配置模型（标准 Schema）：驱动校验、默认值注入与写回
     Config: ClassVar[type[HeartbeatServerConfig]] = HeartbeatServerConfig
 
@@ -223,8 +223,7 @@ class HeartbeatServerPlugin:
             "config": self.config.to_dict(),
             "push": self._push_config(),
             "master": {
-                "node_id": self.ctx.appconfig.section("node").get("name")
-                or str(self.ctx.node_kind),
+                "node_id": str(self.ctx.node_name),
                 "kind": str(self.ctx.node_kind),
             },
         }

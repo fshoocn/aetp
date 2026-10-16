@@ -253,13 +253,13 @@ master_plugins/heartbeat/
 ```
 
 插件类骨架（`inject` 注入的是**服务**：`appconfig` / `webapi` / `webui` 由
-同名插件提供，`node_kind` 是 `common/node_runtime.py` 装配时
-`ctx.provide("node_kind", kind)` 注册的值服务，**没有对应插件**）：
+同名插件提供，`node_kind` / `node_name` 是 `common/node_runtime.py` 装配时
+`ctx.provide(...)` 注册的值服务，**没有对应插件**）：
 
 ```python
 class HeartbeatServerPlugin:
     name = "heartbeat-server"
-    inject = ["appconfig", "webapi", "webui", "node_kind"]
+    inject = ["appconfig", "webapi", "webui", "node_kind", "node_name"]
 
     def __init__(self, ctx, config=None):
         ...

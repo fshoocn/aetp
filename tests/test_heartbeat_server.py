@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -85,6 +86,10 @@ async def _boot_master(
     context = Context()
     context.provide("node_kind", "master")
     await context.plugin(AppConfigPlugin, {"path": str(config_path)})
+    context.provide(
+        "node_name",
+        context.appconfig.section("node").get("name") or socket.gethostname(),
+    )
     await context.plugin(WebApiPlugin)
     webui = _StubWebUi()
     context.provide("webui", webui)
@@ -420,6 +425,10 @@ class HeartbeatPairTests(unittest.IsolatedAsyncioTestCase):
         slave: Context = Context()
         slave.provide("node_kind", "slave")
         await slave.plugin(AppConfigPlugin, {"path": str(slave_config)})
+        slave.provide(
+            "node_name",
+            slave.appconfig.section("node").get("name") or socket.gethostname(),
+        )
         await slave.plugin(WebApiPlugin)
         await slave.plugin(HeartbeatPlugin)
 

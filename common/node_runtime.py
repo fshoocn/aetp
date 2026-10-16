@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
+import socket
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -111,7 +112,9 @@ def load_node_profile(config: AppConfig, *, base_dir: Path) -> NodeProfile:
 
     return NodeProfile(
         kind=kind,
-        name=section.get("name") or str(kind),
+        # 缺省取本机设备名而非节点类型，避免多个同类型节点（如多个 slave）
+        # 都不配置 name 时用同一个默认值互相覆盖注册（见 HB-N4）
+        name=section.get("name") or socket.gethostname(),
         plugin_sources=tuple(sources),
     )
 
@@ -162,6 +165,7 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     ctx: Context = Context()
     cordis_utils.set_ctx(ctx)
     ctx.provide("node_kind", profile.kind)
+    ctx.provide("node_name", profile.name)
 
     await ctx.plugin(AppConfigPlugin, {"path": str(config_file)})
     await ctx.plugin(DbPlugin)
