@@ -194,6 +194,7 @@ class NodeRegistryTests(unittest.TestCase):
             emit=lambda name, payload: self.events.append((name, payload)),
             log=self.logs.append,
             clock=self.clock,
+            wall=self.clock,
         )
 
     def test_accept_upserts_and_tracks_seq(self) -> None:
@@ -218,6 +219,24 @@ class NodeRegistryTests(unittest.TestCase):
         # 换地址记录事件
         self.registry.accept(_beat_payload(seq=2, address="http://127.0.0.1:9000"))
         self.assertIn("address", [entry["kind"] for entry in self.registry.history()])
+
+    def test_seq_regression_detects_restart_not_late_arrivals(self) -> None:
+        """seq 回退：低于基线的连续递增运行判重启；单个乱序迟到的旧包不误判。"""
+        record, _ = self.registry.accept(_beat_payload(seq=10))
+
+        # 单个乱序迟到的旧包：不判重启，基线不动；后续高 seq 继续推进并作废候选
+        self.registry.accept(_beat_payload(seq=4))
+        self.assertEqual(record.seq, 10)
+        self.registry.accept(_beat_payload(seq=11))
+        self.assertEqual(record.seq, 11)
+        self.assertNotIn("restart", [entry["kind"] for entry in self.registry.history()])
+
+        # 重启但首拍丢失：新进程 seq 持续低于基线并递增 → 连续两拍确认重启
+        self.registry.accept(_beat_payload(seq=6))
+        self.assertEqual(record.seq, 11)  # 首拍只挂候选，不急着判
+        self.registry.accept(_beat_payload(seq=7))
+        self.assertEqual(record.seq, 7)  # 基线跟随新进程，不再长期停滞
+        self.assertIn("restart", [entry["kind"] for entry in self.registry.history()])
 
     def test_address_clear_and_unreported(self) -> None:
         """空串 = 主动清除地址（记清除事件）；键缺失 / 非字符串 = 未上报（不动）。"""

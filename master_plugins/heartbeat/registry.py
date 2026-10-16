@@ -1,8 +1,10 @@
 """主模块侧的从模块注册表：心跳 upsert、在线判定与状态历史。
 
 内存态（主模块重启即清空，从模块下个心跳周期自然重新上报，见设计稿 §7）。
-时间基准一律用**主模块接收时刻**（``clock``，缺省 :func:`time.time`），
-从模块的 ``sent_at`` 仅参考，不参与任何判定。
+时间基准一律用**主模块接收时刻**：超时判定走**单调钟**（``clock``，缺省
+:func:`time.monotonic`，不受 NTP 校时 / 改钟跳变影响），展示时间戳走
+**墙钟**（``wall``，缺省 :func:`time.time`）；从模块的 ``sent_at`` 仅参考，
+不参与任何判定。
 """
 
 from __future__ import annotations
@@ -65,6 +67,8 @@ class NodeRecord:
     unparsed: list[object] = field(default_factory=list[object])
     first_seen: float = 0.0
     last_seen: float = 0.0
+    #: 最后一次收到心跳的**单调钟**时刻（超时判定专用，不随墙钟跳变漂移）
+    last_beat: float = 0.0
     #: 错过的心跳周期数；**进入 lost 后冻结**（失联前连丢的拍数），心跳到达归零
     missed: int = 0
     status: NodeStatus = NodeStatus.ONLINE
@@ -94,7 +98,10 @@ class NodeRegistry:
         emit: 事件出口（``emit(事件名, 载荷)``），状态转换时广播
             :data:`NODE_STATUS_EVENT`；缺省不广播。
         log: 告警出口（如能力条目重复），缺省不记录。
-        clock: 时间源（测试注入用），缺省 :func:`time.time`。
+        clock: **单调钟**时间源（超时判定用；测试注入用），缺省
+            :func:`time.monotonic`。
+        wall: **墙钟**时间源（展示时间戳用；测试注入用），缺省
+            :func:`time.time`。
     """
 
     def __init__(
@@ -103,14 +110,19 @@ class NodeRegistry:
         *,
         emit: Callable[[str, dict[str, object]], None] | None = None,
         log: Callable[[str], None] | None = None,
-        clock: Callable[[], float] = time.time,
+        clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], float] = time.time,
     ) -> None:
         self.config: HeartbeatServerConfig = config
         self._emit = emit
         self._log = log
         self._clock = clock
+        self._wall = wall
         self._nodes: dict[str, NodeRecord] = {}
         self._history: deque[dict[str, object]] = deque(maxlen=config.history_size)
+        #: seq 回退跟踪：``node_id → (最近回退到的 seq, 低于基线的连续递增拍数)``，
+        #: 用于识别「首拍丢失」的重启（见 :meth:`_track_seq_regression`）
+        self._regress: dict[str, tuple[int, int]] = {}
 
     # -- 心跳接收 -------------------------------------------------------------
     def accept(self, payload: Mapping[str, object]) -> tuple[NodeRecord, bool]:
@@ -120,13 +132,15 @@ class NodeRegistry:
         :class:`HeartbeatServerError`（400）。
         """
         node_id = _require_node_id(payload.get("node_id"))
-        now = self._clock()
+        beat_at = self._clock()  # 单调钟：超时判定（不受墙钟跳变影响）
+        now = self._wall()  # 墙钟：展示时间戳
         record = self._nodes.get(node_id)
         is_new = record is None
         if record is None:
             record = NodeRecord(node_id=node_id, first_seen=now)
             self._nodes[node_id] = record
         record.last_seen = now
+        record.last_beat = beat_at
         record.missed = 0
         record.node_kind = _text(payload.get("node_kind"), record.node_kind)
 
@@ -144,13 +158,12 @@ class NodeRegistry:
         seq = _require_seq(payload.get("seq"))
         if is_new:
             record.seq = seq
-        elif seq == 1 and record.seq > 1:
-            # seq 归 1 = 从模块重启：保留 first_seen，记录事件并清零 missed
-            self._record_history(record, "restart", message="seq 归 1（从模块重启）")
-            record.seq = seq
+        elif seq < record.seq:
+            self._track_seq_regression(record, seq)
         elif seq > record.seq:
             record.seq = seq
-        # 旧 seq（重复 / 乱序心跳）只刷新 last_seen，不推进 seq（不惩罚网络重传）
+            self._regress.pop(node_id, None)  # 旧运行仍在继续：回退候选作废
+        # seq 相同（重复心跳）只刷新 last_seen，不推进 seq（不惩罚网络重传）
 
         payload_digest = _text(payload.get("caps_digest"), "")
         raw_caps = payload.get("capabilities")
@@ -160,6 +173,33 @@ class NodeRegistry:
 
         self._transition(record, NodeStatus.ONLINE)
         return record, need_caps
+
+    def _track_seq_regression(self, record: NodeRecord, seq: int) -> None:
+        """seq 回退：判定「从模块重启」还是「乱序迟到」（协议 §2 seq 语义）。
+
+        * ``seq == 1``：发送侧每拍递增、重启后必然从 1 起步 —— 强信号，立即判重启；
+        * 其他回退：要求连续两拍构成**低于基线的递增运行**才判重启 —— 从模块
+          重启而首拍丢失时，新进程的 seq 会持续低于旧基线并递增；单个乱序
+          迟到的旧包不会连续递增，不触发重启（不惩罚网络重传）。
+        """
+        if seq == 1:
+            self._commit_restart(record, seq)
+            return
+        last, streak = self._regress.get(record.node_id, (seq, 0))
+        streak = streak + 1 if seq > last else 1
+        self._regress[record.node_id] = (seq, streak)
+        if streak >= 2:
+            self._commit_restart(record, seq)
+
+    def _commit_restart(self, record: NodeRecord, seq: int) -> None:
+        """确认重启：记事件、基线跟随新进程（保留 first_seen，不丢历史）。"""
+        self._record_history(
+            record,
+            "restart",
+            message=f"seq 从 {record.seq} 回退到 {seq}（从模块重启）",
+        )
+        record.seq = seq
+        self._regress.pop(record.node_id, None)
 
     def _archive_caps(self, record: NodeRecord, raw_entries: list[object]) -> None:
         """存档全量能力（摘要变化后从模块下一拍带上，见协议 §2.1）。"""
@@ -197,7 +237,7 @@ class NodeRegistry:
         for record in self._nodes.values():
             if record.status is NodeStatus.LOST:
                 continue  # 失联后 missed 冻结；恢复在线后重新计数
-            age = now - record.last_seen
+            age = now - record.last_beat
             record.missed = max(0, int(age // self.config.interval))
             if age <= self.config.offline_timeout:
                 target = NodeStatus.ONLINE
@@ -222,13 +262,13 @@ class NodeRegistry:
                     "node_id": record.node_id,
                     "from": str(previous),
                     "to": str(target),
-                    "at": self._clock(),
+                    "at": self._wall(),
                 },
             )
 
     def _record_history(self, record: NodeRecord, kind: str, **fields: object) -> None:
         entry: dict[str, object] = {
-            "at": self._clock(),
+            "at": self._wall(),
             "node_id": record.node_id,
             "kind": kind,
         }
@@ -273,6 +313,7 @@ class NodeRegistry:
         """移除节点记录（含其历史）；不存在返回 ``False``。"""
         if self._nodes.pop(node_id, None) is None:
             return False
+        self._regress.pop(node_id, None)
         self._history = deque(
             (entry for entry in self._history if entry.get("node_id") != node_id),
             maxlen=self.config.history_size,
