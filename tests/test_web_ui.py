@@ -173,6 +173,25 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(json.loads(body), [])
             self.assertEqual(_request(base_url, manifest[0]["entry"])[0], 404)
 
+    async def test_unified_error_envelope(self) -> None:
+        """错误信封统一 ``{"error"}``：404 与路径参数转换失败的 400 都带真实原因。"""
+
+        def typed_handler(_request: StarletteRequest, item_id: int) -> dict[str, int]:
+            return {"item_id": item_id}
+
+        self.context.webapi.get(
+            "/api/items/{item_id}", typed_handler, kind="api", name="items.get"
+        )
+        base_url = f"http://127.0.0.1:{self.port}"
+
+        status, _, body = _request(base_url, "/api/items/abc")
+        self.assertEqual(status, 400)
+        self.assertIn("item_id", json.loads(body)["error"])
+
+        status, _, body = _request(base_url, "/api/missing")
+        self.assertEqual(status, 404)
+        self.assertEqual(json.loads(body)["error"], "Not Found")
+
 
 class CorsTests(unittest.IsolatedAsyncioTestCase):
     """webapi 的 CORS 支持（前端跨源切换后端地址的前提）。"""

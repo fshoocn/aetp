@@ -223,7 +223,7 @@ class WebUiPlugin(Service[WebUiConfig]):
         if not ui_index.is_file():
             return JSONResponse(
                 {
-                    "detail": "Vue UI is not built; run npm run build in plugins/webui/frontend"
+                    "error": "Vue UI is not built; run npm run build in plugins/webui/frontend"
                 },
                 status_code=503,
             )

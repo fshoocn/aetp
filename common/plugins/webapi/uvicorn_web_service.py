@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, cast
 
 from cordis_port import Context, Fiber, Service
 from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import (
@@ -276,9 +277,12 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         # 先把 app 交给路由表，再启动：这样启动期间注册的路由也能被匹配到
         self._attach_app(host.app)
         self._attach_server(host)
-        # 404 统一走回退链：set_fallback 的处理器（如 webui 的 SPA 回退）优先，
-        # 返回 None 则落到默认 JSON 404。
+        # 错误信封统一为 {"error": ...}（前端 request() 只读 error 字段）：
+        # 404 走回退链（set_fallback 的处理器如 webui 的 SPA 回退优先，返回
+        # None 则落到 JSON 404）；其余 HTTPException 与未处理异常各自兜底。
         host.app.add_exception_handler(404, self._not_found)
+        host.app.add_exception_handler(HTTPException, self._http_exception)
+        host.app.add_exception_handler(500, self._internal_error)
         host.start()
 
     def stop(self) -> None:
@@ -421,15 +425,30 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         """设置（或清除）404 回退处理器（后设置者覆盖）。"""
         self._fallback = handler
 
-    async def _not_found(self, request: Request, _exc: Exception) -> Response:
-        """404 总入口：先给回退处理器机会，否则返回 JSON 404。"""
-        del _exc
+    async def _not_found(self, request: Request, exc: Exception) -> Response:
+        """404 总入口：先给回退处理器机会，否则返回 JSON 404（统一 ``error`` 信封，
+        自定义 detail 不被吞掉）。"""
         handler = self._fallback
         if handler is not None:
             response = handler(request)
             if isinstance(response, Response):
                 return response
-        return JSONResponse({"detail": "Not Found"}, status_code=404)
+        detail = str(exc.detail) if isinstance(exc, HTTPException) else "Not Found"
+        return JSONResponse({"error": detail}, status_code=404)
+
+    async def _http_exception(self, _request: Request, exc: Exception) -> Response:
+        """非 404 的 ``HTTPException``：统一 ``error`` 信封（starlette 默认是纯文本）。"""
+        assert isinstance(exc, HTTPException)
+        if exc.status_code in {204, 304}:
+            return Response(status_code=exc.status_code, headers=exc.headers)
+        return JSONResponse(
+            {"error": str(exc.detail)}, status_code=exc.status_code, headers=exc.headers
+        )
+
+    async def _internal_error(self, _request: Request, exc: Exception) -> Response:
+        """未处理异常：统一 ``error`` 信封且不泄漏内部细节（traceback 仍上抛给 uvicorn 记录）。"""
+        del exc
+        return JSONResponse({"error": "服务器内部错误"}, status_code=500)
 
     # -------------------------------------------------------------- 路由管理
     def remove(self, path: str) -> bool:
