@@ -24,8 +24,11 @@ from common.plugins.webapi import WebApiConfig, WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 
-def _write_source(root: Path, plugin_id: str) -> Path:
-    """造一个最小插件源目录（executor 风格：注册一条本节点 API）。"""
+def _write_source(root: Path, plugin_id: str, *, broken: bool = False) -> Path:
+    """造一个最小插件源目录（executor 风格：注册一条本节点 API）。
+
+    ``broken=True`` 时构造抛错，用于验证「坏源不拖垮启动」。
+    """
     source = root / plugin_id
     source.mkdir(parents=True)
     (source / "plugin.json").write_text(
@@ -41,6 +44,15 @@ def _write_source(root: Path, plugin_id: str) -> Path:
         ),
         encoding="utf-8",
     )
+    body = (
+        "        raise RuntimeError('broken on purpose')\n"
+        if broken
+        else (
+            f"        @ctx.webapi.get('/api/{plugin_id}', kind='api')\n"
+            "        def status(request):\n"
+            "            return {'active': True, 'node_kind': str(ctx.node_kind)}\n"
+        )
+    )
     (source / "plugin.py").write_text(
         (
             "class DemoPlugin:\n"
@@ -48,9 +60,7 @@ def _write_source(root: Path, plugin_id: str) -> Path:
             "    inject = ['webapi', 'node_kind']\n"
             "\n"
             "    def __init__(self, ctx, config):\n"
-            f"        @ctx.webapi.get('/api/{plugin_id}', kind='api')\n"
-            "        def status(request):\n"
-            "            return {'active': True, 'node_kind': str(ctx.node_kind)}\n"
+            f"{body}"
         ),
         encoding="utf-8",
     )
@@ -127,6 +137,35 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         status, body = _request(self.base_url, "/api/executor-demo")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["active"], "rebuilt")
+
+    async def test_broken_preinstalled_source_does_not_block_startup(self) -> None:
+        """单个预装插件失败不中断启动：其余照常装配，失败原因留档可重试。"""
+        root = Path(self.temp_dir.name)
+        broken = _write_source(root, "broken-demo", broken=True)
+        good = _write_source(root, "good-demo")
+        config_path = root / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = slave\n"
+            "name = 测试从节点\n"
+            "install_root = plugins\n"
+            f"plugins = {broken}, {good}\n"
+            "\n[web]\n"
+            f"port = {self.port}\n",
+            encoding="utf-8",
+        )
+
+        self.context = await assemble_node(config_path=config_path)
+
+        # 坏源在前也不拖垮启动：好插件照常安装启用并对外服务
+        status, _body = _request(self.base_url, "/api/good-demo")
+        self.assertEqual(status, 200)
+        listing = {
+            item["id"]: item for item in await self.context.plugins.list_plugins()
+        }
+        self.assertTrue(listing["good-demo"]["enabled"])
+        self.assertFalse(listing["broken-demo"]["enabled"])
+        self.assertIsNotNone(listing["broken-demo"]["last_error"])
 
 
 class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):

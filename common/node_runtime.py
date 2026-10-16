@@ -163,7 +163,6 @@ def _resolve_config(config_path: str | Path) -> tuple[Path, NodeProfile]:
 async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     """按已解析的 profile 装配内核：配置服务 → 数据库 → Web / 插件管理 → 预装插件。"""
     ctx: Context = Context()
-    cordis_utils.set_ctx(ctx)
     ctx.provide("node_kind", profile.kind)
     ctx.provide("node_name", profile.name)
 
@@ -172,7 +171,12 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     await ctx.plugin(WebApiPlugin)
     await ctx.plugin(PluginManagerPlugin)
     for source in profile.plugin_sources:
-        await ensure_installed(ctx, source)
+        try:
+            await ensure_installed(ctx, source)
+        except (OSError, TypeError, ValueError) as exc:
+            # 单个预装插件失败不中断启动（否则一个坏源拖垮全节点）：
+            # 其余照常装配，失败原因进日志与安装记录（last_error），管理页可重试
+            ctx.logger.error("预装插件 %s 装配失败：%s", source, exc)
 
     ctx.logger.info("%s 装配完成", profile.name)
     return ctx

@@ -4,19 +4,6 @@ from collections.abc import Callable
 
 from cordis_port import Context, Fiber
 
-_ctx: "Context | None" = None
-
-def set_ctx(ctx: "Context") -> None:
-    global _ctx
-    if _ctx is not None and _ctx is not ctx:
-        raise RuntimeError("ctx 已经初始化过了，重复设置说明有多个启动路径")
-    _ctx = ctx
-
-def get_ctx() -> "Context":
-    if _ctx is None:
-        raise RuntimeError("ctx 尚未初始化，请先在入口调用 set_ctx()")
-    return _ctx
-
 
 async def unload_all(ctx: Context) -> list[Fiber]:
     """卸载上下文树中的**全部插件**，返回被卸载的 fiber 列表。

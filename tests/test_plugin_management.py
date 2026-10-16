@@ -46,6 +46,7 @@ def _plugin_archive(
     version: str = "1.0.0",
     broken: bool = False,
     readme: str | None = None,
+    inject: list[str] | None = None,
 ) -> bytes:
     manifest: dict[str, object] = {
         "id": plugin_id,
@@ -58,6 +59,7 @@ def _plugin_archive(
         manifest["requires"] = requires
     if kind is not None:
         manifest["kind"] = kind
+    inject_expr = repr(inject if inject is not None else ["webapi", "webui"])
     init_body = (
         "        raise RuntimeError('broken on purpose')\n"
         if broken
@@ -80,7 +82,7 @@ def _plugin_archive(
             (
                 f"class {plugin_class}:\n"
                 f"    name = {plugin_id!r}\n"
-                "    inject = ['webapi', 'webui']\n"
+                f"    inject = {inject_expr}\n"
                 "\n"
                 "    def __init__(self, ctx, config):\n"
                 f"{init_body}"
@@ -569,6 +571,20 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         listing = {item["id"]: item for item in await plugins.list_plugins()}
         self.assertEqual(listing["config-crash"]["config"], {"port": 6666})
         self.assertIsNotNone(listing["config-crash"]["last_error"])
+
+    async def test_enable_reports_unready_dependencies(self) -> None:
+        """依赖的服务未就绪：422 明说缺哪个服务，不再用「状态未激活」掩盖。"""
+        plugins = self.context.plugins
+        await plugins.install_archive(
+            _plugin_archive("needs-ghost", "NeedsGhost", inject=["ghost-service"])
+        )
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.enable("needs-ghost")
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("ghost-service", str(caught.exception))
+        listing = {item["id"]: item for item in await plugins.list_plugins()}
+        self.assertFalse(listing["needs-ghost"]["enabled"])
+        self.assertIsNotNone(listing["needs-ghost"]["last_error"])
 
     async def test_enable_recovers_from_dead_fiber(self) -> None:
         """重载失败留下的死 fiber 不再让 enable 静默 no-op：清理残留并全新装载。"""

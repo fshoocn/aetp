@@ -557,7 +557,16 @@ class PluginManager:
             state = self._fiber_state_name(fiber)
             if state != "ACTIVE":
                 error = getattr(fiber, "_error", None)
-                raise PluginManagerError(f"插件启用失败：{error or state or '状态未激活'}", 422)
+                if error is not None:
+                    raise PluginManagerError(f"插件启用失败：{error}", 422)
+                missing = self._missing_injects(plugin_class)
+                if missing:
+                    raise PluginManagerError(
+                        f"插件启用失败：依赖的服务未就绪：{', '.join(missing)}"
+                        "（检查插件加载顺序或对应插件是否已启用）",
+                        422,
+                    )
+                raise PluginManagerError(f"插件启用失败：{state or '状态未激活'}", 422)
 
             record["enabled"] = True
             record["last_error"] = None
@@ -607,6 +616,15 @@ class PluginManager:
     def _fiber_state_name(fiber: Fiber) -> str:
         """fiber 状态名（实时）：``"ACTIVE"`` 表示健康运行。"""
         return fiber.get_state().name
+
+    def _missing_injects(self, plugin_class: type[object]) -> list[str]:
+        """插件 ``inject`` 声明里尚未就绪的服务名（诊断「依赖未就绪」用）。"""
+        names = getattr(plugin_class, "inject", None) or ()
+        return [
+            str(name)
+            for name in names
+            if self.ctx.get(str(name), strict=False) is None
+        ]
 
     async def _discard_dead_fiber(self, plugin_id: str, fiber: Fiber) -> None:
         """清理「非激活」残留 fiber（如热重载失败）：销毁并摘除模块登记，
