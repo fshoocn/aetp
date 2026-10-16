@@ -22,7 +22,8 @@ function createLoaderOptions(contribution, styles = []) {
         async getFile(url) {
             const response = await fetch(resolveUrl(url));
             if (!response.ok) {
-                throw new Error(`无法加载插件 UI 资源 ${url}: ${response.status}`);
+                // 5xx / 4xx 不能把响应体当模块源码送进 loader（报错会变成费解的语法错误）
+                throw new Error(`无法加载插件 UI 资源 ${url}: ${response.status} ${response.statusText}`);
             }
             return {
                 getContentData: (asBinary) => (asBinary ? response.arrayBuffer() : response.text())
@@ -56,7 +57,12 @@ export async function initializePluginUi() {
     pluginUiState.contributions = await response.json();
     for (const contribution of pluginUiState.contributions) {
         if (contribution.kind === 'page') {
-            registerPage(contribution);
+            try {
+                registerPage(contribution);
+            } catch (error) {
+                // 单个页面注册失败不影响其余插件（如路由冲突）
+                console.error(`插件页面注册失败: ${contribution.id}`, error);
+            }
         }
     }
 
@@ -69,6 +75,13 @@ export async function initializePluginUi() {
 
 function registerPage(contribution) {
     const routeName = `plugin-ui-${encodeURIComponent(contribution.id)}`;
+    const clash = router.getRoutes().find((route) => route.name === routeName || route.path === contribution.path);
+    if (clash) {
+        // 冲突显式报错而非静默覆盖（同 id / 同 path 都算）
+        throw new Error(
+            `插件页面路由冲突: ${contribution.id} 的 ${contribution.path} 与已有路由 ${String(clash.name ?? clash.path)} 冲突`
+        );
+    }
     router.addRoute('app-shell', {
         path: contribution.path,
         name: routeName,
