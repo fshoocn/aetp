@@ -2,7 +2,7 @@
 # 项目不是可安装的 Python 包（无 [project] 节），本文件只承载工具配置。
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 line-length = 120
 src = ["common", "master", "slave", "tests"]
 
