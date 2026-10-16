@@ -171,6 +171,10 @@ class FieldConfig:
         """把配置（实例 / 部分字典）序列化为 ini 键值字符串。
 
         只序列化**实际给出**的键（部分更新 = 部分写回）；``None`` 返回空字典。
+
+        抛出:
+            TypeError: ``value`` 既不是本配置实例也不是 ``Mapping``（非法输入
+            不静默吞掉，避免配置写回悄悄丢失）。
         """
         if value is None:
             return {}
@@ -183,7 +187,7 @@ class FieldConfig:
                 if str(key).lower() in cls._FIELDS
             }
         else:
-            return {}
+            raise TypeError(f"to_ini 只接受 {cls.__name__} 实例或 Mapping，收到 {type(value).__name__}")
         return {name: _stringify_ini(item) for name, item in items.items() if item is not None}
 
     # -- 便利方法 -------------------------------------------------------------

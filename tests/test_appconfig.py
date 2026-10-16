@@ -156,6 +156,12 @@ class FieldConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "未知配置项"):
             DemoConfig.from_ini({"nope": "1"})
 
+    def test_to_ini_rejects_invalid_input(self) -> None:
+        """非法输入显式抛 TypeError，不静默返回空字典。"""
+        with self.assertRaises(TypeError):
+            DemoConfig.to_ini(object())
+        self.assertEqual(DemoConfig.to_ini(None), {})
+
     def test_merge_layers_last_wins(self) -> None:
         merged = DemoConfig.merge({"port": 1}, {"host": "outer"})
         self.assertEqual(merged.port, 1)
