@@ -226,11 +226,13 @@ class PluginManagerPlugin(Service[None]):
 
     async def package_bytes(self, plugin_id: str) -> bytes:
         """读取插件包原始 ZIP（保留归档，供分发/回溯）。"""
-        return self._require_manager().package_bytes(plugin_id)
+        return await asyncio.to_thread(self._require_manager().package_bytes, plugin_id)
 
     async def package_source(self, source_dir: str | Path) -> bytes:
         """把插件源目录打成 zip 包（插件的交付形态）。"""
-        return self._require_manager().package_source(source_dir)
+        return await asyncio.to_thread(
+            self._require_manager().package_source, source_dir
+        )
 
     # -- HTTP 层（面向操作者）-------------------------------------------------
     def _register_routes(self) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import struct
 import sys
 import tempfile
 import types as module_types
@@ -92,6 +93,28 @@ def _plugin_archive(
         if readme is not None:
             package.writestr("README.md", readme)
     return archive.getvalue()
+
+
+def _patch_member_declared_size(
+    archive: bytes, member_name: str, fake_size: int
+) -> bytes:
+    """把 zip 成员的声明未压缩大小改成 ``fake_size``（模拟谎报尺寸的篡改包）。
+
+    本地头与中央目录两处都改，避免 zipfile 直接报头不一致。
+    """
+    data = bytearray(archive)
+    with zipfile.ZipFile(BytesIO(archive)) as package:
+        header_offset = package.getinfo(member_name).header_offset
+    struct.pack_into("<I", data, header_offset + 22, fake_size)
+    index = data.rfind(b"PK\x01\x02")
+    while index >= 0:
+        name_len = struct.unpack_from("<H", data, index + 28)[0]
+        name = bytes(data[index + 46 : index + 46 + name_len]).decode("utf-8")
+        if name == member_name:
+            struct.pack_into("<I", data, index + 24, fake_size)
+            return bytes(data)
+        index = data.rfind(b"PK\x01\x02", 0, index)
+    raise AssertionError(f"zip 里没有成员 {member_name}")
 
 
 def _config_plugin_archive(plugin_id: str = "config-sample") -> bytes:
@@ -823,6 +846,24 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 400)
         self.assertIn("非法路径", json.loads(body)["error"])
+
+    async def test_upload_rejects_lying_member_sizes(self) -> None:
+        """声明大小不可信：谎小想绕过解压上限、谎大想骗过预留检查，都会被拒。
+
+        （复核结论：Python zipfile 以声明大小截断读取且 CRC 兑底，谎小的篡改包
+        会直接判无效；谎大则被声明值累计的 128 MiB 预留检查拦下。）
+        """
+        plugins = self.context.plugins
+        base = _plugin_archive("liar-sample", "LiarPlugin")
+
+        lying_small = _patch_member_declared_size(base, "ui/Home.vue", 4)
+        with self.assertRaises(PluginManagerError):
+            await plugins.install_archive(lying_small)
+
+        lying_big = _patch_member_declared_size(base, "ui/Home.vue", 200 * 1024 * 1024)
+        with self.assertRaises(PluginManagerError) as caught:
+            await plugins.install_archive(lying_big)
+        self.assertEqual(caught.exception.status_code, 413)
 
     async def test_registry_write_failure_rolls_back_install(self) -> None:
         class RegistryWriteFailureManager(PluginManager):

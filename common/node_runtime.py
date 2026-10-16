@@ -134,17 +134,19 @@ async def ensure_installed(ctx: Context, source: Path) -> str:
     """
     plugins = ctx.plugins
     path = Path(source)
-    plugin_id = source_plugin_id(path)
-    digest = source_digest(path)
+    plugin_id = await asyncio.to_thread(source_plugin_id, path)
+    digest = await asyncio.to_thread(source_digest, path)
     record = next((item for item in await plugins.list_plugins() if item["id"] == plugin_id), None)
     if record is None:
         if path.suffix.lower() == ".zip":
-            await plugins.install_archive(path.read_bytes())
+            await plugins.install_archive(await asyncio.to_thread(path.read_bytes))
         else:
             await plugins.install_source(path)
     elif record.get("digest") != digest:
         if path.suffix.lower() == ".zip":
-            await plugins.install_archive(path.read_bytes(), replace=True)
+            await plugins.install_archive(
+                await asyncio.to_thread(path.read_bytes), replace=True
+            )
         else:
             await plugins.install_source(path, replace=True)
     await plugins.enable(plugin_id)

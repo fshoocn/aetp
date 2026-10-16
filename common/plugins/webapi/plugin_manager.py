@@ -358,7 +358,8 @@ class PluginManager:
             source = Path(source_dir).expanduser().resolve()
             if not source.is_dir():
                 raise PluginManagerError(f"插件源目录不存在：{source}")
-            return await self._install_archive(self._zip_directory(source), replace=replace)
+            archive = await asyncio.to_thread(self._zip_directory, source)
+            return await self._install_archive(archive, replace=replace)
 
     @staticmethod
     def _zip_directory(source: Path) -> bytes:
@@ -388,14 +389,14 @@ class PluginManager:
         extracted: Path = staging_root / "package"
         extracted.mkdir()
         try:
-            manifest = self._extract_and_read_manifest(archive, extracted)
+            manifest = await asyncio.to_thread(self._extract_and_read_manifest, archive, extracted)
             self._reject_builtin(manifest["id"], "安装 / 升级")
             self._check_node_kind(manifest)
             self._check_data_dependencies(manifest)
             plugin_id = manifest["id"]
             # 摘要按 zip 条目（名字 + 内容）计算：与 ensure_installed 的
             # source_digest 同口径，保证启动比对不会因口径不同而每次误换装
-            digest = archive_digest(archive)
+            digest = await asyncio.to_thread(archive_digest, archive)
             existing = self.records.get(plugin_id)
             destination = self.install_root / plugin_id
             if existing is not None or destination.exists():
@@ -423,16 +424,16 @@ class PluginManager:
                 "digest": digest,
             }
             try:
-                os.replace(extracted, destination)
-                archive_path.parent.mkdir(parents=True, exist_ok=True)
-                archive_path.write_bytes(archive)
+                await asyncio.to_thread(
+                    self._land_files, extracted, destination, archive_path, archive
+                )
                 self.records[plugin_id] = record
                 self._write_registry()
             except BaseException:
                 self.records.pop(plugin_id, None)
-                shutil.rmtree(destination, ignore_errors=True)
-                archive_path.unlink(missing_ok=True)
-                self._prune_archives_dir()
+                await asyncio.to_thread(
+                    self._discard_landing, destination, archive_path
+                )
                 raise
             return self._public_record(record)
         except PluginManagerError:
@@ -440,7 +441,22 @@ class PluginManager:
         except (OSError, zipfile.BadZipFile, json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
             raise PluginManagerError(f"插件包无法安装：{exc}") from exc
         finally:
-            shutil.rmtree(staging_root, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, staging_root, ignore_errors=True)
+
+    @staticmethod
+    def _land_files(
+        extracted: Path, destination: Path, archive_path: Path, archive: bytes
+    ) -> None:
+        """落地安装目录与归档（纯文件 IO，交线程执行）。"""
+        os.replace(extracted, destination)
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        archive_path.write_bytes(archive)
+
+    def _discard_landing(self, destination: Path, archive_path: Path) -> None:
+        """清理失败落地的残留（纯文件 IO，交线程执行）。"""
+        shutil.rmtree(destination, ignore_errors=True)
+        archive_path.unlink(missing_ok=True)
+        self._prune_archives_dir()
 
     async def _replace_install(
         self,
@@ -473,14 +489,15 @@ class PluginManager:
                 await fiber.dispose()
             self._remove_modules(module_name)
             # 原子换目录：旧目录先进暂存区，新版就位后旧版随 finally 清理
-            if destination.exists():
-                os.replace(destination, backup_dir)
-                moved = True
-            os.replace(extracted, destination)
-            backup_archive.parent.mkdir(parents=True, exist_ok=True)
-            if archive_path.is_file():
-                backup_archive.write_bytes(archive_path.read_bytes())
-            archive_path.write_bytes(archive)
+            moved = await asyncio.to_thread(
+                self._swap_install,
+                destination,
+                backup_dir,
+                extracted,
+                archive_path,
+                archive,
+                backup_archive,
+            )
             self.records[plugin_id] = {
                 **manifest,
                 # 升级不重置用户持久化配置：旧值优先，新清单里的新键补默认值。
@@ -500,18 +517,19 @@ class PluginManager:
             # 整体回滚：目录、归档、注册表与 fiber 状态全部还原旧版
             self.fibers.pop(plugin_id, None)
             self._remove_modules(module_name)
-            shutil.rmtree(destination, ignore_errors=True)
-            if moved:
-                os.replace(backup_dir, destination)
+            await asyncio.to_thread(
+                self._restore_files,
+                destination,
+                backup_dir,
+                moved,
+                archive_path,
+                backup_archive,
+            )
             self.records[plugin_id] = {
                 **previous,
                 "enabled": False,
                 "last_error": f"覆盖安装失败：{exc}",
             }
-            if backup_archive.is_file():
-                archive_path.write_bytes(backup_archive.read_bytes())
-                backup_archive.unlink(missing_ok=True)
-            self._prune_archives_dir()
             try:
                 self._write_registry()
                 if was_enabled:
@@ -532,6 +550,47 @@ class PluginManager:
             raise PluginManagerError(
                 f"覆盖安装 {plugin_id!r} 失败，已回滚到旧版本：{exc}", status_code
             ) from exc
+
+    @staticmethod
+    def _swap_install(
+        destination: Path,
+        backup_dir: Path,
+        extracted: Path,
+        archive_path: Path,
+        archive: bytes,
+        backup_archive: Path,
+    ) -> bool:
+        """换装的文件操作（纯 IO，交线程执行）：旧目录进暂存、新版就位、归档留备份。
+
+        返回旧目录是否已挪走（供回滚判断）。
+        """
+        moved = False
+        if destination.exists():
+            os.replace(destination, backup_dir)
+            moved = True
+        os.replace(extracted, destination)
+        backup_archive.parent.mkdir(parents=True, exist_ok=True)
+        if archive_path.is_file():
+            backup_archive.write_bytes(archive_path.read_bytes())
+        archive_path.write_bytes(archive)
+        return moved
+
+    def _restore_files(
+        self,
+        destination: Path,
+        backup_dir: Path,
+        moved: bool,
+        archive_path: Path,
+        backup_archive: Path,
+    ) -> None:
+        """回滚的文件操作（纯 IO，交线程执行）：还原旧目录与旧归档。"""
+        shutil.rmtree(destination, ignore_errors=True)
+        if moved:
+            os.replace(backup_dir, destination)
+        if backup_archive.is_file():
+            archive_path.write_bytes(backup_archive.read_bytes())
+            backup_archive.unlink(missing_ok=True)
+        self._prune_archives_dir()
 
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         self._reject_builtin(plugin_id, "启停")
@@ -685,7 +744,7 @@ class PluginManager:
         if package_root.parent != self.install_root:
             raise PluginManagerError("插件安装目录无效", 400)
         try:
-            shutil.rmtree(package_root)
+            await asyncio.to_thread(shutil.rmtree, package_root)
         except OSError as exc:
             raise PluginManagerError(
                 f"插件 {plugin_id!r} 卸载失败：{exc.strerror or exc}"
@@ -1081,7 +1140,7 @@ class PluginManager:
         if path.stat().st_size > MAX_README_BYTES:
             raise PluginManagerError("插件描述文件最大允许 10 MiB", 413)
         try:
-            return path.read_text(encoding="utf-8")
+            return await asyncio.to_thread(path.read_text, encoding="utf-8")
         except UnicodeDecodeError as exc:
             raise PluginManagerError("插件描述文件不是有效的 UTF-8 文本") from exc
 
