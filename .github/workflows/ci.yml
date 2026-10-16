@@ -1,0 +1,61 @@
+# CI 门禁：静态检查 / 类型检查 / 测试任一失败即红。
+#
+# 口径与本地开发一致（见 requirements-dev.txt 注释）：
+#   - ruff      检查规则以 pyproject.toml [tool.ruff] 为准；
+#   - pyright   经 npx 分发，类型规则以 pyproject.toml [tool.pyright] 为准（strict）；
+#   - pytest    测试套件（tests/）；
+#   - 前端      eslint 检查模式（--fix 属本地开发动作，CI 不做自动修复）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 创建虚拟环境并安装依赖
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+      - name: ruff 静态检查
+        run: .venv\Scripts\python.exe -m ruff check .
+
+      - name: pyright 类型检查（strict）
+        run: npx -y pyright --pythonpath .venv\Scripts\python.exe
+
+      - name: pytest 测试
+        run: .venv\Scripts\python.exe -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: master/webui/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: master/webui/frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: eslint 检查
+        run: npx eslint . --ext .vue,.js,.jsx,.cjs,.mjs --ignore-path .gitignore --quiet
