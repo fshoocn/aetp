@@ -382,12 +382,16 @@ class DbServiceTests(DbStackTestCase):
 
         created = await runs.add(RunRecord(name="nightly", payload={"a": 1}))
         self.assertIsNotNone(created.id)
-        self.assertEqual((await runs.get(created.id)).name, "nightly")  # type: ignore[union-attr]
+        fetched = await runs.get(created.id)
+        assert fetched is not None
+        self.assertEqual(fetched.name, "nightly")
         self.assertEqual(await runs.count(), 1)
         rows = await runs.list(where=(RunRecord.name == "nightly"), limit=10)
         self.assertEqual([row.payload for row in rows], [{"a": 1}])
         self.assertEqual(await runs.update(created.id, {"name": "renamed"}), 1)
-        self.assertEqual((await runs.get(created.id)).name, "renamed")  # type: ignore[union-attr]
+        renamed = await runs.get(created.id)
+        assert renamed is not None
+        self.assertEqual(renamed.name, "renamed")
         self.assertEqual(await runs.delete(created.id), 1)
         self.assertEqual(await runs.count(), 0)
 
