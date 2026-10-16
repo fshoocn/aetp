@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import ClassVar, cast
@@ -89,7 +88,7 @@ class PluginManagerPlugin(Service[None]):
                 source = base_dir / source
             try:
                 ids.add(source_plugin_id(source))
-            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            except (OSError, TypeError, ValueError, RecursionError) as exc:
                 self.ctx.logger.warning("预装插件源 %s 解析 id 失败：%s", source, exc)
         return frozenset(ids)
 
@@ -290,7 +289,7 @@ class PluginManagerPlugin(Service[None]):
             try:
                 try:
                     body: object = await _request.json()
-                except ValueError as error:
+                except (ValueError, RecursionError) as error:
                     raise PluginManagerError(
                         f"请求体不是合法 JSON：{error}", 400
                     ) from error

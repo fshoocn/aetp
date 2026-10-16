@@ -846,7 +846,7 @@ class DbService(Service[DbConfig]):
             return {}
         try:
             raw: object = json.loads(self._registry_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             self._provided_ctx.logger.error("插件安装记录无法读取：%s：%s", self._registry_file, exc)
             return {}
         return cast(dict[str, object], raw) if isinstance(raw, dict) else {}

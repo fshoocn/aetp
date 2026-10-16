@@ -151,6 +151,11 @@ class BodyLimitTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HeartbeatServerError):
             await read_json_body(_fake_request(b"not json"))
 
+    async def test_rejects_deeply_nested_json(self) -> None:
+        """深嵌套 JSON 抛 RecursionError（非 ValueError 子类）：按不合规处理而非 500。"""
+        with self.assertRaises(HeartbeatServerError):
+            await read_json_body(_fake_request(b"[" * 60_000 + b"]" * 60_000))
+
 
 class HeartbeatServerConfigTests(unittest.TestCase):
     """[heartbeat] 配置节解析与校验。"""

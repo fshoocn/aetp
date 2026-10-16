@@ -157,7 +157,7 @@ class OwnerRegistry:
             return {}
         try:
             raw: object = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             raise RuntimeError(f"归属登记无法读取：{self.path}：{exc}") from exc
         if not isinstance(raw, dict):
             raise TypeError("归属登记根值必须是对象")

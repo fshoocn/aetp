@@ -75,7 +75,7 @@ class DbPlugin:
         if manifest is not None and manifest.is_file():
             try:
                 raw: object = json.loads(manifest.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
+            except (OSError, ValueError, RecursionError) as exc:
                 self.ctx.logger.error("插件安装记录无法读取：%s：%s", manifest, exc)
                 return ids
             if isinstance(raw, dict):

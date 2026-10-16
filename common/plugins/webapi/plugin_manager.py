@@ -437,7 +437,7 @@ class PluginManager:
             return self._public_record(record)
         except PluginManagerError:
             raise
-        except (OSError, zipfile.BadZipFile, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (OSError, zipfile.BadZipFile, json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
             raise PluginManagerError(f"插件包无法安装：{exc}") from exc
         finally:
             shutil.rmtree(staging_root, ignore_errors=True)
@@ -1057,7 +1057,7 @@ class PluginManager:
             return {}
         try:
             data = json.loads(self.registry_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             raise RuntimeError(f"插件注册表无法读取：{exc}") from exc
         if not isinstance(data, dict):
             raise TypeError("插件注册表根值必须是对象")

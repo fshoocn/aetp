@@ -264,7 +264,8 @@ async def read_json_body(request: Request) -> dict[str, object]:
         chunks.append(chunk)
     try:
         data: object = json.loads(b"".join(chunks).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as error:
+    except (ValueError, RecursionError) as error:
+        # 深嵌套 JSON 抛 RecursionError（非 ValueError 子类），一并按不合规处理
         raise HeartbeatServerError(f"请求体不是合法 JSON：{error}") from error
     if not isinstance(data, dict):
         raise HeartbeatServerError("请求体必须是 JSON 对象")
