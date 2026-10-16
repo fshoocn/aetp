@@ -557,6 +557,25 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listing["config-crash"]["config"], {"port": 6666})
         self.assertIsNotNone(listing["config-crash"]["last_error"])
 
+    async def test_enable_recovers_from_dead_fiber(self) -> None:
+        """重载失败留下的死 fiber 不再让 enable 静默 no-op：清理残留并全新装载。"""
+        plugins = self.context.plugins
+        await plugins.install_archive(_config_plugin_archive("config-dead"))
+        await plugins.enable("config-dead")
+        with self.assertRaises(PluginManagerError):
+            await plugins.update_config("config-dead", {"port": 6666})
+
+        # 重载失败后如实置为未启用（不再假装「运行中」），错误留档
+        listing = {item["id"]: item for item in await plugins.list_plugins()}
+        self.assertFalse(listing["config-dead"]["enabled"])
+        self.assertIsNotNone(listing["config-dead"]["last_error"])
+
+        # 修复配置后 enable 直接恢复（无需「先停再启」的隐式路径）
+        await plugins.update_config("config-dead", {"port": 8123})
+        record = await plugins.enable("config-dead")
+        self.assertTrue(record["enabled"])
+        self.assertIsNone(record["last_error"])
+
     async def test_registry_drops_builtin_shadow_records(self) -> None:
         """遗留注册表里的内置 id 影子记录读取即丢弃（展示真身内置记录）。"""
         install_root = Path(self.temp_dir.name) / "shadow-root"

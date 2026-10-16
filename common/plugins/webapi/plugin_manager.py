@@ -534,8 +534,12 @@ class PluginManager:
 
     async def _enable(self, plugin_id: str) -> PublicPluginRecord:
         record = self._get_record(plugin_id)
-        if plugin_id in self.fibers:
-            return self._public_record(record)
+        existing = self.fibers.get(plugin_id)
+        if existing is not None:
+            if self._fiber_state_name(existing) == "ACTIVE":
+                return self._public_record(record)  # 幂等短路：仅对健康运行的 fiber
+            # 死 fiber（如热重载失败残留）：就地清理后全新装载，enable 不做静默 no-op
+            await self._discard_dead_fiber(plugin_id, existing)
 
         package_root = self.install_root / plugin_id
         module_name = self._module_name(plugin_id)
@@ -550,7 +554,7 @@ class PluginManager:
 
             fiber = self.ctx.plugin(plugin_class, config)
             await fiber
-            state = getattr(getattr(fiber, "state", None), "name", "")
+            state = self._fiber_state_name(fiber)
             if state != "ACTIVE":
                 error = getattr(fiber, "_error", None)
                 raise PluginManagerError(f"插件启用失败：{error or state or '状态未激活'}", 422)
@@ -598,6 +602,23 @@ class PluginManager:
             self._write_registry()
         except OSError as registry_error:
             self.ctx.logger.error("插件 %s 启用失败状态无法写入注册表：%s", plugin_id, registry_error)
+
+    @staticmethod
+    def _fiber_state_name(fiber: Fiber) -> str:
+        """fiber 状态名（实时）：``"ACTIVE"`` 表示健康运行。"""
+        return fiber.get_state().name
+
+    async def _discard_dead_fiber(self, plugin_id: str, fiber: Fiber) -> None:
+        """清理「非激活」残留 fiber（如热重载失败）：销毁并摘除模块登记，
+        下次 :meth:`_enable` 全新装载；清理异常只记录，不掩盖原始错误。"""
+        self.fibers.pop(plugin_id, None)
+        outcome = await asyncio.gather(fiber.dispose(), return_exceptions=True)
+        cleanup_error = outcome[0]
+        if isinstance(cleanup_error, BaseException):
+            self.ctx.logger.error(
+                "插件 %s 清理残留 Fiber 失败：%s", plugin_id, cleanup_error
+            )
+        self._remove_modules(self._module_name(plugin_id))
 
     async def disable(self, plugin_id: str, *, reason: str | None = None) -> PublicPluginRecord:
         """停用插件；``reason`` 会记入安装记录的 ``last_error``（如数据依赖失效）。"""
@@ -715,9 +736,11 @@ class PluginManager:
         try:
             await outcome
         except Exception as exc:
+            await self._discard_dead_fiber(plugin_id, fiber)
             raise self._reload_error(record, exc) from exc
-        state = getattr(getattr(fiber, "state", None), "name", "")
+        state = self._fiber_state_name(fiber)
         if state != "ACTIVE":
+            await self._discard_dead_fiber(plugin_id, fiber)
             raise self._reload_error(
                 record, getattr(fiber, "_error", None) or state or "状态未激活"
             )
@@ -726,8 +749,13 @@ class PluginManager:
     def _reload_error(
         self, record: _PluginRecord, reason: object
     ) -> PluginManagerError:
-        """重载失败的统一处理：错误记入安装记录并构造 422（配置本身已保存）。"""
-        message = f"配置已保存，但插件重载失败：{reason}"
+        """重载失败的统一处理：错误记入安装记录并构造 422（配置本身已保存）。
+
+        残留 fiber 已就地清理，记录同步置为未启用 —— 修复配置后 ``enable``
+        直接全新装载，不再依赖「先停再启」的隐式恢复路径。
+        """
+        message = f"配置已保存，但插件重载失败、已停用（修复配置后重新启用）：{reason}"
+        record["enabled"] = False
         record["last_error"] = message
         try:
             self._write_registry()
