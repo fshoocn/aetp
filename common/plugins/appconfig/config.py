@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import configparser
+import os
 import re
+import tempfile
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
@@ -234,13 +236,17 @@ def write_ini_values(
     就地替换，新键插到该节末尾，节不存在则在文件尾追加新节；文件其余行
     一字不动，因此手工维护的注释不会丢。
 
+    写入采用「临时文件 + 原子替换」：中途崩溃不会留下半截文件；带 BOM 的
+    文件按 ``utf-8-sig`` 读入（剥除 BOM），避免 BOM 挡住首行节头匹配导致
+    同一节被重复追加。
+
     参数:
         path: ini 文件路径；文件不存在时按新文件创建。
         changes: ``{节名: {键: 值}}``；值需是字符串（:meth:`FieldConfig.to_ini`
             的产出口径）。
     """
     resolved = Path(path).expanduser()
-    raw = resolved.read_bytes().decode("utf-8") if resolved.is_file() else ""
+    raw = resolved.read_bytes().decode("utf-8-sig") if resolved.is_file() else ""
     newline = "\r\n" if "\r\n" in raw else "\n"
     lines = raw.splitlines()
     for section, values in changes.items():
@@ -248,7 +254,23 @@ def write_ini_values(
     text = newline.join(lines)
     if lines:
         text += newline
-    resolved.write_bytes(text.encode("utf-8"))
+    _atomic_write(resolved, text.encode("utf-8"))
+
+
+def _atomic_write(path: Path, payload: bytes) -> None:
+    """临时文件 + ``os.replace`` 原子替换；失败清理临时文件，目标文件保持原状。"""
+    fd, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _apply_section(

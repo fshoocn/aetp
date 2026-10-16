@@ -212,6 +212,18 @@ class WriteIniValuesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "需要显式传入 path"):
             AppConfig().update_section("web", {"port": "1"})
 
+    def test_strips_bom_and_leaves_no_temporary(self) -> None:
+        """带 BOM 的文件剥 BOM 后按节更新（不重复追加节）；写完不留临时文件。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.ini"
+            path.write_bytes("[node]\nname = 从节点\n".encode("utf-8-sig"))
+            write_ini_values(path, {"node": {"name": "新名字"}})
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("name = 新名字", text)
+            self.assertNotIn("\ufeff", text)
+            self.assertEqual(text.count("[node]"), 1)
+            self.assertEqual(list(Path(temporary).glob("*.tmp")), [])
+
 
 class ConfigBridgeTests(unittest.IsolatedAsyncioTestCase):
     """appconfig 的两个配置生命周期钩子：注入默认值 / 提交写回。"""
