@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import cast
@@ -21,7 +23,7 @@ from starlette.types import Message, Scope
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from _helpers import request as _request
-from common.cordis_utils import unload_all, wait_until
+from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from master_plugins.heartbeat import (
@@ -495,17 +497,26 @@ class HeartbeatPairTests(unittest.IsolatedAsyncioTestCase):
             nodes = json.loads(body)["nodes"]
             return str(nodes[0]["status"]) if nodes else ""
 
+        async def _wait_node_status(target: str) -> bool:
+            """轮询主模块视角的节点状态（HTTP 取数，阻塞调用让到线程里）。"""
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if await asyncio.to_thread(_node_status) == target:
+                    return True
+                await asyncio.sleep(0.05)
+            return False
+
         try:
             # 从模块上线：主模块收到心跳并判定在线
             self.assertTrue(
-                await wait_until(lambda: _node_status() == "online", timeout=10),
-                f"主模块未见到从模块上线：{_node_status()!r}",
+                await _wait_node_status("online"),
+                f"主模块未见到从模块上线：{await asyncio.to_thread(_node_status)!r}",
             )
             # 从模块停机：主模块按阈值判离线
             await unload_all(slave)
             self.assertTrue(
-                await wait_until(lambda: _node_status() == "offline", timeout=10),
-                f"主模块未判离线：{_node_status()!r}",
+                await _wait_node_status("offline"),
+                f"主模块未判离线：{await asyncio.to_thread(_node_status)!r}",
             )
         finally:
             await unload_all(slave)

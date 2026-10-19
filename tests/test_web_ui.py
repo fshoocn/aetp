@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -155,7 +156,7 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             base_url = f"http://127.0.0.1:{self.port}"
 
-            status, content_type, body = _request(base_url, "/api/web/ui")
+            status, content_type, body = await asyncio.to_thread(_request, base_url, "/api/web/ui")
             self.assertEqual(status, 200)
             self.assertIn("application/json", content_type)
             manifest = json.loads(body)
@@ -163,23 +164,23 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(manifest[0]["owner"], "test-ui")
             self.assertEqual(manifest[0]["path"], "/plugins/test-ui")
 
-            status, _, body = _request(base_url, manifest[0]["entry"])
+            status, _, body = await asyncio.to_thread(_request, base_url, manifest[0]["entry"])
             self.assertEqual(status, 200)
             self.assertEqual(body.decode("utf-8"), component_source)
 
-            status, content_type, body = _request(base_url, "/plugins/test-ui")
+            status, content_type, body = await asyncio.to_thread(_request, base_url, "/plugins/test-ui")
             self.assertEqual(status, 200)
             self.assertIn("text/html", content_type)
             self.assertIn(b"/ui-static/assets/", body)
 
-            self.assertEqual(_request(base_url, "/api/missing")[0], 404)
-            self.assertEqual(_request(base_url, "/ui-static/missing.js")[0], 404)
+            self.assertEqual((await asyncio.to_thread(_request, base_url, "/api/missing"))[0], 404)
+            self.assertEqual((await asyncio.to_thread(_request, base_url, "/ui-static/missing.js"))[0], 404)
 
             await fiber.dispose()
-            status, _, body = _request(base_url, "/api/web/ui")
+            status, _, body = await asyncio.to_thread(_request, base_url, "/api/web/ui")
             self.assertEqual(status, 200)
             self.assertEqual(json.loads(body), [])
-            self.assertEqual(_request(base_url, manifest[0]["entry"])[0], 404)
+            self.assertEqual((await asyncio.to_thread(_request, base_url, manifest[0]["entry"]))[0], 404)
 
     async def test_unified_error_envelope(self) -> None:
         """错误信封统一 ``{"error"}``：404 与路径参数转换失败的 400 都带真实原因。"""
@@ -191,18 +192,19 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         base_url = f"http://127.0.0.1:{self.port}"
 
-        status, _, body = _request(base_url, "/api/items/abc")
+        status, _, body = await asyncio.to_thread(_request, base_url, "/api/items/abc")
         self.assertEqual(status, 400)
         self.assertIn("item_id", json.loads(body)["error"])
 
-        status, _, body = _request(base_url, "/api/missing")
+        status, _, body = await asyncio.to_thread(_request, base_url, "/api/missing")
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body)["error"], "Not Found")
 
     async def test_security_headers(self) -> None:
         """响应统一携带 nosniff 安全头（静态与 API 同款）。"""
         request = Request(f"http://127.0.0.1:{self.port}/api/web/ui")
-        with urlopen(request, timeout=5) as response:
+        response = await asyncio.to_thread(urlopen, request, timeout=5)
+        with response:
             self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
 
 
@@ -237,12 +239,13 @@ class CorsTests(unittest.IsolatedAsyncioTestCase):
         await self.open_context.plugin(WebApiPlugin)
         await self.off_context.plugin(WebApiPlugin)
 
-    def test_allow_origin_and_preflight_by_default(self) -> None:
+    async def test_allow_origin_and_preflight_by_default(self) -> None:
         base_url = f"http://127.0.0.1:{self.open_port}"
         origin = {"Origin": "http://127.0.0.1:8080"}
 
         request = Request(f"{base_url}/api/web/routes", headers=origin)
-        with urlopen(request, timeout=5) as response:
+        response = await asyncio.to_thread(urlopen, request, timeout=5)
+        with response:
             self.assertEqual(response.status, 200)
             self.assertEqual(response.headers["Access-Control-Allow-Origin"], "*")
 
@@ -251,16 +254,18 @@ class CorsTests(unittest.IsolatedAsyncioTestCase):
             method="OPTIONS",
             headers={**origin, "Access-Control-Request-Method": "GET"},
         )
-        with urlopen(preflight, timeout=5) as response:
+        response = await asyncio.to_thread(urlopen, preflight, timeout=5)
+        with response:
             self.assertEqual(response.status, 200)
             self.assertEqual(response.headers["Access-Control-Allow-Origin"], "*")
 
-    def test_disabled_when_origins_empty(self) -> None:
+    async def test_disabled_when_origins_empty(self) -> None:
         request = Request(
             f"http://127.0.0.1:{self.off_port}/api/web/routes",
             headers={"Origin": "http://127.0.0.1:8080"},
         )
-        with urlopen(request, timeout=5) as response:
+        response = await asyncio.to_thread(urlopen, request, timeout=5)
+        with response:
             self.assertIsNone(response.headers["Access-Control-Allow-Origin"])
 
 

@@ -652,9 +652,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             ),
             encoding="utf-8",
         )
-        manager = PluginManager(
-            self.context, asyncio.get_running_loop(), install_root
-        )
+        manager = PluginManager(self.context, install_root)
         listing = {item["id"]: item for item in await manager.list_plugins()}
         self.assertNotIn("webapi", manager.records)  # 影子被丢弃
         self.assertTrue(listing["webapi"]["builtin"])  # 展示的是内置真身
@@ -871,7 +869,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
                 raise OSError("simulated registry failure")
 
         install_root = Path(self.temp_dir.name) / "failed-install"
-        manager = RegistryWriteFailureManager(self.context, asyncio.get_running_loop(), install_root)
+        manager = RegistryWriteFailureManager(self.context, install_root)
         with self.assertRaises(PluginManagerError):
             await manager.install_archive(_plugin_archive())
 
@@ -881,8 +879,8 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_enable_registry_failure_disposes_plugin_fiber(self) -> None:
         class FailEnabledWriteManager(PluginManager):
-            def __init__(self, ctx: Context, loop: asyncio.AbstractEventLoop, root: Path) -> None:
-                super().__init__(ctx, loop, root)
+            def __init__(self, ctx: Context, root: Path) -> None:
+                super().__init__(ctx, root)
                 self.failed: bool = False
 
             def _write_registry(self) -> None:
@@ -894,7 +892,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
         install_root = Path(self.temp_dir.name) / "enable-failure"
         plugin_id = "enable-failure"
-        manager = FailEnabledWriteManager(self.context, asyncio.get_running_loop(), install_root)
+        manager = FailEnabledWriteManager(self.context, install_root)
         await manager.install_archive(_plugin_archive(plugin_id, "EnableFailurePlugin"))
         with self.assertRaises(PluginManagerError):
             await manager.enable(plugin_id)
@@ -926,7 +924,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
                 return ConcurrentPlugin
 
         install_root = Path(self.temp_dir.name) / "concurrent-enable"
-        manager = ConcurrentPluginManager(self.context, asyncio.get_running_loop(), install_root)
+        manager = ConcurrentPluginManager(self.context, install_root)
         plugin_id = "concurrent-enable"
         await manager.install_archive(_plugin_archive(plugin_id, "ConcurrentPlugin"))
         results = await asyncio.gather(manager.enable(plugin_id), manager.enable(plugin_id))
@@ -963,7 +961,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
                 return BlockingPlugin
 
         install_root = Path(self.temp_dir.name) / "cancelled-enable"
-        manager = BlockingPluginManager(self.context, asyncio.get_running_loop(), install_root)
+        manager = BlockingPluginManager(self.context, install_root)
         plugin_id = "cancelled-enable"
         await manager.install_archive(_plugin_archive(plugin_id, "BlockingPlugin"))
 

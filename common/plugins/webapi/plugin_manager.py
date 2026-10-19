@@ -14,7 +14,7 @@ import sys
 import tempfile
 import types
 import zipfile
-from collections.abc import Coroutine, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Final, TypedDict, cast
@@ -276,12 +276,10 @@ class PluginManager:
     def __init__(
         self,
         ctx: Context,
-        loop: asyncio.AbstractEventLoop,
         install_root: Path,
         preinstalled_ids: Iterable[str] = (),
     ) -> None:
         self.ctx: Context = ctx
-        self.loop: asyncio.AbstractEventLoop = loop
         self.install_root: Path = install_root.resolve()
         self.install_root.mkdir(parents=True, exist_ok=True)
         self.registry_file: Path = self.install_root / "registry.json"
@@ -301,15 +299,6 @@ class PluginManager:
     @staticmethod
     def _module_name(plugin_id: str) -> str:
         return f"_aetp_plugin_{plugin_id.encode('ascii').hex()}"
-
-    def run_from_web_thread(self, coroutine: Coroutine[object, object, object]) -> object:
-        """将 Web 线程中的管理请求提交给创建 Cordis Context 的主 loop。"""
-        future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
-        try:
-            return future.result(timeout=60)
-        except TimeoutError:
-            future.cancel()
-            raise PluginManagerError("插件操作超时", 504) from None
 
     async def list_plugins(self) -> list[PublicPluginRecord]:
         records = [self._public_record(record) for record in self.records.values()]

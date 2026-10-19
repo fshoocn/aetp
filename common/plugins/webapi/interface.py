@@ -109,15 +109,15 @@ class WebApiService(ABC):
 
     # ------------------------------------------------------------ 生命周期
     @abstractmethod
-    def start(self) -> None:
-        """启动服务器（阻塞到就绪；失败抛运行时错误）。
+    async def start(self) -> None:
+        """启动服务器（等待就绪；失败抛运行时错误）。
 
         由 web 插件的 ``init()`` 调用。此调用之前注册的路由会一次性挂载，
         之后注册的路由应立即生效（无需重启）。
         """
 
     @abstractmethod
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """停止服务器并清空运行态（幂等，未启动时可安全调用）。
 
         由 web 插件登记的 effect 调用，因此 ``fiber.dispose()`` /

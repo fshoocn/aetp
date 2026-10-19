@@ -91,7 +91,7 @@ class WebApiPlugin:
     async def init(self) -> None:
         """启动 Web 服务并加载内置插件管理 API。"""
         self._register_builtins()
-        self.service.start()
+        await self.service.start()
 
         address: str = self.service.address() or self.config.url()
         self.ctx.logger.info("web 服务已启动：%s", address)
@@ -132,13 +132,14 @@ class WebApiPlugin:
         )
 
     # -- 卸载 -----------------------------------------------------------------
-    def _shutdown(self) -> None:
+    async def _shutdown(self) -> None:
         """停止 HTTP 服务并清空服务状态。
 
-        由 effect 触发，因此 ``fiber.dispose()`` / ``fiber.restart()`` 都会走到。
+        由 effect 触发（effect 清理函数返回可等待对象时会被 await），
+        因此 ``fiber.dispose()`` / ``fiber.restart()`` 都会走到。
         """
         try:
-            self.service.stop()
+            await self.service.stop()
         finally:
             self.ctx.logger.info("web 服务已停止")
 

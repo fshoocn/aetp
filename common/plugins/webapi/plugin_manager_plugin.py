@@ -123,9 +123,8 @@ class PluginManagerPlugin(Service[None]):
         return frozenset(ids)
 
     async def init(self) -> None:
-        loop = asyncio.get_running_loop()
         self.manager = PluginManager(
-            self.ctx, loop, self.install_root, self.preinstalled_ids
+            self.ctx, self.install_root, self.preinstalled_ids
         )
         self._register_routes()
         await self.manager.restore_enabled()
@@ -259,9 +258,9 @@ class PluginManagerPlugin(Service[None]):
             return ctx.webapi.json(payload, status_code=error.status_code)
 
         @ctx.webapi.get("/api/plugins", kind="api", name="plugins.list")
-        def list_plugins(_: Request) -> dict[str, object] | JSONResponse:
+        async def list_plugins(_: Request) -> dict[str, object] | JSONResponse:
             try:
-                items = manager().run_from_web_thread(manager().list_plugins())
+                items = await manager().list_plugins()
                 return {"plugins": items}
             except PluginManagerError as error:
                 return error_response(error)
@@ -276,39 +275,34 @@ class PluginManagerPlugin(Service[None]):
                 )
                 # replace=1 是操作者在确认弹窗后给出的显式替换确认
                 replace = _request.query_params.get("replace", "") in {"1", "true", "yes"}
-                item = await asyncio.to_thread(
-                    manager().run_from_web_thread,
-                    manager().install_archive(archive, replace=replace),
-                )
+                item = await manager().install_archive(archive, replace=replace)
                 return {"plugin": item}
             except PluginManagerError as error:
                 return error_response(error)
 
         @ctx.webapi.post("/api/plugins/{plugin_id}/enable", kind="api", name="plugins.enable")
-        def enable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
+        async def enable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             try:
-                item = manager().run_from_web_thread(manager().enable(plugin_id))
+                item = await manager().enable(plugin_id)
                 return {"plugin": item}
             except PluginManagerError as error:
                 return error_response(error)
 
         @ctx.webapi.post("/api/plugins/{plugin_id}/disable", kind="api", name="plugins.disable")
-        def disable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
+        async def disable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             try:
-                item = manager().run_from_web_thread(manager().disable(plugin_id))
+                item = await manager().disable(plugin_id)
                 return {"plugin": item}
             except PluginManagerError as error:
                 return error_response(error)
 
         @ctx.webapi.delete("/api/plugins/{plugin_id}", kind="api", name="plugins.uninstall")
-        def uninstall_plugin(request: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
+        async def uninstall_plugin(request: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             try:
                 # keep_data=1 保留数据表；drop=1 强制删除被依赖插件的数据
                 keep_data = request.query_params.get("keep_data", "") in {"1", "true", "yes"}
                 drop = request.query_params.get("drop", "") in {"1", "true", "yes"}
-                manager().run_from_web_thread(
-                    manager().uninstall(plugin_id, keep_data=keep_data, drop=drop)
-                )
+                await manager().uninstall(plugin_id, keep_data=keep_data, drop=drop)
                 return {"ok": True, "id": plugin_id}
             except PluginManagerError as error:
                 return error_response(error)
@@ -334,21 +328,16 @@ class PluginManagerPlugin(Service[None]):
                     ) from error
                 if not isinstance(body, dict):
                     raise PluginManagerError("请求体必须是 JSON 对象", 400)
-                item = await asyncio.to_thread(
-                    manager().run_from_web_thread,
-                    manager().update_config(plugin_id, cast(dict[str, object], body)),
-                )
+                item = await manager().update_config(plugin_id, cast(dict[str, object], body))
                 return {"plugin": item}
             except PluginManagerError as error:
                 return error_response(error)
 
         @ctx.webapi.get("/api/plugins/{plugin_id}/readme", kind="api", name="plugins.readme")
-        def plugin_readme(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
+        async def plugin_readme(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
             """插件描述文件（Markdown 文本），供管理页弹窗展示。"""
             try:
-                content = manager().run_from_web_thread(
-                    manager().plugin_readme(plugin_id)
-                )
+                content = await manager().plugin_readme(plugin_id)
                 return {"id": plugin_id, "content": content}
             except PluginManagerError as error:
                 return error_response(error)

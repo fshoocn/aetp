@@ -2,7 +2,7 @@
 
 **所有 uvicorn 相关的代码都在本文件**：
 
-* :class:`UvicornHost` —— 把 Starlette 应用跑在一个后台线程里；
+* :class:`UvicornHost` —— 把 uvicorn 服务器挂在**宿主事件循环**上（单循环）；
 * :class:`UvicornWebApiService` —— 把路由 / 响应拼成一个 WebApiService，
   并以 cordis ``Service``（``provide = "webapi"``）的身份注册为 ``ctx.webapi``。
 
@@ -10,34 +10,37 @@
 再改 :mod:`common.plugins.webapi.plugin` 构造里那一行。接口
 :class:`~common.plugins.webapi.interface.WebApiService` 与所有业务插件都保持不动。
 
-为什么放在独立线程而不是复用调用方的 asyncio 循环？
+为什么挂在宿主循环上而不是独立线程？
+----------------------------------
 
-* 主流程（``master/main.py``）是单次 ``asyncio.run``，插件加载完就结束，没有
-  长期运行的循环可以挂载服务；
-* 后台线程让「启动 web 服务」与「插件运行时」解耦：插件加载完成后服务仍在
-  监听，退出进程时线程随之为 daemon 结束，不需要调用方额外管理生命周期；
-* uvicorn 在非主线程会自动跳过信号注册（``capture_signals`` 检测线程），因此
-  不会抢占 ``Ctrl+C``，主线程仍可正常中断。
+``node_runtime.run_node`` 的主循环在 ``await stop.wait()`` 期间**全程存活**，
+uvicorn 完全可以直接跑在它上面。历史版本用独立线程的真实原因是 uvicorn 在
+主线程会自己接管 ``SIGINT``/``SIGTERM``（``capture_signals``），与
+``node_runtime._install_stop_handler`` 的处理器互相覆盖、Ctrl+C 可能被截胡；
+:class:`_EmbeddedServer` 显式禁用自带信号捕获后这个约束即消失：
+
+* **单循环**——不存在跨线程的字典 / 事件访问，也没有线程 join 的关停互锁；
+* 业务 handler 与管理面同栈运行，不再需要跨线程桥接（``run_from_web_thread``
+  已删除）；
+* 信号统一由 ``node_runtime`` 处理，Ctrl+C 语义不受 uvicorn 影响。
 
 启动/停止时序（与 cordis 的 effect 生命周期对齐）::
 
-    effect 创建 → 建 Starlette app → attach 路由 → 起线程 → 等 started
-                                                        ↓ 超时/失败
-                                                    抛异常 → 插件加载失败
-    effect 销毁 → should_exit=True → join 线程 → detach 路由
-
-停止时的加锁策略（重要）：``UvicornHost.stop()`` 在锁内**只做快照**（取出
-server/thread 并置空自己的字段），真正的 ``join()`` 放在锁外执行 —— 否则线程
-若在退出过程中回调 ``is_running`` 之类的加锁方法就会死锁。
+    effect 创建 → 建 Starlette app → attach 路由 → 起 serve 任务 → 等 started
+                                                            ↓ 超时/失败
+                                                        抛异常 → 插件加载失败
+    effect 销毁 → should_exit=True → await serve 任务 → detach 路由
 """
 from __future__ import annotations
 
-import threading
+import asyncio
+import contextlib
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
+import uvicorn
 from cordis_port import Context, Fiber, Service
 from starlette.applications import Starlette
 from starlette.datastructures import MutableHeaders
@@ -74,10 +77,6 @@ from .types import (
     StreamContent,
 )
 
-if TYPE_CHECKING:
-    # 仅供类型标注：uvicorn 仍在 ``start()`` 内按需导入，运行时导入面保持最小
-    import uvicorn
-
 
 class ServerError(RuntimeError):
     """服务器启动或停止失败。"""
@@ -107,6 +106,19 @@ class _SecurityHeadersMiddleware:
         await self.app(scope, receive, sender)
 
 
+class _EmbeddedServer(uvicorn.Server):
+    """嵌入宿主事件循环的 uvicorn 服务器：禁用自带信号捕获。
+
+    信号统一由 ``node_runtime._install_stop_handler`` 处理；若不覆写，主线程
+    下 ``capture_signals`` 会接管 ``SIGINT``/``SIGTERM``，Ctrl+C 被 uvicorn
+    自己的 ``handle_exit`` 截胡，主循环的 ``stop.wait()`` 永远不返回。
+    """
+
+    @contextlib.contextmanager
+    def capture_signals(self) -> Generator[None, None, None]:
+        yield
+
+
 class UvicornHost:
     """在后台线程中托管一个 uvicorn 服务器。
 
@@ -128,19 +140,16 @@ class UvicornHost:
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
-        self.thread: threading.Thread | None = None
-        self.server: uvicorn.Server | None = None
-        self._lock = threading.Lock()
+        self.server: _EmbeddedServer | None = None
+        self._serve_task: asyncio.Task[None] | None = None
 
     # -- 启动 ----------------------------------------------------------------
-    def start(self) -> None:
-        """启动服务器并阻塞到就绪（或超时抛错）。
+    async def start(self) -> None:
+        """启动服务器并等待就绪（或超时抛错）。
 
         抛出:
             ServerError: 端口被占用、绑定失败或超过 ``start_timeout`` 仍未就绪。
         """
-        import uvicorn
-
         options = uvicorn.Config(
             self.app,
             host=self.config.host,
@@ -151,67 +160,66 @@ class UvicornHost:
             log_config=None,
             reload=False,
         )
-        with self._lock:
-            if self.thread is not None and self.thread.is_alive():
-                return
-            server = uvicorn.Server(options)
-            self.server = server
-            self.thread = threading.Thread(
-                target=server.run,
-                name="aetp-web",
-                daemon=True,
-            )
-            thread = self.thread
-        thread.start()
+        if self._serve_task is not None and not self._serve_task.done():
+            return
+        server = _EmbeddedServer(options)
+        self.server = server
+        task: asyncio.Task[None] = asyncio.create_task(server.serve())
+        self._serve_task = task
 
         timeout = max(float(self.config.start_timeout), 0.1)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if server.started:
                 return
-            if not thread.is_alive():
-                # 线程提前退出：端口占用或地址不可绑定
-                with self._lock:
-                    self.server = None
-                    self.thread = None
+            if task.done():
+                # serve 任务提前退出：端口占用或地址不可绑定
+                self.server = None
+                self._serve_task = None
                 raise ServerError(
                     f"web 服务启动失败：{self.config.host}:{self.config.port} "
                     "（端口可能已被占用，或地址不可绑定）"
                 )
-            time.sleep(0.05)
+            await asyncio.sleep(0.05)
 
-        self.stop()
+        await self.stop()
         raise ServerError(
             f"web 服务未能在 {timeout:g} 秒内启动：{self.config.host}:{self.config.port}"
         )
 
-    def stop(self) -> None:
-        """请求退出并等待线程结束（幂等，可在未启动时安全调用）。
+    async def stop(self) -> None:
+        """请求退出并等待 serve 任务结束（幂等，可在未启动时安全调用）。
 
-        锁内只做快照，``join`` 在锁外进行 —— 避免持锁等待线程退出而死锁。
+        不用 ``wait_for``（超时会取消任务）：分两段 ``asyncio.wait`` 逐级
+        强推（should_exit → force_exit → cancel），被取消时也确保任务回收。
         """
-        with self._lock:
-            server, thread = self.server, self.thread
-            self.server = None
-            self.thread = None
-        if server is None:
+        server, task = self.server, self._serve_task
+        self.server = None
+        self._serve_task = None
+        if server is None or task is None:
             return
 
         server.should_exit = True
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=max(float(self.config.start_timeout), 1.0))
-        if thread is not None and thread.is_alive():
-            # 线程没能在超时内退出：强推一次，避免端口长期被占
-            server.force_exit = True
-            thread.join(timeout=2.0)
+        try:
+            done, _pending = await asyncio.wait(
+                {task}, timeout=max(float(self.config.start_timeout), 1.0)
+            )
+            if not done:
+                # 没能在超时内退出：强推一次，避免端口长期被占
+                server.force_exit = True
+                done, _pending = await asyncio.wait({task}, timeout=2.0)
+        finally:
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     @property
     def is_running(self) -> bool:
         """服务器是否处于监听状态。"""
-        with self._lock:
-            server, thread = self.server, self.thread
+        task = self._serve_task
         return bool(
-            server is not None and server.started and thread is not None and thread.is_alive()
+            self.server is not None and self.server.started and task is not None and not task.done()
         )
 
 class UvicornWebApiService(Service[WebApiConfig], WebApiService):
@@ -294,8 +302,8 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         return fiber if fiber is not None else self._provided_ctx.fiber
 
     # ------------------------------------------------------------ 服务器生命周期
-    def start(self) -> None:
-        """启动 uvicorn（阻塞到就绪；失败抛 :class:`ServerError`）。
+    async def start(self) -> None:
+        """启动 uvicorn（等待就绪；失败抛 :class:`ServerError`）。
 
         在此之前注册的路由会被一次性挂载；之后注册的路由随 :meth:`route` 立即生效。
         """
@@ -310,14 +318,14 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         host.app.add_exception_handler(404, self._not_found)
         host.app.add_exception_handler(HTTPException, self._http_exception)
         host.app.add_exception_handler(500, self._internal_error)
-        host.start()
+        await host.start()
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """停止 uvicorn 并清空服务状态（幂等，未启动时可安全调用）。"""
         host = self._host
         try:
             if host is not None:
-                host.stop()
+                await host.stop()
         finally:
             self._detach_app()
             self._detach_server()

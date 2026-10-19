@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import tempfile
@@ -103,13 +104,13 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         # 插件源已安装到本节点安装目录并启用，其 API 可用
         self.assertTrue((root / "plugins" / "executor-demo").is_dir())
         self.assertTrue((root / "plugins" / ".archives" / "executor-demo.zip").is_file())
-        status, body = _request(self.base_url, "/api/executor-demo")
+        status, body = await asyncio.to_thread(_request, self.base_url, "/api/executor-demo")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["node_kind"], "slave")
 
         # 无头语义：没装 webui —— 页面路径 404，/api/web/ui 不存在
-        self.assertEqual(_request(self.base_url, "/some/page")[0], 404)
-        self.assertEqual(_request(self.base_url, "/api/web/ui")[0], 404)
+        self.assertEqual((await asyncio.to_thread(_request, self.base_url, "/some/page"))[0], 404)
+        self.assertEqual((await asyncio.to_thread(_request, self.base_url, "/api/web/ui"))[0], 404)
 
         # 幂等：重复 ensure 不报错、不重复安装
         self.assertEqual(await ensure_installed(self.context, source), "executor-demo")
@@ -134,7 +135,7 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8",
         )
         self.assertEqual(await ensure_installed(self.context, source), "executor-demo")
-        status, body = _request(self.base_url, "/api/executor-demo")
+        status, body = await asyncio.to_thread(_request, self.base_url, "/api/executor-demo")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["active"], "rebuilt")
 
@@ -158,7 +159,7 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.context = await assemble_node(config_path=config_path)
 
         # 坏源在前也不拖垮启动：好插件照常安装启用并对外服务
-        status, _body = _request(self.base_url, "/api/good-demo")
+        status, _body = await asyncio.to_thread(_request, self.base_url, "/api/good-demo")
         self.assertEqual(status, 200)
         listing = {
             item["id"]: item for item in await self.context.plugins.list_plugins()
