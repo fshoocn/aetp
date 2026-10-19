@@ -829,10 +829,19 @@ class HeartbeatPluginTests(unittest.IsolatedAsyncioTestCase):
 
         await unload_all(context)
         self.slave = None
-        await asyncio.sleep(0.3)
+        # 负断言改「落定 + 观察」：先等卸载瞬间在途的请求收尾（计数不再增长），
+        # 再观察约 10 个心跳周期（interval=0.05）确无新增——固定双 sleep 在
+        # 慢 CI 上会被在途请求误报
         count_after_unload = len(self.master.received)
-        await asyncio.sleep(0.3)
-        self.assertEqual(len(self.master.received), count_after_unload)
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            current = len(self.master.received)
+            if current == count_after_unload:
+                break
+            count_after_unload = current
+        for _ in range(10):
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(self.master.received), count_after_unload)
 
     async def test_master_config_syncs_interval(self) -> None:
         """端到端：主模块在心跳响应里下发 config，从模块同步生效。"""
@@ -948,42 +957,44 @@ class HeartbeatSenderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_http_error_status_becomes_send_error(self) -> None:
         """主模块在线但接口返回 5xx：归一化为 HeartbeatSendError。"""
-        master = _RecordingMaster(Path(tempfile.gettempdir()), _free_port())
-        # 利用不存在的路径触发 404
-        address = await master.start()
-        config = HeartbeatConfig(
-            master_url=address or f"http://127.0.0.1:{master.port}",
-            path="/api/missing",
-            interval=1.0,
-            timeout=1.0,
-            max_backoff=5.0,
-        )
-        try:
-            sender = HeartbeatSender(config)
-            with self.assertRaises(HeartbeatSendError) as caught:
-                await sender.send({"seq": 1})
-            self.assertIn("404", str(caught.exception))
-        finally:
-            await master.stop()
+        with tempfile.TemporaryDirectory() as temporary:
+            master = _RecordingMaster(Path(temporary), _free_port())
+            # 利用不存在的路径触发 404
+            address = await master.start()
+            config = HeartbeatConfig(
+                master_url=address or f"http://127.0.0.1:{master.port}",
+                path="/api/missing",
+                interval=1.0,
+                timeout=1.0,
+                max_backoff=5.0,
+            )
+            try:
+                sender = HeartbeatSender(config)
+                with self.assertRaises(HeartbeatSendError) as caught:
+                    await sender.send({"seq": 1})
+                self.assertIn("404", str(caught.exception))
+            finally:
+                await master.stop()
 
     async def test_oversized_response_becomes_send_error(self) -> None:
         """响应体超过上限（256 KiB）：按失败处理，防大响应撑爆内存。"""
-        master = _RecordingMaster(Path(tempfile.gettempdir()), _free_port())
-        master.reply = {"pad": "x" * (300 * 1024)}
-        address = await master.start()
-        config = HeartbeatConfig(
-            master_url=address or f"http://127.0.0.1:{master.port}",
-            interval=1.0,
-            timeout=5.0,
-            max_backoff=5.0,
-        )
-        try:
-            sender = HeartbeatSender(config)
-            with self.assertRaises(HeartbeatSendError) as caught:
-                await sender.send({"seq": 1})
-            self.assertIn("过大", str(caught.exception))
-        finally:
-            await master.stop()
+        with tempfile.TemporaryDirectory() as temporary:
+            master = _RecordingMaster(Path(temporary), _free_port())
+            master.reply = {"pad": "x" * (300 * 1024)}
+            address = await master.start()
+            config = HeartbeatConfig(
+                master_url=address or f"http://127.0.0.1:{master.port}",
+                interval=1.0,
+                timeout=5.0,
+                max_backoff=5.0,
+            )
+            try:
+                sender = HeartbeatSender(config)
+                with self.assertRaises(HeartbeatSendError) as caught:
+                    await sender.send({"seq": 1})
+                self.assertIn("过大", str(caught.exception))
+            finally:
+                await master.stop()
 
     async def test_unserializable_payload_becomes_send_error(self) -> None:
         """载荷含不可序列化对象：归一化为 HeartbeatSendError，不裸抛。"""

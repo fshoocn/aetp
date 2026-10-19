@@ -423,8 +423,8 @@ class DbServiceTests(DbStackTestCase):
         await db.repo(RunRecord).add(RunRecord(name="keep-me"))
 
         outcome = self.db_fiber.update({"echo": False}, no_save=True)
-        if outcome is not None:
-            await outcome
+        assert outcome is not None  # 热更新必须真的发生：拿不到结果不许悄悄跳过
+        await outcome
         refreshed = self.context.get("db")
         self.assertEqual(await refreshed.repo(RunRecord).count(), 1)  # 热更新不动表
 

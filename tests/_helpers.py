@@ -5,14 +5,25 @@ from __future__ import annotations
 import asyncio
 import socket
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
+
+#: 无代理 opener：与生产传输层同口径（环境代理可能劫持本机回环请求）
+_OPENER = build_opener(ProxyHandler({}))
+
+#: 本进程已发放过的端口：连续探测可能拿到刚还回去的同一端口（TOCTOU），
+#: 记账排除，避免同进程两次起服务撞车
+_used_ports: set[int] = set()
 
 
 def free_port() -> int:
     """探测一个当前空闲的本地端口（测试各起真实服务，避免端口撞车）。"""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+    while True:
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = int(probe.getsockname()[1])
+        if port not in _used_ports:
+            _used_ports.add(port)
+            return port
 
 
 def request(
@@ -27,7 +38,7 @@ def request(
     headers = {"Content-Type": content_type} if content_type else {}
     req = Request(f"{base_url}{path}", data=body, headers=headers, method=method)
     try:
-        response = urlopen(req, timeout=5)
+        response = _OPENER.open(req, timeout=5)
     except HTTPError as error:
         response = error
     with response:

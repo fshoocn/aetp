@@ -29,8 +29,6 @@ def _request(base_url: str, path: str, method: str = "GET") -> tuple[int, str, b
         response = urlopen(request, timeout=5)
     except HTTPError as error:
         response = error
-    if response is None:
-        raise RuntimeError("HTTP 请求没有返回响应")
     with response:
         status = response.status
         body = response.read()
