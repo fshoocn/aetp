@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import importlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -249,6 +250,9 @@ class PluginManagerError(ValueError):
 
 #: requires 字段校验失败的统一提示（形状与内容两处检查共用）
 _REQUIRES_ERROR: Final[str] = "requires 必须是字符串列表（每项非空且不超过 64 字符，最多 32 项）"
+#: registry 有记录但安装目录缺失时的诊断（启动自检写入 last_error）
+_MISSING_DIR_ERROR: Final[str] = "安装目录缺失，需要重新安装（上传插件包）"
+_LOGGER = logging.getLogger(__name__)
 #: kind 字段校验失败的统一提示
 _KIND_ERROR: Final[str] = (
     f"plugin.json 必须提供 kind（{' / '.join(PLUGIN_KINDS)} 之一，单值或列表）"
@@ -293,6 +297,9 @@ class PluginManager:
         self.records: dict[str, _PluginRecord] = self._read_registry()
         self.fibers: dict[str, Fiber] = {}
         self._operation_lock = asyncio.Lock()
+        #: 孤儿安装目录（目录在、registry 无记录）——kill 中断的残留，安装同名时覆盖
+        self._orphan_dirs: set[str] = set()
+        self._reconcile_disk_state()
 
     def _builtins(self) -> dict[str, _BuiltinSpec]:
         """内置插件元数据（按已加载插件动态发现，见 :func:`builtin_specs`）。"""
@@ -397,7 +404,12 @@ class PluginManager:
             digest = await asyncio.to_thread(archive_digest, archive)
             existing = self.records.get(plugin_id)
             destination = self.install_root / plugin_id
-            if existing is not None or destination.exists():
+            if existing is None and destination.exists():
+                # PS-H2 自愈：孤儿安装目录（kill 中断残留，registry 无记录）
+                # 直接覆盖，不再 409 卡死整个节点
+                _LOGGER.warning("覆盖孤儿安装目录 %s（registry 无记录）", destination.name)
+                await asyncio.to_thread(shutil.rmtree, destination, ignore_errors=True)
+            if existing is not None:
                 if not replace:
                     installed_version = (
                         str(existing.get("version") or "未知") if existing else "未知"
@@ -612,6 +624,12 @@ class PluginManager:
             await self._discard_dead_fiber(plugin_id, existing)
 
         package_root = self.install_root / plugin_id
+        if not package_root.is_dir():
+            # PS-H1：registry 有记录但目录缺失——明确诊断，不再裸 ModuleNotFoundError
+            raise PluginManagerError(
+                f"插件 {plugin_id!r} {_MISSING_DIR_ERROR}",
+                422,
+            )
         module_name = self._module_name(plugin_id)
         fiber: Fiber | None = None
         try:
@@ -1073,7 +1091,11 @@ class PluginManager:
         package.__package__ = package_name
         package.__file__ = str(package_root / "__init__.py")
         sys.modules[package_name] = package
-        module = importlib.import_module(f".{module_path}", package_name)
+        try:
+            module = importlib.import_module(f".{module_path}", package_name)
+        except ImportError as exc:
+            self._remove_modules(package_name)
+            raise PluginManagerError(f"插件 {entrypoint!r} 加载失败：{exc}") from exc
         plugin_class = getattr(module, class_name, None)
         if not isinstance(plugin_class, type):
             self._remove_modules(package_name)
@@ -1167,6 +1189,41 @@ class PluginManager:
             "builtin": False,
             "protected": record["id"] in self.preinstalled_ids,
         }
+
+    def _reconcile_disk_state(self) -> None:
+        """启动一致性自检（PS-H1/H2）：registry 与安装目录互相校验。
+
+        - 目录在、registry 无记录 → 孤儿（安装中断残留）：不阻塞启动，
+          安装同名插件时自动覆盖（不再 409 卡死）；
+        - registry 有记录、目录缺失 → 标记「需要重新安装」（不再裸
+          ModuleNotFoundError），启用时给出明确诊断。
+        """
+        dirs = {
+            p.name
+            for p in self.install_root.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
+        }
+        record_ids = set(self.records)
+        self._orphan_dirs = dirs - record_ids
+        for orphan in sorted(self._orphan_dirs):
+            _LOGGER.warning(
+                "检测到孤儿安装目录 %s（registry 无记录，可能是安装中断残留）；"
+                "下次安装同名插件时将自动覆盖",
+                orphan,
+            )
+        changed = False
+        for plugin_id in sorted(record_ids - dirs):
+            record = self.records[plugin_id]
+            if record.get("last_error") != _MISSING_DIR_ERROR:
+                record["last_error"] = _MISSING_DIR_ERROR
+                changed = True
+            _LOGGER.warning(
+                "插件 %s 的安装目录缺失（%s），需要重新安装",
+                plugin_id,
+                self.install_root / plugin_id,
+            )
+        if changed:
+            self._write_registry()
 
     def _read_registry(self) -> dict[str, _PluginRecord]:
         data = self.registry_store.read()

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import sqlite3
 import struct
 import sys
 import tempfile
@@ -981,6 +983,91 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(
             any(name == module_name or name.startswith(module_name + ".") for name in sys.modules)
         )
+
+
+class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    """PS-H1~H4：安装 / 卸载 / 换装中断（kill 模拟）后的重启自愈与明确诊断。"""
+
+    async def asyncSetUp(self) -> None:
+        self.context: Context = Context()
+        self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
+        self.install_root: Path = Path(self.temp_dir.name) / "installed"
+        self.context.provide("node_kind", "master")
+
+    async def asyncTearDown(self) -> None:
+        await unload_all(self.context)
+        self.temp_dir.cleanup()
+
+    async def test_missing_dir_gives_reinstall_diagnosis(self) -> None:
+        """PS-H1：registry 有记录、目录缺失 → 明确诊断，不是裸 ModuleNotFoundError。"""
+        manager = PluginManager(self.context, self.install_root)
+        await manager.install_archive(_plugin_archive())
+        # kill 模拟：registry 写成功后安装目录丢失（卸载中断 / 磁盘清理）
+        shutil.rmtree(self.install_root / "uploaded-sample")
+
+        restarted = PluginManager(self.context, self.install_root)
+        self.assertIn("需要重新安装", restarted.records["uploaded-sample"]["last_error"] or "")
+        with self.assertRaises(PluginManagerError) as raised:
+            await restarted.enable("uploaded-sample")
+        self.assertIn("需要重新安装", str(raised.exception))
+        public = next(
+            record
+            for record in await restarted.list_plugins()
+            if record["id"] == "uploaded-sample"
+        )
+        self.assertIn("需要重新安装", public["last_error"] or "")
+
+    async def test_orphan_dir_is_overwritten_not_conflicting(self) -> None:
+        """PS-H2：孤儿安装目录（registry 无记录）→ 不再 409 卡死，安装时覆盖。"""
+        manager = PluginManager(self.context, self.install_root)
+        await manager.install_archive(_plugin_archive())
+        # kill 模拟：目录落地但 registry 未写（整库丢失）
+        (self.install_root / "registry.db").unlink()
+        # 另一个半截落地的目录（安装到一半被 kill）
+        orphan = self.install_root / "half-installed"
+        orphan.mkdir()
+        (orphan / "garbage.txt").write_text("partial", encoding="utf-8")
+
+        restarted = PluginManager(self.context, self.install_root)
+        self.assertEqual(restarted.records, {})
+        record = await restarted.install_archive(_plugin_archive())
+        self.assertEqual(record["id"], "uploaded-sample")
+        self.assertTrue((self.install_root / "uploaded-sample" / "plugin.json").is_file())
+        # 半截孤儿同样被同名安装覆盖（不 409）
+        await restarted.install_archive(_plugin_archive(plugin_id="half-installed"))
+        self.assertFalse((self.install_root / "half-installed" / "garbage.txt").exists())
+
+    async def test_incompatible_schema_version_is_explicit(self) -> None:
+        """PS-H3：registry schema 版本不兼容 → 启动显式报错（不再静默半兼容）。"""
+        manager = PluginManager(self.context, self.install_root)
+        await manager.install_archive(_plugin_archive())
+        conn = sqlite3.connect(self.install_root / "registry.db")
+        try:
+            with conn:
+                conn.execute(
+                    "UPDATE store_meta SET value = '999' WHERE name = 'schema_version'"
+                )
+        finally:
+            conn.close()
+        with self.assertRaises(RuntimeError) as raised:
+            PluginManager(self.context, self.install_root)
+        self.assertIn("schema 版本不兼容", str(raised.exception))
+
+    async def test_interrupted_replace_restarts_cleanly(self) -> None:
+        """PS-H4：换装中断（目录已清、registry 停旧）→ 重启可重装，诊断自动清除。"""
+        manager = PluginManager(self.context, self.install_root)
+        await manager.install_archive(_plugin_archive())
+        await manager.install_archive(_plugin_archive(version="2.0.0"), replace=True)
+        # kill 模拟：换装清旧阶段中断
+        shutil.rmtree(self.install_root / "uploaded-sample")
+
+        restarted = PluginManager(self.context, self.install_root)
+        self.assertIn("uploaded-sample", restarted.records)
+        record = await restarted.install_archive(
+            _plugin_archive(version="2.0.0"), replace=True
+        )
+        self.assertEqual(record["version"], "2.0.0")
+        self.assertIsNone(record["last_error"])
 
 
 if __name__ == "__main__":
