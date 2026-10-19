@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import signal
 import socket
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -18,6 +20,7 @@ from common.node_runtime import (
     assemble_node,
     ensure_installed,
     load_node_profile,
+    run_node,
     source_plugin_id,
 )
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
@@ -318,6 +321,53 @@ class NodeProfileTests(unittest.TestCase):
             WebApiConfig.from_ini({"nope": "1"})
         with self.assertRaisesRegex(ValueError, "cors_origins"):
             WebApiConfig.from_ini({"cors_origins": "ftp://x"})
+
+
+class RunNodeSignalTests(unittest.IsolatedAsyncioTestCase):
+    """P1-13：``run_node`` + 信号退出（此前零测试）。"""
+
+    async def test_run_node_stops_on_sigterm(self) -> None:
+        """run_node 阻塞至信号；SIGTERM 触发有序退出（服务停、端口释放）。"""
+        temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        port = _free_port()
+        config_path = root / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = slave\n"
+            "name = 信号测试\n"
+            "install_root = plugins\n"
+            "\n[web]\n"
+            f"port = {port}\n"
+            "auth_token = test-token\n"
+            "\n[log]\n"
+            "console = false\n",
+            encoding="utf-8",
+        )
+
+        task = asyncio.create_task(run_node(config_path=config_path))
+        base_url = f"http://127.0.0.1:{port}"
+        # 探活走 to_thread：单循环架构下同步探测会阻塞 loop、饿死 web 服务
+        deadline = time.monotonic() + 15.0
+        up = False
+        while time.monotonic() < deadline:
+            try:
+                status = await asyncio.to_thread(lambda: _request(base_url, "/healthz")[0])
+            except OSError:
+                status = 0
+            if status == 200:
+                up = True
+                break
+            await asyncio.sleep(0.05)
+        self.assertTrue(up, "run_node 未能在限时内就绪")
+
+        signal.raise_signal(signal.SIGTERM)  # 触发优雅退出
+        await asyncio.wait_for(task, timeout=15.0)
+
+        # 端口已释放 = 服务真的停了（卸载链路走完）
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", port))
 
 
 if __name__ == "__main__":

@@ -25,7 +25,12 @@ from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import DbPlugin
 from common.plugins.db.registry import PluginRecordStore
 from common.plugins.webapi import WebApiPlugin
-from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError, builtin_specs
+from common.plugins.webapi.plugin_manager import (
+    MAX_ARCHIVE_SIZE,
+    PluginManager,
+    PluginManagerError,
+    builtin_specs,
+)
 from common.plugins.webapi.plugin_manager_plugin import (
     MAX_CONFIG_BODY_BYTES,
     PluginManagerPlugin,
@@ -51,6 +56,7 @@ def _plugin_archive(
     kind: str | list[str] | None = "master",
     version: str = "1.0.0",
     broken: bool = False,
+    plain: bool = False,
     readme: str | None = None,
     inject: list[str] | None = None,
 ) -> bytes:
@@ -69,7 +75,7 @@ def _plugin_archive(
     init_body = (
         "        raise RuntimeError('broken on purpose')\n"
         if broken
-        else (
+        else ("        self.active = True\n" if plain else (
             "        ctx.webui.register_ui(\n"
             "            'home', kind='page', format='vue', resource_root=config['resource_root'],\n"
             f"            entry='Home.vue', path='/plugins/{plugin_id}', title={plugin_id!r},\n"
@@ -78,7 +84,7 @@ def _plugin_archive(
             f"        @ctx.webapi.get('/api/{plugin_id}', kind='api')\n"
             "        def status(request):\n"
             f"            return {{'active': True, 'version': {version!r}}}\n"
-        )
+        ))
     )
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
@@ -1136,6 +1142,48 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["version"], "2.0.0")
         self.assertIsNone(record["last_error"])
 
+
+    async def test_restore_enabled_reloads_persisted_state(self) -> None:
+        """P1-13：重启恢复启用——健康的重装、损坏的记 last_error 不中断。"""
+        manager = PluginManager(self.context, self.install_root)
+        for plugin_id in ("alpha", "beta", "gamma"):
+            await manager.install_archive(
+                _plugin_archive(
+                    plugin_id=plugin_id,
+                    plugin_class=f"{plugin_id.title()}Plugin",
+                    plain=True,
+                    inject=[],
+                )
+            )
+        await manager.enable("alpha")
+        await manager.enable("beta")
+        # gamma 不启用；beta 的包在“重启后”损坏（恢复时将失败）
+        (self.install_root / "beta" / "plugin.py").write_text(
+            "raise RuntimeError('包在重启后损坏')\n", encoding="utf-8"
+        )
+
+        fresh = PluginManager(self.context, self.install_root)
+        await fresh.restore_enabled()
+        self.assertIn("alpha", fresh.fibers)  # 健康的恢复
+        self.assertNotIn("beta", fresh.fibers)  # 损坏的不装
+        self.assertFalse(fresh.records["beta"]["enabled"])
+        self.assertIn("启用失败", fresh.records["beta"]["last_error"] or "")
+        self.assertNotIn("gamma", fresh.fibers)  # 未启用的不恢复
+
+    async def test_install_rejects_broken_archives(self) -> None:
+        """P1-13：安装错误路径——空包/坏 ZIP/缺清单/超限都有明确报错。"""
+        manager = PluginManager(self.context, self.install_root)
+        with self.assertRaisesRegex(PluginManagerError, "上传文件为空"):
+            await manager.install_archive(b"")
+        with self.assertRaisesRegex(PluginManagerError, "上传文件不是有效 ZIP"):
+            await manager.install_archive(b"this is not a zip")
+        missing_manifest = BytesIO()
+        with zipfile.ZipFile(missing_manifest, "w") as package:
+            package.writestr("plugin.py", "class X:\n    name = 'x'\n")
+        with self.assertRaisesRegex(PluginManagerError, "ZIP 根目录必须包含 plugin.json"):
+            await manager.install_archive(missing_manifest.getvalue())
+        with self.assertRaisesRegex(PluginManagerError, "最大允许 32 MiB"):
+            await manager.install_archive(b"x" * (MAX_ARCHIVE_SIZE + 1))
 
     async def test_preinstalled_dirs_are_not_flagged_as_orphans(self) -> None:
         """预装插件目录由 ensure_installed 管理，不判孤儿；真孤儿照常告警。"""
