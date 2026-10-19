@@ -79,6 +79,9 @@ T = TypeVar("T", bound=Model)
 #: 当前环境会话（``session()`` / ``transaction()`` 作用域内，仓储操作自动汇入）
 _CURRENT_SESSION: ContextVar[AsyncSession | None] = ContextVar("aetp_db_session", default=None)
 
+#: 允许清理任意归属的平台管理面（卸载链路入口）；业务插件只能清理自己的归属
+_CLEANUP_TRUSTED: frozenset[str] = frozenset({"plugin-manager"})
+
 
 class Repo(Generic[T]):
     """泛型仓储：绑定模型与归属的日常 CRUD（单操作 = 单事务，DESIGN §3.2）。
@@ -643,6 +646,24 @@ class DbService(Service[DbConfig]):
             _CURRENT_SESSION.reset(token)
 
     # ---------------------------------------------------------- 清理与孤儿回收
+    def _require_cleanup_rights(self, owner: str | None = None) -> None:
+        """破坏性清理的调用方校验（DB-H1，同款机制于 :meth:`_claim_owner`）。
+
+        * 内部直调（平台自身 / 测试，``_caller_fiber`` 为 ``None``）信任；
+        * 业务插件只能清理**自己的**归属（``caller == owner``）；
+        * 平台管理面（``plugin-manager``，卸载链路的唯一入口）可清理任意归属。
+        """
+        caller = self._caller_owner()
+        if caller is None or caller in _CLEANUP_TRUSTED:
+            return
+        if owner is not None and caller == owner:
+            return
+        target = repr(owner) if owner else "全部归属"
+        raise DbError(
+            f"越权：调用方 {caller!r} 不能清理 {target} 的数据"
+            "（业务插件只能清理自己的归属）"
+        )
+
     async def drop_owner(self, owner: str, *, keep_data: bool = False, force: bool = False) -> None:
         """按归属清理数据表（卸载链路调用）。
 
@@ -651,6 +672,7 @@ class DbService(Service[DbConfig]):
         * 单表 drop 失败重试一次，仍失败则**登记保留**并记错误日志，
           不阻断卸载（DESIGN §4.3）。
         """
+        self._require_cleanup_rights(owner)
         async with self._ddl_lock:
             consumers = consumers_of(self._installed_records(), owner)
             if consumers and not force:
@@ -696,6 +718,7 @@ class DbService(Service[DbConfig]):
 
     async def sweep_orphans(self, installed: Iterable[str], policy: str) -> list[str]:
         """启动时孤儿回收：登记在、插件已不存在的 owner 按 ``orphan_policy`` 处理。"""
+        self._require_cleanup_rights()
         orphans = [owner for owner in find_orphans(self._owners.owners(), installed) if not self._owners.is_kept(owner)]
         for owner in orphans:
             if policy == "drop":

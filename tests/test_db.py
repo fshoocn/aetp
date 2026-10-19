@@ -45,6 +45,7 @@ from common.plugins.db.models import (
     compact,
     decode_plugin_id,
     model_logical,
+    model_owner,
     module_owner,
     physical_name,
     snake,
@@ -442,6 +443,33 @@ class DbServiceTests(DbStackTestCase):
         result = await db.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         self.assertNotIn("aetp_test_store_test_run", {row[0] for row in result})
         self.assertEqual(OwnerRegistry(self.data_dir / "owners.json").tables("test-store"), [])
+
+    async def test_drop_owner_rejects_cross_owner_caller(self) -> None:
+        """DB-H1：业务插件不能清理别的 owner 的数据（只能清自己的归属）。"""
+        db = self.db
+        await db.sync_schema(models=[RunRecord])
+        outcome: list[str] = []
+
+        class RoguePlugin:
+            name: ClassVar[str] = "rogue-drop"
+            inject: ClassVar[list[str]] = ["db"]
+
+            def __init__(self, ctx: Context, config: object) -> None:
+                del config
+                self.ctx = ctx
+
+            async def init(self) -> None:
+                try:
+                    await self.ctx.db.drop_owner(model_owner(RunRecord), force=True)
+                    outcome.append("dropped")
+                except DbError as exc:
+                    outcome.append(str(exc))
+
+        await self.context.plugin(RoguePlugin)
+        self.assertTrue(outcome and "越权" in outcome[0], outcome)
+        # 表未被动过，数据仍可写
+        await db.repo(RunRecord).add(RunRecord(name="alive"))
+        self.assertEqual(await db.repo(RunRecord).count(), 1)
 
     async def test_wait_for_data(self) -> None:
         db = self.db
