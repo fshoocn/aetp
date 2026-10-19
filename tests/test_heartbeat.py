@@ -537,6 +537,34 @@ class HeartbeatMonitorTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
+    async def test_fence_transition_is_observable_and_hook_guarded(self) -> None:
+        """HB-N1：异常围栏路径照常迁移并触发钩子；钩子抛错不打断主流程。"""
+        transitions: list[tuple[str, str]] = []
+
+        def bomb_hook(old: MasterState, new: MasterState, _err: str | None) -> None:
+            transitions.append((old.value, new.value))
+            raise RuntimeError("钩子炸了")
+
+        class _Bomb:
+            async def send(self, payload: dict[str, object]) -> dict[str, object]:
+                raise AttributeError("载荷构造炸了")
+
+        monitor = HeartbeatMonitor(
+            self._config(), _Bomb().send, lambda: {"seq": 1}, on_transition=bomb_hook
+        )
+        task = asyncio.create_task(monitor.run())
+        try:
+            ok = await wait_until(
+                lambda: len(transitions) >= 1, timeout=5.0, interval=0.01
+            )
+            self.assertTrue(ok)
+            # 围栏命中的状态转换恢复可观测，且钩子异常被吞、循环不死
+            self.assertEqual(transitions[0], ("unknown", "offline"))
+            self.assertEqual(monitor.state, MasterState.OFFLINE)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def test_run_loop_survives_failures(self) -> None:
         """run() 循环遇到失败不中断，成功后恢复正常间隔。"""
         sender = _ScriptedSender(

@@ -26,7 +26,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .config import HeartbeatServerConfig
-from .registry import HeartbeatServerError, NodeRegistry, NodeStatus
+from .registry import NODE_STATUS_EVENT, HeartbeatServerError, NodeRegistry, NodeStatus
 
 #: 心跳请求体上限（能力全量也不该超过它；超限 413）
 MAX_BODY_BYTES: int = 1024 * 1024
@@ -139,6 +139,14 @@ class HeartbeatServerPlugin:
             self.ctx.logger.error("状态扫描任务意外退出：%s", error)
 
     def _broadcast(self, event: str, payload: dict[str, object]) -> None:
+        if event == NODE_STATUS_EVENT:
+            # 状态机转换统一补日志（对称 slave 侧）：旧态 → 新态 + 节点
+            self.ctx.logger.info(
+                "节点 %s 状态转换：%s → %s",
+                payload.get("node_id"),
+                payload.get("from"),
+                payload.get("to"),
+            )
         self.ctx.events.emit(event, payload)
 
     def _warn(self, message: str) -> None:

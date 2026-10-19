@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import time
 from collections.abc import Awaitable, Callable
@@ -211,17 +212,22 @@ class HeartbeatMonitor:
         self._last_error = message
 
     def _note_unexpected(self, message: str) -> None:
-        """异常围栏专用：记账并直接置 ``OFFLINE``，**不触发钩子**——
-        钩子本身可能就是异常来源，再回调会二次出错。"""
+        """异常围栏专用：记账并迁移 ``OFFLINE``（HB-N1）。
+
+        钩子调用在 :meth:`_transition` 内单独兜底——不再整体跳过迁移，
+        异常围栏路径的状态转换恢复可观测（历史 / 日志照常）。
+        """
         self._count_failure(message)
-        self._state = MasterState.OFFLINE
+        self._transition(MasterState.OFFLINE, message)
 
     def _transition(self, target: MasterState, error: str | None = None) -> None:
         if self._state == target:
             return
         previous, self._state = self._state, target
         if self._on_transition is not None:
-            self._on_transition(previous, target, error)
+            # 钩子单独兜底（HB-N1）：钩子自身异常不允许打断心跳主流程
+            with contextlib.suppress(Exception):
+                self._on_transition(previous, target, error)
 
     def _apply_server_config(self, response: dict[str, object]) -> None:
         """应用响应里的 ``config`` 字段；非法值就地跳过，不影响心跳。"""

@@ -17,13 +17,15 @@ from typing import cast
 from urllib.parse import quote
 
 from cordis_port import Context, Fiber
+from cordis_port.logger import Exporter, Logger
+from cordis_port.logger import Message as LogMessage
 from starlette.requests import Request
 from starlette.types import Message, Scope
 
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from _helpers import request as _request
-from common.cordis_utils import unload_all
+from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from master_plugins.heartbeat import (
@@ -407,6 +409,33 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         status, body = await _arequest(self.base_url, "/api/heartbeat/nodes")
         self.assertEqual(json.loads(body)["nodes"], [])
+
+    async def test_status_transition_is_logged(self) -> None:
+        """状态机转换统一补日志：节点判离线/失联的每次迁移都有 INFO 留痕。"""
+        captured: list[str] = []
+
+        def capture(message: LogMessage) -> None:
+            captured.append(Logger.format(capture_exporter, message))
+
+        capture_exporter: Exporter = {"levels": {"default": 2}, "export": capture}
+        self.context.logger.exporter(capture_exporter, raw=True)
+        status, _body = await _arequest(
+            self.base_url,
+            "/api/heartbeat",
+            method="POST",
+            body=json.dumps(_beat_payload()).encode(),
+            content_type="application/json",
+        )
+        self.assertEqual(status, 200)
+        ok = await wait_until(
+            lambda: any("状态转换" in line for line in captured),
+            timeout=5.0,
+            interval=0.05,
+        )
+        self.assertTrue(ok)
+        self.assertTrue(
+            any("online" in line and ("offline" in line or "lost" in line) for line in captured)
+        )
 
     async def test_errors_and_extension_slots(self) -> None:
         # 缺 node_id → 400 结构化错误
