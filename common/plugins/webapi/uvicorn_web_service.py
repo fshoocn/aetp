@@ -308,6 +308,10 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         self._host: UvicornHost | None = None
         self._provided_ctx: Context = ctx
         self._fallback: Callable[[Request], Response | None] | None = None
+        #: 服务启动时刻（``/healthz`` 的 uptime）
+        self._started_at: float = time.time()
+        #: 健康指标提供方：name → 只读内存计数器（``/healthz`` 汇总）
+        self._health_providers: dict[str, Callable[[], Mapping[str, object]]] = {}
         #: 鉴权接缝：默认共享密钥验证器，用户管理插件可替换（见 :mod:`.auth`）
         self._auth: AuthContext = AuthContext(SharedSecretVerifier(self.config))
 
@@ -315,6 +319,39 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
     def auth(self) -> AuthContext:
         """鉴权接缝：持有可替换的验证器（默认共享密钥）。"""
         return self._auth
+
+    # ---------------------------------- 健康探针 ----------------------------
+    def add_health_provider(
+        self, name: str, provider: Callable[[], Mapping[str, object]]
+    ) -> Callable[[], None]:
+        self._health_providers[name] = provider
+
+        def dispose() -> None:
+            self._health_providers.pop(name, None)
+
+        return dispose
+
+    async def _probe(self, name: str) -> dict[str, object]:
+        return dict(self._health_providers[name]())
+
+    async def health_snapshot(self) -> dict[str, object]:
+        names = sorted(self._health_providers)
+        results = await asyncio.gather(
+            *(self._probe(name) for name in names), return_exceptions=True
+        )
+        metrics: dict[str, object] = {
+            name: (
+                {"error": type(result).__name__}
+                if isinstance(result, BaseException)
+                else result
+            )
+            for name, result in zip(names, results, strict=True)
+        }
+        return {
+            "status": "ok",
+            "uptime_s": round(time.time() - self._started_at, 1),
+            "metrics": metrics,
+        }
 
     # ---------------------------------------------------------- cordis 集成
     @property

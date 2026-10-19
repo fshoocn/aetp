@@ -565,6 +565,15 @@ class HeartbeatMonitorTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
+    async def test_beat_records_rtt(self) -> None:
+        """成功心跳记录往返时延（/healthz 指标用）。"""
+        sender = _ScriptedSender([None])
+        monitor = self._monitor(sender)
+        self.assertTrue(await monitor.beat_once())
+        rtt = monitor.snapshot().last_rtt_ms
+        self.assertIsNotNone(rtt)
+        self.assertGreaterEqual(rtt or 0.0, 0.0)
+
     async def test_run_loop_survives_failures(self) -> None:
         """run() 循环遇到失败不中断，成功后恢复正常间隔。"""
         sender = _ScriptedSender(

@@ -162,6 +162,8 @@ class HeartbeatPlugin:
             kind="api",
             name="heartbeat.status",
         )
+        dispose = self.ctx.webapi.add_health_provider("heartbeat", self._health_metrics)
+        self.ctx.fiber.effect(lambda: dispose, "heartbeat.health")
         self._task = asyncio.create_task(self.monitor.run())
         self._task.add_done_callback(self._log_task_exit)
         self.ctx.logger.info(
@@ -222,6 +224,17 @@ class HeartbeatPlugin:
         return response
 
     # -- 状态转换日志 -------------------------------------------------------
+    def _health_metrics(self) -> dict[str, object]:
+        """/healthz 指标：心跳状态与最近往返时延（只读快照）。"""
+        snapshot = self.monitor.snapshot()
+        return {
+            "state": snapshot.state.value,
+            "sent": snapshot.sent,
+            "failed": snapshot.failed,
+            "consecutive_failures": snapshot.consecutive_failures,
+            "last_rtt_ms": snapshot.last_rtt_ms,
+        }
+
     def _log_transition(
         self, previous: MasterState, current: MasterState, error: str | None
     ) -> None:

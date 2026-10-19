@@ -73,6 +73,7 @@ class HeartbeatSnapshot:
     last_success_at: float | None
     last_failure_at: float | None
     last_error: str | None
+    last_rtt_ms: float | None
     next_retry_in: float | None
 
     def to_dict(self) -> dict[str, object]:
@@ -87,6 +88,7 @@ class HeartbeatSnapshot:
             "last_success_at": self.last_success_at,
             "last_failure_at": self.last_failure_at,
             "last_error": self.last_error,
+            "last_rtt_ms": self.last_rtt_ms,
             "next_retry_in": self.next_retry_in,
         }
 
@@ -123,6 +125,7 @@ class HeartbeatMonitor:
         self._last_success_at: float | None = None
         self._last_failure_at: float | None = None
         self._last_error: str | None = None
+        self._last_rtt_ms: float | None = None
         self._next_retry_at: float | None = None
 
     # -- 对外查询 -----------------------------------------------------------
@@ -146,6 +149,7 @@ class HeartbeatMonitor:
             last_success_at=self._last_success_at,
             last_failure_at=self._last_failure_at,
             last_error=self._last_error,
+            last_rtt_ms=self._last_rtt_ms,
             next_retry_in=next_retry_in,
         )
 
@@ -183,10 +187,12 @@ class HeartbeatMonitor:
             payload: dict[str, object] = (
                 await made if inspect.isawaitable(made) else made
             )
+            started = time.monotonic()
             response = await self._send(payload)
         except _RETRYABLE as exc:
             self._on_failure(f"{type(exc).__name__}: {exc}")
             return False
+        self._last_rtt_ms = (time.monotonic() - started) * 1000.0
         self._on_success()
         self._apply_server_config(response)
         return True

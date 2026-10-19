@@ -131,6 +131,17 @@ class WebApiPlugin:
             name="web.routes",
         )
 
+        async def healthz(_: Request) -> dict[str, object]:
+            """存活探针（非 /api 路径免令牌）+ 各提供方指标快照。"""
+            return await service.health_snapshot()
+
+        service.get(
+            "/healthz",
+            healthz,
+            kind="api",
+            name="web.healthz",
+        )
+
     # -- 卸载 -----------------------------------------------------------------
     async def _shutdown(self) -> None:
         """停止 HTTP 服务并清空服务状态。

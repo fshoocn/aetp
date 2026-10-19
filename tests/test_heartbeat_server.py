@@ -437,6 +437,22 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
             any("online" in line and ("offline" in line or "lost" in line) for line in captured)
         )
 
+    async def test_healthz_reports_node_metrics(self) -> None:
+        """/healthz 汇总心跳指标：节点数与在线状态统计。"""
+        status, _body = await _arequest(
+            self.base_url,
+            "/api/heartbeat",
+            method="POST",
+            body=json.dumps(_beat_payload()).encode(),
+            content_type="application/json",
+        )
+        self.assertEqual(status, 200)
+        status, body = await _arequest(self.base_url, "/healthz")
+        self.assertEqual(status, 200)
+        metrics = json.loads(body)["metrics"]["heartbeat"]
+        self.assertEqual(metrics["nodes_total"], 1)
+        self.assertEqual(metrics["online"], 1)
+
     async def test_errors_and_extension_slots(self) -> None:
         # 缺 node_id → 400 结构化错误
         status, body = await _arequest(

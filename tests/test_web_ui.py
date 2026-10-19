@@ -211,6 +211,17 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body)["error"], "Not Found")
 
+    async def test_healthz_reports_uptime_and_metrics(self) -> None:
+        """/healthz 存活探针免令牌，返回 uptime 与指标快照。"""
+        response = await asyncio.to_thread(
+            urlopen, Request(f"http://127.0.0.1:{self.port}/healthz"), timeout=5
+        )
+        with response:
+            payload = json.loads(response.read())
+        self.assertEqual(payload["status"], "ok")
+        self.assertGreaterEqual(payload["uptime_s"], 0)
+        self.assertIsInstance(payload["metrics"], dict)
+
     async def test_security_headers(self) -> None:
         """响应统一携带 nosniff 安全头（静态与 API 同款）。"""
         request = Request(

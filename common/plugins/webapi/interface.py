@@ -275,6 +275,21 @@ class WebApiService(ABC):
     def has_route(self, path: str) -> bool:
         """判断某路径是否已注册。"""
 
+    # -------------------------------------------------------------- 健康探针
+    @abstractmethod
+    def add_health_provider(
+        self, name: str, provider: Callable[[], Mapping[str, object]]
+    ) -> Callable[[], None]:
+        """登记健康指标提供方（``/healthz`` 汇总进 ``metrics[name]``），返回注销函数。
+
+        提供方只读内存计数（勿做 IO）；单个提供方异常不拖垮探针（该项记
+        ``{"error": 类型名}``）。注销通常交调用方 fiber effect 管理。
+        """
+
+    @abstractmethod
+    async def health_snapshot(self) -> dict[str, object]:
+        """汇总存活与指标快照（``/healthz`` 响应体）。"""
+
     # -------------------------------------------------------------- 响应构造
     @abstractmethod
     def json(

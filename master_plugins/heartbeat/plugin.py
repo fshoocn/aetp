@@ -95,6 +95,8 @@ class HeartbeatServerPlugin:
             kind="api",
             name="heartbeat-server.config",
         )
+        dispose = api.add_health_provider("heartbeat", self._health_metrics)
+        self.ctx.fiber.effect(lambda: dispose, "heartbeat-server.health")
         self.ctx.webui.register_ui(
             "nodes",
             kind="page",
@@ -137,6 +139,16 @@ class HeartbeatServerPlugin:
         error = task.exception()
         if error is not None:
             self.ctx.logger.error("状态扫描任务意外退出：%s", error)
+
+    def _health_metrics(self) -> dict[str, object]:
+        """/healthz 指标：节点数与在线状态统计（只读内存计数）。"""
+        nodes = self._registry.nodes()
+        return {
+            "nodes_total": len(nodes),
+            "online": sum(1 for record in nodes if record.status is NodeStatus.ONLINE),
+            "offline": sum(1 for record in nodes if record.status is NodeStatus.OFFLINE),
+            "lost": sum(1 for record in nodes if record.status is NodeStatus.LOST),
+        }
 
     def _broadcast(self, event: str, payload: dict[str, object]) -> None:
         if event == NODE_STATUS_EVENT:
