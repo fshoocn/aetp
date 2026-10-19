@@ -21,6 +21,7 @@ from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 from common.plugins.webapi.router import RouteRegistry
 from common.plugins.webapi.types import RouteRecord
+from master.webui.plugin import owner_slug
 
 _SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
 
@@ -100,6 +101,21 @@ class RouteRegistryTests(unittest.TestCase):
         get_owner.dispose()
 
         self.assertEqual(registry.get_all("/shared"), [post_route])
+
+
+class OwnerSlugTests(unittest.TestCase):
+    """UI 路径标识：撞键确定性消歧（防 api.remove 前缀删除误伤他人挂载）。"""
+
+    def test_collision_gets_deterministic_suffix(self) -> None:
+        self.assertEqual(owner_slug("a.b"), "a-b")
+        self.assertEqual(owner_slug("a b"), "a-b")
+        slug = owner_slug("a b", taken=["a-b"])
+        self.assertTrue(slug.startswith("a-b-"))
+        self.assertNotEqual(slug, "a-b")
+        # 同输入同输出：稳定绑定，跨注册顺序不变
+        self.assertEqual(slug, owner_slug("a b", taken=["a-b"]))
+        with self.assertRaisesRegex(ValueError, "无法消歧"):
+            owner_slug("a b", taken=["a-b", slug])
 
 
 class SampleUiPlugin:

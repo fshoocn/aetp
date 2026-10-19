@@ -12,6 +12,7 @@ import unittest
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from typing import cast
 
 from cordis_port import Context
 from cordis_port.logger import Exporter, Logger, Message
@@ -24,7 +25,7 @@ from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import DbPlugin
 from common.plugins.db.registry import PluginRecordStore
 from common.plugins.webapi import WebApiPlugin
-from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
+from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError, builtin_specs
 from common.plugins.webapi.plugin_manager_plugin import (
     MAX_CONFIG_BODY_BYTES,
     PluginManagerPlugin,
@@ -866,6 +867,26 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PluginManagerError) as caught:
             await plugins.install_archive(lying_big)
         self.assertEqual(caught.exception.status_code, 413)
+
+    def test_builtin_specs_rejects_id_collision(self) -> None:
+        """内置插件 id 撞键显式报错（不静默覆盖）。"""
+
+        class _First:
+            name = "dup-builtin"
+
+        class _Second:
+            name = "dup-builtin"
+
+        _First.__module__ = "common.plugins.demo_a"
+        _Second.__module__ = "common.plugins.demo_b"
+        fake = module_types.SimpleNamespace(
+            registry={
+                1: module_types.SimpleNamespace(callback=_First),
+                2: module_types.SimpleNamespace(callback=_Second),
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "内置插件 id 冲突"):
+            builtin_specs(cast(Context, fake))
 
     async def test_operations_emit_audit_logs(self) -> None:
         """操作审计（LOG-A1）：安装/启用/改配置/停用/卸载成功路径都有「审计」日志。"""

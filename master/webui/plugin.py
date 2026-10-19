@@ -25,7 +25,9 @@ UI contribution 的注册需要「谁在注册」（调用方 fiber）来绑定�
 
 from __future__ import annotations
 
+import hashlib
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import ClassVar, cast
 
@@ -74,6 +76,8 @@ class WebUiPlugin(Service[WebUiConfig]):
             config if isinstance(config, WebUiConfig) else WebUiConfig()
         )
         self._ui: dict[str, UiContribution] = {}
+        #: owner → URL 路径标识（撞键消歧后稳定绑定，卸载时释放）
+        self._owner_slugs: dict[str, str] = {}
 
     # ------------------------------------------------------------ 生命周期
     def init(self) -> object:
@@ -163,12 +167,14 @@ class WebUiPlugin(Service[WebUiConfig]):
 
         caller_fiber = self._caller_fiber()
         owner = _fiber_name(caller_fiber)
-        owner_slug = _owner_slug(owner)
+        slug = self._owner_slugs.setdefault(
+            owner, owner_slug(owner, self._owner_slugs.values())
+        )
         full_id = f"{owner}:{contribution_id}"
         if full_id in self._ui:
             raise ValueError(f"UI contribution 已注册：{full_id}")
 
-        static_path = f"/plugin-ui/{owner_slug}/{contribution_id}"
+        static_path = f"/plugin-ui/{slug}/{contribution_id}"
         api = self.ctx.webapi
         api.static(static_path, root)
 
@@ -190,6 +196,8 @@ class WebUiPlugin(Service[WebUiConfig]):
 
         def cleanup() -> None:
             self._ui.pop(full_id, None)
+            self._owner_slugs.pop(owner, None)
+            # 各 owner 撞键已消歧、前缀互不共享：按前缀删只伤自己
             api.remove(static_path)
 
         caller_fiber.effect(lambda: cleanup, f"ctx.webui.register_ui({full_id!r})")
@@ -255,9 +263,20 @@ def _fiber_name(fiber: Fiber | None) -> str:
     return getattr(fiber, "name", None) or "root"
 
 
-def _owner_slug(owner: str) -> str:
-    """把插件名转换为 URL path segment。"""
-    return re.sub(r"[^A-Za-z0-9_-]+", "-", owner).strip("-") or "plugin"
+def owner_slug(owner: str, taken: Iterable[str] = ()) -> str:
+    """把插件名转为 URL path segment；与 ``taken`` 撞键时加确定性后缀消歧。
+
+    ``api.remove`` 按挂载前缀删路由，撞键会误删他人挂载——所以不同 owner
+    必须各占一个前缀；同一 owner 多次调用结果稳定（同输入同输出）。
+    """
+    base = re.sub(r"[^A-Za-z0-9_-]+", "-", owner).strip("-") or "plugin"
+    taken_set = set(taken)
+    if base not in taken_set:
+        return base
+    slug = f"{base}-{hashlib.sha256(owner.encode('utf-8')).hexdigest()[:6]}"
+    if slug in taken_set:
+        raise ValueError(f"插件 {owner!r} 的 UI 路径标识无法消歧，请更换插件名")
+    return slug
 
 
 def _normalize_path(path: str) -> str:
@@ -266,4 +285,4 @@ def _normalize_path(path: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
-__all__: list[str] = ["WebUiPlugin"]
+__all__: list[str] = ["WebUiPlugin", "owner_slug"]

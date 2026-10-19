@@ -105,6 +105,12 @@ def builtin_specs(ctx: Context) -> dict[str, _BuiltinSpec]:
         plugin_id = getattr(plugin, "name", None) or runtime.name
         if not isinstance(plugin_id, str) or not plugin_id:
             continue
+        if plugin_id in specs:
+            # 撞键显式报错（不静默覆盖）：两个内置插件同 id 是部署错误
+            raise ValueError(
+                f"内置插件 id 冲突：{plugin_id!r} 同时由 "
+                f"{specs[plugin_id]['entrypoint']} 与 {_builtin_entrypoint(plugin)} 提供"
+            )
         module_file = getattr(sys.modules.get(plugin.__module__), "__file__", None)
         specs[plugin_id] = {
             "name": getattr(plugin, "display_name", None) or plugin_id,
