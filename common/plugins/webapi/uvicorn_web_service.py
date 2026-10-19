@@ -147,6 +147,19 @@ class UvicornHost:
         self.server: _EmbeddedServer | None = None
         self._serve_task: asyncio.Task[None] | None = None
 
+    async def _serve_guarded(self, server: uvicorn.Server) -> None:
+        """跑 ``serve()``，把 uvicorn 启动失败的 ``SystemExit`` 折算成任务完成。
+
+        uvicorn 在绑定失败时以 ``sys.exit(STARTUP_FAILURE)`` 结束 ``startup()``；
+        线程模型下它只终止线程，单循环下却会穿出事件循环**直接杀进程**——
+        这里吞掉 ``SystemExit``，让 :meth:`start` 以 :class:`ServerError`
+        如实报告启动失败（``CancelledError`` 不在此列，照常向上传播）。
+        """
+        try:
+            await server.serve()
+        except SystemExit:
+            pass
+
     # -- 启动 ----------------------------------------------------------------
     async def start(self) -> None:
         """启动服务器并等待就绪（或超时抛错）。
@@ -168,7 +181,7 @@ class UvicornHost:
             return
         server = _EmbeddedServer(options)
         self.server = server
-        task: asyncio.Task[None] = asyncio.create_task(server.serve())
+        task: asyncio.Task[None] = asyncio.create_task(self._serve_guarded(server))
         self._serve_task = task
 
         timeout = max(float(self.config.start_timeout), 0.1)
