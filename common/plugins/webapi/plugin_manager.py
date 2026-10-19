@@ -629,9 +629,7 @@ class PluginManager:
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         self._reject_builtin(plugin_id, "启停")
         async with self._operation_lock:
-            record = await self._enable(plugin_id)
-        self.ctx.logger.info("审计：启用插件 %s v%s 成功", plugin_id, record["version"])
-        return record
+            return await self._enable(plugin_id)
 
     async def _enable(self, plugin_id: str) -> PublicPluginRecord:
         record = self._get_record(plugin_id)
@@ -679,6 +677,11 @@ class PluginManager:
             record["last_error"] = None
             self._write_registry()
             self.fibers[plugin_id] = fiber
+            # 审计只记**真正装载成功**的启用：幂等短路（已 ACTIVE）不重复留痕
+            # —— 启动期 restore_enabled + ensure_installed 双链路不再打两条
+            self.ctx.logger.info(
+                "审计：启用插件 %s v%s 成功", plugin_id, record["version"]
+            )
             return self._public_record(record)
         except asyncio.CancelledError:
             await self._rollback_failed_enable(

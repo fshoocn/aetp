@@ -879,6 +879,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         plugins = self.context.plugins
         await plugins.install_archive(_plugin_archive())
         await plugins.enable("uploaded-sample")
+        await plugins.enable("uploaded-sample")  # 幂等重入：审计不重复留痕
         await plugins.disable("uploaded-sample")
         await plugins.update_config("uploaded-sample", {"note": "审计测试"})
         await plugins.uninstall("uploaded-sample")
@@ -891,6 +892,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             "审计：卸载插件",
         ):
             self.assertIn(fragment, joined)
+        self.assertEqual(joined.count("审计：启用插件"), 1)
 
     async def test_registry_write_failure_rolls_back_install(self) -> None:
         class RegistryWriteFailureManager(PluginManager):
