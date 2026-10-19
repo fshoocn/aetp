@@ -19,6 +19,7 @@ from common.cordis_utils import unload_all
 from common.node_runtime import ensure_installed
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import DbPlugin
+from common.plugins.db.registry import PluginRecordStore
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManager, PluginManagerError
 from common.plugins.webapi.plugin_manager_plugin import (
@@ -634,25 +635,22 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         """遗留注册表里的内置 id 影子记录读取即丢弃（展示真身内置记录）。"""
         install_root = Path(self.temp_dir.name) / "shadow-root"
         install_root.mkdir()
-        (install_root / "registry.json").write_text(
-            json.dumps(
-                {
-                    "webapi": {
-                        "id": "webapi",
-                        "name": "影子",
-                        "version": "9.9.9",
-                        "entrypoint": "plugin:Shadow",
-                        "resource_root": None,
-                        "config": {},
-                        "requires": [],
-                        "kind": ["any"],
-                        "enabled": False,
-                        "last_error": None,
-                        "digest": "deadbeef",
-                    }
+        PluginRecordStore(install_root / "registry.db").write(
+            {
+                "webapi": {
+                    "id": "webapi",
+                    "name": "影子",
+                    "version": "9.9.9",
+                    "entrypoint": "plugin:Shadow",
+                    "resource_root": None,
+                    "config": {},
+                    "requires": [],
+                    "kind": ["any"],
+                    "enabled": False,
+                    "last_error": None,
+                    "digest": "deadbeef",
                 }
-            ),
-            encoding="utf-8",
+            }
         )
         manager = PluginManager(self.context, install_root)
         listing = {item["id"]: item for item in await manager.list_plugins()}
@@ -878,8 +876,8 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manager.records, {})
         self.assertFalse((install_root / "uploaded-sample").exists())
-        self.assertEqual(list(install_root.iterdir()), [])
-
+        # 持久化事实源（registry.db）构造即建且回滚不删——除它外不应有残留
+        self.assertEqual({p.name for p in install_root.iterdir()}, {"registry.db"})
     async def test_enable_registry_failure_disposes_plugin_fiber(self) -> None:
         class FailEnabledWriteManager(PluginManager):
             def __init__(self, ctx: Context, root: Path) -> None:

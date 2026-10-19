@@ -52,7 +52,7 @@ from common.plugins.db.models import (
     physical_name,
     snake,
 )
-from common.plugins.db.registry import OwnerRegistry, fingerprint, parse_dependencies
+from common.plugins.db.registry import OwnerRegistry, PluginRecordStore, fingerprint, parse_dependencies
 from common.plugins.db.service import sqlite_pool_warning, wider_than
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManagerError, PublicPluginRecord
@@ -229,11 +229,9 @@ class DbStackTestCase(unittest.IsolatedAsyncioTestCase):
         return cast(DbService, self.context.get("db"))
 
     def write_registry(self, records: dict[str, object]) -> None:
-        """写插件安装记录（``registry.json`` 事实源，依赖校验据此反查）。"""
+        """写插件安装记录（``registry.db`` 事实源，依赖校验据此反查）。"""
         self.install_root.mkdir(parents=True, exist_ok=True)
-        (self.install_root / "registry.json").write_text(
-            json.dumps(records, ensure_ascii=False), encoding="utf-8"
-        )
+        PluginRecordStore(self.install_root / "registry.db").write(records)
 
 
 class _CapturePlugin:
@@ -461,13 +459,13 @@ class DbServiceTests(DbStackTestCase):
 
         await db.drop_owner("test-store", keep_data=True)
         self.assertEqual(await db.repo(RunRecord).count(), 1)  # keep_data 保留
-        owners = OwnerRegistry(self.data_dir / "owners.json")
+        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
         self.assertTrue(owners.is_kept("test-store"))
 
         await db.drop_owner("test-store")
         result = await db.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         self.assertNotIn("aetp_test_store_test_run", {row[0] for row in result})
-        self.assertEqual(OwnerRegistry(self.data_dir / "owners.json").tables("test-store"), [])
+        self.assertEqual(OwnerRegistry(self.data_dir / "owners.sqlite").tables("test-store"), [])
 
     async def test_drop_owner_rejects_cross_owner_caller(self) -> None:
         """DB-H1：业务插件不能清理别的 owner 的数据（只能清自己的归属）。"""
@@ -582,18 +580,19 @@ class RegistrySweepSafetyTests(DbStackTestCase):
         """registry 损坏 → 整体跳过（数据保留）；可读且不含该 owner → 照常清理。"""
         db = self.db
         await db.sync_schema(models=[RunRecord])
-        registry_path = self.install_root / "registry.json"
+        registry_path = self.install_root / "registry.db"
         self.install_root.mkdir(parents=True, exist_ok=True)
 
         # registry 损坏：残缺 id 集合不得当“已安装全集”，孤儿回收整体跳过
-        registry_path.write_text("{ not json", encoding="utf-8")
+        registry_path.write_bytes(b"this is not a sqlite database")
         outcome = self.db_fiber.update({"echo": False}, no_save=True)
         assert outcome is not None
         await outcome
         await self.db.repo(RunRecord).add(RunRecord(name="alive"))
 
         # 对照：registry 可读且不含该 owner → 按 orphan_policy=drop 清理
-        registry_path.write_text("{}", encoding="utf-8")
+        registry_path.unlink()
+        PluginRecordStore(registry_path).write({})
         outcome = self.db_fiber.update({"echo": False}, no_save=True)
         assert outcome is not None
         await outcome
@@ -671,7 +670,7 @@ class DropOwnerTests(DbStackTestCase):
         self.assertEqual(remaining, [row_table])
 
         # 成功表：登记已摘、指纹已清；残表登记保留（待重试/孤儿回收）
-        registry = OwnerRegistry(self.data_dir / "owners.json")
+        registry = OwnerRegistry(self.data_dir / "owners.sqlite")
         self.assertEqual(registry.tables(owner), [row_table])
         meta_rows = await db.execute(text("SELECT name FROM aetp_db_meta"))
         names = {str(row[0]) for row in meta_rows}
@@ -680,7 +679,7 @@ class DropOwnerTests(DbStackTestCase):
 
         # 残表重试可完成清理（可再次整体清理，不悬停）
         self.assertEqual(await db.drop_owner(owner), [])
-        self.assertEqual(OwnerRegistry(self.data_dir / "owners.json").tables(owner), [])
+        self.assertEqual(OwnerRegistry(self.data_dir / "owners.sqlite").tables(owner), [])
 
 
 class MigrationTests(DbStackTestCase):
@@ -943,7 +942,7 @@ class OrphanSweepTests(unittest.IsolatedAsyncioTestCase):
         self._temp.cleanup()
 
     def _write_owners(self) -> None:
-        registry = OwnerRegistry(self.data_dir / "owners.json")
+        registry = OwnerRegistry(self.data_dir / "owners.sqlite")
         registry.claim("ghost", "aetp_ghost_note")
         registry.claim("kept-owner", "aetp_kept_owner_note")
         registry.set_keep("kept-owner", True)
@@ -970,12 +969,12 @@ class OrphanSweepTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_warn_policy_keeps_orphans(self) -> None:
         await self._boot("warn")
-        owners = OwnerRegistry(self.data_dir / "owners.json")
+        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
         self.assertIn("ghost", owners.owners())  # 告警不删
 
     async def test_drop_policy_clears_orphans_but_keeps_kept(self) -> None:
         await self._boot("drop")
-        owners = OwnerRegistry(self.data_dir / "owners.json")
+        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
         self.assertNotIn("ghost", owners.owners())
         self.assertIn("kept-owner", owners.owners())  # keep_data 标记跳过
 
@@ -1076,7 +1075,7 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         await self.plugins.uninstall("data-producer", keep_data=True)
         self.assertTrue(await self._table_exists_async("aetp_data_producer_note"))
-        owners = OwnerRegistry(self.data_dir / "owners.json")
+        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
         self.assertTrue(owners.is_kept("data-producer"))
 
     async def _consumer_record(self) -> PublicPluginRecord:

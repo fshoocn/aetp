@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -42,6 +42,7 @@ from .registry import (
     LOG_TABLE,
     DataDependency,
     OwnerRegistry,
+    PluginRecordStore,
     consumers_of,
     find_orphans,
     fingerprint,
@@ -49,6 +50,8 @@ from .registry import (
     record_dependencies,
     schema_log_table,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 #: 迁移步骤：``async def upgrade_v2(conn)``（SQLAlchemy Core / ``sa.text`` 均可）
 MigrationStep = Callable[[AsyncConnection], Awaitable[None]]
@@ -212,9 +215,15 @@ class DbService(Service[DbConfig]):
         #: 节点目录（config.ini 所在目录）：相对库路径 / data_dir 的解析基准
         self._base_dir: Path | None = base_dir
         self._engine: AsyncEngine = self._build_engine()
-        self._owners: OwnerRegistry = OwnerRegistry(self._data_dir() / "owners.json")
-        #: 插件安装记录（registry.json 事实源）；db 不反向注入 plugin-manager
-        self._registry_file: Path | None = (install_root / "registry.json") if install_root is not None else None
+        self._owners: OwnerRegistry = OwnerRegistry(self._data_dir() / "owners.sqlite")
+        #: 插件安装记录（registry.db 事实源）；db 不反向注入 plugin-manager。
+        #: DB-N3：事实源损坏/不可用 → 置 None，孤儿回收整体跳过（宁漏勿误删）
+        self._registry_store: PluginRecordStore | None = None
+        if install_root is not None:
+            try:
+                self._registry_store = PluginRecordStore(install_root / "registry.db")
+            except (OSError, RuntimeError) as err:
+                _LOGGER.warning("registry.db 不可用，本次会话跳过依赖事实源： %s", err)
         self._ddl_lock: asyncio.Lock = asyncio.Lock()
         self._external_cache: dict[tuple[str, str], type[object]] = {}
         self._started: bool = False
@@ -942,15 +951,14 @@ class DbService(Service[DbConfig]):
 
     # ---------------------------------------------------------- 插件事实源
     def _installed_records(self) -> dict[str, object]:
-        """读插件安装记录（``registry.json``，只读事实源）。"""
-        if self._registry_file is None or not self._registry_file.is_file():
+        """读插件安装记录（``registry.db``，只读事实源）。"""
+        if self._registry_store is None:
             return {}
         try:
-            raw: object = json.loads(self._registry_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError, RecursionError) as exc:
-            self._provided_ctx.logger.error("插件安装记录无法读取：%s：%s", self._registry_file, exc)
+            return self._registry_store.read()
+        except (OSError, RuntimeError) as exc:
+            self._provided_ctx.logger.error("插件安装记录无法读取：%s", exc)
             return {}
-        return cast(dict[str, object], raw) if isinstance(raw, dict) else {}
 
 
 def _enable_sqlite_resilience(engine: AsyncEngine) -> None:

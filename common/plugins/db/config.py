@@ -51,7 +51,7 @@ class DbConfig(FieldConfig):
         "max_overflow": ((int,), "池外溢出上限"),
         "pool_recycle": ((int,), "连接回收秒数（防 MySQL wait_timeout）"),
         "orphan_policy": ((str,), "孤儿表处置：warn / drop"),
-        "data_dir": ((str,), "归属登记目录（owners.json，留空自动推导）"),
+        "data_dir": ((str,), "归属登记目录（owners.sqlite，留空自动推导）"),
         "schema_log_limit": ((int,), "结构变更日志保留上限"),
     }
 
@@ -125,7 +125,7 @@ class DbConfig(FieldConfig):
         return value
 
     def resolve_data_dir(self) -> Path:
-        """归属登记目录（``owners.json`` 所在；相对路径按节点目录解析）。
+        """归属登记目录（``owners.sqlite`` 所在；相对路径按节点目录解析）。
 
         显式配置 ``data_dir`` 优先；否则 SQLite 取连接串中库文件所在目录，
         其余方言取 ``data/db``（见 DESIGN §11-6）。

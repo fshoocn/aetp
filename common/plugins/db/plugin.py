@@ -20,11 +20,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from cordis_port import Context
+
+from common.plugins.db.registry import PluginRecordStore
 
 from .config import DbConfig
 from .service import DbService
@@ -73,7 +74,7 @@ class DbPlugin:
         self.ctx.fiber.effect(lambda: self.service.shutdown, "plugins.db.shutdown")
 
     def _installed_plugin_ids(self) -> set[str] | None:
-        """现存插件 id 事实源：``registry.json`` + 已加载的内置插件（不反向注入 plugin-manager）。
+        """现存插件 id 事实源：``registry.db`` + 已加载的内置插件（不反向注入 plugin-manager）。
 
         registry 读取失败返回 ``None``：事实源不完整，调用方须跳过孤儿回收
         （DB-N3），不能拿残缺集合当“已安装全集”用。
@@ -81,16 +82,13 @@ class DbPlugin:
         from common.plugins.webapi.plugin_manager import builtin_specs
 
         ids = set(builtin_specs(self.ctx))
-        registry_file = _install_root(self.ctx)
-        manifest = registry_file / "registry.json" if registry_file is not None else None
-        if manifest is not None and manifest.is_file():
+        registry_dir = _install_root(self.ctx)
+        if registry_dir is not None:
             try:
-                raw: object = json.loads(manifest.read_text(encoding="utf-8"))
-            except (OSError, ValueError, RecursionError) as exc:
-                self.ctx.logger.error("插件安装记录无法读取：%s：%s", manifest, exc)
+                ids.update(PluginRecordStore(registry_dir / "registry.db").read())
+            except (OSError, RuntimeError) as exc:
+                self.ctx.logger.error("插件安装记录无法读取：%s", exc)
                 return None
-            if isinstance(raw, dict):
-                ids.update(str(key) for key in cast(dict[object, object], raw))
         return ids
 
 

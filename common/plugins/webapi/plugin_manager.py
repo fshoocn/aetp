@@ -23,7 +23,7 @@ from cordis_port import Context, Fiber
 from sqlalchemy.exc import SQLAlchemyError
 
 from common.cordis_utils import safe_dispose
-from common.plugins.db.registry import DataDependency, parse_dependencies
+from common.plugins.db.registry import DataDependency, PluginRecordStore, parse_dependencies
 from common.plugins.db.service import DbDependencyError, DbError
 
 MAX_ARCHIVE_SIZE: Final[int] = 32 * 1024 * 1024
@@ -282,7 +282,9 @@ class PluginManager:
         self.ctx: Context = ctx
         self.install_root: Path = install_root.resolve()
         self.install_root.mkdir(parents=True, exist_ok=True)
-        self.registry_file: Path = self.install_root / "registry.json"
+        self.registry_store: PluginRecordStore = PluginRecordStore(
+            self.install_root / "registry.db"
+        )
         #: 原始插件包归档目录（保留上传 ZIP，供未来主从分发与回溯）
         self.archives_dir: Path = self.install_root / ".archives"
         #: 预装插件 id（config.ini 的 ``[node] plugins`` 插件源解析而来）：
@@ -1167,16 +1169,9 @@ class PluginManager:
         }
 
     def _read_registry(self) -> dict[str, _PluginRecord]:
-        if not self.registry_file.exists():
-            return {}
-        try:
-            data = json.loads(self.registry_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError, RecursionError) as exc:
-            raise RuntimeError(f"插件注册表无法读取：{exc}") from exc
-        if not isinstance(data, dict):
-            raise TypeError("插件注册表根值必须是对象")
+        data = self.registry_store.read()
         records: dict[str, _PluginRecord] = {}
-        for plugin_id, raw_record in cast(dict[str, object], data).items():
+        for plugin_id, raw_record in data.items():
             # 防影子插件：遗留注册表里的内置 id 一律丢弃（安装现已拒绝，
             # 这里清掉保护上线前的残留，避免与直装服务同名冲突）
             if plugin_id in self._builtins():
@@ -1187,21 +1182,8 @@ class PluginManager:
         return records
 
     def _write_registry(self) -> None:
-        """原子写注册表（唯一临时文件 + fsync + 替换）：崩溃不半截，多实例不互踩。"""
-        fd, temporary = tempfile.mkstemp(
-            prefix=f".{self.registry_file.name}.",
-            suffix=".tmp",
-            dir=self.registry_file.parent,
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(self.records, handle, ensure_ascii=False, indent=2)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.registry_file)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        """原子写注册表（sqlite 单事务替换）：崩溃不半截。"""
+        self.registry_store.write(self.records)
 
 
 __all__: list[str] = ["PluginManager", "PluginManagerError", "PublicPluginRecord", "builtin_specs"]

@@ -14,11 +14,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
-import os
 import re
-import tempfile
+import sqlite3
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -143,6 +143,97 @@ def meta_tables() -> tuple[Table[Any], Table[Any]]:
 _TABLE_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_]{1,96}")
 
 
+def _open_store(path: Path) -> sqlite3.Connection:
+    """打开（或创建）元数据库连接：WAL + busy_timeout（与业务库同款韧性）。
+
+    元数据操作都是单行级短事务，采用**短连接**（用完即关）：不与调用方
+    的生命周期耦合，也不会让文件句柄阻止目录清理。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.DatabaseError:
+        # 打开损坏文件时 PRAGMA 失败——先关闭句柄再抛，避免 Windows 文件锁泄漏
+        conn.close()
+        raise
+    return conn
+
+
+class PluginRecordStore:
+    """插件安装记录（``registry.db``）：插件 id → 记录（JSON 文本）。
+
+    schema 版本化（``store_meta.schema_version``）：未来字段增删 bump 版本
+    并经迁移升级，不再是"加字段兼容、删字段必崩"的单边容忍；``write`` 全量
+    替换在一个事务里完成（原子，崩溃不半截）。
+    """
+
+    #: 本程序支持的登记 schema 版本
+    SCHEMA_VERSION: Final[str] = "1"
+
+    def __init__(self, path: Path) -> None:
+        # 惰性建库：构造不碰文件系统（服务能起），损坏仅在读写时显式报错
+        self.path = path
+
+    def _ensure(self, conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS store_meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS plugin_records (id TEXT PRIMARY KEY, record TEXT NOT NULL)"
+            )
+            conn.commit()
+            self._check_version(conn)
+        except sqlite3.Error as exc:
+            raise RuntimeError(f"插件注册表无法初始化：{self.path}：{exc}") from exc
+
+    @staticmethod
+    def _check_version(conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            "SELECT value FROM store_meta WHERE name = 'schema_version'"
+        ).fetchone()
+        if row is None:
+            with conn:
+                conn.execute(
+                    "INSERT INTO store_meta (name, value) VALUES ('schema_version', ?)",
+                    (PluginRecordStore.SCHEMA_VERSION,),
+                )
+            return
+        if str(row[0]) != PluginRecordStore.SCHEMA_VERSION:
+            raise RuntimeError(
+                f"插件注册表 schema 版本不兼容：{row[0]}（本程序支持 {PluginRecordStore.SCHEMA_VERSION}）"
+            )
+
+    def read(self) -> dict[str, object]:
+        """全部记录（id → 记录对象）；库损坏 / 不可读抛 ``RuntimeError``。"""
+        try:
+            with contextlib.closing(_open_store(self.path)) as conn:
+                self._ensure(conn)
+                rows = conn.execute("SELECT id, record FROM plugin_records").fetchall()
+            return {str(key): json.loads(str(raw)) for key, raw in rows}
+        except (sqlite3.Error, ValueError, RecursionError) as exc:
+            raise RuntimeError(f"插件注册表无法读取：{self.path}：{exc}") from exc
+
+    def write(self, records: Mapping[str, object]) -> None:
+        """全量替换（单事务原子）；失败抛 ``OSError``（与历史调用方约定一致）。"""
+        try:
+            with contextlib.closing(_open_store(self.path)) as conn:
+                self._ensure(conn)
+                with conn:
+                    conn.execute("DELETE FROM plugin_records")
+                    conn.executemany(
+                        "INSERT INTO plugin_records (id, record) VALUES (?, ?)",
+                        [
+                            (str(key), json.dumps(value, ensure_ascii=False))
+                            for key, value in records.items()
+                        ],
+                    )
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            raise OSError(f"插件注册表无法写入：{self.path}：{exc}") from exc
+
+
 class OwnerRegistry:
     """归属登记（``owners.json``，原子写）：owner → 认领的物理表。
 
@@ -152,102 +243,103 @@ class OwnerRegistry:
 
     ``keep: true`` 表示卸载时显式保留数据（``keep_data``），孤儿回收跳过。
     """
+
     def __init__(self, path: Path) -> None:
-        self.path: Path = path
-        self._data: dict[str, dict[str, object]] = self._read()
+        # 惰性建库：构造不碰文件系统，损坏仅在读写时显式报错
+        self.path = path
 
-    def _read(self) -> dict[str, dict[str, object]]:
-        if not self.path.is_file():
-            return {}
+    def _connect(self) -> sqlite3.Connection:
+        """短连接 + 幂等建表（每操作一次，用完即关）。"""
+        conn = _open_store(self.path)
         try:
-            raw: object = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, RecursionError) as exc:
-            raise RuntimeError(f"归属登记无法读取：{self.path}：{exc}") from exc
-        if not isinstance(raw, dict):
-            raise TypeError("归属登记根值必须是对象")
-        data: dict[str, dict[str, object]] = {}
-        for owner, entry in cast(dict[object, object], raw).items():
-            if not isinstance(owner, str) or not isinstance(entry, dict):
-                raise TypeError("归属登记条目必须是 {owner: 对象}")
-            record = cast(dict[str, object], entry)
-            tables = record.get("tables")
-            names = (
-                [str(name) for name in cast(list[object], tables)]
-                if isinstance(tables, list)
-                else []
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS owners ("
+                "owner TEXT PRIMARY KEY, tables TEXT NOT NULL, "
+                "created_at REAL NOT NULL, keep INTEGER NOT NULL DEFAULT 0)"
             )
-            for name in names:
-                if not _TABLE_NAME.fullmatch(name):
-                    raise TypeError(f"归属登记的表名不合法：{owner!r} → {name!r}")
-            data[owner] = {**record, "tables": names}
-        return data
-
-    def _write(self) -> None:
-        """原子写（唯一临时文件 + fsync + 替换）：崩溃不半截，多实例不互踩。"""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(
-            prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(self._data, handle, ensure_ascii=False, indent=2)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
+            conn.commit()
+        except sqlite3.Error:
+            conn.close()
             raise
+        return conn
 
+    # -- 查询 ---------------------------------------------------------------
     def owners(self) -> list[str]:
         """全部已登记 owner。"""
-        return sorted(self._data)
+        with contextlib.closing(self._connect()) as conn:
+            rows = conn.execute("SELECT owner FROM owners ORDER BY owner").fetchall()
+        return [str(row[0]) for row in rows]
+
+    def _tables_of(self, owner: str) -> list[str]:
+        with contextlib.closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT tables FROM owners WHERE owner = ?", (owner,)
+            ).fetchone()
+        if row is None:
+            return []
+        return [str(name) for name in cast(list[object], json.loads(str(row[0])))]
 
     def tables(self, owner: str) -> list[str]:
         """某 owner 认领的物理表名。"""
-        entry = self._data.get(owner)
-        return list(cast(list[str], entry.get("tables", []))) if entry is not None else []
+        return self._tables_of(owner)
 
     def is_kept(self, owner: str) -> bool:
         """该 owner 是否显式保留数据（``keep_data`` 卸载，孤儿回收跳过）。"""
-        entry = self._data.get(owner)
-        return bool(entry.get("keep")) if entry is not None else False
+        with contextlib.closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT keep FROM owners WHERE owner = ?", (owner,)
+            ).fetchone()
+        return bool(row[0]) if row is not None else False
 
+    # -- 变更（每次操作一个短事务）------------------------------------------
     def claim(self, owner: str, table: str) -> None:
         """登记认领（幂等）；**登记先于建表**写入，崩溃后孤儿可回收。"""
         if not _TABLE_NAME.fullmatch(table):
             raise ValueError(f"表名不合法：{table!r}")
-        entry = self._data.setdefault(owner, {"tables": [], "created_at": time.time()})
-        tables = cast(list[str], entry.setdefault("tables", []))
-        if table not in tables:
+        with contextlib.closing(self._connect()) as conn, conn:
+            tables = self._tables_of(owner)
+            if table in tables:
+                return
             tables.append(table)
-            self._write()
+            payload = json.dumps(tables, ensure_ascii=False)
+            row = conn.execute(
+                "SELECT created_at FROM owners WHERE owner = ?", (owner,)
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO owners (owner, tables, created_at, keep) VALUES (?, ?, ?, 0)",
+                    (owner, payload, time.time()),
+                )
+            else:
+                conn.execute(
+                    "UPDATE owners SET tables = ? WHERE owner = ?", (payload, owner)
+                )
 
     def drop_table(self, owner: str, table: str) -> None:
         """移除单表登记（drop 成功后调用）。"""
-        entry = self._data.get(owner)
-        if entry is None:
-            return
-        tables = cast(list[str], entry.get("tables", []))
-        if table in tables:
+        with contextlib.closing(self._connect()) as conn, conn:
+            tables = self._tables_of(owner)
+            if table not in tables:
+                return
             tables.remove(table)
-            self._write()
+            conn.execute(
+                "UPDATE owners SET tables = ? WHERE owner = ?",
+                (json.dumps(tables, ensure_ascii=False), owner),
+            )
 
     def set_keep(self, owner: str, keep: bool) -> None:
         """标记 / 取消「保留数据」（``keep_data`` 卸载后孤儿回收跳过）。"""
-        entry = self._data.get(owner)
-        if entry is None:
-            return
-        if keep:
-            entry["keep"] = True
-        else:
-            entry.pop("keep", None)
-        self._write()
+        with contextlib.closing(self._connect()) as conn, conn:
+            conn.execute(
+                "UPDATE owners SET keep = ? WHERE owner = ?", (1 if keep else 0, owner)
+            )
 
     def release(self, owner: str) -> None:
         """删除 owner 的整条登记（全部表 drop 成功后调用）。"""
-        if owner in self._data:
-            del self._data[owner]
-            self._write()
+        with contextlib.closing(self._connect()) as conn, conn:
+            conn.execute("DELETE FROM owners WHERE owner = ?", (owner,))
+
+    # （旧 json 实现已迁移至 sqlite，见上）
 
 
 def find_orphans(owners: Iterable[str], installed: Iterable[str]) -> list[str]:
