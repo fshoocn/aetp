@@ -57,16 +57,27 @@ class DbPlugin:
         """验证连接、建库内元表并执行孤儿回收（失败即启动失败，快速暴露）。"""
         await self.service.start()
         installed = self._installed_plugin_ids()
-        orphans = await self.service.sweep_orphans(installed, self.config.orphan_policy)
-        if orphans:
-            self.ctx.logger.info("孤儿回收完成（%d 个）", len(orphans))
+        if installed is None:
+            # DB-N3：事实源不完整时**整体跳过**孤儿回收——按残缺 id 集合执行
+            # 会把仍在使用的外置插件数据当孤儿删掉（orphan_policy=drop 时）
+            self.ctx.logger.error(
+                "插件安装记录无法读取，孤儿回收本次整体跳过（避免误删在用插件数据）"
+            )
+        else:
+            orphans = await self.service.sweep_orphans(installed, self.config.orphan_policy)
+            if orphans:
+                self.ctx.logger.info("孤儿回收完成（%d 个）", len(orphans))
 
         # 「排空连接池」的清理函数：effect 的**返回值**在 fiber 卸载时被调用
         # （注意是 lambda: self.service.shutdown，不是调用）；只动连接池、不动表。
         self.ctx.fiber.effect(lambda: self.service.shutdown, "plugins.db.shutdown")
 
-    def _installed_plugin_ids(self) -> set[str]:
-        """现存插件 id 事实源：``registry.json`` + 已加载的内置插件（不反向注入 plugin-manager）。"""
+    def _installed_plugin_ids(self) -> set[str] | None:
+        """现存插件 id 事实源：``registry.json`` + 已加载的内置插件（不反向注入 plugin-manager）。
+
+        registry 读取失败返回 ``None``：事实源不完整，调用方须跳过孤儿回收
+        （DB-N3），不能拿残缺集合当“已安装全集”用。
+        """
         from common.plugins.webapi.plugin_manager import builtin_specs
 
         ids = set(builtin_specs(self.ctx))
@@ -77,7 +88,7 @@ class DbPlugin:
                 raw: object = json.loads(manifest.read_text(encoding="utf-8"))
             except (OSError, ValueError, RecursionError) as exc:
                 self.ctx.logger.error("插件安装记录无法读取：%s：%s", manifest, exc)
-                return ids
+                return None
             if isinstance(raw, dict):
                 ids.update(str(key) for key in cast(dict[object, object], raw))
         return ids

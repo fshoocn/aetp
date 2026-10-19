@@ -571,6 +571,36 @@ class SchemaLogTests(DbStackTestCase):
         self.assertEqual(counts, {"log-a": 2, "log-b": 2})
 
 
+class RegistrySweepSafetyTests(DbStackTestCase):
+    """DB-N3：孤儿回收的前置条件 = registry 事实源可读。"""
+
+    def _ini(self, *, orphan_policy: str) -> str:
+        del orphan_policy
+        return super()._ini(orphan_policy="drop")
+
+    async def test_corrupt_registry_skips_sweep_but_clean_registry_sweeps(self) -> None:
+        """registry 损坏 → 整体跳过（数据保留）；可读且不含该 owner → 照常清理。"""
+        db = self.db
+        await db.sync_schema(models=[RunRecord])
+        registry_path = self.install_root / "registry.json"
+        self.install_root.mkdir(parents=True, exist_ok=True)
+
+        # registry 损坏：残缺 id 集合不得当“已安装全集”，孤儿回收整体跳过
+        registry_path.write_text("{ not json", encoding="utf-8")
+        outcome = self.db_fiber.update({"echo": False}, no_save=True)
+        assert outcome is not None
+        await outcome
+        await self.db.repo(RunRecord).add(RunRecord(name="alive"))
+
+        # 对照：registry 可读且不含该 owner → 按 orphan_policy=drop 清理
+        registry_path.write_text("{}", encoding="utf-8")
+        outcome = self.db_fiber.update({"echo": False}, no_save=True)
+        assert outcome is not None
+        await outcome
+        with self.assertRaises((DbError, SQLAlchemyError)):
+            await self.db.repo(RunRecord).add(RunRecord(name="ghost"))
+
+
 class EngineResilienceTests(DbStackTestCase):
     """DB-N4/N5/N6：逃生舱事务语义、SQLite 并发韧性、池参数告警。"""
 
