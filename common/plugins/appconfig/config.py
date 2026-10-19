@@ -29,6 +29,15 @@ _TRUE_WORDS: frozenset[str] = frozenset({"1", "yes", "true", "on"})
 _FALSE_WORDS: frozenset[str] = frozenset({"0", "no", "false", "off"})
 
 
+#: URL 凭证掩码正则（``scheme://user:pass@`` → ``scheme://user:***@``）
+_URL_SECRET: re.Pattern[str] = re.compile(r"(://[^:/@\s]+):[^@\s]*@")
+
+
+def _mask_url_secrets(value: str) -> str:
+    """展示掩码：值内 URL 的密码段不回显（凭证不进日志 / API / repr）。"""
+    return _URL_SECRET.sub(r"\1:***@", value)
+
+
 class ConfigSection:
     """单个配置节（``[section]``）的视图：字典 / 属性两种取值方式。
 
@@ -217,8 +226,15 @@ class AppConfig:
         self.path = target
 
     def to_dict(self) -> dict[str, dict[str, str]]:
-        """导出为 ``{节: {键: 值}}``。"""
-        return {name: section.to_dict() for name, section in self._sections.items()}
+        """导出为 ``{节: {键: 值}}``（**展示用途**：URL 凭证掩码不回显）。
+
+        内部写回链路用 :meth:`ConfigSection.to_dict`（保持原值）——掩码只
+        挡展示面，不污染 ``update_section`` 的写回内容。
+        """
+        return {
+            name: {key: _mask_url_secrets(value) for key, value in section.to_dict().items()}
+            for name, section in self._sections.items()
+        }
 
     def __repr__(self) -> str:
         return f"AppConfig({self.path}, sections={self.sections()})"

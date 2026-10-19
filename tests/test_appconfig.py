@@ -67,6 +67,26 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual(AppConfig().get("web", "port", "8080"), "8080")
 
 
+    def test_to_dict_masks_url_credentials(self) -> None:
+        """展示掩码：URL 凭证不回显；内部节视图保持原值（写回不被污染）。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.ini"
+            path.write_text(
+                "[db]\n"
+                "url = postgresql+asyncpg://user:secret@localhost:5432/aetp\n"
+                "name = plain\n",
+                encoding="utf-8",
+            )
+            config = AppConfig.from_file(path)
+            masked = config.to_dict()["db"]
+            self.assertEqual(
+                masked["url"], "postgresql+asyncpg://user:***@localhost:5432/aetp"
+            )
+            self.assertEqual(masked["name"], "plain")
+            # 内部节视图保持原值（update_section 写回用它）
+            self.assertIn("secret", config.section("db").to_dict()["url"])
+
+
 class AppConfigPluginTests(unittest.IsolatedAsyncioTestCase):
     """cordis 集成：ctx.appconfig 服务。"""
 
