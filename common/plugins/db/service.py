@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar, cast
 
 from cordis_port import Context, Fiber, Service
-from sqlalchemy import ColumnElement, MetaData, Table, func
+from sqlalchemy import ColumnElement, MetaData, Table, event, func
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import insert as sa_insert
 from sqlalchemy import inspect as sa_inspect
@@ -258,7 +258,10 @@ class DbService(Service[DbConfig]):
                 max_overflow=self.config.max_overflow,
                 pool_recycle=self.config.pool_recycle,
             )
-        return create_async_engine(url, **options)
+        engine = create_async_engine(url, **options)
+        if parsed.get_backend_name() == "sqlite" and parsed.database not in (None, "", ":memory:"):
+            _enable_sqlite_resilience(engine)
+        return engine
 
     def _prepare_sqlite_file(self) -> None:
         """SQLite 文件库：父目录不存在则创建（默认 ``data/aetp.db`` 直接可用）。"""
@@ -276,6 +279,9 @@ class DbService(Service[DbConfig]):
         抛出:
             DbError: 连接失败（url 非法 / 服务不通）——启动失败，错误进插件 ``last_error``。
         """
+        warning = sqlite_pool_warning(self.config, self._engine.dialect.name)
+        if warning is not None:
+            self._provided_ctx.logger.warning(warning)
         try:
             self._prepare_sqlite_file()
             async with self._engine.begin() as conn:
@@ -406,7 +412,16 @@ class DbService(Service[DbConfig]):
             raise DbError(f"事务执行失败：{exc}") from exc
 
     async def execute(self, statement: Any) -> list[Any]:
-        """逃生舱：SQLAlchemy Core 原语（DML 自动提交，返回已物化的行列表）。"""
+        """逃生舱：SQLAlchemy Core 原语（返回已物化的行列表）。
+
+        在 ``session()`` / ``transaction()`` 作用域内调用时**汇入环境事务**
+        （DB-N4）：不再自开自动提交连接，外层失败时本调用的写入随外层回滚，
+        「失败整体回滚」的承诺不被破坏；无环境事务时自动提交执行。
+        """
+        ambient = _CURRENT_SESSION.get()
+        if ambient is not None:
+            result = cast("CursorResult[Any]", await ambient.execute(statement))
+            return list(result.fetchall()) if result.returns_rows else []
         async with self._engine.begin() as conn:
             result = await conn.execute(statement)
             return list(result.fetchall()) if result.returns_rows else []
@@ -894,6 +909,38 @@ class DbService(Service[DbConfig]):
         return cast(dict[str, object], raw) if isinstance(raw, dict) else {}
 
 
+def _enable_sqlite_resilience(engine: AsyncEngine) -> None:
+    """SQLite 文件库的并发韧性（DB-N5）：WAL + ``busy_timeout``。
+
+    高并发 DDL / 写入时不再轻易 ``database is locked``（WAL 读写不互斥，
+    忙等 5 秒兕底）。
+    """
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _on_connect(dbapi_connection: Any, _record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+        finally:
+            cursor.close()
+
+
+def sqlite_pool_warning(config: DbConfig, dialect_name: str) -> str | None:
+    """DB-N6：SQLite 方言不用连接池参数，显式配置了就告警（不静默无效）。"""
+    if dialect_name != "sqlite":
+        return None
+    if (
+        config.pool_size != DbConfig.pool_size
+        or config.max_overflow != DbConfig.max_overflow
+    ):
+        return (
+            "SQLite 方言不使用连接池参数，pool_size / max_overflow 已忽略"
+            f"（配置值 {config.pool_size} / {config.max_overflow}）"
+        )
+    return None
+
+
 def _ensure_meta_tables(sync_conn: Any) -> None:
     """库内元表（``aetp_db_meta`` / ``aetp_schema_log``）幂等建表。"""
     meta_table.metadata.create_all(sync_conn, checkfirst=True)
@@ -934,4 +981,5 @@ __all__: list[str] = [
     "MigrationStep",
     "Repo",
     "SyncResult",
+    "sqlite_pool_warning",
 ]

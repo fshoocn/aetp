@@ -51,6 +51,7 @@ from common.plugins.db.models import (
     snake,
 )
 from common.plugins.db.registry import OwnerRegistry, fingerprint, parse_dependencies
+from common.plugins.db.service import sqlite_pool_warning
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManagerError, PublicPluginRecord
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
@@ -499,6 +500,36 @@ class DbServiceTests(DbStackTestCase):
 
 
 # ---------------------------------------------------------------- 迁移
+class EngineResilienceTests(DbStackTestCase):
+    """DB-N4/N5/N6：逃生舱事务语义、SQLite 并发韧性、池参数告警。"""
+
+    async def test_execute_joins_ambient_transaction(self) -> None:
+        """DB-N4：事务内 execute 汇入环境事务——外层回滚时其写入一并回滚。"""
+        db = self.db
+        await db.sync_schema(models=[RunRecord])
+        with self.assertRaises(RuntimeError):
+            async with db.transaction():
+                await db.execute(
+                    text("INSERT INTO aetp_test_store_test_run (name) VALUES ('ghost')")
+                )
+                raise RuntimeError("boom")
+        self.assertEqual(await db.repo(RunRecord).count(), 0)
+
+    async def test_sqlite_uses_wal(self) -> None:
+        """DB-N5：SQLite 文件库连接启用 WAL（读写不互斥，配 busy_timeout）。"""
+        rows = await self.db.execute(text("PRAGMA journal_mode"))
+        self.assertEqual(str(rows[0][0]).lower(), "wal")
+
+    def test_sqlite_pool_warning_flags_ignored_options(self) -> None:
+        """DB-N6：SQLite 方言显式配置池参数 → 告警；其他情形不告警。"""
+        custom = DbConfig(url="sqlite+aiosqlite:///x.db", pool_size=3)
+        self.assertIn("pool_size", sqlite_pool_warning(custom, "sqlite") or "")
+        self.assertIsNone(sqlite_pool_warning(custom, "postgresql"))
+        self.assertIsNone(
+            sqlite_pool_warning(DbConfig(url="sqlite+aiosqlite:///x.db"), "sqlite")
+        )
+
+
 class MigrationTests(DbStackTestCase):
     """L1 加性对齐与 L2 版本化迁移（DESIGN §4.4）。"""
 
