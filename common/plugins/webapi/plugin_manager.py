@@ -7,7 +7,6 @@ import contextlib
 import hashlib
 import importlib
 import json
-import logging
 import os
 import re
 import shutil
@@ -252,7 +251,6 @@ class PluginManagerError(ValueError):
 _REQUIRES_ERROR: Final[str] = "requires 必须是字符串列表（每项非空且不超过 64 字符，最多 32 项）"
 #: registry 有记录但安装目录缺失时的诊断（启动自检写入 last_error）
 _MISSING_DIR_ERROR: Final[str] = "安装目录缺失，需要重新安装（上传插件包）"
-_LOGGER = logging.getLogger(__name__)
 #: kind 字段校验失败的统一提示
 _KIND_ERROR: Final[str] = (
     f"plugin.json 必须提供 kind（{' / '.join(PLUGIN_KINDS)} 之一，单值或列表）"
@@ -272,6 +270,17 @@ def _validate_requires(value: object) -> list[str]:
     ):
         raise PluginManagerError(_REQUIRES_ERROR)
     return [cast(str, item).strip() for item in items]
+
+
+def _audit_install(ctx: Context, record: PublicPluginRecord, replace: bool) -> None:
+    """安装成功审计（LOG-A1：成功路径也有留痕，不再只有失败日志）。"""
+    ctx.logger.info(
+        "审计：%s插件 %s v%s（digest %s）成功",
+        "覆盖安装" if replace else "安装",
+        record["id"],
+        record["version"],
+        (record.get("digest") or "")[:8],
+    )
 
 
 class PluginManager:
@@ -346,7 +355,9 @@ class PluginManager:
     async def install_archive(self, archive: bytes, *, replace: bool = False) -> PublicPluginRecord:
         """安装插件包；同 id 已安装时需显式 ``replace=True`` 才覆盖替换。"""
         async with self._operation_lock:
-            return await self._install_archive(archive, replace=replace)
+            record = await self._install_archive(archive, replace=replace)
+        _audit_install(self.ctx, record, replace)
+        return record
 
     async def install_source(self, source_dir: str | Path, *, replace: bool = False) -> PublicPluginRecord:
         """从本地插件源目录安装（与上传 ZIP 同一条安装链路）。
@@ -362,7 +373,9 @@ class PluginManager:
             if not source.is_dir():
                 raise PluginManagerError(f"插件源目录不存在：{source}")
             archive = await asyncio.to_thread(self._zip_directory, source)
-            return await self._install_archive(archive, replace=replace)
+            record = await self._install_archive(archive, replace=replace)
+        _audit_install(self.ctx, record, replace)
+        return record
 
     @staticmethod
     def _zip_directory(source: Path) -> bytes:
@@ -409,9 +422,9 @@ class PluginManager:
                 # 不再 409 卡死整个节点；预装插件本就由 ensure_installed 每次
                 # 启动重装重置，属预期流程，不报孤儿
                 if plugin_id in self.preinstalled_ids:
-                    _LOGGER.info("预装插件 %s 重装（ensure_installed 重置目录）", plugin_id)
+                    self.ctx.logger.info("预装插件 %s 重装（ensure_installed 重置目录）", plugin_id)
                 else:
-                    _LOGGER.warning("覆盖孤儿安装目录 %s（registry 无记录）", destination.name)
+                    self.ctx.logger.warning("覆盖孤儿安装目录 %s（registry 无记录）", destination.name)
                 await asyncio.to_thread(shutil.rmtree, destination, ignore_errors=True)
             if existing is not None:
                 if not replace:
@@ -616,7 +629,9 @@ class PluginManager:
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         self._reject_builtin(plugin_id, "启停")
         async with self._operation_lock:
-            return await self._enable(plugin_id)
+            record = await self._enable(plugin_id)
+        self.ctx.logger.info("审计：启用插件 %s v%s 成功", plugin_id, record["version"])
+        return record
 
     async def _enable(self, plugin_id: str) -> PublicPluginRecord:
         record = self._get_record(plugin_id)
@@ -732,7 +747,11 @@ class PluginManager:
         """停用插件；``reason`` 会记入安装记录的 ``last_error``（如数据依赖失效）。"""
         self._reject_builtin(plugin_id, "停用")
         async with self._operation_lock:
-            return await self._disable(plugin_id, reason=reason)
+            record = await self._disable(plugin_id, reason=reason)
+        self.ctx.logger.info(
+            "审计：停用插件 %s 成功%s", plugin_id, f"（原因：{reason}）" if reason else ""
+        )
+        return record
 
     async def _disable(self, plugin_id: str, *, reason: str | None = None) -> PublicPluginRecord:
         record = self._get_record(plugin_id)
@@ -761,6 +780,7 @@ class PluginManager:
         self._reject_builtin(plugin_id, "卸载")
         async with self._operation_lock:
             await self._uninstall(plugin_id, keep_data=keep_data, drop=drop)
+        self.ctx.logger.info("审计：卸载插件 %s 成功（keep_data=%s）", plugin_id, keep_data)
 
     async def _uninstall(
         self, plugin_id: str, *, keep_data: bool = False, drop: bool = False
@@ -803,7 +823,11 @@ class PluginManager:
         """
         self._reject_builtin(plugin_id, "配置修改")
         async with self._operation_lock:
-            return await self._update_config(plugin_id, config)
+            record = await self._update_config(plugin_id, config)
+        self.ctx.logger.info(
+            "审计：更新插件 %s 配置成功（键：%s）", plugin_id, ", ".join(sorted(config))
+        )
+        return record
 
     async def _update_config(
         self, plugin_id: str, config: Mapping[str, object]
@@ -1217,7 +1241,7 @@ class PluginManager:
         managed = set(self.preinstalled_ids)
         self._orphan_dirs = dirs - record_ids - managed
         for orphan in sorted(self._orphan_dirs):
-            _LOGGER.warning(
+            self.ctx.logger.warning(
                 "检测到孤儿安装目录 %s（registry 无记录，可能是安装中断残留）；"
                 "下次安装同名插件时将自动覆盖",
                 orphan,
@@ -1228,7 +1252,7 @@ class PluginManager:
             if record.get("last_error") != _MISSING_DIR_ERROR:
                 record["last_error"] = _MISSING_DIR_ERROR
                 changed = True
-            _LOGGER.warning(
+            self.ctx.logger.warning(
                 "插件 %s 的安装目录缺失（%s），需要重新安装",
                 plugin_id,
                 self.install_root / plugin_id,

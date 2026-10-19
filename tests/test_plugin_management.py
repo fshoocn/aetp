@@ -14,6 +14,7 @@ from io import BytesIO
 from pathlib import Path
 
 from cordis_port import Context
+from cordis_port.logger import Exporter, Logger, Message
 
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
@@ -866,6 +867,31 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             await plugins.install_archive(lying_big)
         self.assertEqual(caught.exception.status_code, 413)
 
+    async def test_operations_emit_audit_logs(self) -> None:
+        """操作审计（LOG-A1）：安装/启用/改配置/停用/卸载成功路径都有「审计」日志。"""
+        captured: list[str] = []
+
+        def capture(message: Message) -> None:
+            captured.append(Logger.format(capture_exporter, message))
+
+        capture_exporter: Exporter = {"levels": {"default": 3}, "export": capture}
+        self.context.logger.exporter(capture_exporter, raw=True)
+        plugins = self.context.plugins
+        await plugins.install_archive(_plugin_archive())
+        await plugins.enable("uploaded-sample")
+        await plugins.disable("uploaded-sample")
+        await plugins.update_config("uploaded-sample", {"note": "审计测试"})
+        await plugins.uninstall("uploaded-sample")
+        joined = "\n".join(captured)
+        for fragment in (
+            "审计：安装插件",
+            "审计：启用插件",
+            "审计：停用插件",
+            "审计：更新插件",
+            "审计：卸载插件",
+        ):
+            self.assertIn(fragment, joined)
+
     async def test_registry_write_failure_rolls_back_install(self) -> None:
         class RegistryWriteFailureManager(PluginManager):
             def _write_registry(self) -> None:
@@ -1074,9 +1100,13 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         """预装插件目录由 ensure_installed 管理，不判孤儿；真孤儿照常告警。"""
         (self.install_root / "webui").mkdir(parents=True)
         (self.install_root / "stray").mkdir(parents=True)
-        with self.assertLogs("common.plugins.webapi.plugin_manager", level="WARNING") as captured:
-            PluginManager(self.context, self.install_root, ["webui"])
-        messages = "\n".join(captured.output)
+        captured: list[str] = []
+        self.context.logger.exporter(
+            {"levels": {"default": 1}, "export": lambda message: captured.append(str(message.args))},
+            raw=True,
+        )
+        PluginManager(self.context, self.install_root, ["webui"])
+        messages = "\n".join(captured)
         self.assertIn("stray", messages)
         self.assertNotIn("webui", messages)
 

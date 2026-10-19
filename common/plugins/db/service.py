@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -50,8 +49,6 @@ from .registry import (
     record_dependencies,
     schema_log_table,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 #: 迁移步骤：``async def upgrade_v2(conn)``（SQLAlchemy Core / ``sa.text`` 均可）
 MigrationStep = Callable[[AsyncConnection], Awaitable[None]]
@@ -223,7 +220,7 @@ class DbService(Service[DbConfig]):
             try:
                 self._registry_store = PluginRecordStore(install_root / "registry.db")
             except (OSError, RuntimeError) as err:
-                _LOGGER.warning("registry.db 不可用，本次会话跳过依赖事实源： %s", err)
+                ctx.logger.warning("registry.db 不可用，本次会话跳过依赖事实源：%s", err)
         self._ddl_lock: asyncio.Lock = asyncio.Lock()
         self._external_cache: dict[tuple[str, str], type[object]] = {}
         self._started: bool = False
