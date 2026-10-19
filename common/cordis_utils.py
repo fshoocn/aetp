@@ -1,8 +1,30 @@
 import asyncio
+import inspect
 import time
 from collections.abc import Callable
 
 from cordis_port import Context, Fiber
+
+
+async def safe_dispose(fiber: Fiber) -> BaseException | None:
+    """销毁 fiber 并吞掉清理期异常（含 events.emit 监听器异常）。
+
+    返回捕获到的异常供调用方记日志 / 决策；``dispose()`` 对已清理的 fiber
+    可能返回 ``None``，这里统一判空，不交给调用方各自处理。
+
+    用 ``gather(return_exceptions=True)`` 收集异常而不是盲 ``except``：清理期
+    任何异常（含 ``dispose()`` 同步抛出）都折算成返回值；外层取消不在此列——
+    ``CancelledError`` 照常向上传播，不被误当作清理失败吞掉。
+    """
+
+    async def _dispose() -> None:
+        result = fiber.dispose()
+        if inspect.isawaitable(result):
+            await result
+
+    outcome = await asyncio.gather(_dispose(), return_exceptions=True)
+    error = outcome[0]
+    return error if isinstance(error, BaseException) else None
 
 
 async def unload_all(ctx: Context) -> list[Fiber]:
@@ -22,16 +44,24 @@ async def unload_all(ctx: Context) -> list[Fiber]:
 
     返回:
         已卸载的 fiber 列表（按卸载顺序）。
+
+    单个 fiber 清理失败**不再中断整个卸载循环**——全部跑完后统一记日志，
+    保证 web 服务等关键资源不会因某个插件的清理异常而来不及停止。
     """
     unloaded: list[Fiber] = []
+    failures: list[BaseException] = []
     # 复制快照：dispose 过程中会修改 registry._internal，不能直接迭代原集合
     for runtime in list(ctx.registry.values()):
         for fiber in list(runtime.fibers):
             if fiber.uid is None:
                 # 已经卸载过（uid 置空是销毁的标志）
                 continue
-            await fiber.dispose()
+            error = await safe_dispose(fiber)
+            if error is not None:
+                failures.append(error)
             unloaded.append(fiber)
+    for error in failures:
+        ctx.logger.error("卸载期间 fiber 清理失败：%s", error)
     return unloaded
 
 

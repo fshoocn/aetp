@@ -22,6 +22,7 @@ from typing import Final, TypedDict, cast
 from cordis_port import Context, Fiber
 from sqlalchemy.exc import SQLAlchemyError
 
+from common.cordis_utils import safe_dispose
 from common.plugins.db.registry import DataDependency, parse_dependencies
 from common.plugins.db.service import DbDependencyError, DbError
 
@@ -495,7 +496,11 @@ class PluginManager:
         moved = False
         try:
             if fiber is not None:
-                await fiber.dispose()
+                cleanup_error = await safe_dispose(fiber)
+                if cleanup_error is not None:
+                    self.ctx.logger.error(
+                        "插件 %s 换装时清理旧版 Fiber 失败：%s", plugin_id, cleanup_error
+                    )
             self._remove_modules(module_name)
             # 原子换目录：旧目录先进暂存区，新版就位后旧版随 finally 清理
             moved = await asyncio.to_thread(
@@ -669,10 +674,9 @@ class PluginManager:
         error: str,
     ) -> None:
         if fiber is not None:
-            # 回滚清理尽力而为（gather 收集任意异常），不掩盖原始错误
-            outcome = await asyncio.gather(fiber.dispose(), return_exceptions=True)
-            cleanup_error = outcome[0]
-            if isinstance(cleanup_error, BaseException):
+            # 回滚清理尽力而为，不掩盖原始错误
+            cleanup_error = await safe_dispose(fiber)
+            if cleanup_error is not None:
                 self.ctx.logger.error(
                     "插件 %s 启用回滚时清理 Fiber 失败：%s", plugin_id, cleanup_error
                 )
@@ -704,9 +708,8 @@ class PluginManager:
         """清理「非激活」残留 fiber（如热重载失败）：销毁并摘除模块登记，
         下次 :meth:`_enable` 全新装载；清理异常只记录，不掩盖原始错误。"""
         self.fibers.pop(plugin_id, None)
-        outcome = await asyncio.gather(fiber.dispose(), return_exceptions=True)
-        cleanup_error = outcome[0]
-        if isinstance(cleanup_error, BaseException):
+        cleanup_error = await safe_dispose(fiber)
+        if cleanup_error is not None:
             self.ctx.logger.error(
                 "插件 %s 清理残留 Fiber 失败：%s", plugin_id, cleanup_error
             )
@@ -722,7 +725,11 @@ class PluginManager:
         record = self._get_record(plugin_id)
         fiber = self.fibers.pop(plugin_id, None)
         if fiber is not None:
-            await fiber.dispose()
+            cleanup_error = await safe_dispose(fiber)
+            if cleanup_error is not None:
+                self.ctx.logger.error(
+                    "插件 %s 停用时清理 Fiber 失败：%s", plugin_id, cleanup_error
+                )
         self._remove_modules(self._module_name(plugin_id))
         record["enabled"] = False
         if reason is not None:
