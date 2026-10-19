@@ -198,6 +198,10 @@ class PluginManagerPlugin(Service[None]):
         """从本地插件源目录安装（如 ``master/webui``）。"""
         return await self._require_manager().install_source(source_dir, replace=replace)
 
+    async def ensure_source(self, source_dir: str | Path) -> PublicPluginRecord:
+        """预装源就绪一条龙（比对 → 换装如需 → 启用），单锁原子。"""
+        return await self._require_manager().ensure_source(source_dir)
+
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         """启用插件并加载进本节点运行时。"""
         return await self._require_manager().enable(plugin_id)

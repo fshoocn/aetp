@@ -383,6 +383,29 @@ class PluginManager:
         _audit_install(self.ctx, record, replace)
         return record
 
+    async def ensure_source(self, source_dir: str | Path) -> PublicPluginRecord:
+        """预装源就绪一条龙（比对 → 换装如需 → 启用）：**单锁原子**。
+
+        原先由调用方串三次服务调用（查清单 / 安装 / 启用），每次各自拿锁，
+        中间可被并发 HTTP 操作（如卸载）插队；收进同一把锁后操作序列不再
+        被打断。内容摘要判定是否换装的口径不变（与 ``source_digest`` 同）。
+        """
+        source = Path(source_dir).expanduser().resolve()
+        if not source.is_dir() and not source.is_file():
+            raise PluginManagerError(f"插件源不存在：{source}")
+        async with self._operation_lock:
+            plugin_id = await asyncio.to_thread(source_plugin_id, source)
+            digest = await asyncio.to_thread(source_digest, source)
+            existing = self.records.get(plugin_id)
+            if existing is None or existing.get("digest") != digest:
+                if source.suffix.lower() == ".zip":
+                    archive = await asyncio.to_thread(source.read_bytes)
+                else:
+                    archive = await asyncio.to_thread(self._zip_directory, source)
+                record = await self._install_archive(archive, replace=existing is not None)
+                _audit_install(self.ctx, record, existing is not None)
+            return await self._enable(plugin_id)
+
     @staticmethod
     def _zip_directory(source: Path) -> bytes:
         """把插件源目录打包成 ZIP（排除构建缓存、依赖目录与符号链接）。"""

@@ -41,7 +41,7 @@ from common.plugins.appconfig import AppConfig, AppConfigPlugin
 from common.plugins.db import DbPlugin
 from common.plugins.log import LogPlugin
 from common.plugins.webapi import WebApiPlugin
-from common.plugins.webapi.plugin_manager import source_digest, source_plugin_id
+from common.plugins.webapi.plugin_manager import source_plugin_id
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
 
@@ -135,23 +135,10 @@ async def ensure_installed(ctx: Context, source: Path) -> str:
     """
     plugins = ctx.plugins
     path = Path(source)
-    plugin_id = await asyncio.to_thread(source_plugin_id, path)
-    digest = await asyncio.to_thread(source_digest, path)
-    record = next((item for item in await plugins.list_plugins() if item["id"] == plugin_id), None)
-    if record is None:
-        if path.suffix.lower() == ".zip":
-            await plugins.install_archive(await asyncio.to_thread(path.read_bytes))
-        else:
-            await plugins.install_source(path)
-    elif record.get("digest") != digest:
-        if path.suffix.lower() == ".zip":
-            await plugins.install_archive(
-                await asyncio.to_thread(path.read_bytes), replace=True
-            )
-        else:
-            await plugins.install_source(path, replace=True)
-    await plugins.enable(plugin_id)
-    return plugin_id
+    # 比对 → 换装如需 → 启用 在插件管理器单锁内一条龙原子执行
+    # （原先三次独立服务调用可被并发 HTTP 操作插队）
+    record = await plugins.ensure_source(path)
+    return str(record["id"])
 
 
 def _resolve_config(config_path: str | Path) -> tuple[Path, NodeProfile]:
