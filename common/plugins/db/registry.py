@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -138,6 +139,10 @@ def meta_tables() -> tuple[Table[Any], Table[Any]]:
     return meta_table, schema_log_table
 
 
+#: 物理表名白名单（纵深防御：拼 DDL 前先过模式校验；正常命名由 models.py 洗名产生）
+_TABLE_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_]{1,96}")
+
+
 class OwnerRegistry:
     """归属登记（``owners.json``，原子写）：owner → 认领的物理表。
 
@@ -147,7 +152,6 @@ class OwnerRegistry:
 
     ``keep: true`` 表示卸载时显式保留数据（``keep_data``），孤儿回收跳过。
     """
-
     def __init__(self, path: Path) -> None:
         self.path: Path = path
         self._data: dict[str, dict[str, object]] = self._read()
@@ -167,17 +171,32 @@ class OwnerRegistry:
                 raise TypeError("归属登记条目必须是 {owner: 对象}")
             record = cast(dict[str, object], entry)
             tables = record.get("tables")
-            data[owner] = {
-                **record,
-                "tables": [str(name) for name in cast(list[object], tables)] if isinstance(tables, list) else [],
-            }
+            names = (
+                [str(name) for name in cast(list[object], tables)]
+                if isinstance(tables, list)
+                else []
+            )
+            for name in names:
+                if not _TABLE_NAME.fullmatch(name):
+                    raise TypeError(f"归属登记的表名不合法：{owner!r} → {name!r}")
+            data[owner] = {**record, "tables": names}
         return data
 
     def _write(self) -> None:
+        """原子写（唯一临时文件 + fsync + 替换）：崩溃不半截，多实例不互踩。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary, self.path)
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(self._data, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
 
     def owners(self) -> list[str]:
         """全部已登记 owner。"""
@@ -195,6 +214,8 @@ class OwnerRegistry:
 
     def claim(self, owner: str, table: str) -> None:
         """登记认领（幂等）；**登记先于建表**写入，崩溃后孤儿可回收。"""
+        if not _TABLE_NAME.fullmatch(table):
+            raise ValueError(f"表名不合法：{table!r}")
         entry = self._data.setdefault(owner, {"tables": [], "created_at": time.time()})
         tables = cast(list[str], entry.setdefault("tables", []))
         if table not in tables:

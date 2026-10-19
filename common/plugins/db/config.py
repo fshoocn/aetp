@@ -84,7 +84,13 @@ class DbConfig(FieldConfig):
             try:
                 make_url(url)
             except (SQLAlchemyError, ValueError) as exc:
-                issues.append({"message": f"url 不是合法的 SQLAlchemy 连接串：{exc}", "path": ["url"]})
+                # 不回显异常原文：解析错误的消息可能内嵌整条连接串（含账密）
+                issues.append(
+                    {
+                        "message": f"url 不是合法的 SQLAlchemy 连接串（{type(exc).__name__}）",
+                        "path": ["url"],
+                    }
+                )
         if self.pool_size < 1:
             issues.append({"message": f"pool_size 需 ≥ 1，收到 {self.pool_size}", "path": ["pool_size"]})
         if self.max_overflow < 0:

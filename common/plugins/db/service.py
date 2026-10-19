@@ -279,7 +279,12 @@ class DbService(Service[DbConfig]):
                 await conn.execute(sa_text("SELECT 1"))
                 await conn.run_sync(_ensure_meta_tables)
         except (SQLAlchemyError, OSError, ValueError) as exc:
-            raise DbError(f"数据库连接失败（{self.config.to_dict().get('url')}）：{exc}") from exc
+            # 异常原文只进服务端日志（连接错误可内嵌带账密的连接串）；
+            # UI 可见的错误消息只带异常类型，不回显原文
+            self._provided_ctx.logger.error("数据库启动失败：%s", exc)
+            raise DbError(
+                f"数据库连接失败（{self.config.to_dict().get('url')}）：{type(exc).__name__}"
+            ) from exc
         self._started = True
         self._provided_ctx.logger.info(
             "数据库已就绪：%s（归属登记 %s）",
