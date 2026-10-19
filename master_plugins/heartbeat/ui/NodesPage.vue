@@ -128,9 +128,24 @@ function apiUrl(path) {
     return `${apiBase()}${path}`;
 }
 
+// 插件 SFC 拿不到宿主模块，令牌直接读宿主约定的 localStorage 键
+// （与 master/webui/frontend/src/service/backend.js 的 TOKEN_STORAGE_KEY 同步）
+function authHeaders() {
+    let token = '';
+    try {
+        token = window.localStorage.getItem('aetp.authToken') || '';
+    } catch {
+        token = '';
+    }
+    return token ? { 'X-AETP-Token': token } : {};
+}
+
 async function fetchJson(url, options) {
     // 先判 ok 再解析：非 JSON 错误页（网关 5xx 等）不炸成「语法错误」
-    const response = await fetch(url, options);
+    const response = await fetch(url, {
+        ...(options || {}),
+        headers: { ...((options && options.headers) || {}), ...authHeaders() }
+    });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
         const message = data && data.error ? data.error.message || String(data.error) : '';

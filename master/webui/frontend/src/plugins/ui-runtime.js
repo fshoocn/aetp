@@ -1,8 +1,14 @@
 import * as Vue from 'vue';
 import { h, onBeforeUnmount, shallowRef } from 'vue';
 import router from '@/router';
-import { resolveUrl } from '@/service/backend';
+import { getAuthToken, resolveUrl } from '@/service/backend';
 import { pluginUiState } from './ui-state';
+
+/** /api 请求统一带访问令牌（静态资源免鉴权，无需携带）。 */
+function authHeaders() {
+    const token = getAuthToken();
+    return token ? { 'X-AETP-Token': token } : {};
+}
 
 const scriptDisposers = [];
 const moduleCache = Object.assign(Object.create(null), { vue: Vue });
@@ -49,7 +55,7 @@ function attachStyle(contributionId, compiledStyle) {
 }
 
 export async function initializePluginUi() {
-    const response = await fetch(resolveUrl('/api/web/ui'));
+    const response = await fetch(resolveUrl('/api/web/ui'), { headers: authHeaders() });
     if (!response.ok) {
         throw new Error(`获取插件 UI 清单失败: ${response.status}`);
     }
@@ -103,7 +109,11 @@ async function activateScript(contribution) {
 
         const dispose = await module.activate({
             api: {
-                request: (url, options) => fetch(resolveUrl(url), options)
+                request: (url, options) =>
+                    fetch(resolveUrl(url), {
+                        ...(options || {}),
+                        headers: { ...((options && options.headers) || {}), ...authHeaders() }
+                    })
             },
             router,
             slots: {

@@ -11,6 +11,7 @@
  */
 
 const STORAGE_KEY = 'aetp.backendUrl';
+const TOKEN_STORAGE_KEY = 'aetp.authToken';
 
 /** JSON 请求默认超时（毫秒）：后端卡死时不让调用方无限挂起。 */
 const REQUEST_TIMEOUT_MS = 30000;
@@ -28,6 +29,28 @@ let backendUrl = readStored();
 /** 当前后端地址；空字符串表示与页面同源。 */
 export function getBackendUrl() {
     return backendUrl;
+}
+
+/** 当前访问令牌（``X-AETP-Token``）；空字符串表示未设置。 */
+export function getAuthToken() {
+    try {
+        return window.localStorage.getItem(TOKEN_STORAGE_KEY) || '';
+    } catch {
+        return '';
+    }
+}
+
+/** 设置访问令牌（空值 = 清除）；后端地址切换器的令牌输入框用。 */
+export function setAuthToken(value) {
+    const token = String(value ?? '')
+        .trim();
+    try {
+        if (token) window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+        else window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    } catch {
+        // 存储不可用时仅本次会话生效
+    }
+    return token;
 }
 
 /**
@@ -83,9 +106,14 @@ export function resolveUrl(path) {
  *  默认 30 秒超时；调用方自带 `signal` 时由调用方控制取消（如弹窗竞态防护）。 */
 export async function request(url, options = {}) {
     const signal = options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const token = getAuthToken();
     let response;
     try {
-        response = await fetch(resolveUrl(url), { ...options, signal });
+        response = await fetch(resolveUrl(url), {
+            ...options,
+            headers: { ...(options.headers || {}), ...(token ? { 'X-AETP-Token': token } : {}) },
+            signal
+        });
     } catch (reason) {
         if (reason instanceof Error && (reason.name === 'TimeoutError' || reason.name === 'AbortError')) {
             throw new Error('请求超时或已取消');

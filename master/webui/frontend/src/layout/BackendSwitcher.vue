@@ -1,9 +1,10 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { getBackendUrl, normalizeBackendUrl, setBackendUrl } from '@/service/backend';
+import { getAuthToken, getBackendUrl, normalizeBackendUrl, setAuthToken, setBackendUrl } from '@/service/backend';
 
 const visible = ref(false);
 const input = ref('');
+const tokenInput = ref('');
 const message = ref('');
 const isError = ref(false);
 const busy = ref(false);
@@ -19,8 +20,14 @@ function show(text, error = false) {
 
 function open() {
     input.value = getBackendUrl();
+    tokenInput.value = '';
     show('');
     visible.value = true;
+}
+
+/** 候选令牌：输入框留空 = 沿用当前值（用户约定）。 */
+function candidateToken() {
+    return tokenInput.value.trim() || getAuthToken();
 }
 
 async function testConnection() {
@@ -30,7 +37,8 @@ async function testConnection() {
     try {
         const base = normalizeBackendUrl(input.value);
         target = base ? `${base}/api/plugins` : '/api/plugins';
-        const response = await fetch(target);
+        const token = candidateToken();
+        const response = await fetch(target, token ? { headers: { 'X-AETP-Token': token } } : undefined);
         if (!response.ok) {
             show(`连接失败：HTTP ${response.status}`, true);
             return;
@@ -60,6 +68,7 @@ function apply(value) {
     show('');
     try {
         setBackendUrl(value);
+        if (tokenInput.value.trim()) setAuthToken(tokenInput.value); // 留空 = 沿用当前令牌
     } catch (error) {
         show(error instanceof Error ? error.message : String(error), true);
         return;
@@ -80,6 +89,7 @@ function apply(value) {
             >。保存后插件 API 与 UI 资源改从新地址加载，页面自动刷新。
         </p>
         <InputText v-model="input" class="w-full" placeholder="http://127.0.0.1:8080（留空 = 与页面同源）" @keyup.enter="apply(input)" />
+        <InputText v-model="tokenInput" type="password" class="w-full mt-2" placeholder="访问令牌 X-AETP-Token（留空 = 沿用当前值）" @keyup.enter="apply(input)" />
         <p v-if="message" class="m-0 mt-2 text-sm" :class="isError ? 'text-red-500' : 'text-green-600'">{{ message }}</p>
         <template #footer>
             <Button label="恢复同源" link :disabled="busy" @click="apply('')" />
