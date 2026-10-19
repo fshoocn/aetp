@@ -158,10 +158,10 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     ctx.provide("node_name", profile.name)
 
     await ctx.plugin(AppConfigPlugin, {"path": str(config_file)})
-    await ctx.plugin(LogPlugin)  # 尽早装载：后续装配日志即落控制台/文件
     await ctx.plugin(DbPlugin)
     await ctx.plugin(WebApiPlugin)
     await ctx.plugin(CommService)  # webapi 后：挂 /api/comm/ingest
+    await ctx.plugin(LogPlugin)  # 需 webapi（查询 API）与 comm（上报 / 远端入库）
     await ctx.plugin(PluginManagerPlugin)
     for source in profile.plugin_sources:
         try:

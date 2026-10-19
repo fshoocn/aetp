@@ -25,6 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from common.cordis_utils import safe_dispose
 from common.plugins.db.registry import DataDependency, PluginRecordStore, parse_dependencies
 from common.plugins.db.service import DbDependencyError, DbError
+from common.plugins.log import log_operation_async
 
 MAX_ARCHIVE_SIZE: Final[int] = 32 * 1024 * 1024
 MAX_EXTRACTED_SIZE: Final[int] = 128 * 1024 * 1024
@@ -358,6 +359,7 @@ class PluginManager:
                 f"内置插件 {plugin_id!r} 随平台直装，不支持{action}", 403
             )
 
+    @log_operation_async
     async def install_archive(self, archive: bytes, *, replace: bool = False) -> PublicPluginRecord:
         """安装插件包；同 id 已安装时需显式 ``replace=True`` 才覆盖替换。"""
         async with self._operation_lock:
@@ -365,6 +367,7 @@ class PluginManager:
         _audit_install(self.ctx, record, replace)
         return record
 
+    @log_operation_async
     async def install_source(self, source_dir: str | Path, *, replace: bool = False) -> PublicPluginRecord:
         """从本地插件源目录安装（与上传 ZIP 同一条安装链路）。
 
@@ -383,6 +386,7 @@ class PluginManager:
         _audit_install(self.ctx, record, replace)
         return record
 
+    @log_operation_async
     async def ensure_source(self, source_dir: str | Path) -> PublicPluginRecord:
         """预装源就绪一条龙（比对 → 换装如需 → 启用）：**单锁原子**。
 
@@ -663,6 +667,7 @@ class PluginManager:
             backup_archive.unlink(missing_ok=True)
         self._prune_archives_dir()
 
+    @log_operation_async
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         self._reject_builtin(plugin_id, "启停")
         async with self._operation_lock:
@@ -783,6 +788,7 @@ class PluginManager:
             )
         self._remove_modules(self._module_name(plugin_id))
 
+    @log_operation_async
     async def disable(self, plugin_id: str, *, reason: str | None = None) -> PublicPluginRecord:
         """停用插件；``reason`` 会记入安装记录的 ``last_error``（如数据依赖失效）。"""
         self._reject_builtin(plugin_id, "停用")
@@ -809,6 +815,7 @@ class PluginManager:
         self._write_registry()
         return self._public_record(record)
 
+    @log_operation_async
     async def uninstall(
         self, plugin_id: str, *, keep_data: bool = False, drop: bool = False
     ) -> None:
@@ -847,6 +854,7 @@ class PluginManager:
         self.records.pop(plugin_id, None)
         self._write_registry()
 
+    @log_operation_async
     async def update_config(
         self, plugin_id: str, config: Mapping[str, object]
     ) -> PublicPluginRecord:
