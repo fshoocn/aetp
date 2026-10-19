@@ -1,15 +1,21 @@
-"""管理 API 鉴权：``X-AETP-Token`` 共享密钥 + **可替换验证器接缝**。
+"""节点通信与接口鉴权：``X-AETP-Token`` 机器凭证 + 同源受信 + **可叠加的验证器接缝**。
 
-当前模型（单密钥）：节点启动必须在 ``config.ini`` 的 ``[web]`` 配置
-``auth_token``，所有 ``/api`` 请求携带 ``X-AETP-Token`` 头；比对通过后得到
-固定身份 ``{"subject": "operator", "role": "admin"}``。
+两层模型（**并存，不是二选一**）：
 
-**接缝**（面向后续的用户管理插件）：中间件只依赖 :class:`AuthVerifier`
-协议——验证器把"凭证"折算成"身份"。多用户登录 / 权限管理插件上线后，
-把 :attr:`AuthContext.verifier` 换成自己的实现（从请求头 / Cookie 取凭据、
-查用户库、返回带角色的身份）即可，中间件、业务路由与前端请求头约定都不
-用动；``/api/web/ui`` 等清单类接口可按 ``request.state.auth`` 的身份裁剪
-输出（"限制页面展示/功能"的挂点）。
+* **机器层（本模块）**：``X-AETP-Token`` 是**节点通信令牌**——主从通信
+  （心跳上报、未来的插件分发 / 数据回传）与脚本化 API 调用的凭证；从节点
+  不考虑用户登录，机器通道全靠它。浏览器**同源**请求自动受信
+  （``Sec-Fetch-Site: same-origin/none``，页面已挂在受信后端上）。
+* **用户层（未来的用户管理插件）**：管"人"——登录态、可见内容裁剪、页面
+  展示效果、接口访问权限。它在本模块之上**叠加**（包装验证器 / 附加权限
+  中间件），不取代令牌机制；同源受信给出的只是匿名操作者身份，插件可
+  收紧为"未登录则拒绝"。
+
+**接缝**：中间件只依赖 :class:`AuthVerifier` 协议——"请求 → 身份"。机器
+身份（令牌比对）与用户身份（登录态）可由同一个验证器组合解析；用户管理
+插件加载后 ``ctx.webapi.auth.verifier = UserAwareVerifier(inner=...)``
+包装 / 替换即可，中间件与业务路由不动；``/api/web/ui`` 等清单类接口可按
+``request.state.auth`` 的身份裁剪输出（"限制页面展示/功能"的挂点）。
 """
 
 from __future__ import annotations
@@ -25,44 +31,54 @@ AUTH_HEADER: Final[str] = "x-aetp-token"
 
 
 class AuthIdentity(TypedDict):
-    """一次请求的调用方身份（字段可随验证器实现扩充，如 roles / user_id）。"""
+    """一次请求的调用方身份（可随验证器实现扩充，如 user_id / roles）。
+
+    机器通道（令牌）与用户登录态给出的身份可以在同一验证器里组合解析。
+    """
 
     subject: str
     role: str
 
 
 class AuthVerifier(Protocol):
-    """凭证 → 身份的验证器协议（鉴权接缝，可由插件替换实现）。"""
+    """请求 → 身份的验证器协议（鉴权接缝，可替换 / 可包装以叠加用户层）。"""
 
-    def verify(self, token: str) -> AuthIdentity | None:
-        """凭证有效返回身份，无效返回 ``None``。"""
+    def verify(self, token: str, headers: Headers) -> AuthIdentity | None:
+        """按令牌与请求头解析身份；无法认定身份返回 ``None``（拒绝）。"""
         ...
 
 
 class SharedSecretVerifier:
-    """默认验证器：共享密钥（``hmac.compare_digest`` 恒时比对）。
+    """默认验证器：节点令牌（``hmac.compare_digest`` 恒时比对）+ 同源受信。
 
-    通过者一律得到 ``operator/admin`` 身份——单密钥模型下所有持钥者
-    都是操作者。令牌值每次校验现读配置对象，``fiber.update`` 换钥即时生效。
+    * **机器身份**：``X-AETP-Token`` 与配置令牌一致者（主从通信 / 脚本调用）
+      得到 ``operator/admin`` 身份；令牌值每次校验现读配置对象，
+      ``fiber.update`` 换钥即时生效；
+    * **同源受信**：``Sec-Fetch-Site: same-origin/none`` 的浏览器请求
+      （页面已挂在受信后端上）按匿名操作者放行——用户层的登录与权限由
+      用户管理插件**叠加**（包装本验证器即可收紧），两者不是二选一。
     """
 
     def __init__(self, config: object) -> None:
         self._config = config
 
-    def verify(self, token: str) -> AuthIdentity | None:
+    def verify(self, token: str, headers: Headers) -> AuthIdentity | None:
         import hmac
 
         secret = str(getattr(self._config, "auth_token", "") or "")
         if secret and token and hmac.compare_digest(token, secret):
             return {"subject": "operator", "role": "admin"}
+        if headers.get("sec-fetch-site") in {"same-origin", "none"}:
+            return {"subject": "operator", "role": "admin"}
         return None
 
 
 class AuthContext:
-    """鉴权接缝的挂载点：持有可替换的 :class:`AuthVerifier`。
+    """鉴权接缝的挂载点：持有可替换 / 可包装的 :class:`AuthVerifier`。
 
-    服务以 :attr:`UvicornWebApiService.auth` 暴露本对象；用户管理插件加载后
-    ``ctx.webapi.auth.verifier = MyDbVerifier()`` 即完成升级，无需改动中间件。
+    用户管理插件（登录态 / 权限）可 ``ctx.webapi.auth.verifier =
+    UserAwareVerifier(inner=ctx.webapi.auth.verifier)`` **包装叠加**，也可
+    整体替换；中间件与业务路由不动。
     """
 
     def __init__(self, verifier: AuthVerifier) -> None:
@@ -74,7 +90,8 @@ class AuthMiddleware:
 
     白名单：非 ``/api`` 路径（SPA 页面与静态资源——浏览器导航、ES module
     import 都无法携带自定义头）与 ``OPTIONS``（CORS 预检不带自定义头）。
-    校验通过的身份写入 ``scope["state"]["auth"]``，即 ``request.state.auth``。
+    其余请求交验证器认定身份（默认验证器：令牌比对或同源浏览器放行），
+    通过后身份写入 ``scope["state"]["auth"]``，即 ``request.state.auth``。
     """
 
     def __init__(self, app: ASGIApp, auth: AuthContext) -> None:
@@ -90,8 +107,8 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        token = Headers(scope=scope).get(AUTH_HEADER, "")
-        identity = self.auth.verifier.verify(token) if token else None
+        headers = Headers(scope=scope)
+        identity = self.auth.verifier.verify(headers.get(AUTH_HEADER, ""), headers)
         if identity is None:
             response = JSONResponse(
                 {"error": "未授权：缺少或无效的 X-AETP-Token"}, status_code=401

@@ -30,8 +30,11 @@ def _request(
     path: str,
     method: str = "GET",
     token: str | None = AUTH_TOKEN,
+    extra_headers: dict[str, str] | None = None,
 ) -> tuple[int, str, bytes]:
-    headers = {"X-AETP-Token": token} if token else {}
+    headers = dict(extra_headers or {})
+    if token:
+        headers["X-AETP-Token"] = token
     request = Request(f"{base_url}{path}", method=method, headers=headers)
     try:
         response = urlopen(request, timeout=5)
@@ -282,7 +285,7 @@ class CorsTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AuthTests(unittest.IsolatedAsyncioTestCase):
-    """X-AETP-Token 鉴权：强制启用、401 信封、静态白名单与身份注入。"""
+    """鉴权：令牌强制、401 信封、同源放行、静态白名单与身份注入。"""
 
     async def asyncSetUp(self) -> None:
         self.context: Context = Context()
@@ -323,6 +326,22 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
         base_url = f"http://127.0.0.1:{self.port}"
         status, _content_type, body = await asyncio.to_thread(
             _request, base_url, "/api/whoami"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(body)["auth"], {"subject": "operator", "role": "admin"}
+        )
+
+    async def test_same_origin_browser_request_passes_without_token(self) -> None:
+        """同源浏览器请求（Sec-Fetch-Site）免令牌——用户层登录/权限由用户管理插件叠加。"""
+        base_url = f"http://127.0.0.1:{self.port}"
+        status, _content_type, body = await asyncio.to_thread(
+            _request,
+            base_url,
+            "/api/whoami",
+            "GET",
+            None,
+            {"Sec-Fetch-Site": "same-origin"},
         )
         self.assertEqual(status, 200)
         self.assertEqual(
