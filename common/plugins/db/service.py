@@ -623,10 +623,24 @@ class DbService(Service[DbConfig]):
                     ", ".join(sorted(changed)),
                     ", ".join(sorted(consumers)),
                 )
-            self._provided_ctx.emit(
-                "db/schema-changed",
-                {"owner": owner, "summary": sorted(changed), "consumers": sorted(consumers)},
+            self._emit_schema_changed(
+                {"owner": owner, "summary": sorted(changed), "consumers": sorted(consumers)}
             )
+
+    def _emit_schema_changed(self, payload: dict[str, object]) -> None:
+        """派发 ``db/schema-changed``（派发窗口隔离环境会话，DB-H3）。
+
+        监听器通常会 ``create_task`` 派生后台任务（如消费方复检）；任务会
+        **复制当前 ContextVar**——派发时不隔离就会把外层事务的
+        ``_CURRENT_SESSION`` 带进子任务，与 SQLAlchemy「会话不可跨任务
+        共用」冲突。这里在派发窗口内显式清空，监听器及其派生任务看到的
+        环境会话都是 ``None``。
+        """
+        token = _CURRENT_SESSION.set(None)
+        try:
+            self._provided_ctx.emit("db/schema-changed", payload)
+        finally:
+            _CURRENT_SESSION.reset(token)
 
     # ---------------------------------------------------------- 清理与孤儿回收
     async def drop_owner(self, owner: str, *, keep_data: bool = False, force: bool = False) -> None:

@@ -498,6 +498,47 @@ class MigrationTests(DbStackTestCase):
         self.assertTrue(any(item.startswith("add column note") for item in changes), changes)
         self.assertTrue(any(item.startswith("add index") for item in changes), changes)
 
+    async def test_schema_event_task_isolated_from_ambient_session(self) -> None:
+        """DB-H3：事务内 sync_schema 派发的事件，其监听任务不得继承环境会话。"""
+        db = self.db
+        v1 = (
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Evolve(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            "    name: Mapped[str]\n"
+        )
+        v2 = (
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Evolve(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            "    name: Mapped[str]\n"
+            "    note: Mapped[str | None]\n"
+        )
+        module = _synthetic_import(self.root / "synthetic", "isolate-shop", v1)
+        await db.sync_schema(models=[module.Evolve])
+
+        shared: list[bool] = []
+        done = asyncio.Event()
+        tasks: list[asyncio.Task[None]] = []
+
+        def on_changed(_payload: object) -> None:
+            async def probe() -> None:
+                async with db.session() as session:
+                    # True = 继承到了外层事务的会话（跨任务共用，SQLA 禁止）
+                    shared.append(session is outer[0])
+                done.set()
+
+            tasks.append(asyncio.create_task(probe()))  # 强引用防 GC（RUF006）
+
+        self.context.on("db/schema-changed", on_changed)
+        outer: list[object] = []
+        reloaded = _synthetic_import(self.root / "synthetic", "isolate-shop", v2)
+        async with db.transaction() as session:
+            outer.append(session)
+            await db.sync_schema(models=[reloaded.Evolve])
+        await asyncio.wait_for(done.wait(), timeout=5)
+        self.assertEqual(shared, [False])
+
     async def test_l2_versioned_migrations_and_rollback(self) -> None:
         db = self.db
         v1 = (
