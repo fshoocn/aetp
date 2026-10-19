@@ -423,6 +423,14 @@ class PluginManager:
             digest = await asyncio.to_thread(archive_digest, archive)
             existing = self.records.get(plugin_id)
             destination = self.install_root / plugin_id
+            if (
+                existing is not None
+                and replace
+                and existing.get("digest") == digest
+                and destination.is_dir()
+            ):
+                # 幂等：同内容重复替换无事可做（不翻归档、不热重装抖动）
+                return self._public_record(existing)
             if existing is None and destination.exists():
                 # PS-H2 自愈：registry 无记录但目录在——kill 中断残留直接覆盖，
                 # 不再 409 卡死整个节点；预装插件本就由 ensure_installed 每次

@@ -276,7 +276,10 @@ class PluginManagerPlugin(Service[None]):
                 # replace=1 是操作者在确认弹窗后给出的显式替换确认
                 replace = _request.query_params.get("replace", "") in {"1", "true", "yes"}
                 item = await manager().install_archive(archive, replace=replace)
-                return {"plugin": item}
+                # 新装 201 Created；替换（含幂等重放）200 OK
+                return ctx.webapi.json(
+                    {"plugin": item}, status_code=201 if not replace else 200
+                )
             except PluginManagerError as error:
                 return error_response(error)
 

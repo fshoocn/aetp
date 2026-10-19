@@ -275,7 +275,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             body=_plugin_archive(),
             content_type="application/zip",
         )
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 201)  # 新装 201 Created
         uploaded = json.loads(body)["plugin"]
         self.assertEqual(uploaded["id"], "uploaded-sample")
         self.assertFalse(uploaded["enabled"])
@@ -336,7 +336,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
                 body=_plugin_archive(plugin_id, plugin_class),
                 content_type="application/zip",
             )
-            self.assertEqual(status, 200, body.decode("utf-8"))
+            self.assertEqual(status, 201, body.decode("utf-8"))
 
         for plugin_id, _ in plugins:
             status, body = await _arequest(
@@ -370,7 +370,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             body=archive,
             content_type="application/zip",
         )
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 201)
         plugin = json.loads(body)["plugin"]
         self.assertEqual(plugin["kind"], ["master", "slave"])
         self.assertEqual(plugin["requires"], ["can-bus", "iso-tp"])
@@ -383,7 +383,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             body=_plugin_archive("plain-sample", "PlainPlugin"),
             content_type="application/zip",
         )
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 201)
         plain = json.loads(body)["plugin"]
         self.assertEqual(plain["kind"], ["master"])
         self.assertEqual(plain["requires"], [])
@@ -829,7 +829,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             body=archive.getvalue(),
             content_type="application/zip",
         )
-        self.assertEqual(status, 200, body.decode("utf-8"))
+        self.assertEqual(status, 201, body.decode("utf-8"))
         package_root = Path(self.temp_dir.name) / "installed" / "bytecode-sample"
         self.assertFalse((package_root / "__pycache__").exists())
         self.assertFalse((package_root / "helper.pyc").exists())
@@ -867,6 +867,24 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PluginManagerError) as caught:
             await plugins.install_archive(lying_big)
         self.assertEqual(caught.exception.status_code, 413)
+
+    async def test_replace_same_digest_is_idempotent(self) -> None:
+        """同内容重复替换无副作用：不翻归档、不热重装（fiber 原地保留）。"""
+        plugins = self.context.plugins
+        await plugins.install_archive(_plugin_archive())
+        await plugins.enable("uploaded-sample")
+        await plugins.install_archive(_plugin_archive(), replace=True)  # 首次换装
+        fiber_after_replace = plugins.manager.fibers["uploaded-sample"]
+        install_root = Path(self.temp_dir.name) / "installed"
+        archives_before = len(list((install_root / ".archives").iterdir()))
+
+        record = await plugins.install_archive(_plugin_archive(), replace=True)  # 幂等重放
+        self.assertEqual(record["id"], "uploaded-sample")
+        self.assertIs(plugins.manager.fibers["uploaded-sample"], fiber_after_replace)
+        install_root = Path(self.temp_dir.name) / "installed"
+        self.assertEqual(
+            len(list((install_root / ".archives").iterdir())), archives_before
+        )
 
     def test_builtin_specs_rejects_id_collision(self) -> None:
         """内置插件 id 撞键显式报错（不静默覆盖）。"""

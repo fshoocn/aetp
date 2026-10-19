@@ -98,9 +98,13 @@ def normalize_path(path: object, *, allow_root: bool = True) -> str:
 
 
 def normalize_methods(methods: str | Sequence[str] | None) -> frozenset[HttpMethod]:
-    """归一化 HTTP 方法集合（缺省为 GET，统一大写并去重）。"""
+    """归一化 HTTP 方法集合（缺省为 GET，统一大写并去重；GET 自动携带 HEAD）。
+
+    HTTP 语义上 HEAD 与 GET 同路由（同响应头、无响应体）——显式纳入使
+    路由表契约与实际接受的方法一致（``GET /api/web/routes`` 列表可信）。
+    """
     if methods is None:
-        return frozenset({"GET"})
+        return frozenset({"GET", "HEAD"})
     if isinstance(methods, str):
         items = methods.replace(",", " ").split()
     else:
@@ -111,6 +115,8 @@ def normalize_methods(methods: str | Sequence[str] | None) -> frozenset[HttpMeth
     unknown = resolved - set(METHODS)
     if unknown:
         raise RouteError(f"不支持的 HTTP 方法：{', '.join(sorted(unknown))}")
+    if "GET" in resolved:
+        resolved.add("HEAD")
     return frozenset(cast(HttpMethod, method) for method in resolved)
 
 

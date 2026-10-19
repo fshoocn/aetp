@@ -227,6 +227,24 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 404)
         self.assertEqual(json.loads(body)["error"], "Not Found")
 
+    async def test_routes_listing_includes_head_for_get(self) -> None:
+        """GET 路由契约携带 HEAD：列表与实际接受的方法一致。"""
+        response = await asyncio.to_thread(
+            urlopen,
+            Request(
+                f"http://127.0.0.1:{self.port}/api/web/routes",
+                headers={"X-AETP-Token": AUTH_TOKEN},
+            ),
+            timeout=5,
+        )
+        with response:
+            payload = json.loads(response.read())
+        route = next(
+            record for record in payload["routes"] if record["path"] == "/api/web/routes"
+        )
+        self.assertIn("GET", route["methods"])
+        self.assertIn("HEAD", route["methods"])
+
     async def test_healthz_reports_uptime_and_metrics(self) -> None:
         """/healthz 存活探针免令牌，返回 uptime 与指标快照。"""
         response = await asyncio.to_thread(
