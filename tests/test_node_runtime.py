@@ -93,7 +93,9 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
             f"plugins = {source}\n"
             "\n[web]\n"
             f"port = {self.port}\n"
-            "auth_token = test-token\n",
+            "auth_token = test-token\n"
+            "\n[log]\n"
+            "console = false\n",
             encoding="utf-8",
         )
 
@@ -154,7 +156,9 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
             f"plugins = {broken}, {good}\n"
             "\n[web]\n"
             f"port = {self.port}\n"
-            "auth_token = test-token\n",
+            "auth_token = test-token\n"
+            "\n[log]\n"
+            "console = false\n",
             encoding="utf-8",
         )
 

@@ -39,6 +39,7 @@ from cordis_port import Context
 from common import cordis_utils
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
 from common.plugins.db import DbPlugin
+from common.plugins.log import LogPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import source_digest, source_plugin_id
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
@@ -169,6 +170,7 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     ctx.provide("node_name", profile.name)
 
     await ctx.plugin(AppConfigPlugin, {"path": str(config_file)})
+    await ctx.plugin(LogPlugin)  # 尽早装载：后续装配日志即落控制台/文件
     await ctx.plugin(DbPlugin)
     await ctx.plugin(WebApiPlugin)
     await ctx.plugin(PluginManagerPlugin)
