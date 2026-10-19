@@ -54,8 +54,10 @@ class LogPlugin:
     name: ClassVar[str] = "log"
     display_name: ClassVar[str] = "日志服务"
     version: ClassVar[str] = "1.0.0"
-    #: appconfig 读 ``[log]`` 节；webapi 挂查询 API；comm 走上报 / 远端入库
-    inject: ClassVar[list[str]] = ["appconfig", "webapi", "comm"]
+    #: 只声明 appconfig（读 ``[log]`` 节）：webapi / comm / webui 都是**延迟
+    #: 挂载**（见 :meth:`_late_setup`）——本插件要足够早装载以捕获装配期
+    #: 日志，而那三个服务尚未就绪；硬声明会要么死锁顺序、要么丢启动日志
+    inject: ClassVar[list[str]] = ["appconfig"]
     Config: ClassVar[type[LogConfig]] = LogConfig
 
     def __init__(self, ctx: Context, config: LogConfig | None = None) -> None:
@@ -63,6 +65,9 @@ class LogPlugin:
         self.config: LogConfig = config if isinstance(config, LogConfig) else LogConfig()
         self._store: LogStore | None = None
         self._trim_task: asyncio.Task[None] | None = None
+        self._late_task: asyncio.Task[None] | None = None
+        self._dispose_health: object = None
+        self._ui_registered: bool = False
         #: 入库时间戳被钳制的条数（时钟漂移可观测）
         self._clamped: int = 0
 
@@ -97,46 +102,70 @@ class LogPlugin:
                 max_rows=self.config.retain_max_rows,
             )
             self._trim_task = asyncio.create_task(self._trim_loop())
-            self._trim_task.add_done_callback(self._log_trim_exit)
+            self._trim_task.add_done_callback(self._log_task_exit)
 
         if self.config.report:
             self.ctx.logger.exporter(self._sink_exporter(report_level))
 
-        api = self.ctx.webapi
-        api.get("/api/logs", self._logs_handler, kind="api", name="log.query")
-        api.get("/api/logs/nodes", self._nodes_handler, kind="api", name="log.nodes")
-        dispose_health = api.add_health_provider("log", self._metrics)
-        self.ctx.comm.on("log.batch", self._on_log_batch)
-        # 查看页（无头部署没有 webui：软依赖，缺失即纯 API）
-        webui = self.ctx.get("webui")
-        if webui is not None:
-            webui.register_ui(
-                "logs",
-                kind="page",
-                format="vue",
-                resource_root=str(Path(__file__).resolve().parent / "ui"),
-                entry="LogsPage.vue",
-                path="/logs",
-                title="日志",
-                menu_group="系统",
-                menu_order=60,
-            )
+        # 查询 API / 远端入库 / 查看页：依赖的 webapi / comm / webui 晚于本插件
+        # 就绪（预装阶段才装），延迟挂载（无头部署自然放弃）
+        self._late_task = asyncio.create_task(self._late_setup())
+        self._late_task.add_done_callback(self._log_task_exit)
         self.ctx.logger.info("日志插件已加载：%s", self._store.path if self._store else "未启用查询库")
 
         def cleanup() -> None:
-            dispose_health()
-            task = self._trim_task
-            if task is not None:
-                task.cancel()
+            dispose = self._dispose_health
+            if callable(dispose):
+                dispose()
+            for task in (self._trim_task, self._late_task):
+                if task is not None:
+                    task.cancel()
 
         return cleanup
 
-    def _log_trim_exit(self, task: asyncio.Task[None]) -> None:
+    def _log_task_exit(self, task: asyncio.Task[None]) -> None:
+        """后台任务观察哨：意外退出记 error 日志，不再无声消失。"""
         if task.cancelled():
             return
         error = task.exception()
         if error is not None:
-            self.ctx.logger.error("日志保留清理任务意外退出：%s", error)
+            self.ctx.logger.error("日志插件后台任务意外退出：%s", error)
+
+    async def _late_setup(self) -> None:
+        """等 webapi / comm 就绪后挂查询 API、远端入库、健康指标与查看页。
+
+        本插件早装（捕获装配期日志），这几个服务晚就绪（预装阶段）——
+        轮询等待，就绪即挂；无头部署 30 秒后自然放弃。
+        """
+        for _attempt in range(60):
+            api = self.ctx.get("webapi")
+            comm = self.ctx.get("comm")
+            if api is not None and comm is not None:
+                api.get("/api/logs", self._logs_handler, kind="api", name="log.query")
+                api.get("/api/logs/nodes", self._nodes_handler, kind="api", name="log.nodes")
+                self._dispose_health = api.add_health_provider("log", self._metrics)
+                comm.on("log.batch", self._on_log_batch)
+                break
+            await asyncio.sleep(0.5)
+        for _attempt in range(60):
+            if self._ui_registered:
+                return
+            webui = self.ctx.get("webui")
+            if webui is not None:
+                webui.register_ui(
+                    "logs",
+                    kind="page",
+                    format="vue",
+                    resource_root=str(Path(__file__).resolve().parent / "ui"),
+                    entry="LogsPage.vue",
+                    path="/logs",
+                    title="日志",
+                    menu_group="系统",
+                    menu_order=60,
+                )
+                self._ui_registered = True
+                return
+            await asyncio.sleep(0.5)
 
     def _metrics(self) -> dict[str, object]:
         return {
@@ -166,7 +195,10 @@ class LogPlugin:
                 clamped: list[int] = []
                 self._store.write_batch(self._node_name(), [entry], clamped=clamped)
                 self._clamped += len(clamped)
-            self.ctx.comm.send("log.batch", {"logs": [entry]})
+            # comm 延迟就绪：未就绪时仅本地入库，就绪后自动开始上报
+            comm = self.ctx.get("comm")
+            if comm is not None:
+                comm.send("log.batch", {"logs": [entry]})
 
         exporter["export"] = export
         return exporter
