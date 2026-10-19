@@ -43,7 +43,7 @@
 ```ini
 [node]
 kind = slave
-plugins = heartbeat
+plugins = ../slave_plugins/heartbeat
 
 [heartbeat]
 master_url = http://127.0.0.1:8080   # 主模块地址（必填）

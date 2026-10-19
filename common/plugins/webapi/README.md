@@ -22,9 +22,11 @@
 
 | 方法 | 说明 |
 |---|---|
-| `get/post/delete(path, kind="api", name=...)` | 登记 HTTP 路由（handler 同步 / 异步均可） |
-| `static(prefix, root, name=...)` | 挂载静态目录 |
-| `remove(name)` | 按登记名移除路由 |
+| `get/post/put/patch/delete(path, kind="api", name=...)` | 登记 HTTP 路由（handler 同步 / 异步均可；GET 自动携带 HEAD） |
+| `route(path, methods, handler, kind=..., name=...)` | 显式指定方法集登记 |
+| `api(path, handler, name=...)` | 便捷登记（api 前缀路由的统一入口） |
+| `static(path, directory, *, html=False, name=...)` | 挂载静态目录（`html=True` 时目录内 index.html 作首页） |
+| `remove(path)` | 移除该路径下的**全部**路由（含静态挂载）——按路径前缀删除，不是按登记名 |
 | `address()` / `is_running()` | 当前服务地址 / 就绪状态 |
 
 ### 服务：`ctx.plugins`（`provide = "plugins"`）

@@ -49,7 +49,7 @@
 ```ini
 [node]
 kind = master
-plugins = webui, heartbeat
+plugins = webui, ../master_plugins/heartbeat
 
 [heartbeat]
 interval = 5.0          # 下发的心跳间隔（秒）

@@ -167,7 +167,8 @@ ctx.events.emit("heartbeat/node-status", {
 | GET | `/api/heartbeat/capabilities` | 跨节点能力查询：`kind`（多选）、`labels.k=v`（子集）、`q`（id/summary 模糊），即 `select_capabilities` 的 HTTP 包装 |
 | GET | `/api/heartbeat/config` | 当前生效的阈值配置（只读） |
 
-错误语义对齐 `PluginManagerError`：业务错误返回
+错误信封（注：与插件管理 API 的 `{"error": "<str>", "details": {...}}`
+**形状不同**——历史双信封，统一留待后续）：业务错误返回
 `{"error": {"message": ..., "code": ...}}` + 恰当的 HTTP 状态码。
 
 **可扩展返回值**：所有 GET 查询接口与从模块侧
