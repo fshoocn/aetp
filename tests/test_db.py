@@ -23,9 +23,11 @@ from collections.abc import Callable, Mapping, Sequence
 from io import BytesIO
 from pathlib import Path
 from typing import Any, ClassVar, cast
+from unittest import mock
 
 from cordis_port import Context
-from sqlalchemy import column, func, literal, select, table, text
+from sqlalchemy import BigInteger, Float, Integer, SmallInteger, String, column, func, literal, select, table, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
@@ -51,7 +53,7 @@ from common.plugins.db.models import (
     snake,
 )
 from common.plugins.db.registry import OwnerRegistry, fingerprint, parse_dependencies
-from common.plugins.db.service import sqlite_pool_warning
+from common.plugins.db.service import sqlite_pool_warning, wider_than
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManagerError, PublicPluginRecord
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
@@ -333,6 +335,28 @@ class ModelRegistryTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._temp.cleanup()
 
+    def test_failed_definition_releases_logical_name(self) -> None:
+        """DB-N10：定义期失败（外键解析失败）回滚登记，同逻辑表名可重新定义。"""
+        bad = (
+            "from sqlalchemy import ForeignKey\n"
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Broken(Model):\n"
+            "    __tablename__ = 'n10_probe'\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            "    ref: Mapped[int] = mapped_column(ForeignKey('ghost_table.id'))\n"
+        )
+        with self.assertRaises(SQLAlchemyError):
+            _synthetic_import(self.root, "n10-owner", bad)
+
+        retry = (
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Retry(Model):\n"
+            "    __tablename__ = 'n10_probe'\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+        )
+        module = _synthetic_import(self.root, "n10-owner", retry)
+        self.assertEqual(module.Retry.__model_logical__, "n10_probe")
+
     def test_logical_name_conflict_rejected(self) -> None:
         source = (
             "from common.plugins.db import Model, Mapped, mapped_column\n"
@@ -500,6 +524,53 @@ class DbServiceTests(DbStackTestCase):
 
 
 # ---------------------------------------------------------------- 迁移
+class SchemaLogTests(DbStackTestCase):
+    """DB-N9：变更日志按 owner 公平裁剪。"""
+
+    def _ini(self, *, orphan_policy: str) -> str:
+        return super()._ini(orphan_policy=orphan_policy) + "schema_log_limit = 2\n"
+
+    async def test_log_trim_is_fair_across_owners(self) -> None:
+        """日志多的 owner 不挤掉别人的：各自保最新 limit 条。"""
+        db = self.db
+        versions_a = [
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Item(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            f"{extra}"
+            for extra in (
+                "",
+                "    c1: Mapped[str | None]\n",
+                "    c1: Mapped[str | None]\n    c2: Mapped[str | None]\n",
+                "    c1: Mapped[str | None]\n    c2: Mapped[str | None]\n    c3: Mapped[str | None]\n",
+            )
+        ]
+        versions_b = [
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Row(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            f"{extra}"
+            for extra in (
+                "",
+                "    d1: Mapped[str | None]\n",
+                "    d1: Mapped[str | None]\n    d2: Mapped[str | None]\n",
+                "    d1: Mapped[str | None]\n    d2: Mapped[str | None]\n    d3: Mapped[str | None]\n",
+            )
+        ]
+        for version in versions_a:
+            module = _synthetic_import(self.root / "synthetic", "log-a", version)
+            await db.sync_schema(models=[module.Item])
+        for version in versions_b:
+            module = _synthetic_import(self.root / "synthetic", "log-b", version)
+            await db.sync_schema(models=[module.Row])
+
+        rows = await db.execute(
+            text("SELECT owner, COUNT(*) FROM aetp_schema_log GROUP BY owner")
+        )
+        counts = {str(row[0]): int(row[1]) for row in rows}
+        self.assertEqual(counts, {"log-a": 2, "log-b": 2})
+
+
 class EngineResilienceTests(DbStackTestCase):
     """DB-N4/N5/N6：逃生舱事务语义、SQLite 并发韧性、池参数告警。"""
 
@@ -530,8 +601,106 @@ class EngineResilienceTests(DbStackTestCase):
         )
 
 
+class WiderThanTests(unittest.TestCase):
+    """DB-N8：L1 自动放宽判定（字符串长度 + 整数族位宽）。"""
+
+    def test_string_length_and_integer_width(self) -> None:
+        self.assertTrue(wider_than(String(10), String(5)))
+        self.assertFalse(wider_than(String(5), String(10)))
+        self.assertTrue(wider_than(BigInteger(), Integer()))
+        self.assertTrue(wider_than(Integer(), SmallInteger()))
+        self.assertFalse(wider_than(Integer(), BigInteger()))
+        self.assertFalse(wider_than(String(5), Integer()))
+        self.assertFalse(wider_than(Float(), Integer()))
+
+
+class DropOwnerTests(DbStackTestCase):
+    """DB-N2：drop_owner 部分失败不整体悬停。"""
+
+    async def test_partial_failure_cleans_successes_and_reports_rest(self) -> None:
+        """成功表登记/指纹即时清理；残表可观测可重试，不再卡半删态。"""
+        db = self.db
+        source = (
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Item(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            "class Row(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+        )
+        module = _synthetic_import(self.root / "synthetic", "partial", source)
+        await db.sync_schema(models=[module.Item, module.Row])
+        owner = model_owner(module.Item)
+        item_table = physical_name(owner, "item")
+        row_table = physical_name(owner, "row")
+
+        async def fake_drop(_self: DbService, table_name: str) -> bool:
+            return table_name != row_table  # row 表删不动
+
+        with mock.patch.object(DbService, "_drop_table", fake_drop):
+            remaining = await db.drop_owner(owner)
+        self.assertEqual(remaining, [row_table])
+
+        # 成功表：登记已摘、指纹已清；残表登记保留（待重试/孤儿回收）
+        registry = OwnerRegistry(self.data_dir / "owners.json")
+        self.assertEqual(registry.tables(owner), [row_table])
+        meta_rows = await db.execute(text("SELECT name FROM aetp_db_meta"))
+        names = {str(row[0]) for row in meta_rows}
+        self.assertNotIn(f"fp:{item_table}", names)
+        self.assertIn(f"fp:{row_table}", names)
+
+        # 残表重试可完成清理（可再次整体清理，不悬停）
+        self.assertEqual(await db.drop_owner(owner), [])
+        self.assertEqual(OwnerRegistry(self.data_dir / "owners.json").tables(owner), [])
+
+
 class MigrationTests(DbStackTestCase):
     """L1 加性对齐与 L2 版本化迁移（DESIGN §4.4）。"""
+
+    async def test_migration_versions_must_be_contiguous(self) -> None:
+        """DB-N7：迁移版本号需从 2 起连续，跳号直接拒绝。"""
+        db = self.db
+
+        async def noop(_conn: Any) -> None:
+            pass
+
+        with self.assertRaises(DbError) as caught:
+            await db.sync_schema(models=[RunRecord], migrations=[(2, noop), (5, noop)])
+        self.assertIn("不连续", str(caught.exception))
+
+    async def test_strict_align_failure_is_isolated(self) -> None:
+        """DB-N1：严格补漏失败只影响该表——其他表照常记账，阶段 3 不被跳过。"""
+        db = self.db
+        v1 = (
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Good(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            "    name: Mapped[str]\n"
+            "class Bad(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+        )
+        v2 = (
+            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "class Good(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            "    name: Mapped[str]\n"
+            "    note: Mapped[str | None]\n"
+            "class Bad(Model):\n"
+            "    id: Mapped[int] = mapped_column(primary_key=True)\n"
+            "    required: Mapped[str]\n"
+        )
+        module = _synthetic_import(self.root / "synthetic", "isolate-sync", v1)
+        await db.sync_schema(models=[module.Good, module.Bad])
+
+        reloaded = _synthetic_import(self.root / "synthetic", "isolate-sync", v2)
+        with self.assertRaises(DbError) as caught:
+            await db.sync_schema(models=[reloaded.Good, reloaded.Bad])
+        self.assertIn("required", str(caught.exception))
+
+        # 阶段 3 未被跳过：Good 的加列已记入变更日志
+        rows = await db.execute(
+            text("SELECT summary FROM aetp_schema_log WHERE table_name LIKE '%good'")
+        )
+        self.assertTrue(any("add column note" in str(row[0]) for row in rows), rows)
 
     async def test_l1_add_column_and_index(self) -> None:
         db = self.db

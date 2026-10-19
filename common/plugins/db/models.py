@@ -239,6 +239,16 @@ class Model(DeclarativeBase):
         _CURRENT.append(cls)
         try:
             super().__init_subclass__(**kw)
+        except BaseException:
+            # 定义期失败（如跨 owner 外键拒绝）回滚登记（DB-N10），
+            # 避免幽灵占用让同进程后续同名定义被误判冲突
+            group.classes.pop(key, None)
+            if not is_abstract:
+                if group.logical_owners.get(logical) == key:
+                    del group.logical_owners[logical]
+                if cls in group.models:
+                    group.models.remove(cls)
+            raise
         finally:
             _CURRENT.pop()
 

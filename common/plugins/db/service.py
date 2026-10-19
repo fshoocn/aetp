@@ -480,12 +480,19 @@ class DbService(Service[DbConfig]):
                 if migrated_to is not None:
                     result.migrated[owner] = migrated_to
 
-            # 阶段 2b（L1 后半）：迁移改过结构后严格补漏，残留不可加列才报错
+            # 阶段 2b（L1 后半）：迁移改过结构后严格补漏；单表失败**局部化**
+            # （DB-N1）：记录后继续其他表，不让阶段 3 的指纹/日志/消费方告警
+            # 被连累跳过；全部跑完后聚合报错，保证问题不消音
+            strict_failures: list[str] = []
             for model in targets:
                 table = _model_table(model)
                 if table.name in result.created:
                     continue
-                changes = await self._align_table(table, strict=True)
+                try:
+                    changes = await self._align_table(table, strict=True)
+                except DbError as exc:
+                    strict_failures.append(str(exc))
+                    continue
                 if changes:
                     result.altered.setdefault(table.name, []).extend(changes)
                     summaries.setdefault(table.name, []).extend(changes)
@@ -495,6 +502,8 @@ class DbService(Service[DbConfig]):
                 owner = self._claim_owner(model, None)
                 await self._sync_fingerprint(owner, _model_table(model), summaries.get(_model_table(model).name, ()))
             await self._notice_consumers(owners, result)
+        if strict_failures:
+            raise DbError("结构对齐未全部完成（其余表已记账）：" + "；".join(strict_failures))
         return result
 
     def _check_migration_scope(self, owners: set[str], migrations: Sequence[tuple[int, MigrationStep]]) -> None:
@@ -506,8 +515,11 @@ class DbService(Service[DbConfig]):
                 raise DbError(f"迁移版本号需为 ≥ 2 的整数（1 保留给建表基线），收到 {version!r}")
             if version in seen:
                 raise DbError(f"迁移版本号重复：{version}")
-            seen.add(version)
-
+            seen.add(version)        # 连续性（DB-N7）：版本号需从 2 起无缝衔接，否则升级路径会跳过缺号步骤
+        expected = list(range(2, max(seen) + 1))
+        if sorted(seen) != expected:
+            missing = sorted(set(expected) - seen)
+            raise DbError(f"迁移版本号不连续，缺 {missing}（步骤需从 2 起逐版本衔接）")
     async def _ensure_table(self, table: Table[Any]) -> bool:
         """建缺表（幂等），返回是否新建。"""
 
@@ -559,7 +571,7 @@ class DbService(Service[DbConfig]):
                 for column in table.c:
                     current = existing.get(column.name)
                     current_type = current.get("type") if current else None
-                    if _wider_than(column.type, current_type):
+                    if wider_than(column.type, current_type):
                         type_sql = column.type.compile(dialect=sync_conn.dialect)
                         quote_column = preparer.quote(column.name)
                         if sync_conn.dialect.name == "postgresql":
@@ -679,13 +691,16 @@ class DbService(Service[DbConfig]):
             "（业务插件只能清理自己的归属）"
         )
 
-    async def drop_owner(self, owner: str, *, keep_data: bool = False, force: bool = False) -> None:
-        """按归属清理数据表（卸载链路调用）。
+    async def drop_owner(
+        self, owner: str, *, keep_data: bool = False, force: bool = False
+    ) -> list[str]:
+        """按归属清理数据表（卸载链路调用），返回**删除失败的残表**清单。
 
         * 仍有消费方登记时默认**拒绝**（``force=True`` 强删，DESIGN §4.5）；
         * ``keep_data=True`` 只标记保留、不动表（孤儿回收跳过）；
-        * 单表 drop 失败重试一次，仍失败则**登记保留**并记错误日志，
-          不阻断卸载（DESIGN §4.3）。
+        * 单表 drop 失败重试一次，仍失败则**登记保留**并记错误日志（DESIGN
+          §4.3），但已成功表的登记 / 指纹即时清理、不再整体悬停（DB-N2）；
+          残表可观测（返回值 + 日志）、可重试，重新安装即重新认领自愈。
         """
         self._require_cleanup_rights(owner)
         async with self._ddl_lock:
@@ -698,24 +713,38 @@ class DbService(Service[DbConfig]):
             if keep_data:
                 self._owners.set_keep(owner, True)
                 self._provided_ctx.logger.info("owner %s 的数据按 keep_data 保留", owner)
-                return
+                return []
 
             failed: list[str] = []
             for table_name in self._owners.tables(owner):
                 dropped = await self._drop_table(table_name)
                 if dropped:
                     self._owners.drop_table(owner, table_name)
+                    await self._clear_table_meta(owner, table_name)
                 else:
                     failed.append(table_name)
             if failed:
                 self._provided_ctx.logger.error(
-                    "owner %s 的表清理失败（登记保留，待孤儿回收）：%s", owner, ", ".join(failed)
+                    "owner %s 的表清理失败（登记保留，待孤儿回收 / 重试）：%s",
+                    owner,
+                    ", ".join(failed),
                 )
-                return
+                return failed
             self._owners.release(owner)
             self._external_cache.clear()
             await self._clear_owner_meta(owner)
             self._provided_ctx.logger.info("owner %s 的数据表已清理", owner)
+            return []
+
+    async def _clear_table_meta(self, owner: str, table_name: str) -> None:
+        """清理单表的指纹记账（部分失败时已成功表不悬停，DB-N2）。"""
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                sa_delete(meta_table).where(
+                    meta_table.c.owner == owner,
+                    meta_table.c.name == f"fp:{table_name}",
+                )
+            )
 
     async def _drop_table(self, table_name: str) -> bool:
         """单表 drop（幂等）；失败重试一次。"""
@@ -878,7 +907,7 @@ class DbService(Service[DbConfig]):
         action: str,
         summary: str,
     ) -> None:
-        """写变更日志（保留上限内裁剪，防无限增长）。"""
+        """写变更日志（按 owner 各自上限内裁剪，防无限增长）。"""
         await conn.execute(
             sa_insert(schema_log_table).values(
                 ts=time.time(),
@@ -890,11 +919,26 @@ class DbService(Service[DbConfig]):
             )
         )
         limit = self.config.schema_log_limit
-        keep = [row[0] for row in (await conn.execute(sa_select(schema_log_table.c.id).order_by(schema_log_table.c.id.desc()).limit(limit))).all()]
-        if keep:
-            await conn.execute(sa_delete(schema_log_table).where(schema_log_table.c.id.not_in(keep)))
-        else:
-            await conn.execute(sa_delete(schema_log_table))
+        # 按 owner 各保最新 limit 条（DB-N9）：日志多的 owner 不再挤掉别人的
+        owner_rows = await conn.execute(sa_select(schema_log_table.c.owner).distinct())
+        for (owner_name,) in owner_rows.all():
+            keep = [
+                row[0]
+                for row in (
+                    await conn.execute(
+                        sa_select(schema_log_table.c.id)
+                        .where(schema_log_table.c.owner == owner_name)
+                        .order_by(schema_log_table.c.id.desc())
+                        .limit(limit)
+                    )
+                ).all()
+            ]
+            await conn.execute(
+                sa_delete(schema_log_table).where(
+                    schema_log_table.c.owner == owner_name,
+                    schema_log_table.c.id.not_in(keep),
+                )
+            )
 
     # ---------------------------------------------------------- 插件事实源
     def _installed_records(self) -> dict[str, object]:
@@ -965,13 +1009,28 @@ def _compare_requires(table: Table[Any], requires: Mapping[str, str]) -> list[st
     return problems
 
 
-def _wider_than(current: object, previous: object) -> bool:
-    """放宽长度判定（仅字符串列；其余类型交给 L2 迁移）。"""
+def wider_than(current: object, previous: object) -> bool:
+    """放宽判定（DB-N8）：字符串长度放宽，或整数族位宽放宽
+    （``SmallInteger → Integer → BigInteger``）；其余类型交给 L2 迁移。"""
     current_length = getattr(current, "length", None)
     previous_length = getattr(previous, "length", None)
-    if not isinstance(current_length, int) or not isinstance(previous_length, int):
-        return False
-    return current_length > previous_length
+    if isinstance(current_length, int) and isinstance(previous_length, int):
+        return current_length > previous_length
+    current_width = _INTEGER_WIDTH.get(type(current).__name__)
+    previous_width = _INTEGER_WIDTH.get(type(previous).__name__)
+    return (
+        current_width is not None
+        and previous_width is not None
+        and current_width > previous_width
+    )
+
+
+#: 整数族位宽（DB-N8）：同族仅当位宽变大才算 L1 可自动放宽
+_INTEGER_WIDTH: dict[str, int] = {
+    "SmallInteger": 16,
+    "Integer": 32,
+    "BigInteger": 64,
+}
 
 
 __all__: list[str] = [
@@ -982,4 +1041,5 @@ __all__: list[str] = [
     "Repo",
     "SyncResult",
     "sqlite_pool_warning",
+    "wider_than",
 ]
