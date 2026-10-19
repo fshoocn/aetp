@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 from cordis_port import Context
 from starlette.requests import Request as StarletteRequest
 
+from _helpers import AUTH_TOKEN
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
@@ -24,8 +25,14 @@ from common.plugins.webapi.types import RouteRecord
 _SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
 
 
-def _request(base_url: str, path: str, method: str = "GET") -> tuple[int, str, bytes]:
-    request = Request(f"{base_url}{path}", method=method)
+def _request(
+    base_url: str,
+    path: str,
+    method: str = "GET",
+    token: str | None = AUTH_TOKEN,
+) -> tuple[int, str, bytes]:
+    headers = {"X-AETP-Token": token} if token else {}
+    request = Request(f"{base_url}{path}", method=method, headers=headers)
     try:
         response = urlopen(request, timeout=5)
     except HTTPError as error:
@@ -130,6 +137,7 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             f"install_root = {Path(self.temp_dir.name) / 'installed'}\n"
             "\n[web]\n"
             f"port = {self.port}\n"
+            "auth_token = test-token\n"
             "\n[webui]\n"
             f"ui_directory = {ui_dist}\n",
             encoding="utf-8",
@@ -202,7 +210,10 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_security_headers(self) -> None:
         """响应统一携带 nosniff 安全头（静态与 API 同款）。"""
-        request = Request(f"http://127.0.0.1:{self.port}/api/web/ui")
+        request = Request(
+            f"http://127.0.0.1:{self.port}/api/web/ui",
+            headers={"X-AETP-Token": AUTH_TOKEN},
+        )
         response = await asyncio.to_thread(urlopen, request, timeout=5)
         with response:
             self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
@@ -223,13 +234,13 @@ class CorsTests(unittest.IsolatedAsyncioTestCase):
 
         open_config_path = Path(self.temp_dir.name) / "open.ini"
         open_config_path.write_text(
-            "[web]\n" f"port = {self.open_port}\n", encoding="utf-8"
+            "[web]\n" f"port = {self.open_port}\n" "auth_token = test-token\n" "cors_origins = *\n", encoding="utf-8"
         )
         off_config_path = Path(self.temp_dir.name) / "off.ini"
         off_config_path.write_text(
             "[web]\n"
             f"port = {self.off_port}\n"
-            "cors_origins =\n",
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
         await self.open_context.plugin(
@@ -239,9 +250,9 @@ class CorsTests(unittest.IsolatedAsyncioTestCase):
         await self.open_context.plugin(WebApiPlugin)
         await self.off_context.plugin(WebApiPlugin)
 
-    async def test_allow_origin_and_preflight_by_default(self) -> None:
+    async def test_allow_origin_and_preflight_with_wildcard(self) -> None:
         base_url = f"http://127.0.0.1:{self.open_port}"
-        origin = {"Origin": "http://127.0.0.1:8080"}
+        origin = {"Origin": "http://127.0.0.1:8080", "X-AETP-Token": AUTH_TOKEN}
 
         request = Request(f"{base_url}/api/web/routes", headers=origin)
         response = await asyncio.to_thread(urlopen, request, timeout=5)
@@ -259,14 +270,86 @@ class CorsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.headers["Access-Control-Allow-Origin"], "*")
 
-    async def test_disabled_when_origins_empty(self) -> None:
+    async def test_default_cors_disabled(self) -> None:
+        """未配置 cors_origins = 默认关闭跨源（收紧后语义，同源不受影响）。"""
         request = Request(
             f"http://127.0.0.1:{self.off_port}/api/web/routes",
-            headers={"Origin": "http://127.0.0.1:8080"},
+            headers={"Origin": "http://127.0.0.1:8080", "X-AETP-Token": AUTH_TOKEN},
         )
         response = await asyncio.to_thread(urlopen, request, timeout=5)
         with response:
             self.assertIsNone(response.headers["Access-Control-Allow-Origin"])
+
+
+class AuthTests(unittest.IsolatedAsyncioTestCase):
+    """X-AETP-Token 鉴权：强制启用、401 信封、静态白名单与身份注入。"""
+
+    async def asyncSetUp(self) -> None:
+        self.context: Context = Context()
+        self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
+        self.port: int = _free_port()
+        self.context.provide("node_kind", "master")
+        config_path = Path(self.temp_dir.name) / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            f"install_root = {Path(self.temp_dir.name) / 'installed'}\n"
+            "\n[web]\n"
+            f"port = {self.port}\n"
+            "auth_token = test-token\n",
+            encoding="utf-8",
+        )
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(WebApiPlugin)
+
+        @self.context.webapi.get("/api/whoami", kind="api", name="test.whoami")
+        def whoami(request: StarletteRequest) -> dict[str, object]:
+            return {"auth": dict(getattr(request.state, "auth", {}))}
+
+    async def asyncTearDown(self) -> None:
+        await unload_all(self.context)
+        self.temp_dir.cleanup()
+
+    async def test_missing_or_wrong_token_rejected(self) -> None:
+        base_url = f"http://127.0.0.1:{self.port}"
+        for token in (None, "wrong-token"):
+            status, _content_type, body = await asyncio.to_thread(
+                _request, base_url, "/api/whoami", "GET", token
+            )
+            self.assertEqual(status, 401)
+            self.assertIn("X-AETP-Token", json.loads(body)["error"])
+
+    async def test_valid_token_passes_with_identity(self) -> None:
+        base_url = f"http://127.0.0.1:{self.port}"
+        status, _content_type, body = await asyncio.to_thread(
+            _request, base_url, "/api/whoami"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            json.loads(body)["auth"], {"subject": "operator", "role": "admin"}
+        )
+
+    async def test_static_paths_open_without_token(self) -> None:
+        """非 /api 路径（SPA 页面 / 静态资源）免鉴权：浏览器导航带不了请求头。"""
+        base_url = f"http://127.0.0.1:{self.port}"
+        status, _content_type, _body = await asyncio.to_thread(
+            _request, base_url, "/some/page", "GET", None
+        )
+        self.assertEqual(status, 404)  # 未鉴权也走到路由（而非 401）
+
+    async def test_missing_auth_token_rejects_startup(self) -> None:
+        """强制启用：[web] 缺 auth_token → 配置校验失败，节点起不来。"""
+        context: Context = Context()
+        context.provide("node_kind", "master")
+        config_path = Path(self.temp_dir.name) / "notoken.ini"
+        config_path.write_text(
+            "[node]\nkind = master\n\n[web]\n" f"port = {_free_port()}\n",
+            encoding="utf-8",
+        )
+        await context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        with self.assertRaises((TypeError, ValueError)):
+            await context.plugin(WebApiPlugin)
+        await unload_all(context)
 
 
 if __name__ == "__main__":

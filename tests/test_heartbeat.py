@@ -19,6 +19,7 @@ from urllib.error import URLError
 
 from cordis_port import Context
 
+from _helpers import AUTH_TOKEN
 from _helpers import free_port as _free_port
 from _helpers import request as _request
 from common.cordis_utils import unload_all, wait_until
@@ -609,7 +610,8 @@ class _RecordingMaster:
             "[node]\n"
             "kind = master\n"
             "\n[web]\n"
-            f"port = {port}\n",
+            f"port = {port}\n"
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
 
@@ -661,7 +663,8 @@ class HeartbeatPluginTests(unittest.IsolatedAsyncioTestCase):
             "timeout = 1.0\n"
             "max_backoff = 0.2\n"
             "\n[web]\n"
-            f"port = {self.slave_port}\n",
+            f"port = {self.slave_port}\n"
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
         return path
@@ -946,6 +949,7 @@ class HeartbeatSenderTests(unittest.IsolatedAsyncioTestCase):
     async def test_connection_refused_becomes_send_error(self) -> None:
         config = HeartbeatConfig(
             master_url=f"http://127.0.0.1:{_free_port()}",
+            auth_token=AUTH_TOKEN,
             interval=1.0,
             timeout=1.0,
             max_backoff=5.0,
@@ -963,6 +967,7 @@ class HeartbeatSenderTests(unittest.IsolatedAsyncioTestCase):
             address = await master.start()
             config = HeartbeatConfig(
                 master_url=address or f"http://127.0.0.1:{master.port}",
+                auth_token=AUTH_TOKEN,
                 path="/api/missing",
                 interval=1.0,
                 timeout=1.0,
@@ -984,6 +989,7 @@ class HeartbeatSenderTests(unittest.IsolatedAsyncioTestCase):
             address = await master.start()
             config = HeartbeatConfig(
                 master_url=address or f"http://127.0.0.1:{master.port}",
+                auth_token=AUTH_TOKEN,
                 interval=1.0,
                 timeout=5.0,
                 max_backoff=5.0,
@@ -1000,6 +1006,7 @@ class HeartbeatSenderTests(unittest.IsolatedAsyncioTestCase):
         """载荷含不可序列化对象：归一化为 HeartbeatSendError，不裸抛。"""
         config = HeartbeatConfig(
             master_url=f"http://127.0.0.1:{_free_port()}",
+            auth_token=AUTH_TOKEN,
             interval=1.0,
             timeout=1.0,
             max_backoff=5.0,

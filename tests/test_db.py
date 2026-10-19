@@ -738,6 +738,7 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
             f"install_root = {self.install_root.as_posix()}\n"
             "\n[web]\n"
             f"port = {_free_port()}\n"
+            "auth_token = test-token\n"
             "\n[db]\n"
             f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
             f"data_dir = {self.data_dir.as_posix()}\n",

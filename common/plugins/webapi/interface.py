@@ -40,6 +40,7 @@ from starlette.responses import (
     StreamingResponse,
 )
 
+from .auth import AuthContext
 from .config import WebApiConfig
 from .types import (
     RouteHandler,
@@ -105,6 +106,15 @@ class WebApiService(ABC):
 
         服务方法内读到的 ``ctx`` 是**调用方**上下文，需要访问自身配置层或
         派发全局事件时用本属性。
+        """
+
+    @property
+    @abstractmethod
+    def auth(self) -> AuthContext:
+        """鉴权接缝：持有可替换的验证器（默认共享密钥）。
+
+        未来的用户管理插件（多用户登录 / 权限）只需替换
+        ``ctx.webapi.auth.verifier``，中间件与业务路由不动。
         """
 
     # ------------------------------------------------------------ 生命周期

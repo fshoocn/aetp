@@ -83,7 +83,9 @@ async def _boot_master(
     config_path = root / "config.ini"
     config_path.write_text(
         "[node]\nkind = master\nname = 主节点\n\n[web]\n"
-        f"port = {port}\n{section}",
+        f"port = {port}\n"
+        "auth_token = test-token\n"
+        f"{section}",
         encoding="utf-8",
     )
     context = Context()
@@ -476,7 +478,9 @@ class HeartbeatPairTests(unittest.IsolatedAsyncioTestCase):
         slave_config.parent.mkdir(parents=True, exist_ok=True)
         slave_config.write_text(
             "[node]\nkind = slave\nname = 从节点-1\n\n[web]\n"
-            f"port = {slave_port}\n\n[heartbeat]\n"
+            f"port = {slave_port}\n"
+            "auth_token = test-token\n"
+            "\n[heartbeat]\n"
             f"master_url = {master_url}\ninterval = 0.3\ntimeout = 1.0\nmax_backoff = 2.0\n",
             encoding="utf-8",
         )

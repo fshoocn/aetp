@@ -83,6 +83,11 @@ class HeartbeatPlugin:
         self.config: HeartbeatConfig = (
             config if isinstance(config, HeartbeatConfig) else HeartbeatConfig()
         )
+        if not self.config.auth_token:
+            # 留空 = 全网共享 [web] auth_token 的标准用法（节点启动必须配令牌）
+            self.config.auth_token = str(
+                self.ctx.appconfig.get("web", "auth_token", "") or ""
+            )
         self._node_id: str = str(ctx.node_name)
         self._seq: int = 0
         self._task: asyncio.Task[None] | None = None

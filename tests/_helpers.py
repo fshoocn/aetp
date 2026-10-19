@@ -10,6 +10,9 @@ from urllib.request import ProxyHandler, Request, build_opener
 #: 无代理 opener：与生产传输层同口径（环境代理可能劫持本机回环请求）
 _OPENER = build_opener(ProxyHandler({}))
 
+#: 测试统一访问令牌（与各 fixture 写进 [web] auth_token 的值对应）
+AUTH_TOKEN = "test-token"
+
 #: 本进程已发放过的端口：连续探测可能拿到刚还回去的同一端口（TOCTOU），
 #: 记账排除，避免同进程两次起服务撞车
 _used_ports: set[int] = set()
@@ -33,9 +36,15 @@ def request(
     method: str = "GET",
     body: bytes | None = None,
     content_type: str | None = None,
+    token: str | None = AUTH_TOKEN,
 ) -> tuple[int, bytes]:
-    """同步发一个请求，返回 ``(状态码, 正文)``；4xx/5xx 不抛错、照常返回。"""
+    """同步发一个请求，返回 ``(状态码, 正文)``；4xx/5xx 不抛错、照常返回。
+
+    ``token`` 缺省带测试令牌（鉴权强制启用）；传 ``None`` 模拟未带凭证。
+    """
     headers = {"Content-Type": content_type} if content_type else {}
+    if token:
+        headers["X-AETP-Token"] = token
     req = Request(f"{base_url}{path}", data=body, headers=headers, method=method)
     try:
         response = _OPENER.open(req, timeout=5)
@@ -56,6 +65,7 @@ async def arequest(
     method: str = "GET",
     body: bytes | None = None,
     content_type: str | None = None,
+    token: str | None = AUTH_TOKEN,
 ) -> tuple[int, bytes]:
     """异步包装 :func:`request`（不卡事件循环）。"""
     return await asyncio.to_thread(
@@ -65,4 +75,5 @@ async def arequest(
         method=method,
         body=body,
         content_type=content_type,
+        token=token,
     )

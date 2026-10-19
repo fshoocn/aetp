@@ -180,6 +180,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             f"plugins = {_SOURCE_ROOT / 'master' / 'webui'}\n"
             "\n[web]\n"
             f"port = {self.port}\n"
+            "auth_token = test-token\n"
             "\n[db]\n"
             f"url = sqlite+aiosqlite:///{(Path(self.temp_dir.name) / 'aetp.db').as_posix()}\n",
             encoding="utf-8",
@@ -229,7 +230,8 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             "kind = master\n"
             f"install_root = {Path(self.temp_dir.name) / 'bare'}\n"
             "\n[web]\n"
-            f"port = {_free_port()}\n",
+            f"port = {_free_port()}\n"
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
         await bare.plugin(AppConfigPlugin, {"path": str(bare_config_path)})
@@ -697,7 +699,8 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             f"plugins = {_SOURCE_ROOT / 'master' / 'webui'},"
             f" {zip_path}, {Path(self.temp_dir.name) / 'missing'}\n"
             "\n[web]\n"
-            f"port = {_free_port()}\n",
+            f"port = {_free_port()}\n"
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
         context: Context = Context()

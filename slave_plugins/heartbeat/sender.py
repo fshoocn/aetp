@@ -57,16 +57,21 @@ def parse_response_body(body: bytes) -> dict[str, object]:
     return cast(dict[str, object], parsed)
 
 
-def _post_json_sync(endpoint: str, data: bytes, timeout: float) -> dict[str, object]:
+def _post_json_sync(
+    endpoint: str, data: bytes, timeout: float, token: str
+) -> dict[str, object]:
     """同步 POST（在工作线程里执行），返回解析后的响应对象。
 
     响应体最多读取 :data:`MAX_RESPONSE_BYTES` 字节；超限抛
     :class:`HeartbeatSendError`（应答只承载下发配置，不该这么大）。
     """
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-AETP-Token"] = token
     request = Request(
         endpoint,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with _OPENER.open(request, timeout=timeout) as response:
@@ -99,6 +104,7 @@ class HeartbeatSender:
                 self._config.endpoint(),
                 data,
                 self._config.timeout,
+                self._config.auth_token,
             )
         except HTTPError as exc:
             # 主模块在线但接口出错（4xx/5xx）或重定向被拒（3xx）——

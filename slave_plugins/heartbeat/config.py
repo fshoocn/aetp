@@ -28,7 +28,7 @@ from common.config_base import FieldConfig, Issue
 
 #: ``[heartbeat]`` 节允许的键
 _KEYS: frozenset[str] = frozenset(
-    {"master_url", "path", "interval", "timeout", "max_backoff"}
+    {"master_url", "path", "auth_token", "interval", "timeout", "max_backoff"}
 )
 
 #: 主模块可下发覆盖的运行参数；其余键（master_url / path）只由本地
@@ -72,6 +72,7 @@ class HeartbeatConfig(FieldConfig):
     _FIELDS: ClassVar[dict[str, tuple[tuple[type[object], ...], str]]] = {
         "master_url": ((str,), "master_url（主模块基地址）"),
         "path": ((str,), "path（心跳接口路径）"),
+        "auth_token": ((str,), "auth_token（心跳上报访问令牌）"),
         "interval": ((int, float), "interval（心跳间隔秒数）"),
         "timeout": ((int, float), "timeout（单次请求超时秒数）"),
         "max_backoff": ((int, float), "max_backoff（失败重试间隔上限秒数）"),
@@ -81,6 +82,9 @@ class HeartbeatConfig(FieldConfig):
     master_url: str = ""
     #: 心跳接口路径
     path: str = "/api/heartbeat"
+    #: 上报携带的 ``X-AETP-Token``；留空 = 取本节点 ``[web] auth_token``
+    #: （全网共享同一令牌的标准用法）——主模块下发不可覆盖（防劫持）
+    auth_token: str = ""
     #: 心跳间隔（秒）；主模块可下发覆盖
     interval: float = 5.0
     #: 单次请求超时（秒）；主模块可下发覆盖

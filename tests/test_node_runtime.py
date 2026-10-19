@@ -92,7 +92,8 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "install_root = plugins\n"
             f"plugins = {source}\n"
             "\n[web]\n"
-            f"port = {self.port}\n",
+            f"port = {self.port}\n"
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
 
@@ -152,7 +153,8 @@ class NodeRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "install_root = plugins\n"
             f"plugins = {broken}, {good}\n"
             "\n[web]\n"
-            f"port = {self.port}\n",
+            f"port = {self.port}\n"
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
 
@@ -198,7 +200,8 @@ class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):
             "kind = slave\n"
             f"install_root = {root / 'plugins'}\n"
             "\n[web]\n"
-            f"port = {_free_port()}\n",
+            f"port = {_free_port()}\n"
+            "auth_token = test-token\n",
             encoding="utf-8",
         )
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
@@ -285,6 +288,7 @@ class NodeProfileTests(unittest.TestCase):
                 "access_log = true\n"
                 "log_level = INFO\n"
                 "start_timeout = 2.5\n"
+                "auth_token = test-token\n"
                 "cors_origins = http://a, http://b\n",
                 encoding="utf-8",
             )
@@ -298,6 +302,7 @@ class NodeProfileTests(unittest.TestCase):
                 "access_log": True,
                 "log_level": "info",
                 "start_timeout": 2.5,
+                "auth_token": "***",
                 "cors_origins": ("http://a", "http://b"),
             },
         )

@@ -58,6 +58,7 @@ from starlette.responses import (
 )
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .auth import AuthContext, AuthMiddleware, SharedSecretVerifier
 from .config import WebApiConfig
 from .interface import WebApiService
 from .router import (
@@ -127,9 +128,12 @@ class UvicornHost:
         server: 底层 ``uvicorn.Server`` 实例（启动后才非 ``None``）。
     """
 
-    def __init__(self, config: WebApiConfig) -> None:
+    def __init__(self, config: WebApiConfig, auth: AuthContext) -> None:
         self.config: WebApiConfig = config
         self.app: Starlette = Starlette()
+        # 先加鉴权（栈内层），再加安全头 / CORS（外层）——鉴权的 401 响应
+        # 也能带上 nosniff 与 CORS 头
+        self.app.add_middleware(AuthMiddleware, auth=auth)
         self.app.add_middleware(_SecurityHeadersMiddleware)
         origins = [str(origin) for origin in config.cors_origins]
         if origins:
@@ -263,6 +267,13 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         self._host: UvicornHost | None = None
         self._provided_ctx: Context = ctx
         self._fallback: Callable[[Request], Response | None] | None = None
+        #: 鉴权接缝：默认共享密钥验证器，用户管理插件可替换（见 :mod:`.auth`）
+        self._auth: AuthContext = AuthContext(SharedSecretVerifier(self.config))
+
+    @property
+    def auth(self) -> AuthContext:
+        """鉴权接缝：持有可替换的验证器（默认共享密钥）。"""
+        return self._auth
 
     # ---------------------------------------------------------- cordis 集成
     @property
@@ -307,7 +318,7 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
 
         在此之前注册的路由会被一次性挂载；之后注册的路由随 :meth:`route` 立即生效。
         """
-        host = UvicornHost(self.config)
+        host = UvicornHost(self.config, self.auth)
         host.app.state.web_service = self
         # 先把 app 交给路由表，再启动：这样启动期间注册的路由也能被匹配到
         self._attach_app(host.app)

@@ -37,6 +37,7 @@ class WebApiConfig(FieldConfig):
         "access_log": ((bool,), "是否打印访问日志"),
         "log_level": ((str,), "uvicorn 日志级别"),
         "start_timeout": ((int, float), "启动等待秒数"),
+        "auth_token": ((str,), "管理 API 访问令牌（X-AETP-Token）"),
         "cors_origins": ((list, tuple), "允许的跨源来源（CORS）"),
     }
 
@@ -46,15 +47,24 @@ class WebApiConfig(FieldConfig):
     access_log: bool = False
     log_level: str = "warning"
     start_timeout: float = 10.0
-    #: 允许的跨源来源：``("*",)`` 表示不限（内网测试平台取向）；具体列表则回显
-    #: 对应 ``Origin``；空元组/列表 = 关闭 CORS。前端「切换后端地址」依赖此项。
-    cors_origins: tuple[str, ...] = ("*",)
+    #: 管理 API 访问令牌：请求须携带 ``X-AETP-Token``（强制启用，留空拒启）
+    auth_token: str = ""
+    #: 允许的跨源来源：空（默认）= 关闭 CORS；``("*",)`` 表示不限；
+    #: 具体列表则回显对应 ``Origin``。前端「切换后端地址」的跨源访问依赖此项。
+    cors_origins: tuple[str, ...] = ()
 
     def _validate_extra(self) -> list[Issue]:
-        """监听地址、端口范围、日志级别归一化与枚举检查、CORS 项检查。"""
+        """监听地址、端口范围、日志级别归一化与枚举检查、鉴权令牌、CORS 项检查。"""
         issues: list[Issue] = []
         if not self.host.strip():
             issues.append({"message": "监听地址不能为空", "path": ["host"]})
+        if not self.auth_token.strip():
+            issues.append(
+                {
+                    "message": "auth_token 必须配置（管理 API 鉴权强制启用，请在 [web] 节设置访问令牌）",
+                    "path": ["auth_token"],
+                }
+            )
         if not (0 < int(self.port) < 65536):
             issues.append(
                 {"message": f"监听端口需在 1~65535 之间，收到 {self.port}", "path": ["port"]}
@@ -88,6 +98,12 @@ class WebApiConfig(FieldConfig):
             normalized_origins.append(value)
         self.cors_origins = tuple(normalized_origins)
         return issues
+
+    def to_dict(self) -> dict[str, object]:
+        """导出为字典（展示用途）：访问令牌掩码，不回显凭证。"""
+        values = self.raw_dict()
+        values["auth_token"] = "***" if str(values.get("auth_token") or "") else ""
+        return values
 
     # -- 便利方法 -------------------------------------------------------------
     def url(self) -> str:
