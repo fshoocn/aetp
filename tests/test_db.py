@@ -600,6 +600,36 @@ class RegistrySweepSafetyTests(DbStackTestCase):
             await self.db.repo(RunRecord).add(RunRecord(name="ghost"))
 
 
+class InstallRootResolutionTests(unittest.IsolatedAsyncioTestCase):
+    """[node] install_root 相对路径按节点目录（config.ini 所在目录）解析。"""
+
+    async def asyncSetUp(self) -> None:
+        self._temp = tempfile.TemporaryDirectory()
+        self.root = Path(self._temp.name)
+        self.config_path = self.root / "config.ini"
+        self.config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            "install_root = plugins\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
+            "orphan_policy = warn\n",
+            encoding="utf-8",
+        )
+        self.context = Context()
+        self.context.provide("node_kind", "master")
+        await self.context.plugin(AppConfigPlugin, {"path": str(self.config_path)})
+
+    async def asyncTearDown(self) -> None:
+        await unload_all(self.context)
+        self._temp.cleanup()
+
+    async def test_relative_install_root_anchors_to_config_dir(self) -> None:
+        """回归：registry.db 落节点目录下，不随启动时的工作目录漂移。"""
+        await self.context.plugin(DbPlugin)
+        self.assertTrue((self.root / "plugins" / "registry.db").is_file())
+
+
 class EngineResilienceTests(DbStackTestCase):
     """DB-N4/N5/N6：逃生舱事务语义、SQLite 并发韧性、池参数告警。"""
 

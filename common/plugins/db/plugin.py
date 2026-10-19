@@ -93,11 +93,18 @@ class DbPlugin:
 
 
 def _install_root(ctx: Context) -> Path | None:
-    """从应用配置读插件安装目录（``[node] install_root``）；缺失返回 ``None``。"""
+    """从应用配置读插件安装目录（``[node] install_root``）；缺失返回 ``None``。
+
+    相对路径按节点目录（config.ini 所在目录）解析——与 ``plugins`` 及 webapi
+    的约定一致，不随启动时的工作目录漂移。
+    """
     raw = ctx.appconfig.get("node", "install_root")
     if not raw or not str(raw).strip():
         return None
-    return Path(str(raw).strip()).expanduser().resolve()
+    path = Path(str(raw).strip()).expanduser()
+    if not path.is_absolute():
+        path = _base_dir(ctx) / path
+    return path.resolve()
 
 
 def _base_dir(ctx: Context) -> Path:
