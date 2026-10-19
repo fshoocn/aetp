@@ -831,6 +831,8 @@ class PluginManager:
             raise
         except TypeError as exc:  # 含 Schema 校验失败的 ValidationError（继承 TypeError）
             raise PluginManagerError(f"配置校验失败：{exc}", 422) from exc
+        except ValueError as exc:  # ini 兜底过滤拒绝（换行/控制字符 → 配置注入面）
+            raise PluginManagerError(f"配置值非法：{exc}", 422) from exc
         except OSError as exc:  # internal/commit 写回 config.ini 失败
             raise PluginManagerError(f"配置写回 config.ini 失败：{exc}", 500) from exc
         except Exception as exc:

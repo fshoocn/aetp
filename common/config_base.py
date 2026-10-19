@@ -188,7 +188,11 @@ class FieldConfig:
             }
         else:
             raise TypeError(f"to_ini 只接受 {cls.__name__} 实例或 Mapping，收到 {type(value).__name__}")
-        return {name: _stringify_ini(item) for name, item in items.items() if item is not None}
+        return {
+            name: ensure_ini_safe(name, _stringify_ini(item))
+            for name, item in items.items()
+            if item is not None
+        }
 
     # -- 便利方法 -------------------------------------------------------------
     def raw_dict(self) -> dict[str, object]:
@@ -253,4 +257,19 @@ def _stringify_ini(value: object) -> str:
     return str(value)
 
 
-__all__: list[str] = ["FieldConfig", "Issue"]
+def ensure_ini_safe(name: str, text: str) -> str:
+    """ini 值安全兜底：拒绝含换行 / 控制字符的值（防配置注入），返回原值。
+
+    值混入换行会被 ``write_ini_values`` 拼成多个 ini 行，后续行被解析成
+    **新的配置键**（配置注入，如篡改 ``auth_token``）。行分隔字符按
+    ``str.splitlines`` 口径全拒（含 ``\\v`` / ``\\f`` / ``\\x85`` / ``\\u2028``），
+    与写回的行模型一致；制表符与普通空白无害，放行。
+    """
+    if len(text.splitlines()) > 1 or any(
+        (ord(ch) < 32 and ch != "\t") or ord(ch) == 127 for ch in text
+    ):
+        raise ValueError(f"配置 {name} 的值含换行或控制字符，拒绝写入 ini（防止配置注入）")
+    return text
+
+
+__all__: list[str] = ["FieldConfig", "Issue", "ensure_ini_safe"]

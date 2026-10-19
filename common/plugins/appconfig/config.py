@@ -22,6 +22,8 @@ import tempfile
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
+from common.config_base import ensure_ini_safe
+
 #: 布尔值的合法写法（不区分大小写）
 _TRUE_WORDS: frozenset[str] = frozenset({"1", "yes", "true", "on"})
 _FALSE_WORDS: frozenset[str] = frozenset({"0", "no", "false", "off"})
@@ -209,8 +211,9 @@ class AppConfig:
             raise ValueError("配置对象没有来源文件，update_section 需要显式传入 path")
         updates = {str(key).lower(): str(value) for key, value in values.items()}
         current = self._sections.get(name, ConfigSection(name, {})).to_dict()
-        self._sections[name] = ConfigSection(name, {**current, **updates})
         write_ini_values(target, {name: updates})
+        # 写回成功后才改内存：兜底过滤拒绝 / 写盘失败时内存与文件保持一致
+        self._sections[name] = ConfigSection(name, {**current, **updates})
         self.path = target
 
     def to_dict(self) -> dict[str, dict[str, str]]:
@@ -244,7 +247,13 @@ def write_ini_values(
         path: ini 文件路径；文件不存在时按新文件创建。
         changes: ``{节名: {键: 值}}``；值需是字符串（:meth:`FieldConfig.to_ini`
             的产出口径）。
+
+    抛出:
+        ValueError: 值含换行或控制字符（会破坏 ini 结构，形成配置注入）。
     """
+    for section, values in changes.items():
+        for key, value in values.items():
+            ensure_ini_safe(f"[{section}] {key}", value)
     resolved = Path(path).expanduser()
     raw = resolved.read_bytes().decode("utf-8-sig") if resolved.is_file() else ""
     newline = "\r\n" if "\r\n" in raw else "\n"

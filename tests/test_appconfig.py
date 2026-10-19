@@ -162,6 +162,16 @@ class FieldConfigTests(unittest.TestCase):
             DemoConfig.to_ini(object())
         self.assertEqual(DemoConfig.to_ini(None), {})
 
+    def test_to_ini_rejects_unsafe_values(self) -> None:
+        """换行 / 控制字符的值拒绝序列化（防 ini 配置注入）；制表符放行。"""
+        with self.assertRaisesRegex(ValueError, "换行或控制字符"):
+            DemoConfig.to_ini({"host": "a\n[web]\nauth_token = x"})
+        with self.assertRaisesRegex(ValueError, "换行或控制字符"):
+            DemoConfig.to_ini({"host": "a\u2028b"})  # 行分隔符（splitlines 口径）
+        with self.assertRaisesRegex(ValueError, "换行或控制字符"):
+            DemoConfig.to_ini({"host": "a\x00b"})  # 空字节
+        self.assertEqual(DemoConfig.to_ini({"host": "a\tb"}), {"host": "a\tb"})
+
     def test_merge_layers_last_wins(self) -> None:
         merged = DemoConfig.merge({"port": 1}, {"host": "outer"})
         self.assertEqual(merged.port, 1)
@@ -211,6 +221,20 @@ class WriteIniValuesTests(unittest.TestCase):
     def test_update_section_requires_path(self) -> None:
         with self.assertRaisesRegex(ValueError, "需要显式传入 path"):
             AppConfig().update_section("web", {"port": "1"})
+
+    def test_write_ini_values_rejects_unsafe_values(self) -> None:
+        """写回兜底：绕过 to_ini 直传含换行的值同样拒绝，文件与内存保持原状。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.ini"
+            original = "[node]\nname = master\n"
+            path.write_text(original, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "换行或控制字符"):
+                write_ini_values(path, {"web": {"port": "9000\nauth_token = x"}})
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+            config = AppConfig.from_file(path)
+            with self.assertRaisesRegex(ValueError, "换行或控制字符"):
+                config.update_section("web", {"port": "1\nk = 2"})
+            self.assertIsNone(config.get("web", "port"))
 
     def test_strips_bom_and_leaves_no_temporary(self) -> None:
         """带 BOM 的文件剥 BOM 后按节更新（不重复追加节）；写完不留临时文件。"""
