@@ -1070,5 +1070,16 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(record["last_error"])
 
 
+    async def test_preinstalled_dirs_are_not_flagged_as_orphans(self) -> None:
+        """预装插件目录由 ensure_installed 管理，不判孤儿；真孤儿照常告警。"""
+        (self.install_root / "webui").mkdir(parents=True)
+        (self.install_root / "stray").mkdir(parents=True)
+        with self.assertLogs("common.plugins.webapi.plugin_manager", level="WARNING") as captured:
+            PluginManager(self.context, self.install_root, ["webui"])
+        messages = "\n".join(captured.output)
+        self.assertIn("stray", messages)
+        self.assertNotIn("webui", messages)
+
+
 if __name__ == "__main__":
     unittest.main()

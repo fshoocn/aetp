@@ -405,9 +405,13 @@ class PluginManager:
             existing = self.records.get(plugin_id)
             destination = self.install_root / plugin_id
             if existing is None and destination.exists():
-                # PS-H2 自愈：孤儿安装目录（kill 中断残留，registry 无记录）
-                # 直接覆盖，不再 409 卡死整个节点
-                _LOGGER.warning("覆盖孤儿安装目录 %s（registry 无记录）", destination.name)
+                # PS-H2 自愈：registry 无记录但目录在——kill 中断残留直接覆盖，
+                # 不再 409 卡死整个节点；预装插件本就由 ensure_installed 每次
+                # 启动重装重置，属预期流程，不报孤儿
+                if plugin_id in self.preinstalled_ids:
+                    _LOGGER.info("预装插件 %s 重装（ensure_installed 重置目录）", plugin_id)
+                else:
+                    _LOGGER.warning("覆盖孤儿安装目录 %s（registry 无记录）", destination.name)
                 await asyncio.to_thread(shutil.rmtree, destination, ignore_errors=True)
             if existing is not None:
                 if not replace:
@@ -1197,6 +1201,10 @@ class PluginManager:
           安装同名插件时自动覆盖（不再 409 卡死）；
         - registry 有记录、目录缺失 → 标记「需要重新安装」（不再裸
           ModuleNotFoundError），启用时给出明确诊断。
+
+        预装插件（``preinstalled_ids``）**不在自检范围**：它们由
+        ``ensure_installed`` 每次启动按内容摘要重装重置，目录暂时无记录
+        属预期流程，不是孤儿。
         """
         dirs = {
             p.name
@@ -1204,7 +1212,8 @@ class PluginManager:
             if p.is_dir() and not p.name.startswith(".")
         }
         record_ids = set(self.records)
-        self._orphan_dirs = dirs - record_ids
+        managed = set(self.preinstalled_ids)
+        self._orphan_dirs = dirs - record_ids - managed
         for orphan in sorted(self._orphan_dirs):
             _LOGGER.warning(
                 "检测到孤儿安装目录 %s（registry 无记录，可能是安装中断残留）；"
@@ -1212,7 +1221,7 @@ class PluginManager:
                 orphan,
             )
         changed = False
-        for plugin_id in sorted(record_ids - dirs):
+        for plugin_id in sorted(record_ids - dirs - managed):
             record = self.records[plugin_id]
             if record.get("last_error") != _MISSING_DIR_ERROR:
                 record["last_error"] = _MISSING_DIR_ERROR
