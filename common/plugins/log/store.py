@@ -92,9 +92,12 @@ class LogStore:
         q: str | None = None,
         after_id: int | None = None,
         before_id: int | None = None,
+        from_ts: float | None = None,
+        to_ts: float | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
-        """游标查询（新 → 旧）：``after_id`` / ``before_id`` 二选一（尾随 / 回翻）。"""
+        """游标查询（新 → 旧）：``after_id`` / ``before_id`` 二选一（尾随 / 回翻）；
+        ``from_ts`` / ``to_ts`` 时间窗（秒）。"""
         # 全字面量 SQL + 可空参数（? IS NULL 即不过滤）——不拼接查询串（S608 合规）
         like: str | None = None
         if q:
@@ -111,6 +114,10 @@ class LogStore:
             after_id,
             before_id,
             before_id,
+            from_ts,
+            from_ts,
+            to_ts,
+            to_ts,
             max(1, min(limit, 1000)),
         )
         if after_id is not None:  # 尾随（after_id）：旧→新追加序
@@ -119,6 +126,7 @@ class LogStore:
                 "WHERE (? IS NULL OR node = ?) AND (? IS NULL OR level <= ?) "
                 "AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
                 "AND (? IS NULL OR id > ?) AND (? IS NULL OR id < ?) "
+                "AND (? IS NULL OR ts >= ?) AND (? IS NULL OR ts <= ?) "
                 "ORDER BY id ASC LIMIT ?"
             )
         else:  # 回翻 / 首屏：新→旧浏览序
@@ -127,6 +135,7 @@ class LogStore:
                 "WHERE (? IS NULL OR node = ?) AND (? IS NULL OR level <= ?) "
                 "AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
                 "AND (? IS NULL OR id > ?) AND (? IS NULL OR id < ?) "
+                "AND (? IS NULL OR ts >= ?) AND (? IS NULL OR ts <= ?) "
                 "ORDER BY id DESC LIMIT ?"
             )
         with closing(_open_store(self.path)) as conn:

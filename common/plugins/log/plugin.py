@@ -107,6 +107,20 @@ class LogPlugin:
         api.get("/api/logs/nodes", self._nodes_handler, kind="api", name="log.nodes")
         dispose_health = api.add_health_provider("log", self._metrics)
         self.ctx.comm.on("log.batch", self._on_log_batch)
+        # 查看页（无头部署没有 webui：软依赖，缺失即纯 API）
+        webui = self.ctx.get("webui")
+        if webui is not None:
+            webui.register_ui(
+                "logs",
+                kind="page",
+                format="vue",
+                resource_root=str(Path(__file__).resolve().parent / "ui"),
+                entry="LogsPage.vue",
+                path="/logs",
+                title="日志",
+                menu_group="系统",
+                menu_order=60,
+            )
         self.ctx.logger.info("日志插件已加载：%s", self._store.path if self._store else "未启用查询库")
 
         def cleanup() -> None:
@@ -199,12 +213,20 @@ class LogPlugin:
         def as_int(raw: str | None) -> int | None:
             return int(raw) if raw and raw.isdigit() else None
 
+        def as_float(raw: str | None) -> float | None:
+            try:
+                return float(raw) if raw else None
+            except ValueError:
+                return None
+
         logs = self._store.query(
             node=params.get("node") or None,
             level=as_int(params.get("level")),
             q=params.get("q") or None,
             after_id=as_int(params.get("after_id")),
             before_id=as_int(params.get("before_id")),
+            from_ts=as_float(params.get("from_ts")),
+            to_ts=as_float(params.get("to_ts")),
             limit=int(params.get("limit") or 200),
         )
         return {"logs": logs, "count": len(logs)}

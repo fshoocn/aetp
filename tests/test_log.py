@@ -289,6 +289,22 @@ class LogQueryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error-入库", "\n".join(messages))
         self.assertNotIn("info-不入库", "\n".join(messages))
 
+    async def test_time_window_filters(self) -> None:
+        """from_ts / to_ts 时间窗过滤（体验 E 的快捷范围）。"""
+        await self.boot(report_level="debug")
+        assert self.context is not None
+        with log_operation():
+            self.context.logger.info("窗内消息")
+        await self.context.comm.flush(timeout=5.0)
+        recent = await self.get_json(
+            f"/api/logs?q={quote('窗内')}&from_ts={time.time() - 60}"
+        )
+        self.assertEqual(len(recent["logs"]), 1)
+        empty = await self.get_json(
+            f"/api/logs?q={quote('窗内')}&to_ts={time.time() - 60}"
+        )
+        self.assertEqual(empty["logs"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
