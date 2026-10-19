@@ -38,6 +38,7 @@ from cordis_port import Context
 
 from common import cordis_utils
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
+from common.plugins.comm import CommService
 from common.plugins.db import DbPlugin
 from common.plugins.log import LogPlugin
 from common.plugins.webapi import WebApiPlugin
@@ -160,6 +161,7 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     await ctx.plugin(LogPlugin)  # 尽早装载：后续装配日志即落控制台/文件
     await ctx.plugin(DbPlugin)
     await ctx.plugin(WebApiPlugin)
+    await ctx.plugin(CommService)  # webapi 后：挂 /api/comm/ingest
     await ctx.plugin(PluginManagerPlugin)
     for source in profile.plugin_sources:
         try:
