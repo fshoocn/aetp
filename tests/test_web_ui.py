@@ -221,6 +221,48 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with response:
             self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
 
+    async def test_static_cache_policy(self) -> None:
+        """HTML / 未 hash 静态 no-cache（导航必回源）；hash 产物 immutable 长缓存。
+
+        回归：静态响应原先不带 Cache-Control，浏览器启发式缓存旧产物，
+        首次导航拿到旧 UI（弹窗缺新字段），刷新才更新。
+        """
+        assets = Path(self.temp_dir.name) / "ui-dist" / "assets"
+        assets.mkdir()
+        (assets / "app-12345678.js").write_text("console.log(1)", encoding="utf-8")
+        base_url = f"http://127.0.0.1:{self.port}"
+
+        response = await asyncio.to_thread(
+            urlopen, Request(f"{base_url}/ui-static/index.html"), timeout=5
+        )
+        with response:
+            self.assertEqual(response.headers["Cache-Control"], "no-cache")
+
+        # SPA 深层回退返回的 HTML 同样 no-cache
+        response = await asyncio.to_thread(
+            urlopen, Request(f"{base_url}/plugins/any/deep/link"), timeout=5
+        )
+        with response:
+            self.assertIn("text/html", response.headers["Content-Type"])
+            self.assertEqual(response.headers["Cache-Control"], "no-cache")
+
+        response = await asyncio.to_thread(
+            urlopen, Request(f"{base_url}/ui-static/assets/app-12345678.js"), timeout=5
+        )
+        with response:
+            self.assertEqual(
+                response.headers["Cache-Control"], "public, max-age=31536000, immutable"
+            )
+
+        # API 响应不干预缓存
+        response = await asyncio.to_thread(
+            urlopen,
+            Request(f"{base_url}/api/web/ui", headers={"X-AETP-Token": AUTH_TOKEN}),
+            timeout=5,
+        )
+        with response:
+            self.assertIsNone(response.headers.get("Cache-Control"))
+
 
 class CorsTests(unittest.IsolatedAsyncioTestCase):
     """webapi 的 CORS 支持（前端跨源切换后端地址的前提）。"""

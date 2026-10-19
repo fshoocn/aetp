@@ -83,10 +83,22 @@ class ServerError(RuntimeError):
     """服务器启动或停止失败。"""
 
 
-class _SecurityHeadersMiddleware:
-    """为所有响应补基础安全头（``X-Content-Type-Options: nosniff``）。
+#: Vite 构建产物（文件名带内容 hash）的挂载前缀——内容变则文件名变，可安全长缓存
+_HASHED_PREFIXES: tuple[str, ...] = ("/ui-static/assets/",)
+#: 其余未 hash 的静态挂载前缀（插件 UI 资源随插件更新，须回源校验）
+_STATIC_PREFIXES: tuple[str, ...] = ("/ui-static/", "/plugin-ui/")
 
-    纯 ASGI 中间件：只在响应头补字段，不动响应体；静态资源（插件 UI、
+
+class _SecurityHeadersMiddleware:
+    """为所有响应补响应头：安全（``X-Content-Type-Options``）与缓存策略。
+
+    缓存策略——静态响应原先不带 ``Cache-Control``，浏览器会按启发式
+    （Last-Modified 的 10%）缓存，导致重建后**首次导航仍用旧产物**（如
+    弹窗缺新字段），刷新才回源更新。现改为：HTML 一律 ``no-cache``
+    （每次导航回源校验，命中则 304）；带内容 hash 的 Vite 构建产物
+    ``immutable`` 长缓存；其余未 hash 静态（插件 UI 资源等）``no-cache``。
+
+    纯 ASGI 中间件：只改响应头，不动响应体；静态资源（插件 UI、
     构建产物）与 API 响应统一受益。
     """
 
@@ -102,9 +114,25 @@ class _SecurityHeadersMiddleware:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 headers.setdefault("X-Content-Type-Options", "nosniff")
+                cache_control = _cache_control(
+                    scope.get("path", ""), headers.get("content-type", "")
+                )
+                if cache_control is not None:
+                    headers["Cache-Control"] = cache_control
             await send(message)
 
         await self.app(scope, receive, sender)
+
+
+def _cache_control(path: str, content_type: str) -> str | None:
+    """按路径 / 内容类型给出缓存策略（``None`` = 不干预，如 API 响应）。"""
+    if content_type.startswith("text/html"):
+        return "no-cache"
+    if any(path.startswith(prefix) for prefix in _HASHED_PREFIXES):
+        return "public, max-age=31536000, immutable"
+    if any(path.startswith(prefix) for prefix in _STATIC_PREFIXES):
+        return "no-cache"
+    return None
 
 
 class _EmbeddedServer(uvicorn.Server):
