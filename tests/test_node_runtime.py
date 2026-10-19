@@ -297,7 +297,7 @@ class NodeProfileTests(unittest.TestCase):
                 "access_log": True,
                 "log_level": "info",
                 "start_timeout": 2.5,
-                "cors_origins": ["http://a", "http://b"],
+                "cors_origins": ("http://a", "http://b"),
             },
         )
 
@@ -306,6 +306,8 @@ class NodeProfileTests(unittest.TestCase):
             WebApiConfig.from_ini({"port": "abc"})
         with self.assertRaisesRegex(ValueError, "未知配置项"):
             WebApiConfig.from_ini({"nope": "1"})
+        with self.assertRaisesRegex(ValueError, "cors_origins"):
+            WebApiConfig.from_ini({"cors_origins": "ftp://x"})
 
 
 if __name__ == "__main__":

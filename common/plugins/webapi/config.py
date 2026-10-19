@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar, cast
 
 from common.config_base import FieldConfig, Issue
 
 #: 允许的日志级别
 _LOG_LEVELS: tuple[str, ...] = ("critical", "error", "warning", "info", "debug", "trace")
+
+#: CORS 来源格式：``*`` 或 http(s) 源（Origin 没有路径部分；尾部斜杠已归一化剥掉）
+_ORIGIN: re.Pattern[str] = re.compile(r"https?://[^/\s]+")
 
 
 class WebApiConfig(FieldConfig):
@@ -47,8 +51,10 @@ class WebApiConfig(FieldConfig):
     cors_origins: tuple[str, ...] = ("*",)
 
     def _validate_extra(self) -> list[Issue]:
-        """端口范围、日志级别归一化与枚举检查、CORS 项检查。"""
+        """监听地址、端口范围、日志级别归一化与枚举检查、CORS 项检查。"""
         issues: list[Issue] = []
+        if not self.host.strip():
+            issues.append({"message": "监听地址不能为空", "path": ["host"]})
         if not (0 < int(self.port) < 65536):
             issues.append(
                 {"message": f"监听端口需在 1~65535 之间，收到 {self.port}", "path": ["port"]}
@@ -61,11 +67,26 @@ class WebApiConfig(FieldConfig):
                     "path": ["log_level"],
                 }
             )
+        normalized_origins: list[str] = []
         for origin in cast("list[object] | tuple[object, ...]", self.cors_origins):
             if not isinstance(origin, str) or not origin.strip():
                 issues.append(
                     {"message": "cors_origins 的每项需要非空字符串", "path": ["cors_origins"]}
                 )
+                continue
+            # 归一化（去空白与尾部斜杠）：CORSMiddleware 按字符串精确匹配，
+            # 多一个斜杠就永不命中；格式不合法的项直接报错，不静默放过
+            value = origin.strip().rstrip("/")
+            if value != "*" and not _ORIGIN.fullmatch(value):
+                issues.append(
+                    {
+                        "message": f"cors_origins 的每项需为 * 或 http(s) 源（如 https://host[:port]），收到 {origin!r}",
+                        "path": ["cors_origins"],
+                    }
+                )
+                continue
+            normalized_origins.append(value)
+        self.cors_origins = tuple(normalized_origins)
         return issues
 
     # -- 便利方法 -------------------------------------------------------------

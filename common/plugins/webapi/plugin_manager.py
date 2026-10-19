@@ -407,14 +407,17 @@ class PluginManager:
             destination = self.install_root / plugin_id
             if existing is not None or destination.exists():
                 if not replace:
+                    installed_version = (
+                        str(existing.get("version") or "未知") if existing else "未知"
+                    )
                     raise PluginManagerError(
-                        f"插件 {plugin_id!r} 已安装（版本 {existing.get('version') if existing else '未知'}），"
+                        f"插件 {plugin_id!r} 已安装（版本 {installed_version}），"
                         f"新包版本 {manifest['version']}；如需替换请显式确认",
                         409,
                         details={
                             "code": "already-installed",
                             "id": plugin_id,
-                            "installed_version": existing.get("version") if existing else None,
+                            "installed_version": installed_version,
                             "incoming_version": manifest["version"],
                         },
                     )

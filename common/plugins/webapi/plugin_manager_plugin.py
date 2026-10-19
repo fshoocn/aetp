@@ -141,7 +141,16 @@ class PluginManagerPlugin(Service[None]):
             self.ctx.logger.error("数据依赖复检调度失败：%s", exc)
             return
         self._recheck_tasks.add(task)  # 强引用防 GC（RUF006）
-        task.add_done_callback(self._recheck_tasks.discard)
+        task.add_done_callback(self._on_recheck_done)
+
+    def _on_recheck_done(self, task: asyncio.Task[None]) -> None:
+        """观察哨：白名单之外的异常也要见光，后台任务不允许无声失败。"""
+        self._recheck_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            self.ctx.logger.error("数据依赖复检任务意外失败：%s", error)
 
     async def _recheck_consumers(self, payload: object) -> None:
         """复检受影响 owner 的消费方，失配即停用并记明原因（已加载的 B 不带着坏依赖继续跑）。"""
