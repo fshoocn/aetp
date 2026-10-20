@@ -231,7 +231,8 @@ export default {
             this.error = '';
             try {
                 const data = await fetchJson(`${apiBase()}/api/logs?${this.buildQuery({ limit: 500 })}`);
-                this.rows = (data.logs || []).slice().reverse(); // 新→旧展示
+                // 查询返回新→旧（最新在顶）；与 tail 同一排序语义，不再翻转
+                this.rows = data.logs || [];
                 this.pendingNew = 0;
                 this.follow = true;
                 this.$nextTick(() => this.scrollToTop());
@@ -295,7 +296,11 @@ export default {
             try {
                 const before = await fetchJson(`${apiBase()}/api/logs?${this.buildQuery({ before_id: this.selected.id, limit: this.contextLimit })}`);
                 const after = await fetchJson(`${apiBase()}/api/logs?${this.buildQuery({ after_id: this.selected.id, limit: this.contextLimit })}`);
-                this.contextRows = (before.logs || []).concat([this.selected], after.logs || []);
+                // before 为新→旧，翻成时间轴序：旧…近 [选中] 近…新
+                this.contextRows = (before.logs || [])
+                    .slice()
+                    .reverse()
+                    .concat([this.selected], after.logs || []);
             } catch (error) {
                 this.error = error instanceof Error ? error.message : String(error);
             } finally {
@@ -314,6 +319,7 @@ export default {
         },
         // ---- 导出（体验 E） ----
         exportLog() {
+            // rows 为新→旧，导出翻成时间轴序（旧→新，.log 文件惯例）
             const lines = this.rows
                 .slice()
                 .reverse()
