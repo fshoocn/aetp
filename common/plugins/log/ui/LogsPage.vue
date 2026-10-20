@@ -7,6 +7,7 @@
             </div>
             <div class="logs-page__actions">
                 <Button :label="tail ? '暂停尾随' : '恢复尾随'" severity="secondary" outlined size="small" @click="toggleTail" />
+                <Button label="删除…" severity="danger" outlined size="small" :disabled="!rows.length" @click="deleteFiltered" />
                 <Button label="导出 .log" severity="secondary" outlined size="small" :disabled="!rows.length" @click="exportLog" />
                 <Button label="立即刷新" icon="pi pi-refresh" size="small" :loading="loading" @click="reload" />
             </div>
@@ -18,7 +19,7 @@
             <Select v-model="window" :options="windowOptions" optionLabel="label" optionValue="value" class="logs-page__filter" @change="reload" />
             <IconField class="logs-page__search">
                 <InputIcon><i class="pi pi-search" /></InputIcon>
-                <InputText v-model="q" placeholder="关键字…" @keyup.enter="reload" />
+                <InputText v-model="q" placeholder="关键字…" @keydown.enter="reload" />
             </IconField>
         </div>
 
@@ -27,19 +28,37 @@
         <div class="logs-page__scroll" ref="scroller" @scroll="onScroll">
             <table class="logs-page__table">
                 <tbody>
-                    <tr v-for="row in rows" :key="row.id" class="logs-page__row" :class="`logs-page__row--${levelName(row.level)}`" @click="openDetail(row)">
-                        <td class="logs-page__time" :title="absolute(row.ts)">{{ relative(row.ts) }}</td>
-                        <td class="logs-page__node">{{ row.node }}</td>
-                        <td class="logs-page__level"><Tag :value="levelName(row.level)" :severity="levelSeverity(row.level)" /></td>
-                        <td class="logs-page__source" :title="row.source || ''">
-                            {{ row.name }}
-                            <span v-if="row.source" class="logs-page__site">{{ row.source }}</span>
-                        </td>
-                        <td class="logs-page__msg">
-                            <button v-if="row.op" class="logs-page__op" title="查看本次操作" @click.stop="filterByOperation(row.op)">{{ row.op }}</button>
-                            <span v-html="highlight(row.msg)"></span>
-                        </td>
-                    </tr>
+                    <template v-for="row in rows" :key="row.id">
+                        <tr class="logs-page__row" :class="`logs-page__row--${levelName(row.level)}`" @click="toggleDetail(row)">
+                            <td class="logs-page__time" :title="absolute(row.ts)">{{ relative(row.ts) }}</td>
+                            <td class="logs-page__node">{{ row.node }}</td>
+                            <td class="logs-page__level"><Tag :value="levelName(row.level)" :severity="levelSeverity(row.level)" /></td>
+                            <td class="logs-page__source" :title="row.source || ''">
+                                {{ row.name }}
+                                <span v-if="row.source" class="logs-page__site">{{ row.source }}</span>
+                            </td>
+                            <td class="logs-page__msg">
+                                <button v-if="row.op" class="logs-page__op" title="查看本次操作" @click.stop="filterByOperation(row.op)">{{ row.op }}</button>
+                                <span v-html="highlight(row.msg)"></span>
+                            </td>
+                        </tr>
+                        <tr v-if="selected && selected.id === row.id" class="logs-page__detail">
+                            <td colspan="5">
+                                <div class="logs-page__detail-meta">
+                                    <span><strong>时间：</strong>{{ absolute(selected.ts) }}</span>
+                                    <span><strong>节点：</strong>{{ selected.node }}</span>
+                                    <span><strong>来源：</strong>{{ selected.name }}（{{ levelName(selected.level) }}）</span>
+                                    <span v-if="selected.source"><strong>调用点：</strong>{{ selected.source }}</span>
+                                    <span v-if="selected.op"><strong>操作：</strong>{{ selected.op }}</span>
+                                </div>
+                                <pre class="logs-page__detail-msg">{{ selected.msg }}</pre>
+                                <div class="logs-page__detail-actions">
+                                    <Button v-if="selected.op" label="查看本次操作" severity="secondary" outlined size="small" @click="filterByOperation(selected.op)" />
+                                    <Button label="收起" severity="secondary" text size="small" @click="selected = null" />
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
                     <tr v-if="!rows.length && !loading">
                         <td colspan="5" class="logs-page__empty">暂无日志</td>
                     </tr>
@@ -50,33 +69,6 @@
         <button v-if="pendingNew > 0 && !follow" class="logs-page__jump" @click="jumpToLatest">
             ↓ {{ pendingNew }} 条新日志
         </button>
-
-        <Drawer v-model:visible="detailVisible" header="日志详情" position="right" class="logs-page__drawer">
-            <template v-if="selected">
-                <div class="logs-page__detail-meta">
-                    <p><strong>时间：</strong>{{ absolute(selected.ts) }}</p>
-                    <p><strong>节点：</strong>{{ selected.node }}</p>
-                    <p><strong>来源：</strong>{{ selected.name }}（{{ levelName(selected.level) }}）</p>
-                    <p v-if="selected.source"><strong>调用点：</strong>{{ selected.source }}</p>
-                    <p v-if="selected.op"><strong>操作：</strong>{{ selected.op }}</p>
-                </div>
-                <pre class="logs-page__detail-msg">{{ selected.msg }}</pre>
-                <div class="logs-page__detail-actions">
-                    <Button label="前后文" severity="secondary" outlined size="small" :loading="contextLoading" @click="loadContext" />
-                    <Button label="复制" severity="secondary" outlined size="small" @click="copyLine(selected)" />
-                    <Button v-if="selected.op" label="查看本次操作" severity="secondary" outlined size="small" @click="filterByOperation(selected.op)" />
-                </div>
-                <div v-if="contextRows.length" class="logs-page__context">
-                    <p class="logs-page__context-title">前后各 {{ contextLimit }} 条（全部节点）</p>
-                    <div v-for="row in contextRows" :key="`ctx-${row.id}`" class="logs-page__context-row" :class="{ 'logs-page__context-row--focus': row.id === selected.id }">
-                        <span class="logs-page__time">{{ absolute(row.ts) }}</span>
-                        <span class="logs-page__node">{{ row.node }}</span>
-                        <span class="logs-page__level">{{ levelName(row.level) }}</span>
-                        <span>{{ row.msg }}</span>
-                    </div>
-                </div>
-            </template>
-        </Drawer>
     </section>
 </template>
 
@@ -150,13 +142,9 @@ export default {
             loading: false,
             error: '',
             nodes: [],
-            timer: null,
-            disposed: false,
             selected: null,
-            detailVisible: false,
-            contextRows: [],
-            contextLoading: false,
-            contextLimit: 30
+            timer: null,
+            disposed: false
         };
     },
     computed: {
@@ -284,38 +272,37 @@ export default {
             this.pendingNew = 0;
             this.scrollToTop();
         },
-        // ---- 详情 / 前后文（体验 B） ----
-        openDetail(row) {
-            this.selected = row;
-            this.contextRows = [];
-            this.detailVisible = true;
-        },
-        async loadContext() {
-            if (!this.selected) return;
-            this.contextLoading = true;
-            try {
-                const before = await fetchJson(`${apiBase()}/api/logs?${this.buildQuery({ before_id: this.selected.id, limit: this.contextLimit })}`);
-                const after = await fetchJson(`${apiBase()}/api/logs?${this.buildQuery({ after_id: this.selected.id, limit: this.contextLimit })}`);
-                // before 为新→旧，翻成时间轴序：旧…近 [选中] 近…新
-                this.contextRows = (before.logs || [])
-                    .slice()
-                    .reverse()
-                    .concat([this.selected], after.logs || []);
-            } catch (error) {
-                this.error = error instanceof Error ? error.message : String(error);
-            } finally {
-                this.contextLoading = false;
-            }
-        },
-        copyLine(row) {
-            const text = `${this.absolute(row.ts)} [${row.node}] ${row.name} ${this.levelName(row.level)} ${row.msg}`;
-            navigator.clipboard && navigator.clipboard.writeText(text);
+        // ---- 行内详情（点开展开、再点收起） ----
+        toggleDetail(row) {
+            this.selected = this.selected && this.selected.id === row.id ? null : row;
         },
         // ---- 操作关联（体验 C）：一键聚齐本次操作 ----
         filterByOperation(op) {
             this.q = op;
             this.detailVisible = false;
             this.reload();
+        },
+        // ---- 删除（按当前筛选，审计留痕） ----
+        async deleteFiltered() {
+            const scope =
+                [this.node ? `节点=${this.node}` : '', this.q ? `关键字=${this.q}` : '', this.level !== null && this.level !== undefined ? `级别≤${this.levelName(this.level)}` : '']
+                    .filter(Boolean)
+                    .join('、') || '全部（当前时间窗）';
+            if (!window.confirm(`按当前筛选（${scope}）删除 ${this.rows.length} 条日志？\n删除行为会记审计，不可撤销。`)) return;
+            try {
+                const response = await fetch(`${apiBase()}/api/logs?${this.buildQuery({})}`, {
+                    method: 'DELETE',
+                    headers: authHeaders()
+                });
+                const data = await response.json().catch(() => null);
+                if (!response.ok) {
+                    throw new Error((data && data.error) || `删除失败 (${response.status})`);
+                }
+                this.pendingNew = 0;
+                await this.reload();
+            } catch (error) {
+                this.error = error instanceof Error ? error.message : String(error);
+            }
         },
         // ---- 导出（体验 E） ----
         exportLog() {
@@ -477,26 +464,23 @@ export default {
     background: var(--content-background, #1e1f26);
     padding: 0.75rem;
     border-radius: 6px;
+    margin: 0.5rem 0;
+}
+.logs-page__detail td {
+    background: var(--content-hover-background, rgba(255, 255, 255, 0.03));
+    padding: 0.75rem 1rem;
+}
+.logs-page__detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    font-size: 0.8125rem;
+    opacity: 0.9;
 }
 .logs-page__detail-actions {
     display: flex;
     gap: 0.5rem;
-    margin: 0.75rem 0;
+    margin-top: 0.5rem;
     flex-wrap: wrap;
-}
-.logs-page__context-title {
-    opacity: 0.7;
-    font-size: 0.8125rem;
-}
-.logs-page__context-row {
-    display: grid;
-    grid-template-columns: 11rem 7rem 4rem 1fr;
-    gap: 0.5rem;
-    font-size: 0.75rem;
-    padding: 0.25rem 0.4rem;
-    border-bottom: 1px solid var(--content-border, #434652);
-}
-.logs-page__context-row--focus {
-    background: rgba(79, 70, 229, 0.2);
 }
 </style>
