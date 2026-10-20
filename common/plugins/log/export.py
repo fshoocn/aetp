@@ -24,7 +24,13 @@ LEVELS: dict[str, int] = {
 
 
 #: 溯源时跳过的栈帧（框架 / 日志自身），第一个业务帧即日志调用点
-_SKIP_MARKERS: tuple[str, ...] = ("cordis_port", "logging", "plugins/log", "asyncio")
+_SKIP_MARKERS: tuple[str, ...] = (
+    "cordis_port",
+    "logging",
+    "plugins/log",
+    "plugins/webapi/router",
+    "asyncio",
+)
 
 
 def call_site() -> str:

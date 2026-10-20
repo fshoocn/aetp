@@ -18,6 +18,7 @@ cordis **exporter 机制**收集日志（三个平级出口）：
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -70,6 +71,8 @@ class LogPlugin:
         self._ui_registered: bool = False
         #: 入库时间戳被钳制的条数（时钟漂移可观测）
         self._clamped: int = 0
+        #: 存储写入失败次数（库损坏/不可写；出口降级不炸业务）
+        self._store_failures: int = 0
 
     # ------------------------------------------------------------- 生命周期
     def init(self) -> object:
@@ -143,6 +146,7 @@ class LogPlugin:
             if api is not None and comm is not None:
                 api.get("/api/logs", self._logs_handler, kind="api", name="log.query")
                 api.get("/api/logs/nodes", self._nodes_handler, kind="api", name="log.nodes")
+                api.delete("/api/logs", self._delete_logs, kind="api", name="log.delete")
                 self._dispose_health = api.add_health_provider("log", self._metrics)
                 comm.on("log.batch", self._on_log_batch)
                 break
@@ -171,7 +175,14 @@ class LogPlugin:
         return {
             "store": str(self._store.path) if self._store else "",
             "clamped": self._clamped,
+            "store_failures": self._store_failures,
         }
+
+    def _note_store_failure(self, exc: Exception) -> None:
+        """存储不可写：出口降级（丢入库）但绝不炸业务调用；库损坏已隔离重建。"""
+        self._store_failures += 1
+        if self._store_failures == 1:
+            self.ctx.logger.warning("日志查询库写入失败（后续静默计数）：%s", exc)
 
     def _node_name(self) -> str:
         try:
@@ -193,9 +204,12 @@ class LogPlugin:
                 "source": call_site(),
             }
             if self._store is not None:
-                clamped: list[int] = []
-                self._store.write_batch(self._node_name(), [entry], clamped=clamped)
-                self._clamped += len(clamped)
+                try:
+                    clamped: list[int] = []
+                    self._store.write_batch(self._node_name(), [entry], clamped=clamped)
+                    self._clamped += len(clamped)
+                except (sqlite3.Error, OSError) as exc:
+                    self._note_store_failure(exc)
             # comm 延迟就绪：未就绪时仅本地入库，就绪后自动开始上报
             comm = self.ctx.get("comm")
             if comm is not None:
@@ -223,9 +237,12 @@ class LogPlugin:
             for item in cast(list[object], logs)
             if isinstance(item, dict)
         ]
-        clamped: list[int] = []
-        self._store.write_batch(meta["node"], entries, clamped=clamped)
-        self._clamped += len(clamped)
+        try:
+            clamped: list[int] = []
+            self._store.write_batch(meta["node"], entries, clamped=clamped)
+            self._clamped += len(clamped)
+        except (sqlite3.Error, OSError) as exc:
+            self._note_store_failure(exc)
 
     async def _trim_loop(self) -> None:
         while True:
@@ -266,7 +283,54 @@ class LogPlugin:
 
     async def _nodes_handler(self, _request: Request) -> dict[str, object]:
         """``GET /api/logs/nodes``：上报过日志的节点清单（过滤下拉）。"""
-        return {"nodes": self._store.nodes() if self._store else []}
+        if self._store is None:
+            return {"nodes": []}
+        try:
+            return {"nodes": self._store.nodes()}
+        except (sqlite3.Error, OSError) as exc:
+            return cast(dict[str, object], self.ctx.webapi.json(
+                {"error": f"查询库不可用：{type(exc).__name__}"}, status_code=503
+            ))
+
+    async def _delete_logs(self, request: Request) -> dict[str, object]:
+        """``DELETE /api/logs``：按当前筛选删除（审计留痕，防灭迹）。"""
+        if self._store is None:
+            return {"deleted": 0}
+        params = request.query_params
+
+        def as_int(raw: str | None) -> int | None:
+            return int(raw) if raw and raw.isdigit() else None
+
+        def as_float(raw: str | None) -> float | None:
+            try:
+                return float(raw) if raw else None
+            except ValueError:
+                return None
+
+        node = params.get("node") or None
+        level = as_int(params.get("level"))
+        q = params.get("q") or None
+        try:
+            deleted = self._store.delete(
+                node=node,
+                level=level,
+                q=q,
+                from_ts=as_float(params.get("from_ts")),
+                to_ts=as_float(params.get("to_ts")),
+            )
+        except (sqlite3.Error, OSError) as exc:
+            return cast(dict[str, object], self.ctx.webapi.json(
+                {"error": f"删除失败：{type(exc).__name__}"}, status_code=503
+            ))
+        # 删除操作本身留审计（条件 + 条数）：日志可删，删除行为不隐匿
+        self.ctx.logger.info(
+            "审计：删除日志 %d 条（node=%s level=%s q=%s）",
+            deleted,
+            node or "*",
+            level if level is not None else "*",
+            q or "*",
+        )
+        return {"deleted": deleted}
 
 
 __all__: list[str] = ["LogPlugin"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -165,6 +166,38 @@ class LogStoreTests(unittest.TestCase):
             store.trim(retain_days=30, max_rows=1)
             self.assertEqual([row["msg"] for row in store.query()], ["boom-needle"])
 
+    def test_delete_by_filter_and_clear_all(self) -> None:
+        """删除：按筛选删（返回条数），不带条件 = 清空全部。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            store = LogStore(Path(temporary) / "log.sqlite")
+            store.write_batch(
+                "n1", [{"ts": time.time(), "name": "a", "level": 2, "op": "", "msg": "keep"}]
+            )
+            store.write_batch(
+                "n2", [{"ts": time.time(), "name": "b", "level": 2, "op": "", "msg": "drop-me"}]
+            )
+            self.assertEqual(store.delete(q="drop-me"), 1)
+            self.assertEqual([row["msg"] for row in store.query()], ["keep"])
+            self.assertEqual(store.delete(), 1)
+            self.assertEqual(store.query(), [])
+
+    def test_corrupt_store_is_quarantined_and_rebuilt(self) -> None:
+        """库损坏：隔离留证（.corrupt）并重建新库（自愈）。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "log.sqlite"
+            store = LogStore(path)
+            path.write_bytes(b"this is not a sqlite database")
+            with self.assertRaises(sqlite3.DatabaseError):
+                store.write_batch(
+                    "n", [{"ts": time.time(), "name": "a", "level": 2, "op": "", "msg": "x"}]
+                )
+            self.assertTrue(path.with_name("log.sqlite.corrupt").is_file())
+            # 自愈：下次操作自动重建新库
+            store.write_batch(
+                "n", [{"ts": time.time(), "name": "a", "level": 2, "op": "", "msg": "fresh"}]
+            )
+            self.assertEqual([row["msg"] for row in store.query()], ["fresh"])
+
     def test_write_clamps_out_of_range_timestamps(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = LogStore(Path(temporary) / "log.sqlite")
@@ -288,6 +321,18 @@ class LogQueryTests(unittest.IsolatedAsyncioTestCase):
         messages = [row["msg"] for row in data["logs"]]
         self.assertIn("error-入库", "\n".join(messages))
         self.assertNotIn("info-不入库", "\n".join(messages))
+
+    async def test_store_failure_never_breaks_logging(self) -> None:
+        """库损坏时出口降级不炸业务调用；隔离重建后自动恢复入库。"""
+        await self.boot()
+        assert self.context is not None
+        (self.root / "logs" / "log.sqlite").write_bytes(b"corrupt!")
+        self.context.logger.error("损坏期间的日志")  # 不应抛出
+        self.context.logger.error("恢复后的日志")
+        await self.context.comm.flush(timeout=5.0)
+        data = await self.get_json(f"/api/logs?q={quote('恢复后')}")
+        self.assertEqual(len(data["logs"]), 1)
+        self.assertTrue((self.root / "logs" / "log.sqlite.corrupt").is_file())
 
     async def test_time_window_filters(self) -> None:
         """from_ts / to_ts 时间窗过滤（体验 E 的快捷范围）。"""

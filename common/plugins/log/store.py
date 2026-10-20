@@ -8,11 +8,13 @@
 
 from __future__ import annotations
 
+import functools
 import sqlite3
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import closing
 from pathlib import Path
+from typing import Any, TypeVar
 
 #: ingest 时间戳钳制窗：超出 ``[now - 保留天数, now + 1 天]`` 钳到边界并计数
 FUTURE_SKEW_S: float = 24 * 3600.0
@@ -30,11 +32,40 @@ def _open_store(path: Path) -> sqlite3.Connection:
     return conn
 
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _isolating(method: _F) -> _F:
+    """库损坏时隔离留证（``.corrupt``），下次操作自动重建新库。"""
+
+    @functools.wraps(method)
+    def wrapper(self: LogStore, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return method(self, *args, **kwargs)
+        except sqlite3.DatabaseError:
+            self.quarantine_corrupt()
+            raise
+
+    return wrapper  # type: ignore[return-value]
+
+
 class LogStore:
     """``log.sqlite``：批量写入 / 游标查询 / 双限保留。"""
 
     def __init__(self, path: Path) -> None:
         self.path = path
+
+    def quarantine_corrupt(self) -> None:
+        """把损坏的库移存 ``*.corrupt`` 留证；下次操作自动重建新库。"""
+        for suffix in ("", "-wal", "-shm"):
+            candidate = Path(f"{self.path}{suffix}")
+            try:
+                if suffix == "":
+                    candidate.replace(self.path.with_name(f"{self.path.name}.corrupt"))
+                else:
+                    candidate.unlink()
+            except OSError:
+                pass
 
     def _ensure(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -53,6 +84,7 @@ class LogStore:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_node_ts ON logs(node, ts)")
         conn.commit()
 
+    @_isolating
     def write_batch(
         self,
         node: str,
@@ -92,6 +124,7 @@ class LogStore:
             )
         return len(rows)
 
+    @_isolating
     def query(
         self,
         *,
@@ -165,6 +198,7 @@ class LogStore:
         # after_id（尾随）→ 旧→新追加序；否则（回翻）→ 新→旧浏览序
         return result
 
+    @_isolating
     def nodes(self) -> list[str]:
         """上报过日志的节点清单（供过滤下拉）。"""
         with closing(_open_store(self.path)) as conn:
@@ -172,6 +206,7 @@ class LogStore:
             rows = conn.execute("SELECT DISTINCT node FROM logs ORDER BY node").fetchall()
         return [str(row[0]) for row in rows]
 
+    @_isolating
     def trim(self, *, retain_days: float, max_rows: int) -> None:
         """双限保留（先到先删）：过期天数 + 总条数上限。"""
         with closing(_open_store(self.path)) as conn, conn:
@@ -184,6 +219,34 @@ class LogStore:
                 "(SELECT id FROM logs ORDER BY id DESC LIMIT ?)",
                 (max(1, max_rows),),
             )
+    @_isolating
+    def delete(
+        self,
+        *,
+        node: str | None = None,
+        level: int | None = None,
+        q: str | None = None,
+        from_ts: float | None = None,
+        to_ts: float | None = None,
+    ) -> int:
+        """按筛选条件删除（返回删除行数）；不带条件 = 清空全部。"""
+        like: str | None = None
+        if q:
+            escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = f"%{escaped}%"
+        params: tuple[object, ...] = (
+            node, node, level, level, like, like,
+            from_ts, from_ts, to_ts, to_ts,
+        )
+        with closing(_open_store(self.path)) as conn, conn:
+            self._ensure(conn)
+            cursor = conn.execute(
+                "DELETE FROM logs WHERE (? IS NULL OR node = ?) "
+                "AND (? IS NULL OR level <= ?) AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
+                "AND (? IS NULL OR ts >= ?) AND (? IS NULL OR ts <= ?)",
+                params,
+            )
+            return int(cursor.rowcount or 0)
 
 
 __all__: list[str] = ["FUTURE_SKEW_S", "LogStore"]
