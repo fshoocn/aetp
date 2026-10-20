@@ -41,7 +41,7 @@ class CommTests(unittest.IsolatedAsyncioTestCase):
             await unload_all(self.context)
         self._temp.cleanup()
 
-    async def boot(self, comm_ini: str) -> None:
+    async def boot(self, comm_ini: str, *, node_name: str = "test-node") -> None:
         config_path = self.root / "config.ini"
         config_path.write_text(
             "[node]\n"
@@ -57,7 +57,7 @@ class CommTests(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8",
         )
         self.context = Context()
-        self.context.provide("node_name", "test-node")
+        self.context.provide("node_name", node_name)
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
         await self.context.plugin(WebApiPlugin)
         await self.context.plugin(CommService)
@@ -114,8 +114,11 @@ class CommTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.metrics())["dropped"], 3)
 
     async def test_http_roundtrip_with_gzip_and_token(self) -> None:
-        """target 指向自身：走批量 HTTP（gzip + 令牌）环回，处理器照常收到。"""
-        await self.boot(f"target = http://127.0.0.1:{self.port}\nqueue_max = 50\n")
+        """target 指向自身：gzip + 令牌环回；中文节点名也能发（回归：头限 latin-1）。"""
+        await self.boot(
+            f"target = http://127.0.0.1:{self.port}\nqueue_max = 50\n",
+            node_name="从节点甲",
+        )
         assert self.context is not None
         received: list[object] = []
         self.context.comm.on("t", _collector(received))

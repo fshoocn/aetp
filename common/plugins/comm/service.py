@@ -63,7 +63,7 @@ def _post_gzip_json(url: str, node: str, items: list[dict[str, object]], token: 
     headers = {
         "Content-Type": "application/json",
         "Content-Encoding": "gzip",
-        "X-AETP-Node": node,
+        # 节点名只随 body 传递：HTTP 头限 latin-1，中文节点名会炸请求构造
     }
     if token:
         headers["X-AETP-Token"] = token
@@ -78,8 +78,8 @@ class CommService(Service[CommConfig]):
 
     provide: str | None = "comm"
     name: str = "comm"
-    #: ingest 路由挂在 webapi 上
-    inject: ClassVar[list[str]] = ["webapi"]
+    #: ingest 路由挂在 webapi 上；令牌取自 [web] auth_token（主从机器凭证）
+    inject: ClassVar[list[str]] = ["appconfig", "webapi"]
     Config: type[CommConfig] = CommConfig
 
     def __init__(self, ctx: Context, config: CommConfig | None = None) -> None:
@@ -88,6 +88,8 @@ class CommService(Service[CommConfig]):
         self._provided_ctx: Context = ctx
         self.config: CommConfig = config if isinstance(config, CommConfig) else CommConfig()
         self._target: str = self.config.target.strip().rstrip("/")
+        #: 主从通信令牌：复用 [web] auth_token（不新增密钥体系）
+        self._token: str = str(self.ctx.appconfig.get("web", "auth_token") or "")
         self._queue: deque[dict[str, object]] = deque(maxlen=max(1, self.config.queue_max))
         self._handlers: dict[str, list[CommTopicHandler]] = {}
         self._wake: asyncio.Event = asyncio.Event()
@@ -108,9 +110,15 @@ class CommService(Service[CommConfig]):
         dispose_health = api.add_health_provider("comm", self._metrics)
         self._pump_task = asyncio.create_task(self._pump())
         self._pump_task.add_done_callback(self._log_pump_exit)
-        self.ctx.logger.info(
-            "comm 已启动：%s", self._target or "本地自环（本节点即汇聚点）"
-        )
+        if self._target:
+            self.ctx.logger.info("comm 已启动：上报 %s", self._target)
+        else:
+            self.ctx.logger.info("comm 已启动：本地自环（本节点即汇聚点）")
+            if str(getattr(self.ctx, "node_kind", "")) != "master":
+                self.ctx.logger.warning(
+                    "[comm] 未配置 target：本节点消息只走本地自环，**不会上报主节点**"
+                    "（从节点请在 [comm] target 填主节点基地址）"
+                )
 
         def cleanup() -> None:
             dispose_health()
@@ -230,15 +238,17 @@ class CommService(Service[CommConfig]):
             await self._dispatch_items(batch, node=self._node_name(), local=True)
             return
         url = f"{self._target}/api/comm/ingest"
-        token = str(getattr(getattr(self.ctx.webapi, "config", None), "auth_token", "") or "")
         attempt = 0
         while True:
             try:
                 status = await asyncio.to_thread(
-                    _post_gzip_json, url, self._node_name(), batch, token
+                    _post_gzip_json, url, self._node_name(), batch, self._token
                 )
-            except (urllib.error.URLError, OSError, ValueError):
+            except urllib.error.HTTPError as exc:
+                status = exc.code  # 4xx/5xx 显示真相，不当网络错误重试
+            except (urllib.error.URLError, OSError, ValueError) as exc:
                 status = 0
+                self.ctx.logger.debug("comm 上报异常（将退避重试）：%s %s", type(exc).__name__, exc)
             if 200 <= status < 300:
                 self._sent += 1
                 return
