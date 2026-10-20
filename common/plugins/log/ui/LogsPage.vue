@@ -31,8 +31,14 @@
                         <td class="logs-page__time" :title="absolute(row.ts)">{{ relative(row.ts) }}</td>
                         <td class="logs-page__node">{{ row.node }}</td>
                         <td class="logs-page__level"><Tag :value="levelName(row.level)" :severity="levelSeverity(row.level)" /></td>
-                        <td class="logs-page__source">{{ row.name }}</td>
-                        <td class="logs-page__msg" v-html="highlight(row.msg)"></td>
+                        <td class="logs-page__source" :title="row.source || ''">
+                            {{ row.name }}
+                            <span v-if="row.source" class="logs-page__site">{{ row.source }}</span>
+                        </td>
+                        <td class="logs-page__msg">
+                            <button v-if="row.op" class="logs-page__op" title="查看本次操作" @click.stop="filterByOperation(row.op)">{{ row.op }}</button>
+                            <span v-html="highlight(row.msg)"></span>
+                        </td>
                     </tr>
                     <tr v-if="!rows.length && !loading">
                         <td colspan="5" class="logs-page__empty">暂无日志</td>
@@ -51,6 +57,7 @@
                     <p><strong>时间：</strong>{{ absolute(selected.ts) }}</p>
                     <p><strong>节点：</strong>{{ selected.node }}</p>
                     <p><strong>来源：</strong>{{ selected.name }}（{{ levelName(selected.level) }}）</p>
+                    <p v-if="selected.source"><strong>调用点：</strong>{{ selected.source }}</p>
                     <p v-if="selected.op"><strong>操作：</strong>{{ selected.op }}</p>
                 </div>
                 <pre class="logs-page__detail-msg">{{ selected.msg }}</pre>
@@ -418,8 +425,28 @@ export default {
 }
 .logs-page__source {
     white-space: nowrap;
-    width: 10rem;
+    width: 12rem;
     opacity: 0.85;
+}
+.logs-page__site {
+    display: block;
+    font-size: 0.7rem;
+    opacity: 0.65;
+}
+.logs-page__op {
+    display: inline-block;
+    margin-right: 0.4rem;
+    padding: 0 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--primary-color, #4f46e5);
+    background: transparent;
+    color: var(--primary-color, #4f46e5);
+    font-size: 0.75rem;
+    cursor: pointer;
+    vertical-align: middle;
+}
+.logs-page__op:hover {
+    background: rgba(79, 70, 229, 0.18);
 }
 .logs-page__empty {
     text-align: center;

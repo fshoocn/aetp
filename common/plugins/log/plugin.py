@@ -28,7 +28,7 @@ from starlette.requests import Request
 from common.plugins.comm import CommMeta
 
 from .config import LogConfig
-from .export import LEVELS, RotatingFile, console_exporter, file_exporter
+from .export import LEVELS, RotatingFile, call_site, console_exporter, file_exporter
 from .op import current_operation
 from .store import LogStore
 
@@ -147,25 +147,25 @@ class LogPlugin:
                 comm.on("log.batch", self._on_log_batch)
                 break
             await asyncio.sleep(0.5)
-        for _attempt in range(60):
-            if self._ui_registered:
-                return
+        # 查看页常驻守护：webui 被换装 / 重载会连带清掉贡献清单（如 dist 重建后
+        # ensure_installed 换装），循环校验并自动补注册；无头部署自然空转
+        while True:
             webui = self.ctx.get("webui")
             if webui is not None:
-                webui.register_ui(
-                    "logs",
-                    kind="page",
-                    format="vue",
-                    resource_root=str(Path(__file__).resolve().parent / "ui"),
-                    entry="LogsPage.vue",
-                    path="/logs",
-                    title="日志",
-                    menu_group="系统",
-                    menu_order=60,
-                )
-                self._ui_registered = True
-                return
-            await asyncio.sleep(0.5)
+                known = {item.id for item in webui.ui_contributions()}
+                if "log:logs" not in known:
+                    webui.register_ui(
+                        "logs",
+                        kind="page",
+                        format="vue",
+                        resource_root=str(Path(__file__).resolve().parent / "ui"),
+                        entry="LogsPage.vue",
+                        path="/logs",
+                        title="日志",
+                        menu_group="",
+                        menu_order=100,
+                    )
+            await asyncio.sleep(5.0)
 
     def _metrics(self) -> dict[str, object]:
         return {
@@ -190,6 +190,7 @@ class LogPlugin:
                 "level": int(message.level),
                 "op": current_operation() or "",
                 "msg": Logger.format(exporter, message),
+                "source": call_site(),
             }
             if self._store is not None:
                 clamped: list[int] = []

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import sys
 import time
 from pathlib import Path
@@ -22,10 +23,25 @@ LEVELS: dict[str, int] = {
 }
 
 
-def format_line(message: Message, text: str) -> str:
-    """单行日志：时间戳 + 级别 + 日志名 + 正文。"""
+#: 溯源时跳过的栈帧（框架 / 日志自身），第一个业务帧即日志调用点
+_SKIP_MARKERS: tuple[str, ...] = ("cordis_port", "logging", "plugins/log", "asyncio")
+
+
+def call_site() -> str:
+    """业务调用点 ``文件:行号``（跳过框架 / 日志栈帧；取不到返回空串）。"""
+    for frame in inspect.stack()[1:]:
+        filename = frame.filename.replace("\\", "/")
+        if any(marker in filename for marker in _SKIP_MARKERS):
+            continue
+        return f"{Path(filename).name}:{frame.lineno}"
+    return ""
+
+
+def format_line(message: Message, text: str, source: str = "") -> str:
+    """单行日志：时间戳 + 级别 + 日志名 + 调用点 + 正文。"""
     stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(message.ts / 1000))
-    return f"{stamp} {message.type.upper():5s} [{message.name}] {text}"
+    site = f" [{source}]" if source else ""
+    return f"{stamp} {message.type.upper():5s} [{message.name}]{site} {text}"
 
 
 class RotatingFile:
@@ -65,7 +81,7 @@ def console_exporter(level: int) -> Exporter:
     def export(message: Message) -> None:
         text = Logger.format(exporter, message)
         stream = sys.stderr if message.level <= LoggerLevel.WARN else sys.stdout
-        stream.write(format_line(message, text) + "\n")
+        stream.write(format_line(message, text, call_site()) + "\n")
         stream.flush()
 
     exporter["export"] = export
@@ -78,7 +94,7 @@ def file_exporter(level: int, sink: RotatingFile) -> Exporter:
 
     def export(message: Message) -> None:
         try:
-            sink.write(format_line(message, Logger.format(exporter, message)))
+            sink.write(format_line(message, Logger.format(exporter, message), call_site()))
         except OSError as exc:
             # 日志出口自身的 IO 失败不能拖垮业务调用；报到 stderr 即止
             sys.stderr.write(f"日志写入失败：{sink.path}：{exc}\n")
@@ -90,6 +106,7 @@ def file_exporter(level: int, sink: RotatingFile) -> Exporter:
 __all__: list[str] = [
     "LEVELS",
     "RotatingFile",
+    "call_site",
     "console_exporter",
     "file_exporter",
     "format_line",

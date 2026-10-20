@@ -41,8 +41,14 @@ class LogStore:
             "CREATE TABLE IF NOT EXISTS logs ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "ts REAL NOT NULL, node TEXT NOT NULL, name TEXT NOT NULL, "
-            "level INTEGER NOT NULL, op TEXT NOT NULL DEFAULT '', msg TEXT NOT NULL)"
+            "level INTEGER NOT NULL, op TEXT NOT NULL DEFAULT '', msg TEXT NOT NULL, "
+            "source TEXT NOT NULL DEFAULT '')"
         )
+        try:
+            # 旧库升级：补调用点列（重复执行安全）
+            conn.execute("ALTER TABLE logs ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_node_ts ON logs(node, ts)")
         conn.commit()
@@ -72,6 +78,7 @@ class LogStore:
                     int(raw_level) if isinstance(raw_level, (int, float)) else 0,
                     str(entry.get("op") or "")[:64],
                     str(entry.get("msg") or "")[:8192],
+                    str(entry.get("source") or "")[:240],
                 )
             )
         if not rows:
@@ -79,7 +86,8 @@ class LogStore:
         with closing(_open_store(self.path)) as conn, conn:
             self._ensure(conn)
             conn.executemany(
-                "INSERT INTO logs (ts, node, name, level, op, msg) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO logs (ts, node, name, level, op, msg, source) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
         return len(rows)
@@ -122,7 +130,7 @@ class LogStore:
         )
         if after_id is not None:  # 尾随（after_id）：旧→新追加序
             sql = (
-                "SELECT id, ts, node, name, level, op, msg FROM logs "
+                "SELECT id, ts, node, name, level, op, msg, source FROM logs "
                 "WHERE (? IS NULL OR node = ?) AND (? IS NULL OR level <= ?) "
                 "AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
                 "AND (? IS NULL OR id > ?) AND (? IS NULL OR id < ?) "
@@ -131,7 +139,7 @@ class LogStore:
             )
         else:  # 回翻 / 首屏：新→旧浏览序
             sql = (
-                "SELECT id, ts, node, name, level, op, msg FROM logs "
+                "SELECT id, ts, node, name, level, op, msg, source FROM logs "
                 "WHERE (? IS NULL OR node = ?) AND (? IS NULL OR level <= ?) "
                 "AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
                 "AND (? IS NULL OR id > ?) AND (? IS NULL OR id < ?) "
@@ -150,6 +158,7 @@ class LogStore:
                 "level": row[4],
                 "op": row[5],
                 "msg": row[6],
+                "source": row[7],
             }
             for row in rows
         ]

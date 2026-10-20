@@ -89,7 +89,7 @@ function apply(value) {
             >。保存后插件 API 与 UI 资源改从新地址加载，页面自动刷新。
         </p>
         <InputText v-model="input" class="w-full" placeholder="http://127.0.0.1:8080（留空 = 与页面同源）" @keyup.enter="apply(input)" />
-        <InputText v-model="tokenInput" type="password" class="w-full mt-2" placeholder="节点令牌 X-AETP-Token（留空 = 沿用当前值）" @keyup.enter="apply(input)" />
+        <InputText v-model="tokenInput" type="password" class="w-full mt-2" placeholder="节点令牌 X-AETP-Token（留空 = 沿用当前值；跨源访问必填）" @keyup.enter="apply(input)" />
         <p v-if="message" class="m-0 mt-2 text-sm" :class="isError ? 'text-red-500' : 'text-green-600'">{{ message }}</p>
         <template #footer>
             <Button label="恢复同源" link :disabled="busy" @click="apply('')" />
