@@ -213,7 +213,7 @@ class LogPlugin:
             # comm 延迟就绪：未就绪时仅本地入库，就绪后自动开始上报
             comm = self.ctx.get("comm")
             if comm is not None:
-                comm.send("log.batch", {"logs": [entry]})
+                comm.report("log.batch", {"logs": [entry]})
 
         exporter["export"] = export
         return exporter

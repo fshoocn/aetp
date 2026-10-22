@@ -18,6 +18,7 @@ from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.comm import CommService
+from common.plugins.db import DbPlugin
 from common.plugins.log import LogPlugin, LogStore, log_operation
 from common.plugins.log.export import LEVELS, RotatingFile
 from common.plugins.webapi import WebApiPlugin
@@ -44,6 +45,8 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
             "\n[web]\n"
             f"port = {self.port}\n"
             "auth_token = test-token\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
             "\n[comm]\n"
             "batch_interval = 0.05\n"
             "\n[log]\n" + log_ini,
@@ -51,6 +54,7 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
         )
         self.context = Context()
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)
         await self.context.plugin(WebApiPlugin)
         await self.context.plugin(CommService)
         await self.context.plugin(LogPlugin)
@@ -262,6 +266,8 @@ class LogQueryTests(unittest.IsolatedAsyncioTestCase):
             "\n[web]\n"
             f"port = {self.port}\n"
             "auth_token = test-token\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
             "\n[comm]\n"
             "batch_interval = 0.05\n"
             "\n[log]\n"
@@ -274,6 +280,7 @@ class LogQueryTests(unittest.IsolatedAsyncioTestCase):
         self.context = Context()
         self.context.provide("node_name", "test-node")
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)
         await self.context.plugin(WebApiPlugin)
         await self.context.plugin(CommService)
         await self.context.plugin(LogPlugin)
