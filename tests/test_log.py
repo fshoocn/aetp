@@ -181,6 +181,33 @@ class LogStoreTests(unittest.TestCase):
             self.assertEqual(store.delete(), 1)
             self.assertEqual(store.query(), [])
 
+    def test_keyword_matches_op_name_and_source(self) -> None:
+        """关键字命中 msg / op / 来源名 / 调用点（``q=op-xxxx`` = 查看本次操作）。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            store = LogStore(Path(temporary) / "log.sqlite")
+            store.write_batch(
+                "n1",
+                [
+                    {
+                        "ts": time.time(),
+                        "name": "webapi",
+                        "level": 2,
+                        "op": "op-1a2b3c",
+                        "msg": "enable done",
+                        "source": "plugin.py:20",
+                    },
+                    {"ts": time.time(), "name": "heartbeat", "level": 2, "op": "", "msg": "beat"},
+                ],
+            )
+            self.assertEqual([row["msg"] for row in store.query(q="op-1a2b3c")], ["enable done"])
+            self.assertEqual([row["msg"] for row in store.query(q="webapi")], ["enable done"])
+            self.assertEqual([row["msg"] for row in store.query(q="plugin.py:20")], ["enable done"])
+            self.assertEqual([row["msg"] for row in store.query(q="beat")], ["beat"])
+            self.assertEqual([row["msg"] for row in store.query(q="no-such")], [])
+            # 按筛选删除与查询同一套谓词：删 op 目标行，其余保留
+            self.assertEqual(store.delete(q="op-1a2b3c"), 1)
+            self.assertEqual([row["msg"] for row in store.query()], ["beat"])
+
     def test_corrupt_store_is_quarantined_and_rebuilt(self) -> None:
         """库损坏：隔离留证（.corrupt）并重建新库（自愈）。"""
         with tempfile.TemporaryDirectory() as temporary:

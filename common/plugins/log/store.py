@@ -138,17 +138,22 @@ class LogStore:
         limit: int = 200,
     ) -> list[dict[str, object]]:
         """游标查询（新 → 旧）：``after_id`` / ``before_id`` 二选一（尾随 / 回翻）；
-        ``from_ts`` / ``to_ts`` 时间窗（秒）。"""
+        ``from_ts`` / ``to_ts`` 时间窗（秒）。关键字 ``q`` 命中 msg / op / 来源名 /
+        调用点任一列（``q=op-xxxx`` 即「查看本次操作」）。"""
         # 全字面量 SQL + 可空参数（? IS NULL 即不过滤）——不拼接查询串（S608 合规）
         like: str | None = None
         if q:
             escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             like = f"%{escaped}%"
+        # like 占位 5 个：开关 1（? IS NULL）+ msg / op / name / source 各 1
         params: tuple[object, ...] = (
             node,
             node,
             level,
             level,
+            like,
+            like,
+            like,
             like,
             like,
             after_id,
@@ -165,7 +170,8 @@ class LogStore:
             sql = (
                 "SELECT id, ts, node, name, level, op, msg, source FROM logs "
                 "WHERE (? IS NULL OR node = ?) AND (? IS NULL OR level <= ?) "
-                "AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
+                "AND (? IS NULL OR msg LIKE ? ESCAPE '\\' OR op LIKE ? ESCAPE '\\' "
+                "OR name LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\') "
                 "AND (? IS NULL OR id > ?) AND (? IS NULL OR id < ?) "
                 "AND (? IS NULL OR ts >= ?) AND (? IS NULL OR ts <= ?) "
                 "ORDER BY id ASC LIMIT ?"
@@ -174,7 +180,8 @@ class LogStore:
             sql = (
                 "SELECT id, ts, node, name, level, op, msg, source FROM logs "
                 "WHERE (? IS NULL OR node = ?) AND (? IS NULL OR level <= ?) "
-                "AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
+                "AND (? IS NULL OR msg LIKE ? ESCAPE '\\' OR op LIKE ? ESCAPE '\\' "
+                "OR name LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\') "
                 "AND (? IS NULL OR id > ?) AND (? IS NULL OR id < ?) "
                 "AND (? IS NULL OR ts >= ?) AND (? IS NULL OR ts <= ?) "
                 "ORDER BY id DESC LIMIT ?"
@@ -229,20 +236,25 @@ class LogStore:
         from_ts: float | None = None,
         to_ts: float | None = None,
     ) -> int:
-        """按筛选条件删除（返回删除行数）；不带条件 = 清空全部。"""
+        """按筛选条件删除（返回删除行数）；不带条件 = 清空全部。
+        关键字谓词与 :meth:`query` 一致（msg / op / 来源名 / 调用点），
+        保证「按当前筛选删除」删的就是筛选出的那批行。"""
         like: str | None = None
         if q:
             escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             like = f"%{escaped}%"
+        # like 占位 5 个：开关 1（? IS NULL）+ msg / op / name / source 各 1
         params: tuple[object, ...] = (
-            node, node, level, level, like, like,
+            node, node, level, level, like, like, like, like, like,
             from_ts, from_ts, to_ts, to_ts,
         )
         with closing(_open_store(self.path)) as conn, conn:
             self._ensure(conn)
             cursor = conn.execute(
                 "DELETE FROM logs WHERE (? IS NULL OR node = ?) "
-                "AND (? IS NULL OR level <= ?) AND (? IS NULL OR msg LIKE ? ESCAPE '\\') "
+                "AND (? IS NULL OR level <= ?) "
+                "AND (? IS NULL OR msg LIKE ? ESCAPE '\\' OR op LIKE ? ESCAPE '\\' "
+                "OR name LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\') "
                 "AND (? IS NULL OR ts >= ?) AND (? IS NULL OR ts <= ?)",
                 params,
             )
