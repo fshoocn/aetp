@@ -26,49 +26,56 @@
         <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
 
         <div class="logs-page__scroll" ref="scroller" @scroll="onScroll">
-            <table class="logs-page__table">
-                <tbody>
-                    <template v-for="row in rows" :key="row.id">
-                        <tr class="logs-page__row" :class="`logs-page__row--${levelName(row.level)}`" @click="toggleDetail(row)">
-                            <td class="logs-page__time" :title="absolute(row.ts)">{{ relative(row.ts) }}</td>
-                            <td class="logs-page__node">{{ row.node }}</td>
-                            <td class="logs-page__level"><Tag :value="levelName(row.level)" :severity="levelSeverity(row.level)" /></td>
-                            <td class="logs-page__source" :title="row.source || ''">
-                                {{ row.name }}
-                                <span v-if="row.source" class="logs-page__site">{{ row.source }}</span>
-                            </td>
-                            <td class="logs-page__msg">
-                                <button v-if="row.op" class="logs-page__op" title="查看本次操作" @click.stop="filterByOperation(row.op)">{{ row.op }}</button>
-                                <span v-html="highlight(row.msg)"></span>
-                            </td>
-                        </tr>
-                        <tr v-if="selected && selected.id === row.id" class="logs-page__detail">
-                            <td colspan="5">
-                                <div class="logs-page__detail-meta">
-                                    <span><strong>时间：</strong>{{ absolute(selected.ts) }}</span>
-                                    <span><strong>节点：</strong>{{ selected.node }}</span>
-                                    <span><strong>来源：</strong>{{ selected.name }}（{{ levelName(selected.level) }}）</span>
-                                    <span v-if="selected.source"><strong>调用点：</strong>{{ selected.source }}</span>
-                                    <span v-if="selected.op"><strong>操作：</strong>{{ selected.op }}</span>
-                                </div>
-                                <pre class="logs-page__detail-msg">{{ selected.msg }}</pre>
-                                <div class="logs-page__detail-actions">
-                                    <Button v-if="selected.op" label="查看本次操作" severity="secondary" outlined size="small" @click="filterByOperation(selected.op)" />
-                                    <Button label="收起" severity="secondary" text size="small" @click="selected = null" />
-                                </div>
-                            </td>
-                        </tr>
+            <DataTable :value="rows" dataKey="id" v-model:expandedRows="expandedRows" :rowClass="rowClass" :rowHover="true" size="small" @row-click="onRowClick">
+                <Column expander style="width: 3rem" />
+                <Column header="时间" style="width: 8rem">
+                    <template #body="{ data }">
+                        <span class="logs-page__time" :title="absolute(data.ts)">{{ relative(data.ts) }}</span>
                     </template>
-                    <tr v-if="!rows.length && !loading">
-                        <td colspan="5" class="logs-page__empty">暂无日志</td>
-                    </tr>
-                </tbody>
-            </table>
+                </Column>
+                <Column field="node" header="节点" style="width: 9rem" />
+                <Column header="级别" style="width: 5.5rem">
+                    <template #body="{ data }">
+                        <Tag :value="levelName(data.level)" :severity="levelSeverity(data.level)" />
+                    </template>
+                </Column>
+                <Column header="来源" style="width: 13rem">
+                    <template #body="{ data }">
+                        <div class="logs-page__source" :title="data.source || ''">
+                            {{ data.name }}
+                            <span v-if="data.source" class="logs-page__site">{{ data.source }}</span>
+                        </div>
+                    </template>
+                </Column>
+                <Column header="信息">
+                    <template #body="{ data }">
+                        <Button v-if="data.op" class="logs-page__op" size="small" severity="secondary" outlined :label="data.op" title="查看本次操作" @click.stop="filterByOperation(data.op)" />
+                        <span v-html="highlight(data.msg)"></span>
+                    </template>
+                </Column>
+                <template #expansion="{ data }">
+                    <div class="logs-page__detail">
+                        <div class="logs-page__detail-meta">
+                            <span><strong>时间：</strong>{{ absolute(data.ts) }}</span>
+                            <span><strong>节点：</strong>{{ data.node }}</span>
+                            <span><strong>来源：</strong>{{ data.name }}（{{ levelName(data.level) }}）</span>
+                            <span v-if="data.source"><strong>调用点：</strong>{{ data.source }}</span>
+                            <span v-if="data.op"><strong>操作：</strong>{{ data.op }}</span>
+                        </div>
+                        <pre class="logs-page__detail-msg">{{ data.msg }}</pre>
+                        <div class="logs-page__detail-actions">
+                            <Button v-if="data.op" label="查看本次操作" severity="secondary" outlined size="small" @click="filterByOperation(data.op)" />
+                            <Button label="收起" severity="secondary" text size="small" @click="toggleDetail(data)" />
+                        </div>
+                    </div>
+                </template>
+                <template #empty>
+                    <span class="logs-page__empty">暂无日志</span>
+                </template>
+            </DataTable>
         </div>
 
-        <button v-if="pendingNew > 0 && !follow" class="logs-page__jump" @click="jumpToLatest">
-            ↓ {{ pendingNew }} 条新日志
-        </button>
+        <Button v-if="pendingNew > 0 && !follow" class="logs-page__jump" severity="primary" :label="`↓ ${pendingNew} 条新日志`" @click="jumpToLatest" />
     </section>
 </template>
 
@@ -142,7 +149,9 @@ export default {
             loading: false,
             error: '',
             nodes: [],
-            selected: null,
+            // DataTable 行展开（详情行）：设了 dataKey 时 expandedRows 是
+            // 「行 key → true」的对象映射（展开箭头内部切换也用该形式），单行展开
+            expandedRows: {},
             timer: null,
             disposed: false
         };
@@ -223,6 +232,7 @@ export default {
                 this.rows = data.logs || [];
                 this.pendingNew = 0;
                 this.follow = true;
+                this.expandedRows = {};
                 this.$nextTick(() => this.scrollToTop());
             } catch (error) {
                 this.error = error instanceof Error ? error.message : String(error);
@@ -272,37 +282,54 @@ export default {
             this.pendingNew = 0;
             this.scrollToTop();
         },
-        // ---- 行内详情（点开展开、再点收起） ----
+        // ---- 行内详情（DataTable 行展开：点行展开、再点收起） ----
+        rowClass(data) {
+            return `logs-page__row--${this.levelName(data.level)}`;
+        },
+        onRowClick(event) {
+            // 展开箭头自带 @click.stop，不会触发行点击，无需去重
+            this.toggleDetail(event.data);
+        },
         toggleDetail(row) {
-            this.selected = this.selected && this.selected.id === row.id ? null : row;
+            const isOpen = Boolean(this.expandedRows && this.expandedRows[row.id]);
+            this.expandedRows = isOpen ? {} : { [row.id]: true };
         },
         // ---- 操作关联（体验 C）：一键聚齐本次操作 ----
         filterByOperation(op) {
             this.q = op;
-            this.detailVisible = false;
+            this.expandedRows = {};
             this.reload();
         },
         // ---- 删除（按当前筛选，审计留痕） ----
-        async deleteFiltered() {
+        deleteFiltered() {
             const scope =
                 [this.node ? `节点=${this.node}` : '', this.q ? `关键字=${this.q}` : '', this.level !== null && this.level !== undefined ? `级别≤${this.levelName(this.level)}` : '']
                     .filter(Boolean)
                     .join('、') || '全部（当前时间窗）';
-            if (!window.confirm(`按当前筛选（${scope}）删除 ${this.rows.length} 条日志？\n删除行为会记审计，不可撤销。`)) return;
-            try {
-                const response = await fetch(`${apiBase()}/api/logs?${this.buildQuery({})}`, {
-                    method: 'DELETE',
-                    headers: authHeaders()
-                });
-                const data = await response.json().catch(() => null);
-                if (!response.ok) {
-                    throw new Error((data && data.error) || `删除失败 (${response.status})`);
+            // 插件 SFC 拿不到 useConfirm，走宿主 app.use(ConfirmationService) 装的 $confirm
+            this.$confirm.require({
+                header: '删除日志',
+                message: `按当前筛选（${scope}）删除 ${this.rows.length} 条日志？\n删除行为会记审计，不可撤销。`,
+                icon: 'pi pi-exclamation-triangle',
+                acceptLabel: '删除',
+                rejectLabel: '取消',
+                accept: async () => {
+                    try {
+                        const response = await fetch(`${apiBase()}/api/logs?${this.buildQuery({})}`, {
+                            method: 'DELETE',
+                            headers: authHeaders()
+                        });
+                        const data = await response.json().catch(() => null);
+                        if (!response.ok) {
+                            throw new Error((data && data.error) || `删除失败 (${response.status})`);
+                        }
+                        this.pendingNew = 0;
+                        await this.reload();
+                    } catch (error) {
+                        this.error = error instanceof Error ? error.message : String(error);
+                    }
                 }
-                this.pendingNew = 0;
-                await this.reload();
-            } catch (error) {
-                this.error = error instanceof Error ? error.message : String(error);
-            }
+            });
         },
         // ---- 导出（体验 E） ----
         exportLog() {
@@ -381,44 +408,26 @@ export default {
     overflow: auto;
     border: 1px solid var(--content-border, #434652);
     border-radius: 8px;
-}
-.logs-page__table {
-    width: 100%;
-    border-collapse: collapse;
     font-size: 0.8125rem;
 }
-.logs-page__row {
+/* 行可点 + 行级状态着色（rowClass 打在 DataTable 行上，需 :deep 穿透） */
+.logs-page__scroll :deep(.p-datatable-tbody > tr) {
     cursor: pointer;
 }
-.logs-page__row:hover {
-    background: var(--content-hover-background, rgba(255, 255, 255, 0.04));
-}
-.logs-page__row--error {
+.logs-page__scroll :deep(tr.logs-page__row--error) {
     color: var(--red-400, #ff8787);
 }
-.logs-page__row--warn {
+.logs-page__scroll :deep(tr.logs-page__row--warn) {
     color: var(--yellow-400, #ffe066);
-}
-.logs-page__row td {
-    padding: 0.35rem 0.6rem;
-    border-bottom: 1px solid var(--content-border, #434652);
-    vertical-align: top;
 }
 .logs-page__time {
     white-space: nowrap;
     opacity: 0.75;
-    width: 7rem;
-}
-.logs-page__node {
-    white-space: nowrap;
-    width: 8rem;
-}
-.logs-page__level {
-    width: 5rem;
 }
 .logs-page__source {
     white-space: nowrap;
-    width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
     opacity: 0.85;
 }
 .logs-page__site {
@@ -427,36 +436,30 @@ export default {
     opacity: 0.65;
 }
 .logs-page__op {
-    display: inline-block;
     margin-right: 0.4rem;
-    padding: 0 0.45rem;
-    border-radius: 999px;
-    border: 1px solid var(--primary-color, #4f46e5);
-    background: transparent;
-    color: var(--primary-color, #4f46e5);
-    font-size: 0.75rem;
-    cursor: pointer;
     vertical-align: middle;
 }
-.logs-page__op:hover {
-    background: rgba(79, 70, 229, 0.18);
-}
 .logs-page__empty {
+    display: inline-block;
     text-align: center;
     opacity: 0.6;
-    padding: 2rem !important;
+    padding: 2rem;
 }
 .logs-page__jump {
     position: fixed;
     right: 2.5rem;
     bottom: 2.5rem;
-    padding: 0.5rem 1rem;
-    border-radius: 999px;
-    border: none;
-    background: var(--primary-color, #4f46e5);
-    color: #fff;
-    cursor: pointer;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+/* 展开行详情（DataTable expansion slot） */
+.logs-page__detail {
+    padding: 0.25rem 0.25rem;
+}
+.logs-page__detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    opacity: 0.85;
 }
 .logs-page__detail-msg {
     white-space: pre-wrap;
@@ -466,21 +469,8 @@ export default {
     border-radius: 6px;
     margin: 0.5rem 0;
 }
-.logs-page__detail td {
-    background: var(--content-hover-background, rgba(255, 255, 255, 0.03));
-    padding: 0.75rem 1rem;
-}
-.logs-page__detail-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 1.25rem;
-    font-size: 0.8125rem;
-    opacity: 0.9;
-}
 .logs-page__detail-actions {
     display: flex;
     gap: 0.5rem;
-    margin-top: 0.5rem;
-    flex-wrap: wrap;
 }
 </style>

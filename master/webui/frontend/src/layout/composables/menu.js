@@ -2,11 +2,14 @@ import { computed } from 'vue';
 import { pluginUiState } from '@/plugins/ui-state';
 
 /**
- * 侧边栏菜单模型：宿主自带页面 + 插件 UI 页面（register_ui）。
+ * PrimeVue PanelMenu 侧边栏菜单模型：宿主自带页面 + 插件 UI 页面（register_ui）。
  *
  * 菜单权重即 `register_ui` 的 `menu_order`（越小越靠前）；「插件管理」权重
  * 默认 100（即最低，排最后）。组内按权重排序、分组按组内最靠前的权重排序；
  * 整个菜单权重最靠前的条目即默认首页（`/` 重定向目标，见 router/index.js）。
+ * 未声明 `menu_group` 的页面归入无 path 的 AETP 桶（PluginMenu 直接铺成
+ * 一级菜单）；声明了 `menu_group` 的分组带 `path`（PluginMenu 渲染为
+ * 可折叠的二级菜单）。
  */
 
 //: 「插件管理」菜单权重默认值：100 = 最低（没有插件页面时它仍是首页）

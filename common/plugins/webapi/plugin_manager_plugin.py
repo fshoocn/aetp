@@ -127,7 +127,9 @@ class PluginManagerPlugin(Service[None]):
             self.ctx, self.install_root, self.preinstalled_ids
         )
         self._register_routes()
-        await self.manager.restore_enabled()
+        # 「恢复已启用」不再随插件初始化执行：预装链路（ensure_installed）
+        # 装配完后由 node_runtime 显式调用 restore_enabled，避免同一插件
+        # 先恢复启用、再被覆盖安装重装一遍（启动期加载两次）
         # 锁步模型（DESIGN §4.5）：db 结构变化 → 复检消费方数据依赖，未过则停用并报错
         self.ctx.on("db/schema-changed", self._on_schema_changed)
 
@@ -201,6 +203,15 @@ class PluginManagerPlugin(Service[None]):
     async def ensure_source(self, source_dir: str | Path) -> PublicPluginRecord:
         """预装源就绪一条龙（比对 → 换装如需 → 启用），单锁原子。"""
         return await self._require_manager().ensure_source(source_dir)
+
+    async def restore_enabled(self) -> None:
+        """恢复注册表里已启用的插件。
+
+        由 ``node_runtime`` 在预装链路（ensure_installed）**之后**调用：
+        预装插件此时已就绪并激活，restore 的幂等短路不会二次装载；
+        预装源损坏时则回落到旧版安装（保持可用），非预装的已启用插件照常恢复。
+        """
+        await self._require_manager().restore_enabled()
 
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
         """启用插件并加载进本节点运行时。"""

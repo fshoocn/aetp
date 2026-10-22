@@ -221,15 +221,24 @@ export default {
                 if (!silent) this.error = String(reason && reason.message ? reason.message : reason);
             }
         },
-        async removeNode(nodeId) {
-            if (!window.confirm(`确认移除从模块「${nodeId}」的记录？`)) return;
-            try {
-                await fetchJson(apiUrl(`/api/heartbeat/nodes/${encodeURIComponent(nodeId)}`), { method: 'DELETE' });
-                if (this.detail && this.detail.node.node_id === nodeId) this.detail = null;
-                await this.load();
-            } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
-            }
+        removeNode(nodeId) {
+            // 插件 SFC 拿不到 useConfirm，走宿主 app.use(ConfirmationService) 装的 $confirm
+            this.$confirm.require({
+                header: '移除节点',
+                message: `确认移除从模块「${nodeId}」的记录？`,
+                icon: 'pi pi-exclamation-triangle',
+                acceptLabel: '移除',
+                rejectLabel: '取消',
+                accept: async () => {
+                    try {
+                        await fetchJson(apiUrl(`/api/heartbeat/nodes/${encodeURIComponent(nodeId)}`), { method: 'DELETE' });
+                        if (this.detail && this.detail.node.node_id === nodeId) this.detail = null;
+                        await this.load();
+                    } catch (reason) {
+                        this.error = String(reason && reason.message ? reason.message : reason);
+                    }
+                }
+            });
         },
         schedulePoll() {
             // 超时链轮询：上一拍收完才排下一拍，慢请求不会叠加成轮询风暴

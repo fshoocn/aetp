@@ -33,7 +33,7 @@ function readLayoutConfig() {
     }
 }
 
-const layoutConfig = reactive(readLayoutConfig());
+export const layoutConfig = reactive(readLayoutConfig());
 
 if (typeof document !== 'undefined') {
     document.documentElement.classList.toggle('app-dark', layoutConfig.darkTheme);
@@ -89,14 +89,11 @@ export function useLayout() {
     };
 
     const toggleMenu = () => {
-        if (isDesktop()) {
-            if (layoutConfig.menuMode === 'static') {
-                layoutState.staticMenuInactive = !layoutState.staticMenuInactive;
-            }
-
-            if (layoutConfig.menuMode === 'overlay') {
-                layoutState.overlayMenuActive = !layoutState.overlayMenuActive;
-            }
+        // 静态模式任意窗口宽度都切换常驻侧栏；悬浮模式桌面走 overlay、窄屏走移动端抽屉
+        if (layoutConfig.menuMode === 'static') {
+            layoutState.staticMenuInactive = !layoutState.staticMenuInactive;
+        } else if (isDesktop()) {
+            layoutState.overlayMenuActive = !layoutState.overlayMenuActive;
         } else {
             layoutState.mobileMenuActive = !layoutState.mobileMenuActive;
         }

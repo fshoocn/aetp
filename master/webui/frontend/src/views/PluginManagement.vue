@@ -1,7 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useConfirm } from 'primevue/useconfirm';
 import { getBackendUrl, request } from '@/service/backend';
 import MarkdownDoc from '@/components/MarkdownDoc.vue';
+
+const confirm = useConfirm();
 
 // 非同源时在页头提示数据来源；切换后端会整页刷新，无需响应式
 const backendUrl = getBackendUrl();
@@ -137,23 +140,35 @@ async function uploadFile(file) {
     } catch (reason) {
         const details = reason instanceof Error ? reason.details : undefined;
         if (details && details.code === 'already-installed') {
-            // 同 id 替换不区分版本方向，一律显示确认
-            const confirmed = window.confirm(`插件 ${details.id}（版本 ${details.installed_version}）已安装。\n替换为版本 ${details.incoming_version} 吗？\n确认后旧版本归档保留一份，可回滚。`);
-            if (confirmed) {
-                try {
-                    const data = await sendUpload(file, true);
-                    notice.value = `已替换 ${data.plugin.name}（${details.installed_version} → ${data.plugin.version}），刷新页面以更新菜单和 UI。`;
-                    await loadPlugins();
-                } catch (replaceReason) {
-                    error.value = replaceReason instanceof Error ? replaceReason.message : String(replaceReason);
-                }
-            }
+            // 同 id 替换不区分版本方向，一律显示确认（PrimeVue ConfirmDialog）
+            confirm.require({
+                header: '替换已安装插件',
+                message: `插件 ${details.id}（版本 ${details.installed_version}）已安装。\n替换为版本 ${details.incoming_version} 吗？\n确认后旧版本归档保留一份，可回滚。`,
+                icon: 'pi pi-exclamation-triangle',
+                acceptLabel: '替换',
+                rejectLabel: '取消',
+                accept: () => replaceUpload(file, details)
+            });
         } else {
             error.value = reason instanceof Error ? reason.message : String(reason);
         }
     } finally {
         uploading.value = false;
         uploadRef.value?.clear();
+    }
+}
+
+async function replaceUpload(file, details) {
+    uploading.value = true;
+    error.value = '';
+    try {
+        const data = await sendUpload(file, true);
+        notice.value = `已替换 ${data.plugin.name}（${details.installed_version} → ${data.plugin.version}），刷新页面以更新菜单和 UI。`;
+        await loadPlugins();
+    } catch (replaceReason) {
+        error.value = replaceReason instanceof Error ? replaceReason.message : String(replaceReason);
+    } finally {
+        uploading.value = false;
     }
 }
 
@@ -182,8 +197,18 @@ async function togglePlugin(plugin) {
     }
 }
 
-async function uninstallPlugin(plugin) {
-    if (!window.confirm(`确定卸载“${plugin.name}”吗？插件文件将被删除。`)) return;
+function uninstallPlugin(plugin) {
+    confirm.require({
+        header: '卸载插件',
+        message: `确定卸载“${plugin.name}”吗？插件文件将被删除。`,
+        icon: 'pi pi-exclamation-triangle',
+        acceptLabel: '卸载',
+        rejectLabel: '取消',
+        accept: () => doUninstall(plugin)
+    });
+}
+
+async function doUninstall(plugin) {
     pending.value = plugin.id;
     error.value = '';
     notice.value = '';
@@ -245,18 +270,7 @@ onMounted(loadPlugins);
             </div>
         </header>
 
-        <FileUpload
-            ref="uploadRef"
-            accept=".zip,application/zip"
-            :maxFileSize="33554432"
-            :multiple="false"
-            :showUploadButton="false"
-            :showCancelButton="false"
-            chooseLabel="选择 ZIP 插件包"
-            customUpload
-            auto
-            @uploader="onUploader"
-        >
+        <FileUpload ref="uploadRef" accept=".zip,application/zip" :maxFileSize="33554432" :multiple="false" :showUploadButton="false" :showCancelButton="false" chooseLabel="选择 ZIP 插件包" customUpload auto @uploader="onUploader">
             <template #empty>
                 <div class="flex items-center gap-3 text-muted-color text-sm">
                     <i class="pi pi-upload text-primary" aria-hidden="true" />
@@ -374,9 +388,7 @@ onMounted(loadPlugins);
                                     @click="uninstallPlugin(node.data)"
                                 />
                             </template>
-                            <span v-else class="flex items-center gap-2 text-muted-color text-sm whitespace-nowrap" title="内置插件随平台直装，不可安装 / 升级 / 启停 / 卸载">
-                                <i class="pi pi-lock" aria-hidden="true" /> 随平台直装
-                            </span>
+                            <span v-else class="flex items-center gap-2 text-muted-color text-sm whitespace-nowrap" title="内置插件随平台直装，不可安装 / 升级 / 启停 / 卸载"> <i class="pi pi-lock" aria-hidden="true" /> 随平台直装 </span>
                         </div>
                     </template>
                 </Column>
@@ -395,5 +407,3 @@ onMounted(loadPlugins);
         </Dialog>
     </main>
 </template>
-
-

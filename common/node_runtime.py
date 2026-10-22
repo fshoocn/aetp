@@ -171,6 +171,11 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
             # 其余照常装配，失败原因进日志与安装记录（last_error），管理页可重试
             ctx.logger.error("预装插件 %s 装配失败：%s", source, exc)
 
+    # 「恢复已启用」放在预装链路之后：预装插件已被 ensure_installed 启用，
+    # restore 的幂等短路不会重复装载（此前先恢复再换装会加载两次）；
+    # 预装源损坏时这里回落启用旧版安装，非预装的已启用插件也在此恢复
+    await ctx.plugins.restore_enabled()
+
     ctx.logger.info("%s 装配完成", profile.name)
     return ctx
 

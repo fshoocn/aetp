@@ -79,9 +79,16 @@ function apply(value) {
 </script>
 
 <template>
-    <button type="button" class="layout-topbar-action" :class="{ 'layout-topbar-action-highlight': active }" title="切换后端地址" @click="open">
-        <i class="pi pi-server"></i>
-    </button>
+    <Button
+        type="button"
+        :severity="active ? 'primary' : 'secondary'"
+        text
+        rounded
+        icon="pi pi-server"
+        title="切换后端地址"
+        aria-label="切换后端地址"
+        @click="open"
+    />
 
     <Dialog v-model:visible="visible" header="切换后端地址" :modal="true" :style="{ width: '26rem' }">
         <p class="m-0 mb-3 text-sm opacity-80">

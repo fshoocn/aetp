@@ -63,3 +63,4 @@ history_size = 200      # 状态转换历史保留条数
 
 ⚠️ 依赖 `slave_plugins/heartbeat` 的能力信封模块（`slave_plugins.heartbeat.capabilities`，
 协议两侧共用），交付时两者需同时可导入（随仓库 / 同环境安装）。
+

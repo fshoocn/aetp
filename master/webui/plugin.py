@@ -235,13 +235,20 @@ class WebUiPlugin(Service[WebUiConfig]):
                 },
                 status_code=503,
             )
+        # 入口 HTML 禁止沿用旧缓存：index.html 引用的是带哈希的构建产物，
+        # 重建后旧入口会指向已删除的资源（页面空白、取不到后端数据），
+        # 每次重验证（304 很便宜）才能稳定跟上最新构建
+        cache_headers = {"Cache-Control": "no-cache"}
         if request.method == "HEAD":
             return Response(
                 status_code=200,
                 media_type="text/html",
-                headers={"Content-Length": str(ui_index.stat().st_size)},
+                headers={
+                    "Content-Length": str(ui_index.stat().st_size),
+                    **cache_headers,
+                },
             )
-        return FileResponse(ui_index)
+        return FileResponse(ui_index, headers=cache_headers)
 
     def _caller_ctx(self) -> Context:
         """取本次调用的「使用点」上下文（即调用方插件自己的 ctx）。

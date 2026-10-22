@@ -1,18 +1,23 @@
 <script setup>
 import { useLayout } from '@/layout/composables/layout';
+import { ref } from 'vue';
 import AppConfigurator from './AppConfigurator.vue';
 import BackendSwitcher from './BackendSwitcher.vue';
 import PluginUiOutlet from '@/plugins/PluginUiOutlet.vue';
 
 const { toggleMenu, toggleDarkMode, isDarkTheme } = useLayout();
+
+const configPopover = ref(null);
+
+function toggleConfigPanel(event) {
+    configPopover.value?.toggle(event);
+}
 </script>
 
 <template>
     <div class="layout-topbar">
         <div class="layout-topbar-logo-container">
-            <button class="layout-menu-button layout-topbar-action" @click="toggleMenu">
-                <i class="pi pi-bars"></i>
-            </button>
+            <Button class="layout-menu-button" severity="secondary" text rounded icon="pi pi-bars" aria-label="切换菜单" @click="toggleMenu" />
             <router-link to="/" class="layout-topbar-logo">
                 <svg viewBox="0 0 54 40" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path
@@ -39,28 +44,11 @@ const { toggleMenu, toggleDarkMode, isDarkTheme } = useLayout();
         <div class="layout-topbar-actions">
             <PluginUiOutlet name="app:header-actions" />
             <BackendSwitcher />
-            <div class="layout-config-menu">
-                <button type="button" class="layout-topbar-action" @click="toggleDarkMode">
-                    <i :class="['pi', { 'pi-moon': isDarkTheme, 'pi-sun': !isDarkTheme }]"></i>
-                </button>
-                <div class="relative">
-                    <button
-                        v-styleclass="{ selector: '@next', enterFromClass: 'hidden', enterActiveClass: 'p-anchored-overlay-enter-active', leaveToClass: 'hidden', leaveActiveClass: 'p-anchored-overlay-leave-active', hideOnOutsideClick: true }"
-                        type="button"
-                        class="layout-topbar-action layout-topbar-action-highlight"
-                    >
-                        <i class="pi pi-palette"></i>
-                    </button>
-                    <AppConfigurator />
-                </div>
-            </div>
-
-            <button
-                class="layout-topbar-menu-button layout-topbar-action"
-                v-styleclass="{ selector: '@next', enterFromClass: 'hidden', enterActiveClass: 'p-anchored-overlay-enter-active', leaveToClass: 'hidden', leaveActiveClass: 'p-anchored-overlay-leave-active', hideOnOutsideClick: true }"
-            >
-                <i class="pi pi-ellipsis-v"></i>
-            </button>
+            <Button severity="secondary" text rounded :icon="isDarkTheme ? 'pi pi-moon' : 'pi pi-sun'" aria-label="切换深色模式" @click="toggleDarkMode" />
+            <Button severity="secondary" text rounded icon="pi pi-palette" aria-label="界面设置" @click="toggleConfigPanel" />
+            <Popover ref="configPopover" :show-close-icon="false" class="config-panel-popover">
+                <AppConfigurator />
+            </Popover>
         </div>
     </div>
 </template>
