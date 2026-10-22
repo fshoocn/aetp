@@ -678,7 +678,12 @@ class PluginManager:
         existing = self.fibers.get(plugin_id)
         if existing is not None:
             if self._fiber_state_name(existing) == "ACTIVE":
-                return self._public_record(record)  # 幂等短路：仅对健康运行的 fiber
+                # 幂等短路：仅对健康运行的 fiber。短路也要把记录对齐为已启用——
+                # restore_enabled 是「先置未启用、再 enable」协议，预装链路
+                # （ensure_installed）已装载的插件会被短路返回，不置回 True
+                # 会留下「fiber 在跑、记录却显示未启用」的分裂状态
+                record["enabled"] = True
+                return self._public_record(record)
             # 死 fiber（如热重载失败残留）：就地清理后全新装载，enable 不做静默 no-op
             await self._discard_dead_fiber(plugin_id, existing)
 
