@@ -51,11 +51,11 @@ def resolve_policy(
     policy: DeliveryPolicy | None, *, default: DeliveryPolicy
 ) -> DeliveryPolicy:
     """按默认值合并出完整策略并钳位到合法区间。"""
-    merged: dict[str, int] = {**default, **(policy or {})}
+    source: DeliveryPolicy = policy if policy is not None else default
     return {
-        "min_success": max(0, int(merged.get("min_success", 1))),
-        "min_retries": max(0, int(merged.get("min_retries", 0))),
-        "max_attempts": max(0, int(merged.get("max_attempts", 0))),
+        "min_success": max(0, source.get("min_success", default.get("min_success", 1))),
+        "min_retries": max(0, source.get("min_retries", default.get("min_retries", 0))),
+        "max_attempts": max(0, source.get("max_attempts", default.get("max_attempts", 0))),
     }
 
 

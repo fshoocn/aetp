@@ -84,10 +84,14 @@ class HttpTransport:
             )
         except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError):
             return []
-        raw = data.get("items") if isinstance(data, dict) else None
+        raw = data.get("items")
         if not isinstance(raw, list):
             return []
-        return [cast(Envelope, item) for item in raw if isinstance(item, dict)]
+        return [
+            cast(Envelope, item)
+            for item in cast(list[object], raw)
+            if isinstance(item, dict)
+        ]
 
     async def ack(self, ids: list[str]) -> None:
         """确认下行已处理；失败仅忽略（对端靠超时重投，at-least-once 兜底）。"""
@@ -131,13 +135,16 @@ class HttpTransport:
         )
         with _OPENER.open(request, timeout=POST_TIMEOUT) as response:
             text = response.read(MAX_RESPONSE_BYTES + 1)
+        empty: dict[str, object] = {}
         if len(text) > MAX_RESPONSE_BYTES:
-            return {}
+            return empty
         try:
             parsed: object = json.loads(text) if text else None
         except (ValueError, RecursionError):
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
+            return empty
+        if isinstance(parsed, dict):
+            return cast(dict[str, object], parsed)
+        return empty
 
 
 __all__: list[str] = ["MAX_PULL_ITEMS", "MAX_RESPONSE_BYTES", "POST_TIMEOUT", "HttpTransport"]
