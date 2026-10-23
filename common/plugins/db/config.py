@@ -57,7 +57,8 @@ class DbConfig(FieldConfig):
 
     #: SQLAlchemy 异步连接串（唯一换库入口）；``env:VAR`` 从环境变量取
     #: （SQLite 相对库路径按**节点目录**——config.ini 所在目录——解析）
-    url: str = "sqlite+aiosqlite:///data/aetp.db"
+    #: 默认落点按专属数据目录约定：``data/plugins/db/aetp.db``
+    url: str = "sqlite+aiosqlite:///data/plugins/db/aetp.db"
     #: 是否打印 SQL 日志
     echo: bool = False
     #: 连接池大小（非 SQLite 生效）
@@ -66,9 +67,9 @@ class DbConfig(FieldConfig):
     max_overflow: int = 10
     #: 连接回收秒数（非 SQLite 生效）
     pool_recycle: int = 300
-    #: 孤儿表处置策略：``warn``（告警不删）/ ``drop``（启动即清理）
+    #: 孤儿表处置策略：``warn``（自检只报告）/ ``drop``（自检时清理）
     orphan_policy: str = "warn"
-    #: 归属登记目录；留空 = 取连接串中库文件所在目录（非 SQLite 取 ``data/db``）
+    #: 归属登记目录；留空 = 取连接串中库文件所在目录（非 SQLite 取 ``data/plugins/db``）
     data_dir: str = ""
     #: 库内结构变更日志（``aetp_schema_log``）保留上限，防无限增长
     schema_log_limit: int = 500
@@ -128,7 +129,7 @@ class DbConfig(FieldConfig):
         """归属登记目录（``owners.sqlite`` 所在；相对路径按节点目录解析）。
 
         显式配置 ``data_dir`` 优先；否则 SQLite 取连接串中库文件所在目录，
-        其余方言取 ``data/db``（见 DESIGN §11-6）。
+        其余方言取 ``data/plugins/db``（见 DESIGN §11-6）。
         """
         explicit = self.data_dir.strip()
         if explicit:
@@ -136,12 +137,12 @@ class DbConfig(FieldConfig):
         try:
             parsed = make_url(self.resolved_url())
         except (SQLAlchemyError, ValueError):
-            return Path("data") / "db"
+            return Path("data") / "plugins" / "db"
         if parsed.get_backend_name() == "sqlite":
             database = parsed.database
             if database and database != ":memory:":
                 return Path(database).expanduser().parent
-        return Path("data") / "db"
+        return Path("data") / "plugins" / "db"
 
     def to_dict(self) -> dict[str, object]:
         """导出为字典（展示用途）：连接串密码掩码，不回显凭证。"""

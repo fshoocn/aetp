@@ -43,7 +43,7 @@ class DbPlugin:
     #: 展示名与版本：内置插件没有 plugin.json，清单元数据由插件类属性提供
     display_name: ClassVar[str] = "数据库服务"
     version: ClassVar[str] = "1.0.0"
-    #: 依赖应用配置（读 ``[db]`` 节与 ``[node] install_root``）
+    #: 依赖应用配置（读 ``[db]`` 节）
     inject: ClassVar[list[str]] = ["appconfig"]
     #: 配置模型（标准 Schema）：驱动校验、默认值注入与写回
     Config: ClassVar[type[DbConfig]] = DbConfig
@@ -54,7 +54,6 @@ class DbPlugin:
         self.service: DbService = DbService(
             ctx,
             self.config,
-            install_root=_install_root(ctx),
             base_dir=_base_dir(ctx),
         )
         self._route_task: asyncio.Task[None] | None = None
@@ -122,26 +121,12 @@ class DbPlugin:
         return api.json({"error": message}, status_code=status_code)
 
 
-def _install_root(ctx: Context) -> Path | None:
-    """从应用配置读插件安装目录（``[node] install_root``）；缺失返回 ``None``。
-
-    相对路径按节点目录（config.ini 所在目录）解析——与 ``plugins`` 及 webapi
-    的约定一致，不随启动时的工作目录漂移。
-    """
-    raw = ctx.appconfig.get("node", "install_root")
-    if not raw or not str(raw).strip():
-        return None
-    path = Path(str(raw).strip()).expanduser()
-    if not path.is_absolute():
-        path = _base_dir(ctx) / path
-    return path.resolve()
-
-
 def _base_dir(ctx: Context) -> Path:
     """节点目录（config.ini 所在目录）：db 相对库路径 / data_dir 的解析基准。
 
     与 ``install_root`` / ``plugins`` 的相对路径约定一致（按配置文件所在
-    目录解析），默认库文件因此落节点目录下的 ``data/``（如 ``master/data/``）。
+    目录解析），默认库文件因此落节点专属数据目录（如
+    ``master/data/plugins/db/``）。
     """
     loaded = ctx.appconfig.path_loaded
     return loaded.parent if loaded is not None else Path.cwd()

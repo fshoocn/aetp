@@ -36,10 +36,10 @@ class LogConfig(FieldConfig):
 
     level: str = "info"
     console: bool = True
-    file: str = str(Path("data") / "logs" / "aetp.log")
+    file: str = str(Path("data") / "plugins" / "log" / "aetp.log")
     max_bytes: int = 5 * 1024 * 1024
     backup_count: int = 3
-    store: str = str(Path("data") / "logs" / "log.sqlite")
+    store: str = str(Path("data") / "plugins" / "log" / "log.sqlite")
     report: bool = True
     report_level: str = "info"
     retain_days: float = 7.0

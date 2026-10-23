@@ -24,8 +24,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from common.cordis_utils import safe_dispose
 from common.db_errors import DbDependencyError, DbError
-from common.db_registry import DataDependency, PluginRecordStore, parse_dependencies
+from common.db_registry import (
+    DataDependency,
+    PluginRecordStore,
+    parse_dependencies,
+    registry_db_path,
+)
 from common.log_op import log_operation_async
+from common.plugin_data import plugin_data_dir
 
 MAX_ARCHIVE_SIZE: Final[int] = 32 * 1024 * 1024
 MAX_EXTRACTED_SIZE: Final[int] = 128 * 1024 * 1024
@@ -298,13 +304,17 @@ class PluginManager:
         ctx: Context,
         install_root: Path,
         preinstalled_ids: Iterable[str] = (),
+        *,
+        base_dir: Path | None = None,
     ) -> None:
         self.ctx: Context = ctx
         self.install_root: Path = install_root.resolve()
         self.install_root.mkdir(parents=True, exist_ok=True)
-        self.registry_store: PluginRecordStore = PluginRecordStore(
-            self.install_root / "registry.db"
-        )
+        #: 节点目录（config.ini 所在目录）：插件专属数据目录的解析基准
+        self._base_dir: Path = base_dir.resolve() if base_dir is not None else self.install_root.parent
+        #: 插件安装记录（registry.db）：落专属数据目录 data/plugins/plugin-manager/
+        registry_path = registry_db_path(self._base_dir)
+        self.registry_store: PluginRecordStore = PluginRecordStore(registry_path)
         #: 原始插件包归档目录（保留上传 ZIP，供未来主从分发与回溯）
         self.archives_dir: Path = self.install_root / ".archives"
         #: 预装插件 id（config.ini 的 ``[node] plugins`` 插件源解析而来）：
@@ -841,6 +851,7 @@ class PluginManager:
         if plugin_id in self.fibers:
             await self._disable(plugin_id)
         await self._drop_plugin_data(plugin_id, keep_data=keep_data, drop=drop)
+        self._drop_plugin_files(plugin_id, keep_data=keep_data)
         package_root = (self.install_root / plugin_id).resolve()
         if package_root.parent != self.install_root:
             raise PluginManagerError("插件安装目录无效", 400)
@@ -1159,6 +1170,32 @@ class PluginManager:
             self.ctx.logger.error(
                 "插件 %s 的数据清理失败（不阻断卸载，登记保留待孤儿回收）：%s",
                 plugin_id,
+                exc,
+            )
+
+    def _drop_plugin_files(self, plugin_id: str, *, keep_data: bool) -> None:
+        """卸载时回收插件专属数据目录（``data/plugins/{id}``，约定见
+        :mod:`common.plugin_data`）。
+
+        * ``keep_data=True`` 保留（与表语义一致，重装复用）；
+        * 清理失败**不阻断卸载**（与表清理同策略）：错误日志给出路径，
+          待手动清理；目录不存在则静默跳过。
+        """
+        if keep_data:
+            return
+        try:
+            data_dir = plugin_data_dir(self._base_dir, plugin_id)
+        except ValueError:
+            return  # id 不合法不可能出现在登记里，防御性跳过
+        if not data_dir.is_dir():
+            return
+        try:
+            shutil.rmtree(data_dir)
+        except OSError as exc:
+            self.ctx.logger.error(
+                "插件 %s 的数据目录清理失败（不阻断卸载，待手动清理 %s）：%s",
+                plugin_id,
+                data_dir,
                 exc,
             )
 

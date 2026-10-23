@@ -20,7 +20,9 @@ from cordis_port.logger import Exporter, Logger, Message
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
+from common.db_registry import registry_db_path
 from common.node_runtime import ensure_installed
+from common.plugin_data import plugin_data_dir
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import DbPlugin
 from common.plugins.db.registry import PluginRecordStore
@@ -328,6 +330,32 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(remaining, [])
         _, ui_body = await _arequest(self.base_url, "/api/web/ui")
         self.assertFalse(any(item["owner"] == "uploaded-sample" for item in json.loads(ui_body)))
+
+    async def test_uninstall_recycles_plugin_data_dir(self) -> None:
+        """专属数据目录 data/plugins/{id} 随卸载回收；keep_data=True 保留（与表语义一致）。"""
+        plugins = self.context.plugins
+        data_dir = plugin_data_dir(Path(self.temp_dir.name), "data-holder")
+        data_dir.mkdir(parents=True)
+        (data_dir / "note.txt").write_text("runtime data", encoding="utf-8")
+
+        await plugins.install_archive(_plugin_archive("data-holder", plain=True))
+        await plugins.uninstall("data-holder", keep_data=True)
+        self.assertTrue((data_dir / "note.txt").is_file())  # keep_data 保留
+
+        await plugins.install_archive(_plugin_archive("data-holder", plain=True))
+        await plugins.uninstall("data-holder")
+        self.assertFalse(data_dir.exists())  # 正常卸载整目录回收
+
+    def test_plugin_data_dir_rejects_bad_ids(self) -> None:
+        """helper：路径形状固定 data/plugins/{id}，非法 id（含路径穿越）拒绝。"""
+        base = Path(self.temp_dir.name)
+        self.assertEqual(
+            plugin_data_dir(base, "my-plugin"),
+            base / "data" / "plugins" / "my-plugin",
+        )
+        for bad in ("../escape", "a/b", "a\\b", "", "Upper", "a" * 65):
+            with self.assertRaises(ValueError):
+                plugin_data_dir(base, bad)
 
     async def test_similar_plugin_ids_keep_isolated_modules(self) -> None:
         plugins = (
@@ -645,7 +673,7 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         """遗留注册表里的内置 id 影子记录读取即丢弃（展示真身内置记录）。"""
         install_root = Path(self.temp_dir.name) / "shadow-root"
         install_root.mkdir()
-        PluginRecordStore(install_root / "registry.db").write(
+        PluginRecordStore(registry_db_path(Path(self.temp_dir.name))).write(
             {
                 "webapi": {
                     "id": "webapi",
@@ -697,13 +725,16 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
     async def test_preinstalled_marker_follows_config_ini(self) -> None:
         """protected 由 config.ini 的 [node] plugins 推导：dir / zip 源均识别，
         坏源只告警跳过，上传的插件不带标记。"""
+        # 独立节点目录（registry 落 data/plugins/plugin-manager/，按节点隔离）
+        node_dir = Path(self.temp_dir.name) / "derive-node"
+        node_dir.mkdir()
         zip_path = Path(self.temp_dir.name) / "extra.zip"
         zip_path.write_bytes(_plugin_archive("extra-sample", "ExtraPlugin"))
-        config_path = Path(self.temp_dir.name) / "derive.ini"
+        config_path = node_dir / "config.ini"
         config_path.write_text(
             "[node]\n"
             "kind = master\n"
-            f"install_root = {Path(self.temp_dir.name) / 'derive-installed'}\n"
+            f"install_root = {(node_dir / 'installed').as_posix()}\n"
             f"plugins = {_SOURCE_ROOT / 'master' / 'webui'},"
             f" {zip_path}, {Path(self.temp_dir.name) / 'missing'}\n"
             "\n[web]\n"
@@ -944,15 +975,17 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             def _write_registry(self) -> None:
                 raise OSError("simulated registry failure")
 
-        install_root = Path(self.temp_dir.name) / "failed-install"
+        install_root = Path(self.temp_dir.name) / "failed-node" / "installed"
         manager = RegistryWriteFailureManager(self.context, install_root)
         with self.assertRaises(PluginManagerError):
             await manager.install_archive(_plugin_archive())
 
         self.assertEqual(manager.records, {})
         self.assertFalse((install_root / "uploaded-sample").exists())
-        # 持久化事实源（registry.db）构造即建且回滚不删——除它外不应有残留
-        self.assertEqual({p.name for p in install_root.iterdir()}, {"registry.db"})
+        # 回滚不剩任何插件产物；持久化事实源（registry.db）在该节点的专属数据目录
+        # （首读即建、回滚不删），安装目录里不应有任何残留
+        self.assertEqual(list(install_root.iterdir()), [])
+        self.assertTrue(registry_db_path(install_root.parent).is_file())
     async def test_enable_registry_failure_disposes_plugin_fiber(self) -> None:
         class FailEnabledWriteManager(PluginManager):
             def __init__(self, ctx: Context, root: Path) -> None:
@@ -1095,7 +1128,7 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         manager = PluginManager(self.context, self.install_root)
         await manager.install_archive(_plugin_archive())
         # kill 模拟：目录落地但 registry 未写（整库丢失）
-        (self.install_root / "registry.db").unlink()
+        registry_db_path(Path(self.temp_dir.name)).unlink()
         # 另一个半截落地的目录（安装到一半被 kill）
         orphan = self.install_root / "half-installed"
         orphan.mkdir()
@@ -1114,7 +1147,7 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         """PS-H3：registry schema 版本不兼容 → 启动显式报错（不再静默半兼容）。"""
         manager = PluginManager(self.context, self.install_root)
         await manager.install_archive(_plugin_archive())
-        conn = sqlite3.connect(self.install_root / "registry.db")
+        conn = sqlite3.connect(registry_db_path(Path(self.temp_dir.name)))
         try:
             with conn:
                 conn.execute(

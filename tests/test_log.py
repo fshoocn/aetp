@@ -60,11 +60,11 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
         await self.context.plugin(LogPlugin)
 
     async def test_file_exporter_writes_formatted_line(self) -> None:
-        """默认落盘到节点目录 data/logs/aetp.log，带时间戳/级别/名称。"""
+        """默认落盘到节点目录 data/plugins/log/aetp.log，带时间戳/级别/名称。"""
         await self.load("console = false\n")
         assert self.context is not None
         self.context.logger.info("hello %s", "world")
-        log_file = self.root / "data" / "logs" / "aetp.log"
+        log_file = self.root / "data" / "plugins" / "log" / "aetp.log"
         text = log_file.read_text(encoding="utf-8")
         self.assertIn("hello world", text)
         self.assertIn("INFO", text)
@@ -82,7 +82,7 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
         assert self.context is not None
         self.context.logger.info("dropped-info")
         self.context.logger.error("kept-error")
-        text = (self.root / "data" / "logs" / "aetp.log").read_text(encoding="utf-8")
+        text = (self.root / "data" / "plugins" / "log" / "aetp.log").read_text(encoding="utf-8")
         self.assertNotIn("dropped-info", text)
         self.assertIn("kept-error", text)
 

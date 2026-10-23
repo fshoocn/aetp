@@ -26,6 +26,8 @@ from typing import Any, Final, TypedDict, cast
 
 from sqlalchemy import Column, Float, Integer, MetaData, String, Table
 
+from common.plugin_data import plugin_data_dir
+
 #: 库内元数据表：owner → （schema_version / 结构指纹）键值对
 META_TABLE: Final[str] = "aetp_db_meta"
 #: 库内结构变更日志表（保留上限见 ``[db] schema_log_limit``）
@@ -137,6 +139,19 @@ schema_log_table: Table[Any] = Table(
 def meta_tables() -> tuple[Table[Any], Table[Any]]:
     """库内元数据表（``aetp_db_meta`` / ``aetp_schema_log``）。"""
     return meta_table, schema_log_table
+
+
+#: 安装记录归属的插件 id（卸载清理豁免：内置插件不走卸载链）
+REGISTRY_OWNER: Final[str] = "plugin-manager"
+
+
+def registry_db_path(base_dir: Path) -> Path:
+    """安装记录 ``registry.db`` 的落点：``data/plugins/plugin-manager/``。
+
+    专属数据目录约定见 :mod:`common.plugin_data`；读写双方（plugin-manager
+    写、db 读）都经本函数取路径，保证同一落点。
+    """
+    return plugin_data_dir(base_dir, REGISTRY_OWNER) / "registry.db"
 
 
 #: 物理表名白名单（纵深防御：拼 DDL 前先过模式校验；正常命名由 models.py 洗名产生）

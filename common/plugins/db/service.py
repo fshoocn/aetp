@@ -46,6 +46,7 @@ from common.db_registry import (
     fingerprint,
     meta_table,
     record_dependencies,
+    registry_db_path,
     schema_log_table,
 )
 from common.models import (
@@ -204,7 +205,6 @@ class DbService(Service[DbConfig]):
         ctx: Context,
         config: DbConfig | None = None,
         *,
-        install_root: Path | None = None,
         base_dir: Path | None = None,
     ) -> None:
         # ⚠️ 必须最先调用：这一步完成 ctx.db 的注册
@@ -218,9 +218,9 @@ class DbService(Service[DbConfig]):
         #: 插件安装记录（registry.db 事实源）；db 不反向注入 plugin-manager。
         #: DB-N3：事实源损坏/不可用 → 置 None，孤儿回收整体跳过（宁漏勿误删）
         self._registry_store: PluginRecordStore | None = None
-        if install_root is not None:
+        if self._base_dir is not None:
             try:
-                self._registry_store = PluginRecordStore(install_root / "registry.db")
+                self._registry_store = PluginRecordStore(registry_db_path(self._base_dir))
             except (OSError, RuntimeError) as err:
                 ctx.logger.warning("registry.db 不可用，本次会话跳过依赖事实源：%s", err)
         self._ddl_lock: asyncio.Lock = asyncio.Lock()
@@ -272,7 +272,7 @@ class DbService(Service[DbConfig]):
         return engine
 
     def _prepare_sqlite_file(self) -> None:
-        """SQLite 文件库：父目录不存在则创建（默认 ``data/aetp.db`` 直接可用）。"""
+        """SQLite 文件库：父目录不存在则创建（默认 ``data/plugins/db/aetp.db`` 直接可用）。"""
         parsed = make_url(self._anchored_url())
         if parsed.get_backend_name() != "sqlite":
             return

@@ -90,13 +90,14 @@ class PluginManagerPlugin(Service[None]):
             appconfig.get("node", "install_root", "plugins") or "plugins"
         ).expanduser()
         config_path = appconfig.path_loaded
+        base_dir = config_path.parent if config_path is not None else Path.cwd()
+        self._base_dir: Path = base_dir
         if not install_root.is_absolute():
-            base_dir = config_path.parent if config_path is not None else Path.cwd()
             install_root = base_dir / install_root
         self.install_root: Path = install_root.resolve()
         self.preinstalled_ids: frozenset[str] = self._preinstalled_ids(
             appconfig.get("node", "plugins", "") or "",
-            config_path.parent if config_path is not None else Path.cwd(),
+            base_dir,
         )
         self.manager: PluginManager | None = None
         #: ``db/schema-changed`` 触发的消费方复检任务（强引用防 GC）
@@ -124,7 +125,10 @@ class PluginManagerPlugin(Service[None]):
 
     async def init(self) -> None:
         self.manager = PluginManager(
-            self.ctx, self.install_root, self.preinstalled_ids
+            self.ctx,
+            self.install_root,
+            self.preinstalled_ids,
+            base_dir=self._base_dir,
         )
         self._register_routes()
         # 「恢复已启用」不再随插件初始化执行：预装链路（ensure_installed）

@@ -64,7 +64,7 @@ class MyPlugin:
 
 ```ini
 [db]
-url = sqlite+aiosqlite:///data/aetp.db   ; 换库唯一入口；env:DB_URL 从环境变量取
+url = sqlite+aiosqlite:///data/plugins/db/aetp.db   ; 换库唯一入口；env:DB_URL 从环境变量取
 echo = false                             ; SQL 日志
 pool_size = 5                            ; 连接池大小（非 SQLite）
 max_overflow = 10                        ; 池外溢出上限
@@ -78,8 +78,8 @@ schema_log_limit = 500                   ; 结构变更日志保留上限
 
 路径约定（与 `install_root` / `plugins` 一致）：SQLite **相对库路径**与相对
 `data_dir` 按**节点目录**（`config.ini` 所在目录）解析——默认库文件落
-`master/data/aetp.db` / `slave/data/aetp.db`（已在 `.gitignore` 忽略），
-不随当前工作目录漂移。
+`master/data/plugins/db/aetp.db` / `slave/data/plugins/db/aetp.db`（专属数据
+目录约定，已在 `.gitignore` 忽略），不随当前工作目录漂移。
 
 ## 设计文档
 

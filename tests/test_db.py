@@ -32,6 +32,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from _helpers import arequest
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
+from common.db_registry import registry_db_path
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import (
     DataDependency,
@@ -245,8 +246,9 @@ class DbStackTestCase(unittest.IsolatedAsyncioTestCase):
 
     def write_registry(self, records: dict[str, object]) -> None:
         """写插件安装记录（``registry.db`` 事实源，依赖校验据此反查）。"""
-        self.install_root.mkdir(parents=True, exist_ok=True)
-        PluginRecordStore(self.install_root / "registry.db").write(records)
+        path = registry_db_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        PluginRecordStore(path).write(records)
 
 
 class _CapturePlugin:
@@ -595,8 +597,8 @@ class RegistrySweepSafetyTests(DbStackTestCase):
         """registry 损坏 → 自检整体跳过（数据保留）；可读且不含该 owner → 照常清理。"""
         db = self.db
         await db.sync_schema(models=[RunRecord])
-        registry_path = self.install_root / "registry.db"
-        self.install_root.mkdir(parents=True, exist_ok=True)
+        registry_path = registry_db_path(self.root)
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
 
         # registry 损坏：残缺 id 集合不得当“已安装全集”，自检整体跳过（宁漏勿误删）
         registry_path.write_bytes(b"this is not a sqlite database")
@@ -641,12 +643,14 @@ class InstallRootResolutionTests(unittest.IsolatedAsyncioTestCase):
         await unload_all(self.context)
         self._temp.cleanup()
 
-    async def test_relative_install_root_anchors_to_config_dir(self) -> None:
-        """回归：registry.db 落节点目录下，不随启动时的工作目录漂移。"""
+    async def test_registry_db_anchors_to_config_dir(self) -> None:
+        """回归：registry.db 落节点目录 data/plugins/plugin-manager/ 下，不随 cwd 漂移。"""
         await self.context.plugin(DbPlugin)
         # 事实源惰性建库：读一次（自检入口）才落文件——验的正是解析后的落点
         await cast(DbService, self.context.get("db")).self_check()
-        self.assertTrue((self.root / "plugins" / "registry.db").is_file())
+        self.assertTrue(
+            (self.root / "data" / "plugins" / "plugin-manager" / "registry.db").is_file()
+        )
 
 
 class EngineResilienceTests(DbStackTestCase):

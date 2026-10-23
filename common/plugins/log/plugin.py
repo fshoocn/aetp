@@ -88,9 +88,8 @@ class LogPlugin:
             path = Path(file_raw).expanduser()
             if not path.is_absolute():
                 path = _base_dir(self.ctx) / path
-            sink = RotatingFile(
-                path.resolve(), self.config.max_bytes, self.config.backup_count
-            )
+            path = path.resolve()
+            sink = RotatingFile(path, self.config.max_bytes, self.config.backup_count)
             self.ctx.logger.exporter(file_exporter(level, sink))
             self.ctx.logger.info("日志文件：%s", path)
 
@@ -99,7 +98,8 @@ class LogPlugin:
             path = Path(store_raw).expanduser()
             if not path.is_absolute():
                 path = _base_dir(self.ctx) / path
-            self._store = LogStore(path.resolve())
+            path = path.resolve()
+            self._store = LogStore(path)
             self._store.trim(
                 retain_days=self.config.retain_days,
                 max_rows=self.config.retain_max_rows,

@@ -158,8 +158,8 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     ctx.provide("node_name", profile.name)
 
     await ctx.plugin(AppConfigPlugin, {"path": str(config_file)})
-    await ctx.plugin(LogPlugin)  # 最先：捕获装配全程日志（API/comm/UI 延迟挂载）
     await ctx.plugin(DbPlugin)
+    await ctx.plugin(LogPlugin)
     await ctx.plugin(WebApiPlugin)
     await ctx.plugin(CommService)  # webapi 后：挂 /api/comm/ingest
     await ctx.plugin(PluginManagerPlugin)
