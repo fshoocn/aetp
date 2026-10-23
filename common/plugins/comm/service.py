@@ -177,6 +177,7 @@ class CommService(Service[CommConfig]):
         self._nodes: dict[str, float] = {}
         self._wake: asyncio.Event = asyncio.Event()
         self._poll_ready: asyncio.Event = asyncio.Event()
+        self._closing: bool = False
         self._pump_task: asyncio.Task[None] | None = None
         self._pull_task: asyncio.Task[None] | None = None
         self._store: OutboxStore | None = None
@@ -233,6 +234,11 @@ class CommService(Service[CommConfig]):
 
         def cleanup() -> Any:
             dispose_health()
+            # 先让在途长轮询立即返回：uvicorn 优雅排水要等所有请求收尾，
+            # 长轮询挂着会让关停被强推取消（starlette 把取消报成 lifespan
+            # shutdown.failed，整段 traceback 被裸打，看着像崩溃）
+            self._closing = True
+            self._poll_ready.set()
             for task in (self._pump_task, self._pull_task):
                 if task is not None:
                     task.cancel()
@@ -1041,6 +1047,8 @@ class CommService(Service[CommConfig]):
         self._nodes[node] = time.time()
         deadline = time.monotonic() + hang
         while True:
+            if self._closing:
+                return {"items": []}
             items = self._take_down(node, limit)
             if items:
                 return {"items": items}
@@ -1048,8 +1056,14 @@ class CommService(Service[CommConfig]):
             if remaining <= 0:
                 return {"items": []}
             self._poll_ready.clear()
-            with contextlib.suppress(TimeoutError):
+            try:
                 await asyncio.wait_for(self._poll_ready.wait(), min(remaining, 1.0))
+            except TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                # 关停时在途长轮询被取消：按空结果收尾。请求任务就是取消的
+                # 终点，吞掉并正常返回不会破坏传播语义，只消掉 ASGI 报错噪音
+                return {"items": []}
 
     async def _ack(self, request: Request) -> dict[str, object] | JSONResponse:
         """下行确认：成功投递记账（任一目标成功即整组达标，A4）。"""

@@ -29,6 +29,7 @@ from cordis_port import Context
 from sqlalchemy import BigInteger, Float, Integer, SmallInteger, String, column, func, literal, select, table, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from _helpers import arequest
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
@@ -50,6 +51,7 @@ from common.plugins.db.models import (
     model_owner,
     module_owner,
     physical_name,
+    reset_owner_group,
     snake,
 )
 from common.plugins.db.registry import OwnerRegistry, PluginRecordStore, fingerprint, parse_dependencies
@@ -80,6 +82,19 @@ class Report(Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     run_id: Mapped[int]
     kind: Mapped[str]
+
+
+class CodeAlive(Model):
+    """归属 code-alive：模拟「未安装但代码在」的内置插件（如 comm 的 outbox）。
+
+    模型随模块导入即注册——装载顺序无关，孤儿回收必须豁免这类 owner。
+    """
+
+    __owner__ = "code-alive"
+    __tablename__ = "alive_note"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    text: Mapped[str]
 
 
 # ---------------------------------------------------------------- 测试辅助
@@ -570,34 +585,36 @@ class SchemaLogTests(DbStackTestCase):
 
 
 class RegistrySweepSafetyTests(DbStackTestCase):
-    """DB-N3：孤儿回收的前置条件 = registry 事实源可读。"""
+    """DB-N3：数据自检的前置条件 = registry 事实源可读。"""
 
     def _ini(self, *, orphan_policy: str) -> str:
         del orphan_policy
         return super()._ini(orphan_policy="drop")
 
-    async def test_corrupt_registry_skips_sweep_but_clean_registry_sweeps(self) -> None:
-        """registry 损坏 → 整体跳过（数据保留）；可读且不含该 owner → 照常清理。"""
+    async def test_corrupt_registry_skips_self_check_but_clean_registry_checks(self) -> None:
+        """registry 损坏 → 自检整体跳过（数据保留）；可读且不含该 owner → 照常清理。"""
         db = self.db
         await db.sync_schema(models=[RunRecord])
         registry_path = self.install_root / "registry.db"
         self.install_root.mkdir(parents=True, exist_ok=True)
 
-        # registry 损坏：残缺 id 集合不得当“已安装全集”，孤儿回收整体跳过
+        # registry 损坏：残缺 id 集合不得当“已安装全集”，自检整体跳过（宁漏勿误删）
         registry_path.write_bytes(b"this is not a sqlite database")
-        outcome = self.db_fiber.update({"echo": False}, no_save=True)
-        assert outcome is not None
-        await outcome
-        await self.db.repo(RunRecord).add(RunRecord(name="alive"))
+        report = await db.self_check(policy="drop")
+        self.assertTrue(report["skipped"])
+        await self.db.repo(RunRecord).add(RunRecord(name="alive"))  # 数据不受影响
 
-        # 对照：registry 可读且不含该 owner → 按 orphan_policy=drop 清理
+        # 对照：registry 可读且不含该 owner、模型组已作废（模拟卸载后代码
+        # 不再导入）→ 真孤儿，policy=drop 清理（表与登记一并清掉）。
+        # 仅"安装记录缺失"但模型仍注册的 owner 不算孤儿（内置插件豁免语义）
         registry_path.unlink()
         PluginRecordStore(registry_path).write({})
-        outcome = self.db_fiber.update({"echo": False}, no_save=True)
-        assert outcome is not None
-        await outcome
-        with self.assertRaises((DbError, SQLAlchemyError)):
-            await self.db.repo(RunRecord).add(RunRecord(name="ghost"))
+        reset_owner_group("test-store")
+        report = await db.self_check(policy="drop")
+        self.assertFalse(report["skipped"])
+        self.assertEqual(report["cleaned"], ["test-store"])
+        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
+        self.assertNotIn("test-store", owners.owners())
 
 
 class InstallRootResolutionTests(unittest.IsolatedAsyncioTestCase):
@@ -627,6 +644,8 @@ class InstallRootResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_relative_install_root_anchors_to_config_dir(self) -> None:
         """回归：registry.db 落节点目录下，不随启动时的工作目录漂移。"""
         await self.context.plugin(DbPlugin)
+        # 事实源惰性建库：读一次（自检入口）才落文件——验的正是解析后的落点
+        await cast(DbService, self.context.get("db")).self_check()
         self.assertTrue((self.root / "plugins" / "registry.db").is_file())
 
 
@@ -955,9 +974,9 @@ _PRODUCER_LIKE_DEPS = [
 ]
 
 
-# ---------------------------------------------------------------- 孤儿回收
-class OrphanSweepTests(unittest.IsolatedAsyncioTestCase):
-    """启动时孤儿回收两策略（DESIGN §4.3 兜底）。"""
+# ---------------------------------------------------------------- 数据自检
+class DbSelfCheckTests(unittest.IsolatedAsyncioTestCase):
+    """数据自检接口：启动不回收孤儿；``policy=warn`` 只报告、``drop`` 才清理。"""
 
     async def asyncSetUp(self) -> None:
         self._temp = tempfile.TemporaryDirectory()
@@ -974,6 +993,7 @@ class OrphanSweepTests(unittest.IsolatedAsyncioTestCase):
     def _write_owners(self) -> None:
         registry = OwnerRegistry(self.data_dir / "owners.sqlite")
         registry.claim("ghost", "aetp_ghost_note")
+        registry.claim("code-alive", "aetp_code_alive_note")
         registry.claim("kept-owner", "aetp_kept_owner_note")
         registry.set_keep("kept-owner", True)
 
@@ -997,16 +1017,43 @@ class OrphanSweepTests(unittest.IsolatedAsyncioTestCase):
         await context.plugin(DbPlugin)
         return context
 
-    async def test_warn_policy_keeps_orphans(self) -> None:
-        await self._boot("warn")
-        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertIn("ghost", owners.owners())  # 告警不删
-
-    async def test_drop_policy_clears_orphans_but_keeps_kept(self) -> None:
+    async def test_startup_does_not_sweep(self) -> None:
+        """启动不再自动回收：drop 策略下 ghost 也原样保留，等手动自检。"""
         await self._boot("drop")
         owners = OwnerRegistry(self.data_dir / "owners.sqlite")
+        self.assertIn("ghost", owners.owners())
+
+    async def test_warn_policy_reports_without_cleaning(self) -> None:
+        context = await self._boot("warn")
+        report = await self._service(context).self_check()
+        self.assertFalse(report["skipped"])
+        self.assertEqual(self._owners_in(report, "orphans"), ["ghost"])
+        self.assertEqual(self._owners_in(report, "kept"), ["kept-owner"])
+        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
+        self.assertIn("ghost", owners.owners())  # warn 只报告不删
+
+    async def test_drop_policy_clears_orphans_but_keeps_kept(self) -> None:
+        context = await self._boot("drop")
+        report = await self._service(context).self_check(policy="drop")
+        self.assertEqual(cast(list[str], report["cleaned"]), ["ghost"])
+        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
         self.assertNotIn("ghost", owners.owners())
+        self.assertIn("code-alive", owners.owners())  # 有已注册模型 → 非孤儿
         self.assertIn("kept-owner", owners.owners())  # keep_data 标记跳过
+
+    async def test_invalid_policy_rejected(self) -> None:
+        context = await self._boot("warn")
+        with self.assertRaises(ValueError):
+            await self._service(context).self_check(policy="nope")
+
+    @staticmethod
+    def _service(context: Context) -> DbService:
+        return cast(DbService, context.get("db"))
+
+    @staticmethod
+    def _owners_in(report: dict[str, object], key: str) -> list[str]:
+        entries = cast(list[dict[str, object]], report[key])
+        return [str(entry["owner"]) for entry in entries]
 
 
 # ---------------------------------------------------------------- 插件生命周期 e2e
@@ -1018,13 +1065,14 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self._temp.name)
         self.data_dir = self.root / "db-data"
         self.install_root = self.root / "installed"
+        self.port = _free_port()
         config_path = self.root / "config.ini"
         config_path.write_text(
             "[node]\n"
             "kind = master\n"
             f"install_root = {self.install_root.as_posix()}\n"
             "\n[web]\n"
-            f"port = {_free_port()}\n"
+            f"port = {self.port}\n"
             "auth_token = test-token\n"
             "\n[db]\n"
             f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
@@ -1067,6 +1115,34 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
             select(literal(True)).select_from(sqlite_master).where(sqlite_master.c.name == table_name)
         )
         return bool(rows)
+
+    async def test_self_check_http_endpoint(self) -> None:
+        """自检接口端到端：db 装载早于 webapi，路由延迟挂载后可用。"""
+        base_url = f"http://127.0.0.1:{self.port}"
+        body = json.dumps({"policy": "warn"}).encode("utf-8")
+        status, payload = 0, b""
+        for _attempt in range(20):  # 延迟挂载任务最多 0.5s 一轮
+            status, payload = await arequest(
+                base_url,
+                "/api/db/self-check",
+                method="POST",
+                body=body,
+                content_type="application/json",
+            )
+            if status == 200:
+                break
+            await asyncio.sleep(0.25)
+        self.assertEqual(status, 200)
+        self.assertFalse(json.loads(payload)["skipped"])
+
+        status, _payload = await arequest(
+            base_url,
+            "/api/db/self-check",
+            method="POST",
+            body=b'{"policy": "nope"}',
+            content_type="application/json",
+        )
+        self.assertEqual(status, 400)  # 非法 policy 明确拒绝
 
     async def test_install_enable_uninstall_data_chain(self) -> None:
         # 装 B 提示 A 未安装（安装时依赖预检）

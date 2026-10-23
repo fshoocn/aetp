@@ -294,7 +294,7 @@ class LogPlugin:
             try:
                 names.update(self._store.nodes())
             except (sqlite3.Error, OSError) as exc:
-                return cast(dict[str, object], self.ctx.webapi.json(
+                return cast(dict[str, object], self.ctx.get("webapi").json(
                     {"error": f"查询库不可用：{type(exc).__name__}"}, status_code=503
                 ))
         comm = self.ctx.get("comm")
@@ -332,7 +332,7 @@ class LogPlugin:
                 to_ts=as_float(params.get("to_ts")),
             )
         except (sqlite3.Error, OSError) as exc:
-            return cast(dict[str, object], self.ctx.webapi.json(
+            return cast(dict[str, object], self.ctx.get("webapi").json(
                 {"error": f"删除失败：{type(exc).__name__}"}, status_code=503
             ))
         # 删除操作本身留审计（条件 + 条数）：日志可删，删除行为不隐匿

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from pathlib import Path
@@ -175,6 +176,23 @@ class UvicornHost:
         self.server: _EmbeddedServer | None = None
         self._serve_task: asyncio.Task[None] | None = None
 
+    @staticmethod
+    def _ensure_uvicorn_logging() -> None:
+        """给 uvicorn 错误日志补最小 handler。
+
+        ``log_config=None``（不接管根 logger）时 ``uvicorn.error`` 没有
+        handler，记录会落 ``logging.lastResort`` 被**裸打**成无格式堆栈，
+        关停期的消息看着像崩溃。这里补一个格式化 handler，只动 uvicorn
+        自己的 logger，不影响 cordis 日志体系。
+        """
+        logger = logging.getLogger("uvicorn.error")
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+            )
+            logger.addHandler(handler)
+
     async def _serve_guarded(self, server: uvicorn.Server) -> None:
         """跑 ``serve()``，把 uvicorn 启动失败的 ``SystemExit`` 折算成任务完成。
 
@@ -205,6 +223,7 @@ class UvicornHost:
             log_config=None,
             reload=False,
         )
+        self._ensure_uvicorn_logging()
         if self._serve_task is not None and not self._serve_task.done():
             return
         server = _EmbeddedServer(options)

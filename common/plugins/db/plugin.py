@@ -1,4 +1,4 @@
-"""数据库插件入口：装配引擎、建库内元表并执行启动时孤儿回收。
+"""数据库插件入口：装配引擎、建库内元表并挂数据自检接口。
 
 加载后其他插件声明 ``inject = ["db"]`` 即可建表与增删改查::
 
@@ -15,17 +15,21 @@
   热更新与停机，挂在上面会「改一次配置、丢一次数据」；卸载清理只走
   插件管理器的显式链路（``ctx.plugins.uninstall`` → ``ctx.db.drop_owner``）；
 * fiber 卸载的 effect 只负责**排空连接池**（热更新 / 停机都安全：不动表）；
-* 启动时交叉核对归属登记与现存插件，孤儿按 ``orphan_policy`` 处理。
+* **孤儿数据不随启动回收**（启动快照会受装载顺序影响、误判内置插件）——
+  改由自检接口手动触发：``ctx.db.self_check()`` / ``POST /api/db/self-check``
+  （报告孤儿数据，``policy=drop`` 才清理）。
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from cordis_port import Context
-
-from common.plugins.db.registry import PluginRecordStore
+from starlette.requests import Request
 
 from .config import DbConfig
 from .service import DbService
@@ -53,43 +57,69 @@ class DbPlugin:
             install_root=_install_root(ctx),
             base_dir=_base_dir(ctx),
         )
+        self._route_task: asyncio.Task[None] | None = None
 
     async def init(self) -> None:
-        """验证连接、建库内元表并执行孤儿回收（失败即启动失败，快速暴露）。"""
+        """验证连接、建库内元表并挂自检接口（失败即启动失败，快速暴露）。"""
         await self.service.start()
-        installed = self._installed_plugin_ids()
-        if installed is None:
-            # DB-N3：事实源不完整时**整体跳过**孤儿回收——按残缺 id 集合执行
-            # 会把仍在使用的外置插件数据当孤儿删掉（orphan_policy=drop 时）
-            self.ctx.logger.error(
-                "插件安装记录无法读取，孤儿回收本次整体跳过（避免误删在用插件数据）"
-            )
-        else:
-            orphans = await self.service.sweep_orphans(installed, self.config.orphan_policy)
-            if orphans:
-                self.ctx.logger.info("孤儿回收完成（%d 个）", len(orphans))
-
+        self._route_task = asyncio.create_task(self._mount_self_check_route())
         # 「排空连接池」的清理函数：effect 的**返回值**在 fiber 卸载时被调用
-        # （注意是 lambda: self.service.shutdown，不是调用）；只动连接池、不动表。
-        self.ctx.fiber.effect(lambda: self.service.shutdown, "plugins.db.shutdown")
+        # （注意不是调用）；只撤路由任务、动连接池，不动表。
+        self.ctx.fiber.effect(self._make_cleanup, "plugins.db.shutdown")
 
-    def _installed_plugin_ids(self) -> set[str] | None:
-        """现存插件 id 事实源：``registry.db`` + 已加载的内置插件（不反向注入 plugin-manager）。
+    def _make_cleanup(self) -> Callable[[], Awaitable[None]]:
+        async def cleanup() -> None:
+            task, self._route_task = self._route_task, None
+            if task is not None:
+                task.cancel()
+            await self.service.shutdown()
 
-        registry 读取失败返回 ``None``：事实源不完整，调用方须跳过孤儿回收
-        （DB-N3），不能拿残缺集合当“已安装全集”用。
+        return cleanup
+
+    async def _mount_self_check_route(self) -> None:
+        """延迟挂载 ``POST /api/db/self-check``（db 装载早于 webapi）。
+
+        与 log 插件同款：轮询等 webapi 就绪即挂；无头部署 30 秒后放弃。
         """
-        from common.plugins.webapi.plugin_manager import builtin_specs
+        for _attempt in range(60):
+            api = self.ctx.get("webapi")
+            if api is not None:
+                api.post(
+                    "/api/db/self-check",
+                    self._self_check,
+                    kind="api",
+                    name="db.self-check",
+                )
+                return
+            await asyncio.sleep(0.5)
 
-        ids = set(builtin_specs(self.ctx))
-        registry_dir = _install_root(self.ctx)
-        if registry_dir is not None:
+    async def _self_check(self, request: Request) -> dict[str, object]:
+        """``POST /api/db/self-check``：手动触发数据自检。
+
+        请求体可选 ``{"policy": "warn" | "drop"}``（缺省取 ``[db]
+        orphan_policy``）：``warn`` 只报告，``drop`` 清理孤儿。
+        """
+        policy = str(self.config.orphan_policy)
+        raw = await request.body()
+        if raw:
             try:
-                ids.update(PluginRecordStore(registry_dir / "registry.db").read())
-            except (OSError, RuntimeError) as exc:
-                self.ctx.logger.error("插件安装记录无法读取：%s", exc)
-                return None
-        return ids
+                parsed: object = json.loads(raw)
+            except ValueError:
+                return self._error("请求体不是合法 JSON", 400)
+            if isinstance(parsed, dict):
+                body = cast(dict[str, object], parsed)
+                if "policy" in body:
+                    policy = str(body.get("policy") or "")
+        try:
+            return await self.service.self_check(policy=policy)
+        except ValueError as exc:
+            return self._error(str(exc), 400)
+
+    def _error(self, message: str, status_code: int) -> dict[str, object]:
+        # ctx.get 免注入通道（db 不能 inject webapi：装载顺序在 webapi 之前；
+        # 也严禁 import webapi 插件包——插件间只经 cordis 服务往来）
+        api = self.ctx.get("webapi")
+        return api.json({"error": message}, status_code=status_code)
 
 
 def _install_root(ctx: Context) -> Path | None:

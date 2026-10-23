@@ -207,6 +207,7 @@ async def run_node(
     ``asyncio.run`` 结束、进程退出，线程被连带杀掉。
     """
     config_file, profile = _resolve_config(config_path)
+    _quiet_asyncio_noise(asyncio.get_running_loop())
     ctx = await _assemble(config_file, profile)
 
     address = ctx.webapi.address()
@@ -223,6 +224,35 @@ async def run_node(
     ctx.logger.info("正在停止…")
     await cordis_utils.unload_all(ctx)
     print("\n  已退出", flush=True)
+
+
+def _quiet_asyncio_noise(loop: asyncio.AbstractEventLoop) -> None:
+    """压掉两类无害的 asyncio 退出噪音（其余异常仍走默认输出）。
+
+    * **客户端断连**：浏览器 / 从节点中途重置连接会在传输回调
+      （如 ``_call_connection_lost``）里抛 ``ConnectionResetError`` 等——
+      属正常断开而非程序错误，默认处理器会打印吓人的堆栈；
+    * **关停取消**：停机时在途请求（长轮询等）被取消，未回收任务的
+      ``CancelledError`` 打印——属预期关停语义。
+    """
+
+    def handler(
+        loop: asyncio.AbstractEventLoop, context: dict[str, object]
+    ) -> None:
+        exc = context.get("exception")
+        if isinstance(
+            exc,
+            (
+                ConnectionResetError,
+                BrokenPipeError,
+                ConnectionAbortedError,
+                asyncio.CancelledError,
+            ),
+        ):
+            return
+        loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
 
 
 def _install_stop_handler(

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -768,21 +768,70 @@ class DbService(Service[DbConfig]):
         self._provided_ctx.logger.error("drop 表 %s 失败：%s", table_name, last_error)
         return False
 
-    async def sweep_orphans(self, installed: Iterable[str], policy: str) -> list[str]:
-        """启动时孤儿回收：登记在、插件已不存在的 owner 按 ``orphan_policy`` 处理。"""
-        self._require_cleanup_rights()
-        orphans = [owner for owner in find_orphans(self._owners.owners(), installed) if not self._owners.is_kept(owner)]
-        for owner in orphans:
+    async def self_check(self, *, policy: str = "warn") -> dict[str, object]:
+        """数据自检（**手动触发**，不再随启动执行）：核查归属登记里的孤儿数据。
+
+        「孤儿」= 登记在册、但既不在插件安装记录、也没有任何**已注册模型**
+        的 owner（真孤儿：手删目录 / 清理中断残留）；``keep_data`` 标记的
+        跳过并单列。有已注册模型的 owner 凭"代码仍在"豁免——模型随模块导入
+        注册、与装载顺序无关，内置插件（如 comm 的 outbox）不会被误判。
+
+        参数:
+            policy: ``warn`` 只报告不动数据；``drop`` 清理孤儿（破坏性，
+                受 :meth:`_require_cleanup_rights` 权限校验）。
+
+        返回:
+            自检报告 ``{"checked_at", "skipped", "reason", "orphans",
+            "kept", "cleaned"}``；``registry.db`` 事实源不可读时
+            ``skipped=True`` 整体跳过（宁漏勿误删，DB-N3）。
+        """
+        if policy not in ("warn", "drop"):
+            raise ValueError(f"policy 只能是 warn / drop，收到 {policy!r}")
+        if policy == "drop":
+            self._require_cleanup_rights()
+        checked_at = time.time()
+        if self._registry_store is None:
+            return {
+                "checked_at": checked_at,
+                "skipped": True,
+                "reason": "registry.db 不可读，事实源不完整，自检跳过（宁漏勿误删）",
+                "orphans": [],
+                "kept": [],
+                "cleaned": [],
+            }
+        try:
+            installed = set(self._registry_store.read())
+        except (OSError, RuntimeError) as exc:
+            return {
+                "checked_at": checked_at,
+                "skipped": True,
+                "reason": f"插件安装记录无法读取：{exc}",
+                "orphans": [],
+                "kept": [],
+                "cleaned": [],
+            }
+        alive = set(installed)
+        alive.update(model_owner(model) for model in registered_models())
+        orphans: list[dict[str, object]] = []
+        kept: list[dict[str, object]] = []
+        cleaned: list[str] = []
+        for owner in find_orphans(self._owners.owners(), alive):
+            entry: dict[str, object] = {"owner": owner, "tables": self._owners.tables(owner)}
+            if self._owners.is_kept(owner):
+                kept.append(entry)
+                continue
+            orphans.append(entry)
             if policy == "drop":
                 await self.drop_owner(owner, force=True)
-                self._provided_ctx.logger.warning("孤儿归属 %s 已按 orphan_policy=drop 清理", owner)
-            else:
-                self._provided_ctx.logger.warning(
-                    "孤儿归属 %s（表：%s）的插件已不存在；orphan_policy=warn 不清理",
-                    owner,
-                    ", ".join(self._owners.tables(owner)),
-                )
-        return orphans
+                cleaned.append(owner)
+        return {
+            "checked_at": checked_at,
+            "skipped": False,
+            "reason": "",
+            "orphans": orphans,
+            "kept": kept,
+            "cleaned": cleaned,
+        }
 
     # ---------------------------------------------------------- 跨插件依赖
     async def check_dependencies(self, plugin_id: str, dependencies: Sequence[DataDependency]) -> None:
