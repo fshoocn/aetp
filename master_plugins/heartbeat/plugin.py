@@ -1,10 +1,11 @@
-"""主模块心跳插件：接收从模块心跳、维护在线状态与能力存档。
+"""主模块心跳插件：接收从模块心跳、维护在线状态与能力存档（经 comm 通道）。
 
 职责（设计稿 ``master_plugins/heartbeat/DESIGN.md``）：
 
-1. ``POST /api/heartbeat`` 接收从模块心跳（协议见设计稿 §2），应答携带
-   ``config``（下发 ``interval`` / ``timeout`` / ``max_backoff``）与
-   ``need_caps``（请求全量能力）；
+1. ``ctx.comm.on("heartbeat.beat")`` 接收从模块心跳（载荷见设计稿 §2），
+   并经 comm 下行 ``heartbeat.config``（下发 ``interval`` / ``timeout`` /
+   ``max_backoff``）与 ``heartbeat.caps``（请求全量能力）——旧私有
+   ``POST /api/heartbeat`` 应答捎带语义由两条下行消息替代；
 2. 定时扫描推进在线状态（``online`` / ``offline`` / ``lost``），状态转换
    记入历史并广播 :data:`~master_plugins.heartbeat.registry.NODE_STATUS_EVENT`；
 3. 管理 API（节点列表 / 详情 / 移除 / 标记离线 / 跨节点能力查询 / 配置查看）
@@ -17,7 +18,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from typing import ClassVar, cast
 
@@ -28,8 +28,9 @@ from starlette.responses import JSONResponse
 from .config import HeartbeatServerConfig
 from .registry import NODE_STATUS_EVENT, HeartbeatServerError, NodeRegistry, NodeStatus
 
-#: 心跳请求体上限（能力全量也不该超过它；超限 413）
-MAX_BODY_BYTES: int = 1024 * 1024
+#: fire-and-forget 投递策略（comm DeliveryPolicy 字面量，不 import 对方插件包）：
+#: 心跳下行容忍丢失，丢一条下一拍补上
+_FIRE_AND_FORGET: dict[str, int] = {"min_success": 0, "max_attempts": 1}
 
 #: 节点列表接口的扩展收集事件（与从模块侧 status 接口同一契约：
 #: 监听器把自家数据写进 ``response["extensions"]["<插件名>"]``）
@@ -47,7 +48,7 @@ class HeartbeatServerPlugin:
     """
 
     name: ClassVar[str] = "heartbeat-server"
-    inject: ClassVar[list[str]] = ["appconfig", "webapi", "webui", "node_kind", "node_name"]
+    inject: ClassVar[list[str]] = ["appconfig", "webapi", "webui", "comm", "node_kind", "node_name"]
     #: 配置模型（标准 Schema）：驱动校验、默认值注入与写回
     Config: ClassVar[type[HeartbeatServerConfig]] = HeartbeatServerConfig
 
@@ -67,9 +68,9 @@ class HeartbeatServerPlugin:
 
     # -- 生命周期 -------------------------------------------------------------
     async def init(self) -> object:
-        """注册 API 路由 / 管理页并启动状态扫描；返回值即卸载清理函数。"""
+        """注册 API 路由 / comm 收件 / 管理页并启动状态扫描；返回卸载清理函数。"""
         api = self.ctx.webapi
-        api.post("/api/heartbeat", self._receive, kind="api", name="heartbeat-server.receive")
+        self.ctx.comm.on("heartbeat.beat", self._on_beat)
         api.get("/api/heartbeat/nodes", self._nodes, kind="api", name="heartbeat-server.nodes")
         api.get(
             "/api/heartbeat/nodes/{node_id}",
@@ -164,23 +165,43 @@ class HeartbeatServerPlugin:
     def _warn(self, message: str) -> None:
         self.ctx.logger.warning("%s", message)
 
-    # -- 心跳接收（协议 §2） ---------------------------------------------------
-    async def _receive(self, request: Request) -> dict[str, object] | JSONResponse:
-        """``POST /api/heartbeat``：upsert 上报并应答下发参数。"""
+    # -- 心跳接收（comm 收件，协议 §2） ---------------------------------------
+    def _on_beat(self, payload: object, _meta: object) -> None:
+        """``heartbeat.beat``（``ctx.comm.on``）：upsert 上报并下行下发参数。
+
+        旧私有应答的两个字段改为 comm 下行消息（FIRE_AND_FORGET，不落盘）：
+        ``heartbeat.config`` 每拍推送运行参数（自愈两侧重启，保持
+        「最迟一个心跳周期同步」语义）；``heartbeat.caps`` 按需请求全量能力。
+        """
+        if not isinstance(payload, dict):
+            self._warn("心跳载荷不是对象，忽略")
+            return
         try:
-            body = await read_json_body(request)
-            record, need_caps = self._registry.accept(body)
+            record, need_caps = self._registry.accept(
+                cast(dict[str, object], payload)
+            )
         except HeartbeatServerError as error:
-            return _error_response(error)
-        return {
-            "ok": True,
-            "server_time": record.last_seen,
-            "config": self._push_config(),
-            "need_caps": need_caps,
-        }
+            self._warn(f"心跳载荷被拒（{error.code}）：{error}")
+            return
+        node_id = record.node_id
+        self.ctx.comm.send_to(
+            node_id,
+            "heartbeat.config",
+            self._push_config(),
+            policy=_FIRE_AND_FORGET,
+            immediate=True,
+        )
+        if need_caps:
+            self.ctx.comm.send_to(
+                node_id,
+                "heartbeat.caps",
+                {"need_caps": True},
+                policy=_FIRE_AND_FORGET,
+                immediate=True,
+            )
 
     def _push_config(self) -> dict[str, float]:
-        """下发给从模块的运行参数（协议 §2：应答只承载这三个键）。"""
+        """下发给从模块的运行参数（``heartbeat.config`` 载荷）。"""
         return {
             "interval": self.config.interval,
             "timeout": self.config.timeout,
@@ -266,32 +287,6 @@ class HeartbeatServerPlugin:
 
 
 # -- HTTP 辅助 ----------------------------------------------------------------
-async def read_json_body(request: Request) -> dict[str, object]:
-    """流式读请求体（超限 413），解析成 JSON 对象。"""
-    declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
-        raise HeartbeatServerError(
-            f"请求体过大（最大 {MAX_BODY_BYTES} 字节）", 413, code="payload_too_large"
-        )
-    chunks: list[bytes] = []
-    total = 0
-    async for chunk in request.stream():
-        total += len(chunk)
-        if total > MAX_BODY_BYTES:
-            raise HeartbeatServerError(
-                f"请求体过大（最大 {MAX_BODY_BYTES} 字节）", 413, code="payload_too_large"
-            )
-        chunks.append(chunk)
-    try:
-        data: object = json.loads(b"".join(chunks).decode("utf-8"))
-    except (ValueError, RecursionError) as error:
-        # 深嵌套 JSON 抛 RecursionError（非 ValueError 子类），一并按不合规处理
-        raise HeartbeatServerError(f"请求体不是合法 JSON：{error}") from error
-    if not isinstance(data, dict):
-        raise HeartbeatServerError("请求体必须是 JSON 对象")
-    return cast(dict[str, object], data)
-
-
 def _error_response(error: HeartbeatServerError) -> JSONResponse:
     """业务错误响应：``{"error": {"message", "code"}}`` + 恰当状态码（设计稿 §4）。"""
     return JSONResponse(
@@ -301,10 +296,8 @@ def _error_response(error: HeartbeatServerError) -> JSONResponse:
 
 
 __all__: list[str] = [
-    "MAX_BODY_BYTES",
     "NODES_EVENT",
     "NODE_EVENT",
     "HeartbeatServerPlugin",
     "NodeStatus",
-    "read_json_body",
 ]

@@ -26,7 +26,7 @@ from cordis_port import Context
 from cordis_port.logger import Exporter, Logger, Message
 from starlette.requests import Request
 
-from common.plugins.comm import CommMeta
+from common.contracts import CommMeta
 
 from .config import LogConfig
 from .export import LEVELS, RotatingFile, call_site, console_exporter, file_exporter
@@ -275,6 +275,7 @@ class LogPlugin:
             q=params.get("q") or None,
             after_id=as_int(params.get("after_id")),
             before_id=as_int(params.get("before_id")),
+            around_id=as_int(params.get("around_id")),
             from_ts=as_float(params.get("from_ts")),
             to_ts=as_float(params.get("to_ts")),
             limit=int(params.get("limit") or 200),
@@ -282,15 +283,27 @@ class LogPlugin:
         return {"logs": logs, "count": len(logs)}
 
     async def _nodes_handler(self, _request: Request) -> dict[str, object]:
-        """``GET /api/logs/nodes``：上报过日志的节点清单（过滤下拉）。"""
-        if self._store is None:
-            return {"nodes": []}
-        try:
-            return {"nodes": self._store.nodes()}
-        except (sqlite3.Error, OSError) as exc:
-            return cast(dict[str, object], self.ctx.webapi.json(
-                {"error": f"查询库不可用：{type(exc).__name__}"}, status_code=503
-            ))
+        """``GET /api/logs/nodes``：全部已知节点名（过滤下拉）。
+
+        合并两个来源：日志库出现过的节点 + comm 通道已接入的节点
+        （汇聚点可见所有节点，含尚未产生日志的）——下拉列**所有节点名称**，
+        不受"是否有日志"限制。
+        """
+        names: set[str] = set()
+        if self._store is not None:
+            try:
+                names.update(self._store.nodes())
+            except (sqlite3.Error, OSError) as exc:
+                return cast(dict[str, object], self.ctx.webapi.json(
+                    {"error": f"查询库不可用：{type(exc).__name__}"}, status_code=503
+                ))
+        comm = self.ctx.get("comm")
+        if comm is not None:
+            try:
+                names.update(comm.nodes())
+            except (AttributeError, TypeError):
+                pass  # 老服务无 nodes() 时静默降级为日志库来源
+        return {"nodes": sorted(names)}
 
     async def _delete_logs(self, request: Request) -> dict[str, object]:
         """``DELETE /api/logs``：按当前筛选删除（审计留痕，防灭迹）。"""

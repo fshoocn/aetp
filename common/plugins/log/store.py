@@ -133,13 +133,32 @@ class LogStore:
         q: str | None = None,
         after_id: int | None = None,
         before_id: int | None = None,
+        around_id: int | None = None,
         from_ts: float | None = None,
         to_ts: float | None = None,
         limit: int = 200,
     ) -> list[dict[str, object]]:
         """游标查询（新 → 旧）：``after_id`` / ``before_id`` 二选一（尾随 / 回翻）；
-        ``from_ts`` / ``to_ts`` 时间窗（秒）。关键字 ``q`` 命中 msg / op / 来源名 /
-        调用点任一列（``q=op-xxxx`` 即「查看本次操作」）。"""
+        ``around_id`` 为**前后文模式**：返回锚点行及其前 / 后各约一半 ``limit``
+        条（体验 B，统一时间轴）；``from_ts`` / ``to_ts`` 时间窗（秒）。
+        关键字 ``q`` 命中 msg / op / 来源名 / 调用点任一列
+        （``q=op-xxxx`` 即「查看本次操作」）。"""
+        if around_id is not None:
+            half = max(1, min(limit, 1000)) // 2
+            older = self.query(
+                node=node, level=level, q=q, before_id=around_id,
+                from_ts=from_ts, to_ts=to_ts, limit=half,
+            )  # 新→旧
+            newer = self.query(
+                node=node, level=level, q=q, after_id=around_id,
+                from_ts=from_ts, to_ts=to_ts, limit=half,
+            )  # 旧→新
+            anchor = self._row_by_id(around_id)
+            combined: list[dict[str, object]] = list(reversed(newer))
+            if anchor is not None:
+                combined.append(anchor)
+            combined.extend(older)
+            return combined
         # 全字面量 SQL + 可空参数（? IS NULL 即不过滤）——不拼接查询串（S608 合规）
         like: str | None = None
         if q:
@@ -204,6 +223,28 @@ class LogStore:
         ]
         # after_id（尾随）→ 旧→新追加序；否则（回翻）→ 新→旧浏览序
         return result
+
+    @_isolating
+    def _row_by_id(self, row_id: int) -> dict[str, object] | None:
+        """按 id 取单行（前后文锚点；不套过滤，锚点行始终可见）。"""
+        with closing(_open_store(self.path)) as conn:
+            self._ensure(conn)
+            row = conn.execute(
+                "SELECT id, ts, node, name, level, op, msg, source FROM logs WHERE id = ?",
+                (row_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "ts": row[1],
+            "node": row[2],
+            "name": row[3],
+            "level": row[4],
+            "op": row[5],
+            "msg": row[6],
+            "source": row[7],
+        }
 
     @_isolating
     def nodes(self) -> list[str]:

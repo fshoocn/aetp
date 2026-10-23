@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from common.plugins.db import Mapped, Model, mapped_column
+from common.models import Mapped, Model, mapped_column
 
 #: 行结构（逻辑列）的固定顺序（``load_all`` / 补丁用）
 OUTBOX_COLUMNS: tuple[str, ...] = (

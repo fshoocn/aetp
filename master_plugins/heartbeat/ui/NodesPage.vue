@@ -79,6 +79,7 @@
                 <template #body="{ data }">
                     <div class="nodes-page__actions" @click.stop>
                         <Button v-if="data.address" label="打开" icon="pi pi-external-link" size="small" severity="secondary" text @click="openAddress(data.address)" />
+                        <Button label="日志" icon="pi pi-file" size="small" severity="secondary" text @click="openLogs(data)" />
                         <Button label="移除" icon="pi pi-trash" size="small" severity="danger" text @click="removeNode(data.node_id)" />
                     </div>
                 </template>
@@ -255,6 +256,21 @@ export default {
         },
         openAddress(address) {
             window.open(address, '_blank', 'noopener');
+        },
+        openLogs(data) {
+            // 深链（日志体验 A）：预填节点 + 最近心跳前 5 分钟
+            const lastSeen = Number(data.last_seen) || Date.now() / 1000;
+            const query = new URLSearchParams({
+                node: String(data.node_id),
+                from: String(Math.floor(lastSeen - 300)),
+                to: String(Math.floor(lastSeen + 60))
+            });
+            const url = `/logs?${query.toString()}`;
+            if (this.$router && typeof this.$router.push === 'function') {
+                this.$router.push(url);
+            } else {
+                window.location.assign(url);
+            }
         },
         statusSeverity(status) {
             return { online: 'success', offline: 'warn', lost: 'danger' }[status] || 'secondary';

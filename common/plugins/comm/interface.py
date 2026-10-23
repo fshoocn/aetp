@@ -13,6 +13,8 @@ from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, Protocol, TypedDict, runtime_checkable
 
+from common.contracts import CommMeta
+
 
 class DeliveryPolicy(TypedDict, total=False):
     """单条消息的投递语义（三参数正交，未填取默认值）。
@@ -67,16 +69,6 @@ class MessageState(StrEnum):
     IN_FLIGHT = "in_flight"
     DONE = "done"
     FAILED = "failed"
-
-
-class CommMeta(TypedDict):
-    """派发给 topic 处理器的元数据。"""
-
-    node: str
-    topic: str
-    ts: float
-    received_ts: float
-    id: str
 
 
 #: topic 处理器：同步或异步均可
@@ -202,6 +194,10 @@ class CommInterface(Protocol):
 
         与 ``ctx.on(f"comm/{topic}", handler)`` 等价（cordis 事件总线派发）。
         """
+        ...
+
+    def nodes(self) -> list[str]:
+        """本节点已知的全部节点名称（汇聚点 = 所有接入节点 + 自身）。"""
         ...
 
     def relay(

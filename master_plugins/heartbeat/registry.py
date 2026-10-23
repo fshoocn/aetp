@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import cast
 
-from slave_plugins.heartbeat.capabilities import (
+from common.capabilities import (
     Capability,
     capabilities_digest,
     parse_capability,

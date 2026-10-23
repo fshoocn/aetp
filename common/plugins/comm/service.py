@@ -514,6 +514,13 @@ class CommService(Service[CommConfig]):
 
         return self.on(wire, handler)
 
+    def nodes(self) -> list[str]:
+        """本节点已知的全部节点名称（汇聚点 = 所有接入节点 + 自身）。"""
+        names = set(self._nodes)
+        names.add(self._node_name())
+        names.discard("")
+        return sorted(names)
+
     def status(self, message_id: str) -> MessageStatus | None:
         """单条消息投递状态；未知 id 返回 ``None``。"""
         mid = str(message_id or "").strip()

@@ -1,18 +1,17 @@
 """心跳插件配置：``config.ini`` 的 ``[heartbeat]`` 节。
 
-主模块地址由**节点配置**提供（不走 ``plugin.json`` 的 ``config``）::
+通道归 comm（迁移后心跳经 ``ctx.comm`` 上报，主模块地址即 ``[comm] target``），
+本节只保留**运行参数**::
 
     [heartbeat]
-    master_url = http://127.0.0.1:8080   # 主模块基地址（必填）
-    path = /api/heartbeat                 # 心跳接口路径（缺省 /api/heartbeat）
     interval = 5.0                        # 心跳间隔秒数（缺省 5，启动兜底值）
-    timeout = 3.0                         # 单次请求超时秒数（缺省 3，启动兜底值）
+    timeout = 3.0                         # 单次投递等待秒数（缺省 3，启动兜底值）
     max_backoff = 60.0                    # 失败重试间隔上限秒数（缺省 60，启动兜底值）
 
-**运行参数由主模块设定**：``interval`` / ``timeout`` / ``max_backoff`` 的 ini
-值只是「主模块下发前」的启动兜底 —— 心跳响应携带 ``config`` 时从模块立即
-应用（见 :meth:`HeartbeatConfig.apply_server`），主模块改配置后最迟一个
-心跳周期内同步到全部从模块，不需要逐台改 ini。
+**运行参数由主模块设定**：三个键的 ini 值只是「主模块下发前」的启动兜底 ——
+主模块经 ``heartbeat.config`` 下行消息推送时立即应用
+（见 :meth:`HeartbeatConfig.apply_server`），主模块改配置即时同步到全部
+从模块，不需要逐台改 ini。
 
 失败重试采用指数退避：第 n 次连续失败后等待
 ``min(interval * 2**(n-1), max_backoff)`` 秒。
@@ -27,12 +26,9 @@ from typing import ClassVar
 from common.config_base import FieldConfig, Issue
 
 #: ``[heartbeat]`` 节允许的键
-_KEYS: frozenset[str] = frozenset(
-    {"master_url", "path", "auth_token", "interval", "timeout", "max_backoff"}
-)
+_KEYS: frozenset[str] = frozenset({"interval", "timeout", "max_backoff"})
 
-#: 主模块可下发覆盖的运行参数；其余键（master_url / path）只由本地
-#: config.ini 管理 —— 防止主模块把从模块指向别的地址。
+#: 主模块可下发覆盖的运行参数（全部键；通道归 comm，无「仅本地」项）
 SERVER_KEYS: frozenset[str] = frozenset({"interval", "timeout", "max_backoff"})
 
 
@@ -70,58 +66,21 @@ class HeartbeatConfig(FieldConfig):
     ini_section: ClassVar[str | None] = "heartbeat"
     #: 字段类型表：字段名 -> (类型元组, 说明)；驱动默认值、类型校验与 ini 序列化
     _FIELDS: ClassVar[dict[str, tuple[tuple[type[object], ...], str]]] = {
-        "master_url": ((str,), "master_url（主模块基地址）"),
-        "path": ((str,), "path（心跳接口路径）"),
-        "auth_token": ((str,), "auth_token（心跳上报访问令牌）"),
         "interval": ((int, float), "interval（心跳间隔秒数）"),
-        "timeout": ((int, float), "timeout（单次请求超时秒数）"),
+        "timeout": ((int, float), "timeout（单次投递等待秒数）"),
         "max_backoff": ((int, float), "max_backoff（失败重试间隔上限秒数）"),
     }
 
-    #: 主模块基地址（必填），如 ``http://127.0.0.1:8080``
-    master_url: str = ""
-    #: 心跳接口路径
-    path: str = "/api/heartbeat"
-    #: 上报携带的 ``X-AETP-Token``；留空 = 取本节点 ``[web] auth_token``
-    #: （全网共享同一令牌的标准用法）——主模块下发不可覆盖（防劫持）
-    auth_token: str = ""
     #: 心跳间隔（秒）；主模块可下发覆盖
     interval: float = 5.0
-    #: 单次请求超时（秒）；主模块可下发覆盖
+    #: 单次投递等待（秒）；主模块可下发覆盖
     timeout: float = 3.0
     #: 失败重试间隔上限（秒）；主模块可下发覆盖
     max_backoff: float = 60.0
 
-    def endpoint(self) -> str:
-        """完整心跳接口地址（``master_url`` + ``path``）。"""
-        return f"{self.master_url.rstrip('/')}/{self.path.lstrip('/')}"
-
     def _validate_extra(self) -> list[Issue]:
-        """master_url 必填与协议、path 前缀、三个运行参数收敛为有限正数。"""
+        """三个运行参数收敛为有限正数。"""
         issues: list[Issue] = []
-        if not self.master_url:
-            issues.append(
-                {
-                    "message": "config.ini 的 [heartbeat] 节缺少 master_url"
-                    "（主模块地址，如 http://127.0.0.1:8080）",
-                    "path": ["master_url"],
-                }
-            )
-        elif not self.master_url.startswith(("http://", "https://")):
-            issues.append(
-                {
-                    "message": f"配置 [heartbeat].master_url 需以 http:// 或 https:// 开头："
-                    f"{self.master_url!r}",
-                    "path": ["master_url"],
-                }
-            )
-        if not self.path.startswith("/"):
-            issues.append(
-                {
-                    "message": f"配置 [heartbeat].path 需以 / 开头：{self.path!r}",
-                    "path": ["path"],
-                }
-            )
         for name in ("interval", "timeout", "max_backoff"):
             try:
                 setattr(self, name, _positive_seconds(name, getattr(self, name)))

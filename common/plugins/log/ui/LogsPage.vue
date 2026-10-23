@@ -16,7 +16,11 @@
         <div class="logs-page__filters">
             <Select v-model="node" :options="nodeOptions" optionLabel="label" optionValue="value" placeholder="全部节点" showClear class="logs-page__filter" @change="reload" />
             <Select v-model="level" :options="levelOptions" optionLabel="label" optionValue="value" placeholder="全部级别" showClear class="logs-page__filter" @change="reload" />
-            <Select v-model="window" :options="windowOptions" optionLabel="label" optionValue="value" class="logs-page__filter" @change="reload" />
+            <Select v-model="window" :options="windowOptions" optionLabel="label" optionValue="value" class="logs-page__filter" @change="onWindowChange" />
+            <template v-if="window === 'custom'">
+                <input v-model="fromLocal" type="datetime-local" class="logs-page__filter" aria-label="起始时间" @change="onCustomRange" />
+                <input v-model="toLocal" type="datetime-local" class="logs-page__filter" aria-label="结束时间" @change="onCustomRange" />
+            </template>
             <IconField class="logs-page__search">
                 <InputIcon><i class="pi pi-search" /></InputIcon>
                 <InputText v-model="q" placeholder="关键字…" @keydown.enter="reload" />
@@ -63,8 +67,23 @@
                             <span v-if="data.op"><strong>操作：</strong>{{ data.op }}</span>
                         </div>
                         <pre class="logs-page__detail-msg">{{ data.msg }}</pre>
+                        <div v-if="around && around.id === data.id" class="logs-page__around">
+                            <div class="logs-page__around-head">
+                                前后文（{{ around.scope === 'node' ? around.node : '全部节点' }}）
+                                <Button label="收起前后文" severity="secondary" text size="small" @click="around = null" />
+                            </div>
+                            <div v-for="row in around.rows" :key="row.id" class="logs-page__around-row" :class="{ 'logs-page__around-row--anchor': row.id === around.id }">
+                                <span class="logs-page__time">{{ absolute(row.ts) }}</span>
+                                <span class="logs-page__around-node">{{ row.node }}</span>
+                                <Tag :value="levelName(row.level)" :severity="levelSeverity(row.level)" />
+                                <span v-html="highlight(row.msg)"></span>
+                            </div>
+                        </div>
                         <div class="logs-page__detail-actions">
                             <Button v-if="data.op" label="查看本次操作" severity="secondary" outlined size="small" @click="filterByOperation(data.op)" />
+                            <Button label="前后文（本节点）" severity="secondary" outlined size="small" @click="loadAround(data, 'node')" />
+                            <Button label="前后文（全部节点）" severity="secondary" outlined size="small" @click="loadAround(data, 'all')" />
+                            <Button label="复制" severity="secondary" outlined size="small" @click="copyMessage(data)" />
                             <Button label="收起" severity="secondary" text size="small" @click="toggleDetail(data)" />
                         </div>
                     </div>
@@ -124,8 +143,21 @@ const WINDOWS = [
     { label: '最近 15 分钟', value: 900 },
     { label: '最近 1 小时', value: 3600 },
     { label: '今天', value: 'today' },
+    { label: '自定义', value: 'custom' },
     { label: '全部', value: 0 }
 ];
+
+// epoch 秒 ↔ <input type="datetime-local"> 值（本地时区）
+function toLocalInput(epoch) {
+    const date = new Date(Number(epoch) * 1000);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function fromLocalInput(value) {
+    const ms = new Date(String(value)).getTime();
+    return Number.isFinite(ms) ? ms / 1000 : null;
+}
 
 function escapeHtml(text) {
     return String(text)
@@ -143,6 +175,9 @@ export default {
             level: null,
             q: '',
             window: 3600,
+            fromLocal: '',
+            toLocal: '',
+            around: null,
             tail: true,
             follow: true,
             pendingNew: 0,
@@ -187,12 +222,25 @@ export default {
             const levelRaw = params.get('level');
             this.level = levelRaw === null ? null : Number(levelRaw);
             this.q = params.get('q') || '';
+            const from = params.get('from');
+            const to = params.get('to');
+            if (from || to) {
+                this.window = 'custom';
+                this.fromLocal = from ? toLocalInput(Number(from)) : '';
+                this.toLocal = to ? toLocalInput(Number(to)) : '';
+            }
         },
         writeDeepLink() {
             const params = new URLSearchParams();
             if (this.node) params.set('node', this.node);
             if (this.level !== null && this.level !== undefined) params.set('level', String(this.level));
             if (this.q) params.set('q', this.q);
+            if (this.window === 'custom') {
+                const from = fromLocalInput(this.fromLocal);
+                const to = fromLocalInput(this.toLocal);
+                if (from !== null) params.set('from', String(Math.floor(from)));
+                if (to !== null) params.set('to', String(Math.floor(to)));
+            }
             const query = params.toString();
             window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
         },
@@ -202,7 +250,12 @@ export default {
             if (this.level !== null && this.level !== undefined) params.set('level', String(this.level));
             if (this.q) params.set('q', this.q);
             const windowValue = this.window;
-            if (windowValue === 'today') {
+            if (windowValue === 'custom') {
+                const from = fromLocalInput(this.fromLocal);
+                const to = fromLocalInput(this.toLocal);
+                if (from !== null) params.set('from_ts', String(from));
+                if (to !== null) params.set('to_ts', String(to));
+            } else if (windowValue === 'today') {
                 const start = new Date();
                 start.setHours(0, 0, 0, 0);
                 params.set('from_ts', String(start.getTime() / 1000));
@@ -224,6 +277,7 @@ export default {
         },
         async reload() {
             this.writeDeepLink();
+            this.loadNodes(); // 节点清单随刷新更新（后接入的节点也能选）
             this.loading = true;
             this.error = '';
             try {
@@ -299,6 +353,42 @@ export default {
             this.q = op;
             this.expandedRows = {};
             this.reload();
+        },
+        // ---- 时间快捷与自定义（体验 E） ----
+        onWindowChange() {
+            if (this.window === 'custom') {
+                if (!this.fromLocal && !this.toLocal) {
+                    this.fromLocal = toLocalInput(Date.now() / 1000 - 3600);
+                    this.toLocal = toLocalInput(Date.now() / 1000);
+                }
+            }
+            this.reload();
+        },
+        onCustomRange() {
+            this.reload();
+        },
+        // ---- 前后文（体验 B）：锚点行前 / 后各 N 条，统一时间轴 ----
+        async loadAround(row, scope) {
+            try {
+                const params = new URLSearchParams();
+                if (scope === 'node') params.set('node', row.node);
+                if (this.level !== null && this.level !== undefined) params.set('level', String(this.level));
+                if (this.q) params.set('q', this.q);
+                params.set('around_id', String(row.id));
+                params.set('limit', '21');
+                const data = await fetchJson(`${apiBase()}/api/logs?${params.toString()}`);
+                this.around = { id: row.id, rows: data.logs || [], scope, node: row.node };
+            } catch (error) {
+                this.error = error instanceof Error ? error.message : String(error);
+            }
+        },
+        // ---- 单条复制（体验 E） ----
+        async copyMessage(row) {
+            try {
+                await navigator.clipboard.writeText(row.msg);
+            } catch {
+                this.error = '复制失败：浏览器未授权剪贴板';
+            }
         },
         // ---- 删除（按当前筛选，审计留痕） ----
         deleteFiltered() {
@@ -454,6 +544,37 @@ export default {
 /* 展开行详情（DataTable expansion slot） */
 .logs-page__detail {
     padding: 0.25rem 0.25rem;
+}
+.logs-page__around {
+    margin: 0.5rem 0;
+    border: 1px solid var(--content-border, #434652);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+}
+.logs-page__around-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    opacity: 0.8;
+    margin-bottom: 0.25rem;
+}
+.logs-page__around-row {
+    display: grid;
+    grid-template-columns: 11rem 8rem 5rem 1fr;
+    gap: 0.5rem;
+    align-items: baseline;
+    padding: 0.15rem 0.25rem;
+    border-radius: 4px;
+}
+.logs-page__around-row--anchor {
+    background: color-mix(in srgb, var(--primary-color, #4f9cf9) 18%, transparent);
+}
+.logs-page__around-node {
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .logs-page__detail-meta {
     display: flex;

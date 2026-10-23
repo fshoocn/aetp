@@ -19,14 +19,14 @@ from urllib.parse import quote
 from cordis_port import Context, Fiber
 from cordis_port.logger import Exporter, Logger
 from cordis_port.logger import Message as LogMessage
-from starlette.requests import Request
-from starlette.types import Message, Scope
 
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from _helpers import request as _request
 from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
+from common.plugins.comm import CommService
+from common.plugins.db import DbPlugin
 from common.plugins.webapi import WebApiPlugin
 from master_plugins.heartbeat import (
     MAX_NODES,
@@ -37,7 +37,6 @@ from master_plugins.heartbeat import (
     NodeRegistry,
     NodeStatus,
 )
-from master_plugins.heartbeat.plugin import MAX_BODY_BYTES, read_json_body
 from slave_plugins.heartbeat import HeartbeatPlugin
 from slave_plugins.heartbeat.capabilities import capabilities_digest
 
@@ -79,7 +78,7 @@ class _StubWebUi:
 async def _boot_master(
     root: Path, *, section: str = ""
 ) -> tuple[Context, _StubWebUi, str, Fiber]:
-    """装配带心跳主模块的节点：appconfig + webapi + heartbeat-server。"""
+    """装配带心跳主模块的节点：appconfig + db + webapi + comm + heartbeat-server。"""
     root.mkdir(parents=True, exist_ok=True)
     port = _free_port()
     config_path = root / "config.ini"
@@ -87,6 +86,10 @@ async def _boot_master(
         "[node]\nkind = master\nname = 主节点\n\n[web]\n"
         f"port = {port}\n"
         "auth_token = test-token\n"
+        "\n[db]\n"
+        f"url = sqlite+aiosqlite:///{(root / 'aetp.db').as_posix()}\n"
+        "\n[comm]\n"
+        "batch_interval = 0.05\n"
         f"{section}",
         encoding="utf-8",
     )
@@ -97,7 +100,9 @@ async def _boot_master(
         "node_name",
         context.appconfig.section("node").get("name") or socket.gethostname(),
     )
+    await context.plugin(DbPlugin)
     await context.plugin(WebApiPlugin)
+    await context.plugin(CommService)
     webui = _StubWebUi()
     context.provide("webui", webui)
     fiber: Fiber = await context.plugin(HeartbeatServerPlugin)
@@ -119,49 +124,10 @@ def _beat_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
-def _fake_request(body: bytes) -> Request:
-    """合成一个只带请求体的 starlette Request（请求体上限直测用）。"""
-
-    async def receive() -> Message:
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    scope = cast(
-        Scope,
-        {
-            "type": "http",
-            "http_version": "1.1",
-            "method": "POST",
-            "scheme": "http",
-            "path": "/api/heartbeat",
-            "raw_path": b"/api/heartbeat",
-            "query_string": b"",
-            "headers": [
-                (b"content-length", str(len(body)).encode()),
-                (b"host", b"testserver"),
-            ],
-        },
-    )
-    return Request(scope, receive)
-
-
-class BodyLimitTests(unittest.IsolatedAsyncioTestCase):
-    """请求体上限（413）与非对象 JSON：合成请求直测，结果确定。"""
-
-    async def test_rejects_oversized_body(self) -> None:
-        with self.assertRaises(HeartbeatServerError) as caught:
-            await read_json_body(_fake_request(b"x" * (MAX_BODY_BYTES + 1)))
-        self.assertEqual(caught.exception.status_code, 413)
-
-    async def test_rejects_non_object_json(self) -> None:
-        with self.assertRaises(HeartbeatServerError):
-            await read_json_body(_fake_request(b"[1]"))
-        with self.assertRaises(HeartbeatServerError):
-            await read_json_body(_fake_request(b"not json"))
-
-    async def test_rejects_deeply_nested_json(self) -> None:
-        """深嵌套 JSON 抛 RecursionError（非 ValueError 子类）：按不合规处理而非 500。"""
-        with self.assertRaises(HeartbeatServerError):
-            await read_json_body(_fake_request(b"[" * 60_000 + b"]" * 60_000))
+async def _send_beat(context: Context, **overrides: object) -> None:
+    """经 comm 上报一次心跳并等待收件处理（hub 自环，批量泵 0.05s 内派发）。"""
+    context.comm.report("heartbeat.beat", _beat_payload(**overrides))
+    await asyncio.sleep(0.3)
 
 
 class HeartbeatServerConfigTests(unittest.TestCase):
@@ -367,20 +333,30 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_heartbeat_and_management_api(self) -> None:
         entries = [{"kind": "executor", "id": "pytest", "provider": "runner"}]
+        await _send_beat(
+            self.context,
+            caps_digest=capabilities_digest(entries),
+            capabilities=entries,
+        )
+
+        # 下行运行参数（替代旧应答 config 字段）：从节点经 comm poll 拉取
         status, body = await _arequest(
             self.base_url,
-            "/api/heartbeat",
+            "/api/comm/poll",
             method="POST",
-            body=json.dumps(
-                _beat_payload(caps_digest=capabilities_digest(entries), capabilities=entries)
-            ).encode(),
+            body=json.dumps({"node": "从节点-1", "hang": 0.2, "max": 10}).encode(),
             content_type="application/json",
         )
         self.assertEqual(status, 200)
-        reply = json.loads(body)
-        self.assertTrue(reply["ok"])
-        self.assertEqual(reply["config"], {"interval": 0.3, "timeout": 1.0, "max_backoff": 2.0})
-        self.assertFalse(reply["need_caps"])
+        items = cast(list[dict[str, object]], json.loads(body)["items"])
+        config_items = [item for item in items if item["topic"] == "heartbeat.config"]
+        self.assertTrue(config_items)
+        self.assertEqual(
+            config_items[0]["payload"],
+            {"interval": 0.3, "timeout": 1.0, "max_backoff": 2.0},
+        )
+        # need_caps=False → 无 heartbeat.caps 下行
+        self.assertFalse([item for item in items if item["topic"] == "heartbeat.caps"])
 
         # 列表 / 详情（node_id 含中文，走 URL 编码）
         node_url = f"/api/heartbeat/nodes/{quote('从节点-1')}"
@@ -419,14 +395,7 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
 
         capture_exporter: Exporter = {"levels": {"default": 2}, "export": capture}
         self.context.logger.exporter(capture_exporter, raw=True)
-        status, _body = await _arequest(
-            self.base_url,
-            "/api/heartbeat",
-            method="POST",
-            body=json.dumps(_beat_payload()).encode(),
-            content_type="application/json",
-        )
-        self.assertEqual(status, 200)
+        await _send_beat(self.context)
         ok = await wait_until(
             lambda: any("状态转换" in line for line in captured),
             timeout=5.0,
@@ -439,14 +408,7 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_healthz_reports_node_metrics(self) -> None:
         """/healthz 汇总心跳指标：节点数与在线状态统计。"""
-        status, _body = await _arequest(
-            self.base_url,
-            "/api/heartbeat",
-            method="POST",
-            body=json.dumps(_beat_payload()).encode(),
-            content_type="application/json",
-        )
-        self.assertEqual(status, 200)
+        await _send_beat(self.context)
         status, body = await _arequest(self.base_url, "/healthz")
         self.assertEqual(status, 200)
         metrics = json.loads(body)["metrics"]["heartbeat"]
@@ -454,22 +416,10 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metrics["online"], 1)
 
     async def test_errors_and_extension_slots(self) -> None:
-        # 缺 node_id → 400 结构化错误
-        status, body = await _arequest(
-            self.base_url,
-            "/api/heartbeat",
-            method="POST",
-            body=b'{"node_kind": "slave"}',
-            content_type="application/json",
-        )
-        self.assertEqual(status, 400)
-        self.assertIn("node_id", json.loads(body)["error"]["message"])
-
-        # 非 JSON → 400（超大 body 的 413 见 BodyLimitTests，直测更确定）
-        status, _body = await _arequest(
-            self.base_url, "/api/heartbeat", method="POST", body=b"not json"
-        )
-        self.assertEqual(status, 400)
+        # 缺 node_id 的非法心跳：收件拒收（记警告）且不注册节点（异步通道无 400 形态）
+        await _send_beat(self.context, node_id="")
+        status, body = await _arequest(self.base_url, "/api/heartbeat/nodes")
+        self.assertEqual(json.loads(body)["nodes"], [])
 
         # 未知节点 → 404
         status, body = await _arequest(
@@ -525,8 +475,13 @@ class HeartbeatPairTests(unittest.IsolatedAsyncioTestCase):
             "[node]\nkind = slave\nname = 从节点-1\n\n[web]\n"
             f"port = {slave_port}\n"
             "auth_token = test-token\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(root / 'slave' / 'aetp.db').as_posix()}\n"
+            "\n[comm]\n"
+            f"target = {master_url}\n"
+            "batch_interval = 0.05\n"
             "\n[heartbeat]\n"
-            f"master_url = {master_url}\ninterval = 0.3\ntimeout = 1.0\nmax_backoff = 2.0\n",
+            "interval = 0.3\ntimeout = 1.0\nmax_backoff = 2.0\n",
             encoding="utf-8",
         )
         slave: Context = Context()
@@ -536,7 +491,9 @@ class HeartbeatPairTests(unittest.IsolatedAsyncioTestCase):
             "node_name",
             slave.appconfig.section("node").get("name") or socket.gethostname(),
         )
+        await slave.plugin(DbPlugin)
         await slave.plugin(WebApiPlugin)
+        await slave.plugin(CommService)
         await slave.plugin(HeartbeatPlugin)
 
         def _node_status() -> str:

@@ -27,7 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from common.plugins.db.service import DbError
+from common.db_errors import DbError
 
 from .plugin_manager import (
     MAX_ARCHIVE_SIZE,

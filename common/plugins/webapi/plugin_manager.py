@@ -23,9 +23,9 @@ from cordis_port import Context, Fiber
 from sqlalchemy.exc import SQLAlchemyError
 
 from common.cordis_utils import safe_dispose
-from common.plugins.db.registry import DataDependency, PluginRecordStore, parse_dependencies
-from common.plugins.db.service import DbDependencyError, DbError
-from common.plugins.log import log_operation_async
+from common.db_errors import DbDependencyError, DbError
+from common.db_registry import DataDependency, PluginRecordStore, parse_dependencies
+from common.log_op import log_operation_async
 
 MAX_ARCHIVE_SIZE: Final[int] = 32 * 1024 * 1024
 MAX_EXTRACTED_SIZE: Final[int] = 128 * 1024 * 1024

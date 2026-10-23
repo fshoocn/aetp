@@ -35,9 +35,8 @@ from sqlalchemy.orm import registry as sa_registry
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CreateColumn, CreateIndex
 
-from .config import DbConfig
-from .models import Model, decode_plugin_id, model_owner, owner_models, physical_name, registered_models, type_token
-from .registry import (
+from common.db_errors import DbDependencyError, DbError
+from common.db_registry import (
     LOG_TABLE,
     DataDependency,
     OwnerRegistry,
@@ -49,17 +48,20 @@ from .registry import (
     record_dependencies,
     schema_log_table,
 )
+from common.models import (
+    Model,
+    decode_plugin_id,
+    model_owner,
+    owner_models,
+    physical_name,
+    registered_models,
+    type_token,
+)
+
+from .config import DbConfig
 
 #: 迁移步骤：``async def upgrade_v2(conn)``（SQLAlchemy Core / ``sa.text`` 均可）
 MigrationStep = Callable[[AsyncConnection], Awaitable[None]]
-
-
-class DbError(RuntimeError):
-    """数据库服务层错误（仓储 / 结构同步的统一包装；逃生舱透传 SQLAlchemy 异常）。"""
-
-
-class DbDependencyError(DbError):
-    """跨插件数据依赖不满足（未声明 / 结构不符 / 依赖数据不存在）。"""
 
 
 @dataclass

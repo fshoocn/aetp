@@ -25,6 +25,7 @@ ctx.comm.relay("db/schema-changed", direction="out", mode="broadcast")
 
 # 观测 / 控制
 ctx.comm.status(mid)               # {state, attempts, acks, last_error, ...}
+ctx.comm.nodes()                   # 已知节点名清单（汇聚点 = 全部接入节点）
 await ctx.comm.flush(timeout=5.0)  # 排空在途消息（测试 / 关停）
 ```
 

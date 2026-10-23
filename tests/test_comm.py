@@ -183,6 +183,14 @@ class CommTests(unittest.IsolatedAsyncioTestCase):
         await self.context.comm.flush(timeout=5.0)
         self.assertEqual(received, [])
 
+    async def test_nodes_lists_known_nodes(self) -> None:
+        """nodes() 列出全部已知节点：自身 + 上报/轮询过的节点。"""
+        await self.boot("batch_interval = 0.05\nqueue_max = 50\n")
+        assert self.context is not None
+        self.assertEqual(self.context.comm.nodes(), ["test-node"])
+        await self.poll("slave-x")
+        self.assertEqual(self.context.comm.nodes(), ["slave-x", "test-node"])
+
     async def test_send_rejects_invalid_input(self) -> None:
         """非法 topic / 不可序列化载荷 / 缺目标节点拒收并计数。"""
         await self.boot("batch_interval = 0.05\nqueue_max = 50\n")

@@ -1,10 +1,17 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useConfirm } from 'primevue/useconfirm';
+import { useRouter } from 'vue-router';
 import { getBackendUrl, request } from '@/service/backend';
 import MarkdownDoc from '@/components/MarkdownDoc.vue';
 
 const confirm = useConfirm();
+const router = useRouter();
+
+// 深链（日志体验 A）：按插件 id 预填关键字直达日志页
+function openPluginLogs(pluginId) {
+    router.push({ path: '/logs', query: { q: pluginId } });
+}
 
 // 非同源时在页头提示数据来源；切换后端会整页刷新，无需响应式
 const backendUrl = getBackendUrl();
@@ -335,6 +342,7 @@ onMounted(loadPlugins);
                                 <small class="text-muted-color">{{ node.data.id }}</small>
                             </div>
                             <small v-if="node.data.last_error" class="block text-red-500 mt-1">{{ node.data.last_error }}</small>
+                            <Button v-if="node.data.last_error" label="查看日志" icon="pi pi-search" size="small" severity="secondary" text class="mt-1" @click="openPluginLogs(node.data.id)" />
                         </div>
                     </template>
                 </Column>

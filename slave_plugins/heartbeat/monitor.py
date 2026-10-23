@@ -28,7 +28,11 @@ from enum import StrEnum
 from typing import cast
 
 from .config import HeartbeatConfig
-from .sender import HeartbeatSendError
+
+
+class HeartbeatSendError(RuntimeError):
+    """心跳发送失败（通道拒收 / 投递未成功 / 载荷不合规）。"""
+
 
 #: 主循环可重试的异常面：发送层归一化错误（HeartbeatSendError ⊂ RuntimeError）
 #: 之外，再兜住载荷构造 / 序列化可能抛出的网络与数值类异常。
@@ -110,12 +114,14 @@ class HeartbeatMonitor:
         send: Sender,
         build_payload: PayloadFactory,
         *,
+        master_url: str = "",
         on_transition: TransitionHook | None = None,
         on_config: ConfigHook | None = None,
     ) -> None:
         self._config = config
         self._send = send
         self._build_payload = build_payload
+        self._master_url = master_url
         self._on_transition = on_transition
         self._on_config = on_config
         self._state = MasterState.UNKNOWN
@@ -141,7 +147,7 @@ class HeartbeatMonitor:
             next_retry_in = max(0.0, self._next_retry_at - time.monotonic())
         return HeartbeatSnapshot(
             state=self._state,
-            master_url=self._config.master_url,
+            master_url=self._master_url,
             interval=self._config.interval,
             sent=self._sent,
             failed=self._failed,

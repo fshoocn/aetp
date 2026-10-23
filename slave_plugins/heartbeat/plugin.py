@@ -1,47 +1,54 @@
-"""心跳插件入口：向主模块周期性上报本节点存活状态。
+"""心跳插件入口：向主模块周期性上报本节点存活状态（经 comm 通道）。
 
 职责：
 
-1. 从 ``config.ini`` 的 ``[heartbeat]`` 节读主模块地址与心跳参数
-   （见 :mod:`slave_plugins.heartbeat.config`）；
+1. 从 ``config.ini`` 的 ``[heartbeat]`` 节读运行参数
+   （见 :mod:`slave_plugins.heartbeat.config`）；通道归 comm——心跳以
+   ``ctx.comm.report("heartbeat.beat", ...)`` 上报（FIRE_AND_FORGET +
+   immediate：容忍丢失、不落盘、不攒批），主模块地址即 ``[comm] target``；
 2. 启动心跳循环（:class:`~slave_plugins.heartbeat.monitor.HeartbeatMonitor`），
    覆盖主模块不在线 / 掉线 / 上线三种场景，失败自动退避重试；
-3. 在本节点 ``ctx.webapi`` 注册 ``GET /api/heartbeat/status`` 自省接口
+3. 接收主模块下行：``heartbeat.config``（运行参数下发，即时应用）与
+   ``heartbeat.caps``（请求全量能力，下一拍补发）；
+4. 在本节点 ``ctx.webapi`` 注册 ``GET /api/heartbeat/status`` 自省接口
    （返回值带 ``extensions`` 展示扩展槽与 ``capabilities`` 能力信封列表，
    其他插件可经 :data:`STATUS_EVENT` / ``heartbeat/collect-capabilities``
    事件插入自家数据）；
-4. 卸载时取消心跳循环，不留后台任务。
+5. 卸载时取消心跳循环，不留后台任务。
 
 配置（``slave/config.ini``）::
 
+    [comm]
+    target = http://127.0.0.1:8080       # 主模块基地址（心跳通道 = comm）
     [heartbeat]
-    master_url = http://127.0.0.1:8080
     interval = 5.0
     timeout = 3.0
     max_backoff = 60.0
 
 其中 ``interval`` / ``timeout`` / ``max_backoff`` 是**启动兜底值** ——
-真正生效的运行参数由主模块在心跳响应的 ``config`` 字段里下发，主模块
-改配置后最迟一个心跳周期自动同步到本模块（见
+真正生效的运行参数由主模块经 ``heartbeat.config`` 下发，主模块改配置后
+即时同步到本模块（见
 :meth:`~slave_plugins.heartbeat.config.HeartbeatConfig.apply_server`）。
 
-状态机与退避策略见 :mod:`slave_plugins.heartbeat.monitor`；传输层
-（标准库 urllib、异常归一化）见 :mod:`slave_plugins.heartbeat.sender`。
+状态机与退避策略见 :mod:`slave_plugins.heartbeat.monitor`。
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from cordis_port import Context, EventDispatchError
 from starlette.requests import Request
 
 from .capabilities import CapProblemAlerter, capabilities_digest, collect_capabilities
 from .config import HeartbeatConfig
-from .monitor import HeartbeatMonitor, MasterState
-from .sender import HeartbeatSender, HeartbeatSendError
+from .monitor import HeartbeatMonitor, HeartbeatSendError, MasterState
+
+#: fire-and-forget 投递策略（comm DeliveryPolicy 字面量，不 import 对方插件包）：
+#: 至少成功 0 次 = 发完即弃；心跳容忍丢失，丢一拍下一拍补上
+_FIRE_AND_FORGET: dict[str, int] = {"min_success": 0, "max_attempts": 1}
 
 #: 状态接口的扩展收集事件：``GET /api/heartbeat/status`` 构造好响应后派发它，
 #: 并把**响应 dict** 传给监听器；其他插件把自家数据写进
@@ -67,6 +74,7 @@ class HeartbeatPlugin:
 
     * ``appconfig`` —— 应用配置服务，由 ``AppConfigPlugin`` 提供；
     * ``webapi`` —— Web API 服务，由 ``WebApiPlugin`` 提供；
+    * ``comm`` —— 主从通信服务（心跳通道），由 ``CommService`` 提供；
     * ``node_kind`` —— 节点类型值服务，由 ``common/node_runtime.py`` 装配时
       ``ctx.provide("node_kind", kind)`` 注册，**没有对应插件**；
     * ``node_name`` —— 节点名值服务，同样由装配阶段注册（``[node] name``
@@ -74,7 +82,7 @@ class HeartbeatPlugin:
     """
 
     name: ClassVar[str] = "heartbeat"
-    inject: ClassVar[list[str]] = ["appconfig", "webapi", "node_kind", "node_name"]
+    inject: ClassVar[list[str]] = ["appconfig", "webapi", "comm", "node_kind", "node_name"]
     #: 配置模型（标准 Schema）：驱动校验、``[heartbeat]`` 默认值注入与写回
     Config: ClassVar[type[HeartbeatConfig]] = HeartbeatConfig
 
@@ -83,11 +91,6 @@ class HeartbeatPlugin:
         self.config: HeartbeatConfig = (
             config if isinstance(config, HeartbeatConfig) else HeartbeatConfig()
         )
-        if not self.config.auth_token:
-            # 留空 = 全网共享 [web] auth_token 的标准用法（节点启动必须配令牌）
-            self.config.auth_token = str(
-                self.ctx.appconfig.get("web", "auth_token", "") or ""
-            )
         self._node_id: str = str(ctx.node_name)
         self._seq: int = 0
         self._task: asyncio.Task[None] | None = None
@@ -96,11 +99,13 @@ class HeartbeatPlugin:
         self._cap_alerts: CapProblemAlerter = CapProblemAlerter(self._log_cap_problem)
         #: 已确认送达主模块的能力摘要；``None`` 表示主模块缺当前能力集
         self._caps_sent_digest: str | None = None
-        self._sender: HeartbeatSender = HeartbeatSender(self.config)
+        #: 通道标签（心跳经 comm 上报，主模块地址即 [comm] target）
+        self._master_url: str = str(self.ctx.appconfig.get("comm", "target") or "")
         self.monitor: HeartbeatMonitor = HeartbeatMonitor(
             self.config,
             self._send,
             self._build_payload,
+            master_url=self._master_url,
             on_transition=self._log_transition,
             on_config=self._log_config,
         )
@@ -135,27 +140,69 @@ class HeartbeatPlugin:
         return payload
 
     async def _send(self, payload: dict[str, object]) -> dict[str, object]:
-        """发送心跳并维护能力同步状态（摘要已送达 / 主模块要全量）。"""
+        """经 comm 上报心跳并维护能力同步状态（摘要已送达 / 主模块要全量）。
+
+        ``FIRE_AND_FORGET`` + ``immediate`` 的一次投递终态（done / failed）
+        即旧私有通道的成功 / 失败信号：驱动状态机与退避。运行参数与
+        ``need_caps`` 不走应答，经 comm 下行（``heartbeat.config`` /
+        ``heartbeat.caps``）送达（见 :meth:`_on_config_down` /
+        :meth:`_on_caps_request`）。
+        """
         try:
-            response = await self._sender.send(payload)
-        except HeartbeatSendError:
+            message_id = self.ctx.comm.report(
+                "heartbeat.beat", payload, policy=_FIRE_AND_FORGET, immediate=True
+            )
+        except Exception as exc:
+            self._caps_sent_digest = None
+            raise HeartbeatSendError(f"心跳载荷不可发送：{exc}") from exc
+        if not message_id:
+            self._caps_sent_digest = None
+            raise HeartbeatSendError("comm 拒收心跳载荷")
+        state = await self._wait_settled(message_id)
+        if state != "done":
             # 送达不确定：下一拍重发全量（宁多勿缺）
             self._caps_sent_digest = None
-            raise
-        if bool(response.get("need_caps")):
-            self._caps_sent_digest = None
-        elif "capabilities" in payload:
+            raise HeartbeatSendError(f"心跳投递未成功（{state or '等待超时'}）")
+        if "capabilities" in payload:
             digest = payload.get("caps_digest")
             if isinstance(digest, str):
                 self._caps_sent_digest = digest
-        return response
+        return {}
+
+    async def _wait_settled(self, message_id: str) -> str:
+        """等一条心跳到达投递终态（fire-and-forget 一次尝试即终结）。"""
+        deadline = time.monotonic() + self.config.timeout
+        while time.monotonic() < deadline:
+            status = self.ctx.comm.status(message_id)
+            if status is not None:
+                state = str(status.get("state") or "")
+                if state in ("done", "failed"):
+                    return state
+            await asyncio.sleep(0.02)
+        return ""
+
+    # -- 主模块下行 ---------------------------------------------------------
+    def _on_config_down(self, payload: object, _meta: object) -> None:
+        """``heartbeat.config``：主模块下发运行参数，即时应用（替代应答捎带）。"""
+        if not isinstance(payload, dict):
+            return
+        values = {
+            str(key): value for key, value in cast(dict[object, object], payload).items()
+        }
+        applied, skipped = self.config.apply_server(values)
+        if applied or skipped:
+            self._log_config(applied, skipped)
+
+    def _on_caps_request(self, payload: object, _meta: object) -> None:
+        """``heartbeat.caps``：主模块要全量能力，下一拍补发。"""
+        self._caps_sent_digest = None
 
     def _log_cap_problem(self, problem: str) -> None:
         self.ctx.logger.warning("能力收集：%s", problem)
 
     # -- 生命周期 -----------------------------------------------------------
     async def init(self) -> object:
-        """注册自省接口并启动心跳循环；返回值即卸载清理函数。"""
+        """注册自省接口 / comm 下行处理器并启动心跳循环；返回值即卸载清理函数。"""
         self.ctx.webapi.get(
             "/api/heartbeat/status",
             self._status,
@@ -164,11 +211,14 @@ class HeartbeatPlugin:
         )
         dispose = self.ctx.webapi.add_health_provider("heartbeat", self._health_metrics)
         self.ctx.fiber.effect(lambda: dispose, "heartbeat.health")
+        # 主模块下行：运行参数下发 + 全量能力请求（绑本插件 fiber，卸载自动注销）
+        self.ctx.comm.on("heartbeat.config", self._on_config_down)
+        self.ctx.comm.on("heartbeat.caps", self._on_caps_request)
         self._task = asyncio.create_task(self.monitor.run())
         self._task.add_done_callback(self._log_task_exit)
         self.ctx.logger.info(
-            "心跳插件已启动：主模块 %s，间隔 %s 秒",
-            self.config.endpoint(),
+            "心跳插件已启动：通道 comm → %s，间隔 %s 秒",
+            self._master_url or "(本地自环)",
             self.config.interval,
         )
         return self._stop
@@ -255,10 +305,12 @@ class HeartbeatPlugin:
         elif current is MasterState.ONLINE:
             if previous is MasterState.OFFLINE:
                 self.ctx.logger.info(
-                    "主模块连接已恢复：%s", self.config.endpoint()
+                    "主模块连接已恢复：%s", self._master_url or "(本地自环)"
                 )
             else:
-                self.ctx.logger.info("主模块连接已建立：%s", self.config.endpoint())
+                self.ctx.logger.info(
+                    "主模块连接已建立：%s", self._master_url or "(本地自环)"
+                )
 
     # -- 配置同步日志 -------------------------------------------------------
     def _log_config(

@@ -307,6 +307,38 @@ class LogQueryTests(unittest.IsolatedAsyncioTestCase):
         nodes = await self.get_json("/api/logs/nodes")
         self.assertEqual(nodes["nodes"], ["test-node"])
 
+    async def test_nodes_lists_all_known_nodes(self) -> None:
+        """节点下拉列全部已知节点：含 comm 已接入但尚无日志的节点。"""
+        await self.boot()
+        assert self.context is not None
+        data = await self.get_json("/api/logs/nodes")
+        # comm 已知节点（自身）无日志也应出现在清单里
+        self.assertEqual(data["nodes"], ["test-node"])
+        self.context.logger.info("有日志了")
+        await self.context.comm.flush(timeout=5.0)
+        data = await self.get_json("/api/logs/nodes")
+        self.assertEqual(data["nodes"], ["test-node"])
+
+    async def test_around_id_returns_context(self) -> None:
+        """前后文模式（体验 B）：锚点行 + 前 / 后各约一半，统一时间轴新→旧。"""
+        await self.boot()
+        assert self.context is not None
+        for index in range(5):
+            self.context.logger.info("上下文 %d", index)
+        await self.context.comm.flush(timeout=5.0)
+        all_rows = (await self.get_json(f"/api/logs?q={quote('上下文')}"))["logs"]
+        self.assertEqual(len(all_rows), 5)
+        anchor = all_rows[2]  # 新→旧第 3 条
+        data = await self.get_json(f"/api/logs?around_id={anchor['id']}&limit=5")
+        rows = data["logs"]
+        self.assertEqual(len(rows), 5)
+        self.assertEqual([row["id"] for row in rows], sorted((r["id"] for r in rows), reverse=True))
+        self.assertEqual(rows[2]["id"], anchor["id"])
+        self.assertEqual(
+            [row["msg"] for row in rows],
+            ["上下文 0", "上下文 1", "上下文 2", "上下文 3", "上下文 4"][::-1],
+        )
+
     async def test_remote_batch_lands_with_source_node(self) -> None:
         """远端 log.batch 落本地库并保留来源节点（自环回流去重不双写）。"""
         await self.boot()
