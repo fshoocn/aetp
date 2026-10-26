@@ -208,14 +208,16 @@ async def run_node(
     """
     config_file, profile = _resolve_config(config_path)
     _quiet_asyncio_noise(asyncio.get_running_loop())
-    ctx = await _assemble(config_file, profile)
-
-    address = ctx.webapi.address()
-    ctx.logger.info("已就绪，访问 %s", address)
-    print(f"\n  {profile.name}已启动：{address}\n  按 Ctrl+C 退出\n", flush=True)
-
+    # 停止信号处理器必须在**装配前**注册：web 装配中途 /healthz 即可达，
+    # 若处理器晚于就绪安装，探活方一见 200 就发 SIGTERM 会命中默认动作、
+    # 直接杀掉进程（CI 实测猝死、无失败摘要）；提前注册后慢启动阶段的
+    # Ctrl+C / SIGTERM 也走优雅退出（stop 事件置位，装配完即收尾）。
     stop, restore_signal_handlers = _install_stop_handler(asyncio.get_running_loop())
     try:
+        ctx = await _assemble(config_file, profile)
+        address = ctx.webapi.address()
+        ctx.logger.info("已就绪，访问 %s", address)
+        print(f"\n  {profile.name}已启动：{address}\n  按 Ctrl+C 退出\n", flush=True)
         await stop.wait()
     finally:
         restore_signal_handlers()

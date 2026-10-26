@@ -71,6 +71,8 @@ class LogPlugin:
         self._ui_registered: bool = False
         #: 入库缓冲（出口同步、入库异步）：(节点, 条目) 待批量写 aetp.db
         self._pending: list[tuple[str, dict[str, object]]] = []
+        #: 落库串行锁：查询路径的 read-your-writes 等在途批次写完
+        self._flush_lock: asyncio.Lock = asyncio.Lock()
         #: 入库时间戳被钳制的条数（时钟漂移可观测）
         self._clamped: int = 0
         #: 存储写入失败次数（库不可写；出口降级不炸业务）
@@ -239,20 +241,26 @@ class LogPlugin:
             await self._flush_pending()
 
     async def _flush_pending(self) -> None:
-        """按节点分组批量落库；失败计数降级（绝不炸业务）。"""
-        if not self._pending or self._store is None:
-            return
-        pending, self._pending = self._pending, []
-        grouped: dict[str, list[dict[str, object]]] = {}
-        for node, entry in pending:
-            grouped.setdefault(node, []).append(entry)
-        for node, entries in grouped.items():
-            try:
-                clamped: list[int] = []
-                await self._store.write_batch(node, entries, clamped=clamped)
-                self._clamped += len(clamped)
-            except Exception as exc:  # noqa: BLE001 —— 入库故障绝不阻断日志出口
-                self._note_store_failure(exc)
+        """按节点分组批量落库；失败计数降级（绝不炸业务）。
+
+        全程持锁：查询路径的 ``_flush_pending``（read-your-writes）必须等
+        在途批次写完才算落库——否则后来者看到空缓冲即返回，读到的却是
+        少了在途批次的旧快照（CI 慢机器上实测踩中）。
+        """
+        async with self._flush_lock:
+            if not self._pending or self._store is None:
+                return
+            pending, self._pending = self._pending, []
+            grouped: dict[str, list[dict[str, object]]] = {}
+            for node, entry in pending:
+                grouped.setdefault(node, []).append(entry)
+            for node, entries in grouped.items():
+                try:
+                    clamped: list[int] = []
+                    await self._store.write_batch(node, entries, clamped=clamped)
+                    self._clamped += len(clamped)
+                except Exception as exc:  # noqa: BLE001 —— 入库故障绝不阻断日志出口
+                    self._note_store_failure(exc)
 
     def _on_log_batch(self, payload: Any, meta: CommMeta) -> None:
         """远端日志入本地库（汇聚点角色）；坏载荷跳过并告警。
