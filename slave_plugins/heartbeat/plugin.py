@@ -42,7 +42,8 @@ from typing import ClassVar, cast
 from cordis_port import Context, EventDispatchError
 from starlette.requests import Request
 
-from .capabilities import CapProblemAlerter, capabilities_digest, collect_capabilities
+from common.capabilities import CapProblemAlerter, capabilities_digest, collect_capabilities
+
 from .config import HeartbeatConfig
 from .monitor import HeartbeatMonitor, HeartbeatSendError, MasterState
 
@@ -120,7 +121,7 @@ class HeartbeatPlugin:
         能力同步用「摘要 + 按需全量」：平时只带 ``caps_digest``，摘要变了
         或主模块回 ``need_caps`` 时才带全量 ``capabilities``（能力信息变化
         频率低，不必每拍重发）。信封契约见
-        :mod:`slave_plugins.heartbeat.capabilities`。
+        :mod:`common.capabilities`。
         """
         self._seq = next_seq(self._seq)
         entries, problems = await collect_capabilities(self.ctx)

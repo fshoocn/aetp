@@ -130,6 +130,7 @@ class PluginManagerPlugin(Service[None]):
             self.preinstalled_ids,
             base_dir=self._base_dir,
         )
+        await self.manager.start()
         self._register_routes()
         # 「恢复已启用」不再随插件初始化执行：预装链路（ensure_installed）
         # 装配完后由 node_runtime 显式调用 restore_enabled，避免同一插件

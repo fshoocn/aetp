@@ -50,9 +50,12 @@ async def unload_all(ctx: Context) -> list[Fiber]:
     """
     unloaded: list[Fiber] = []
     failures: list[BaseException] = []
-    # 复制快照：dispose 过程中会修改 registry._internal，不能直接迭代原集合
-    for runtime in list(ctx.registry.values()):
-        for fiber in list(runtime.fibers):
+    # 复制快照：dispose 过程中会修改 registry._internal，不能直接迭代原集合。
+    # **逆序**卸载（后注册先销毁）：依赖方先于被依赖方收尾——db 排空连接池必须
+    # 晚于 log / comm 等使用方把后台任务收干净，否则任务在关停后归还连接，
+    # Windows 上文件句柄不释放
+    for runtime in reversed(list(ctx.registry.values())):
+        for fiber in reversed(list(runtime.fibers)):
             if fiber.uid is None:
                 # 已经卸载过（uid 置空是销毁的标志）
                 continue

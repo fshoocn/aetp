@@ -6,7 +6,7 @@ cordis **exporter 机制**收集日志（三个平级出口）：
 * **console**：error / warn 走 stderr，其余走 stdout；
 * **轮转文件**：兜底逃生通道（日志系统自身故障时 ``tail``/``grep`` 还能用）；
 * **入库 / 上报**（``report = true`` 且 ``report_level`` 阈值内）：写本地
-  ``log.sqlite``（查询真相源）并经 ``ctx.comm`` 发往汇聚点（``[comm] target``
+  aetp.db 的 ``aetp_log_entries`` 表（查询真相源）并经 ``ctx.comm`` 发往汇聚点（``[comm] target``
   留空 = 本节点即汇聚点）。
 
 汇聚点额外接收远端 ``log.batch`` 落**同一**本地库；``GET /api/logs``
@@ -18,7 +18,6 @@ cordis **exporter 机制**收集日志（三个平级出口）：
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -27,11 +26,11 @@ from cordis_port.logger import Exporter, Logger, Message
 from starlette.requests import Request
 
 from common.contracts import CommMeta
+from common.log_op import current_operation
 
 from .config import LogConfig
 from .export import LEVELS, RotatingFile, call_site, console_exporter, file_exporter
-from .op import current_operation
-from .store import LogStore
+from .store import LogEntry, LogStore
 
 
 def _level_value(name: str, label: str) -> int:
@@ -66,16 +65,19 @@ class LogPlugin:
         self.config: LogConfig = config if isinstance(config, LogConfig) else LogConfig()
         self._store: LogStore | None = None
         self._trim_task: asyncio.Task[None] | None = None
+        self._flush_task: asyncio.Task[None] | None = None
         self._late_task: asyncio.Task[None] | None = None
         self._dispose_health: object = None
         self._ui_registered: bool = False
+        #: 入库缓冲（出口同步、入库异步）：(节点, 条目) 待批量写 aetp.db
+        self._pending: list[tuple[str, dict[str, object]]] = []
         #: 入库时间戳被钳制的条数（时钟漂移可观测）
         self._clamped: int = 0
-        #: 存储写入失败次数（库损坏/不可写；出口降级不炸业务）
+        #: 存储写入失败次数（库不可写；出口降级不炸业务）
         self._store_failures: int = 0
 
     # ------------------------------------------------------------- 生命周期
-    def init(self) -> object:
+    async def init(self) -> object:
         """挂三个出口 / 查询 API / 远端入库 / 保留清理；返回卸载清理函数。"""
         level = _level_value(self.config.level, "log.level")
         report_level = _level_value(self.config.report_level, "log.report_level")
@@ -93,19 +95,23 @@ class LogPlugin:
             self.ctx.logger.exporter(file_exporter(level, sink))
             self.ctx.logger.info("日志文件：%s", path)
 
-        store_raw = str(self.config.store or "").strip()
-        if store_raw:
-            path = Path(store_raw).expanduser()
-            if not path.is_absolute():
-                path = _base_dir(self.ctx) / path
-            path = path.resolve()
-            self._store = LogStore(path)
-            self._store.trim(
-                retain_days=self.config.retain_days,
-                max_rows=self.config.retain_max_rows,
-            )
-            self._trim_task = asyncio.create_task(self._trim_loop())
-            self._trim_task.add_done_callback(self._log_task_exit)
+        # 查询库 = aetp.db 的 aetp_log_entries 表（单库设计）；db 不可用时
+        # 降级为仅文件出口（不能因库故障丢掉后续日志）
+        db = self.ctx.get("db", strict=False)
+        if self.config.store and db is not None:
+            try:
+                await db.sync_schema(models=[LogEntry])
+                self._store = LogStore(db)
+                await self._store.trim(
+                    retain_days=self.config.retain_days,
+                    max_rows=self.config.retain_max_rows,
+                )
+                self._flush_task = asyncio.create_task(self._flush_loop())
+                self._flush_task.add_done_callback(self._log_task_exit)
+                self._trim_task = asyncio.create_task(self._trim_loop())
+                self._trim_task.add_done_callback(self._log_task_exit)
+            except Exception as exc:  # noqa: BLE001 —— 入库故障绝不阻断日志出口
+                self._note_store_failure(exc)
 
         if self.config.report:
             self.ctx.logger.exporter(self._sink_exporter(report_level))
@@ -114,15 +120,22 @@ class LogPlugin:
         # 就绪（预装阶段才装），延迟挂载（无头部署自然放弃）
         self._late_task = asyncio.create_task(self._late_setup())
         self._late_task.add_done_callback(self._log_task_exit)
-        self.ctx.logger.info("日志插件已加载：%s", self._store.path if self._store else "未启用查询库")
+        self.ctx.logger.info(
+            "日志插件已加载：%s", "aetp.db:aetp_log_entries" if self._store else "未启用查询库"
+        )
 
-        def cleanup() -> None:
+        async def cleanup() -> None:
             dispose = self._dispose_health
             if callable(dispose):
                 dispose()
-            for task in (self._trim_task, self._late_task):
-                if task is not None:
-                    task.cancel()
+            tasks = [t for t in (self._trim_task, self._flush_task, self._late_task) if t is not None]
+            for task in tasks:
+                task.cancel()
+            # 取消必须**等落地**：后台任务要在 db 排空连接池前收干净，
+            # 否则任务在关停后归还连接，Windows 上文件句柄不释放
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await self._flush_pending()  # 停机前把缓冲尽量落库
 
         return cleanup
 
@@ -173,7 +186,7 @@ class LogPlugin:
 
     def _metrics(self) -> dict[str, object]:
         return {
-            "store": str(self._store.path) if self._store else "",
+            "store": "aetp_log_entries" if self._store else "",
             "clamped": self._clamped,
             "store_failures": self._store_failures,
         }
@@ -195,7 +208,7 @@ class LogPlugin:
         exporter: Exporter = {"colors": False, "levels": {"default": level}}
 
         def export(message: Message) -> None:
-            entry = {
+            entry: dict[str, object] = {
                 "ts": message.ts / 1000.0,
                 "name": message.name,
                 "level": int(message.level),
@@ -204,12 +217,7 @@ class LogPlugin:
                 "source": call_site(),
             }
             if self._store is not None:
-                try:
-                    clamped: list[int] = []
-                    self._store.write_batch(self._node_name(), [entry], clamped=clamped)
-                    self._clamped += len(clamped)
-                except (sqlite3.Error, OSError) as exc:
-                    self._note_store_failure(exc)
+                self._enqueue(self._node_name(), entry)
             # comm 延迟就绪：未就绪时仅本地入库，就绪后自动开始上报
             comm = self.ctx.get("comm")
             if comm is not None:
@@ -218,8 +226,36 @@ class LogPlugin:
         exporter["export"] = export
         return exporter
 
+    def _enqueue(self, node: str, entry: dict[str, object]) -> None:
+        """入缓冲（同步上下文安全）：超上限丢最旧并计失败，防止无界增长。"""
+        self._pending.append((node, entry))
+        if len(self._pending) > 5000:
+            self._pending.pop(0)
+            self._note_store_failure(RuntimeError("入库缓冲溢出"))
+
+    async def _flush_loop(self) -> None:
+        while True:
+            await asyncio.sleep(0.2)
+            await self._flush_pending()
+
+    async def _flush_pending(self) -> None:
+        """按节点分组批量落库；失败计数降级（绝不炸业务）。"""
+        if not self._pending or self._store is None:
+            return
+        pending, self._pending = self._pending, []
+        grouped: dict[str, list[dict[str, object]]] = {}
+        for node, entry in pending:
+            grouped.setdefault(node, []).append(entry)
+        for node, entries in grouped.items():
+            try:
+                clamped: list[int] = []
+                await self._store.write_batch(node, entries, clamped=clamped)
+                self._clamped += len(clamped)
+            except Exception as exc:  # noqa: BLE001 —— 入库故障绝不阻断日志出口
+                self._note_store_failure(exc)
+
     def _on_log_batch(self, payload: Any, meta: CommMeta) -> None:
-        """远端日志落本地库（汇聚点角色）；坏载荷跳过并告警。
+        """远端日志入本地库（汇聚点角色）；坏载荷跳过并告警。
 
         自环回流（发送方即本节点）跳过：本地入库已由出口直接完成，避免双写。
         """
@@ -232,23 +268,15 @@ class LogPlugin:
         if not isinstance(logs, list):
             self.ctx.logger.warning("log.batch 载荷缺 logs 列表（node=%s）", meta["node"])
             return
-        entries = [
-            cast(dict[str, object], item)
-            for item in cast(list[object], logs)
-            if isinstance(item, dict)
-        ]
-        try:
-            clamped: list[int] = []
-            self._store.write_batch(meta["node"], entries, clamped=clamped)
-            self._clamped += len(clamped)
-        except (sqlite3.Error, OSError) as exc:
-            self._note_store_failure(exc)
+        for item in cast(list[object], logs):
+            if isinstance(item, dict):
+                self._enqueue(meta["node"], cast(dict[str, object], item))
 
     async def _trim_loop(self) -> None:
         while True:
             await asyncio.sleep(60.0)
             if self._store is not None:
-                self._store.trim(
+                await self._store.trim(
                     retain_days=self.config.retain_days,
                     max_rows=self.config.retain_max_rows,
                 )
@@ -256,6 +284,7 @@ class LogPlugin:
     # ----------------------------------------------------------- 查询 API
     async def _logs_handler(self, request: Request) -> dict[str, object]:
         """``GET /api/logs``：游标查询（新 → 旧；``after_id`` 为尾随方向）。"""
+        await self._flush_pending()  # read-your-writes：查询前先落库
         if self._store is None:
             return {"logs": [], "count": 0}
         params = request.query_params
@@ -269,7 +298,7 @@ class LogPlugin:
             except ValueError:
                 return None
 
-        logs = self._store.query(
+        logs = await self._store.query(
             node=params.get("node") or None,
             level=as_int(params.get("level")),
             q=params.get("q") or None,
@@ -289,11 +318,12 @@ class LogPlugin:
         （汇聚点可见所有节点，含尚未产生日志的）——下拉列**所有节点名称**，
         不受"是否有日志"限制。
         """
+        await self._flush_pending()  # read-your-writes
         names: set[str] = set()
         if self._store is not None:
             try:
-                names.update(self._store.nodes())
-            except (sqlite3.Error, OSError) as exc:
+                names.update(await self._store.nodes())
+            except Exception as exc:  # noqa: BLE001 —— 查询故障降级为空清单
                 return cast(dict[str, object], self.ctx.get("webapi").json(
                     {"error": f"查询库不可用：{type(exc).__name__}"}, status_code=503
                 ))
@@ -307,6 +337,7 @@ class LogPlugin:
 
     async def _delete_logs(self, request: Request) -> dict[str, object]:
         """``DELETE /api/logs``：按当前筛选删除（审计留痕，防灭迹）。"""
+        await self._flush_pending()  # read-your-writes：删的就是当前全部
         if self._store is None:
             return {"deleted": 0}
         params = request.query_params
@@ -324,14 +355,14 @@ class LogPlugin:
         level = as_int(params.get("level"))
         q = params.get("q") or None
         try:
-            deleted = self._store.delete(
+            deleted = await self._store.delete(
                 node=node,
                 level=level,
                 q=q,
                 from_ts=as_float(params.get("from_ts")),
                 to_ts=as_float(params.get("to_ts")),
             )
-        except (sqlite3.Error, OSError) as exc:
+        except Exception as exc:  # noqa: BLE001 —— 查询故障降级为错误响应
             return cast(dict[str, object], self.ctx.get("webapi").json(
                 {"error": f"删除失败：{type(exc).__name__}"}, status_code=503
             ))

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path
 from typing import ClassVar
 
 from sqlalchemy.engine import make_url
@@ -51,7 +50,6 @@ class DbConfig(FieldConfig):
         "max_overflow": ((int,), "池外溢出上限"),
         "pool_recycle": ((int,), "连接回收秒数（防 MySQL wait_timeout）"),
         "orphan_policy": ((str,), "孤儿表处置：warn / drop"),
-        "data_dir": ((str,), "归属登记目录（owners.sqlite，留空自动推导）"),
         "schema_log_limit": ((int,), "结构变更日志保留上限"),
     }
 
@@ -69,8 +67,6 @@ class DbConfig(FieldConfig):
     pool_recycle: int = 300
     #: 孤儿表处置策略：``warn``（自检只报告）/ ``drop``（自检时清理）
     orphan_policy: str = "warn"
-    #: 归属登记目录；留空 = 取连接串中库文件所在目录（非 SQLite 取 ``data/plugins/db``）
-    data_dir: str = ""
     #: 库内结构变更日志（``aetp_schema_log``）保留上限，防无限增长
     schema_log_limit: int = 500
 
@@ -124,25 +120,6 @@ class DbConfig(FieldConfig):
         if not value:
             raise ValueError(f"环境变量 {raw[4:]} 未设置或为空（[db] url = {raw}）")
         return value
-
-    def resolve_data_dir(self) -> Path:
-        """归属登记目录（``owners.sqlite`` 所在；相对路径按节点目录解析）。
-
-        显式配置 ``data_dir`` 优先；否则 SQLite 取连接串中库文件所在目录，
-        其余方言取 ``data/plugins/db``（见 DESIGN §11-6）。
-        """
-        explicit = self.data_dir.strip()
-        if explicit:
-            return Path(explicit).expanduser()
-        try:
-            parsed = make_url(self.resolved_url())
-        except (SQLAlchemyError, ValueError):
-            return Path("data") / "plugins" / "db"
-        if parsed.get_backend_name() == "sqlite":
-            database = parsed.database
-            if database and database != ":memory:":
-                return Path(database).expanduser().parent
-        return Path("data") / "plugins" / "db"
 
     def to_dict(self) -> dict[str, object]:
         """导出为字典（展示用途）：连接串密码掩码，不回显凭证。"""

@@ -1,40 +1,33 @@
 """内置数据库服务插件（``common/plugins/db``）：统一数据入口。
 
-对外契约（DESIGN §3）::
+对外契约（DESIGN §3）——共享契约在**非插件公共层**（插件铁律）::
 
-    from common.plugins.db import Model, Mapped, mapped_column
+    from common.models import Model, Mapped, mapped_column
 
     class TestRun(Model):
         id: Mapped[int] = mapped_column(primary_key=True)
-        name: Mapped[str)
+        name: Mapped[str]
 
 插件声明 ``inject = ["db"]`` 后经 ``ctx.db`` 建表（``sync_schema``）与
 增删改查（``repo`` / ``session`` / ``transaction``）；表归属调用方插件，
-卸载即清理（DESIGN §4）。详细设计见同目录 ``DESIGN.md``。
+卸载即清理（DESIGN §4）。详细设计见同目录 ``README.md``。
 """
 
 from __future__ import annotations
 
 from .config import DbConfig
-from .models import Mapped, Model, mapped_column, model_logical, model_owner, physical_name
 from .plugin import DbPlugin
-from .registry import DataDependency
 from .service import DbDependencyError, DbError, DbService, MigrationStep, Repo, SyncResult
+from .ui_service import DbUiService
 
 __all__: list[str] = [
-    "DataDependency",
     "DbConfig",
     "DbDependencyError",
     "DbError",
     "DbPlugin",
     "DbService",
-    "Mapped",
+    "DbUiService",
     "MigrationStep",
-    "Model",
     "Repo",
     "SyncResult",
-    "mapped_column",
-    "model_logical",
-    "model_owner",
-    "physical_name",
 ]

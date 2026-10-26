@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import sqlite3
 import struct
 import sys
 import tempfile
@@ -20,12 +19,10 @@ from cordis_port.logger import Exporter, Logger, Message
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
-from common.db_registry import registry_db_path
 from common.node_runtime import ensure_installed
 from common.plugin_data import plugin_data_dir
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import DbPlugin
-from common.plugins.db.registry import PluginRecordStore
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import (
     MAX_ARCHIVE_SIZE,
@@ -244,10 +241,13 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             f"install_root = {Path(self.temp_dir.name) / 'bare'}\n"
             "\n[web]\n"
             f"port = {_free_port()}\n"
-            "auth_token = test-token\n",
+            "auth_token = test-token\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(Path(self.temp_dir.name) / 'bare.db').as_posix()}\n",
             encoding="utf-8",
         )
         await bare.plugin(AppConfigPlugin, {"path": str(bare_config_path)})
+        await bare.plugin(DbPlugin)
         await bare.plugin(WebApiPlugin)
         await bare.plugin(PluginManagerPlugin)
         with self.assertRaises(PluginManagerError):
@@ -670,10 +670,10 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(record["last_error"])
 
     async def test_registry_drops_builtin_shadow_records(self) -> None:
-        """遗留注册表里的内置 id 影子记录读取即丢弃（展示真身内置记录）。"""
+        """遗留安装记录里的内置 id 影子记录读取即丢弃（展示真身内置记录）。"""
         install_root = Path(self.temp_dir.name) / "shadow-root"
         install_root.mkdir()
-        PluginRecordStore(registry_db_path(Path(self.temp_dir.name))).write(
+        await self.context.get("db").replace_plugin_records(
             {
                 "webapi": {
                     "id": "webapi",
@@ -739,12 +739,15 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
             f" {zip_path}, {Path(self.temp_dir.name) / 'missing'}\n"
             "\n[web]\n"
             f"port = {_free_port()}\n"
-            "auth_token = test-token\n",
+            "auth_token = test-token\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(node_dir / 'aetp.db').as_posix()}\n",
             encoding="utf-8",
         )
         context: Context = Context()
         context.provide("node_kind", "master")
         await context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await context.plugin(DbPlugin)
         await context.plugin(WebApiPlugin)
         await context.plugin(PluginManagerPlugin)
         try:
@@ -972,32 +975,33 @@ class PluginManagementTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_registry_write_failure_rolls_back_install(self) -> None:
         class RegistryWriteFailureManager(PluginManager):
-            def _write_registry(self) -> None:
+            async def _write_registry(self) -> None:
                 raise OSError("simulated registry failure")
 
         install_root = Path(self.temp_dir.name) / "failed-node" / "installed"
+        await self.context.get("db").replace_plugin_records({})  # 清掉夹具残留
         manager = RegistryWriteFailureManager(self.context, install_root)
         with self.assertRaises(PluginManagerError):
             await manager.install_archive(_plugin_archive())
 
         self.assertEqual(manager.records, {})
         self.assertFalse((install_root / "uploaded-sample").exists())
-        # 回滚不剩任何插件产物；持久化事实源（registry.db）在该节点的专属数据目录
-        # （首读即建、回滚不删），安装目录里不应有任何残留
+        # 回滚不剩任何插件产物；安装记录经 db 全量替换写（失败即不落任何条目）
         self.assertEqual(list(install_root.iterdir()), [])
-        self.assertTrue(registry_db_path(install_root.parent).is_file())
+        self.assertEqual(await self.context.get("db").plugin_records(), {})
+
     async def test_enable_registry_failure_disposes_plugin_fiber(self) -> None:
         class FailEnabledWriteManager(PluginManager):
             def __init__(self, ctx: Context, root: Path) -> None:
                 super().__init__(ctx, root)
                 self.failed: bool = False
 
-            def _write_registry(self) -> None:
+            async def _write_registry(self) -> None:
                 record = self.records.get(plugin_id)
                 if record is not None and record["enabled"] and not self.failed:
                     self.failed = True
                     raise OSError("simulated registry failure")
-                super()._write_registry()
+                await super()._write_registry()
 
         install_root = Path(self.temp_dir.name) / "enable-failure"
         plugin_id = "enable-failure"
@@ -1099,6 +1103,17 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.install_root: Path = Path(self.temp_dir.name) / "installed"
         self.context.provide("node_kind", "master")
+        config_path = Path(self.temp_dir.name) / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            f"install_root = {self.install_root.as_posix()}\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(Path(self.temp_dir.name) / 'aetp.db').as_posix()}\n",
+            encoding="utf-8",
+        )
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)  # 安装记录住 aetp.db，管理器需要 db
 
     async def asyncTearDown(self) -> None:
         await unload_all(self.context)
@@ -1112,6 +1127,7 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.install_root / "uploaded-sample")
 
         restarted = PluginManager(self.context, self.install_root)
+        await restarted.start()
         self.assertIn("需要重新安装", restarted.records["uploaded-sample"]["last_error"] or "")
         with self.assertRaises(PluginManagerError) as raised:
             await restarted.enable("uploaded-sample")
@@ -1127,14 +1143,15 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         """PS-H2：孤儿安装目录（registry 无记录）→ 不再 409 卡死，安装时覆盖。"""
         manager = PluginManager(self.context, self.install_root)
         await manager.install_archive(_plugin_archive())
-        # kill 模拟：目录落地但 registry 未写（整库丢失）
-        registry_db_path(Path(self.temp_dir.name)).unlink()
+        # kill 模拟：目录落地但安装记录未写（整库丢失）
+        await self.context.get("db").replace_plugin_records({})
         # 另一个半截落地的目录（安装到一半被 kill）
         orphan = self.install_root / "half-installed"
         orphan.mkdir()
         (orphan / "garbage.txt").write_text("partial", encoding="utf-8")
 
         restarted = PluginManager(self.context, self.install_root)
+        await restarted.start()
         self.assertEqual(restarted.records, {})
         record = await restarted.install_archive(_plugin_archive())
         self.assertEqual(record["id"], "uploaded-sample")
@@ -1143,24 +1160,8 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         await restarted.install_archive(_plugin_archive(plugin_id="half-installed"))
         self.assertFalse((self.install_root / "half-installed" / "garbage.txt").exists())
 
-    async def test_incompatible_schema_version_is_explicit(self) -> None:
-        """PS-H3：registry schema 版本不兼容 → 启动显式报错（不再静默半兼容）。"""
-        manager = PluginManager(self.context, self.install_root)
-        await manager.install_archive(_plugin_archive())
-        conn = sqlite3.connect(registry_db_path(Path(self.temp_dir.name)))
-        try:
-            with conn:
-                conn.execute(
-                    "UPDATE store_meta SET value = '999' WHERE name = 'schema_version'"
-                )
-        finally:
-            conn.close()
-        with self.assertRaises(RuntimeError) as raised:
-            PluginManager(self.context, self.install_root)
-        self.assertIn("schema 版本不兼容", str(raised.exception))
-
     async def test_interrupted_replace_restarts_cleanly(self) -> None:
-        """PS-H4：换装中断（目录已清、registry 停旧）→ 重启可重装，诊断自动清除。"""
+        """PS-H4：换装中断（目录已清、记录停旧）→ 重启可重装，诊断自动清除。"""
         manager = PluginManager(self.context, self.install_root)
         await manager.install_archive(_plugin_archive())
         await manager.install_archive(_plugin_archive(version="2.0.0"), replace=True)
@@ -1168,6 +1169,7 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.install_root / "uploaded-sample")
 
         restarted = PluginManager(self.context, self.install_root)
+        await restarted.start()
         self.assertIn("uploaded-sample", restarted.records)
         record = await restarted.install_archive(
             _plugin_archive(version="2.0.0"), replace=True
@@ -1227,7 +1229,8 @@ class CrashRecoveryTests(unittest.IsolatedAsyncioTestCase):
             {"levels": {"default": 1}, "export": lambda message: captured.append(str(message.args))},
             raw=True,
         )
-        PluginManager(self.context, self.install_root, ["webui"])
+        manager = PluginManager(self.context, self.install_root, ["webui"])
+        await manager.start()  # 磁盘对账在 start（懒启动）：告警此时产生
         messages = "\n".join(captured)
         self.assertIn("stray", messages)
         self.assertNotIn("webui", messages)

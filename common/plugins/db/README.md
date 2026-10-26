@@ -23,6 +23,21 @@ class MyPlugin:
         await runs.add(TestRun(name="nightly"))
 ```
 
+## 服务分层（一个插件、两个服务）
+
+cordis 一个插件可提供多个服务，且**每个服务的依赖集各不相同**——db 插件
+据此拆两层，核心永远不沾 Web 依赖：
+
+| 服务 | 依赖集 | 职责 |
+|---|---|---|
+| `ctx.db`（DbService） | `appconfig` | 核心数据服务：建表 / 查询 / 归属账本 / 自检引擎；从节点、无头部署照常工作 |
+| `ctx.db_ui`（DbUiService） | `db` + `webapi` | 界面层：`POST /api/db/self-check` 与「数据库」页面（`ui/DbPage.vue`） |
+
+`webui` 是**可选依赖**（从节点没有 webui，自检接口仍可用），不写进
+`inject`，页面走就绪守护注册（webui 装载 / 换装后自动补，log 查看页同款）；
+db 核心因此**永远不需要** `inject = ["webui"]`。依赖缺席时 `db_ui`
+安静 PENDING、`ctx.db` 不受影响。
+
 ## 能力接口（`ctx.db`）
 
 | 方法 | 说明 |
@@ -43,8 +58,10 @@ class MyPlugin:
 - 物理表名 `aetp_{owner}_{logical}`（owner = 插件 id），索引名同样加归属前缀；
 - 表由调用方插件认领，**插件卸载时同步清理数据表**（`ctx.plugins.uninstall`），
   不留孤儿表；节点停机 / 插件热更新**不丢数据**；
-- 启动时孤儿回收：登记在、插件已不存在的归属按 `[db] orphan_policy` 处理
-  （`warn` 告警不删 / `drop` 清理）。
+- 孤儿数据**手动自检**：启动不自动回收（装载顺序会误判内置插件），改由
+  `ctx.db.self_check()` / `POST /api/db/self-check` /「数据库」页面按钮触发，
+  按 `[db] orphan_policy` 或请求体 `{"policy": "warn" | "drop"}` 决定只报告
+  还是清理。
 
 ## 跨插件数据依赖（锁步更新）
 
@@ -70,16 +87,19 @@ pool_size = 5                            ; 连接池大小（非 SQLite）
 max_overflow = 10                        ; 池外溢出上限
 pool_recycle = 300                       ; 连接回收秒数
 orphan_policy = warn                     ; 孤儿表处置：warn / drop
-data_dir =                               ; 归属登记目录（留空自动推导）
 schema_log_limit = 500                   ; 结构变更日志保留上限
 ```
 
 连接串密码展示时掩码为 `***`，不回显凭证。
 
-路径约定（与 `install_root` / `plugins` 一致）：SQLite **相对库路径**与相对
-`data_dir` 按**节点目录**（`config.ini` 所在目录）解析——默认库文件落
+路径约定（与 `install_root` / `plugins` 一致）：SQLite **相对库路径**按**节点
+目录**（`config.ini` 所在目录）解析——默认库文件落
 `master/data/plugins/db/aetp.db` / `slave/data/plugins/db/aetp.db`（专属数据
-目录约定，已在 `.gitignore` 忽略），不随当前工作目录漂移。
+目录约定，已在 `.gitignore` 忽略），不随当前工作目录漂移。每节点**唯一
+数据库**：业务表与治理表同住此库，治理表各归其主——归属登记
+（`aetp_db_claims`，含逐表结构指纹与迁移版本）、安装记录
+（`aetp_plugin_manager_records`，安装字段分列存放）
+与日志查询表（`aetp_log_entries`）同住此库。
 
 ## 设计文档
 

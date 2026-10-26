@@ -32,22 +32,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from _helpers import arequest
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
-from common.db_registry import registry_db_path
-from common.plugins.appconfig import AppConfigPlugin
-from common.plugins.db import (
-    DataDependency,
-    DbConfig,
-    DbDependencyError,
-    DbError,
-    DbPlugin,
-    DbService,
+from common.db_registry import DataDependency, fingerprint, parse_dependencies
+from common.models import (
     Mapped,
     Model,
-    mapped_column,
-)
-from common.plugins.db.models import (
     compact,
     decode_plugin_id,
+    mapped_column,
     model_logical,
     model_owner,
     module_owner,
@@ -55,7 +46,15 @@ from common.plugins.db.models import (
     reset_owner_group,
     snake,
 )
-from common.plugins.db.registry import OwnerRegistry, PluginRecordStore, fingerprint, parse_dependencies
+from common.plugins.appconfig import AppConfigPlugin
+from common.plugins.db import (
+    DbConfig,
+    DbDependencyError,
+    DbError,
+    DbPlugin,
+    DbService,
+    DbUiService,
+)
 from common.plugins.db.service import sqlite_pool_warning, wider_than
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import PluginManagerError, PublicPluginRecord
@@ -154,7 +153,7 @@ def _plugin_zip(
 
 #: 生产方插件 V1：init 里建自己的表（归属 = 插件 id，经合成包解码）
 _PRODUCER_SOURCE_V1 = """
-from common.plugins.db import Model, Mapped, mapped_column
+from common.models import Model, Mapped, mapped_column
 
 
 class Note(Model):
@@ -177,7 +176,7 @@ class EntryPlugin:
 _PRODUCER_SOURCE_V2 = """
 from sqlalchemy import text
 
-from common.plugins.db import Model, Mapped, mapped_column
+from common.models import Model, Mapped, mapped_column
 
 
 class Note(Model):
@@ -214,7 +213,6 @@ class DbStackTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._temp = tempfile.TemporaryDirectory()
         self.root = Path(self._temp.name)
-        self.data_dir = self.root / "db-data"
         self.install_root = self.root / "installed"
         self.config_path = self.root / "config.ini"
         self.config_path.write_text(self._ini(orphan_policy="warn"), encoding="utf-8")
@@ -231,7 +229,6 @@ class DbStackTestCase(unittest.IsolatedAsyncioTestCase):
             f"install_root = {self.install_root.as_posix()}\n"
             "\n[db]\n"
             f"url = sqlite+aiosqlite:///{db_file}\n"
-            f"data_dir = {self.data_dir.as_posix()}\n"
             f"orphan_policy = {orphan_policy}\n"
         )
 
@@ -244,11 +241,9 @@ class DbStackTestCase(unittest.IsolatedAsyncioTestCase):
         """``ctx.db`` 服务（测试根 ctx 直调 = 内部调用，无归属校验）。"""
         return cast(DbService, self.context.get("db"))
 
-    def write_registry(self, records: dict[str, object]) -> None:
-        """写插件安装记录（``registry.db`` 事实源，依赖校验据此反查）。"""
-        path = registry_db_path(self.root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        PluginRecordStore(path).write(records)
+    async def write_registry(self, records: dict[str, object]) -> None:
+        """写插件安装记录（``aetp_plugin_manager_records`` 事实源，依赖校验据此反查）。"""
+        await self.db.replace_plugin_records(records)
 
 
 class _CapturePlugin:
@@ -354,7 +349,7 @@ class ModelRegistryTests(unittest.TestCase):
         """DB-N10：定义期失败（外键解析失败）回滚登记，同逻辑表名可重新定义。"""
         bad = (
             "from sqlalchemy import ForeignKey\n"
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Broken(Model):\n"
             "    __tablename__ = 'n10_probe'\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
@@ -364,7 +359,7 @@ class ModelRegistryTests(unittest.TestCase):
             _synthetic_import(self.root, "n10-owner", bad)
 
         retry = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Retry(Model):\n"
             "    __tablename__ = 'n10_probe'\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
@@ -374,7 +369,7 @@ class ModelRegistryTests(unittest.TestCase):
 
     def test_logical_name_conflict_rejected(self) -> None:
         source = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class DupA(Model):\n"
             "    __tablename__ = 'dup'\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
@@ -387,7 +382,7 @@ class ModelRegistryTests(unittest.TestCase):
 
     def test_reload_replaces_group_idempotently(self) -> None:
         v1 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Item(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str]\n"
@@ -403,7 +398,7 @@ class ModelRegistryTests(unittest.TestCase):
         module = _synthetic_import(
             self.root,
             "owner-probe",
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Probe(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n",
         )
@@ -414,6 +409,14 @@ class ModelRegistryTests(unittest.TestCase):
 # ---------------------------------------------------------------- CRUD 与事务
 class DbServiceTests(DbStackTestCase):
     """CRUD / 事务 / 生命周期 / 清理（DESIGN §3、§4.3、§7）。"""
+
+    async def test_core_runs_without_web_layer(self) -> None:
+        """架构护栏：核心不沾 Web 依赖——无 webapi 时 db 照常工作、db_ui 安静 PENDING。"""
+        self.assertEqual(DbPlugin.inject, ["appconfig"])
+        self.assertEqual(DbUiService.inject, ["db", "webapi"])
+        self.assertIsNone(self.context.get("db_ui"))  # 无 webapi → 界面服务不激活
+        await self.db.claim_table("headless", "aetp_headless_note")
+        self.assertIn("headless", await self.db.owner_names())
 
     async def test_crud_roundtrip(self) -> None:
         db = self.db
@@ -476,13 +479,12 @@ class DbServiceTests(DbStackTestCase):
 
         await db.drop_owner("test-store", keep_data=True)
         self.assertEqual(await db.repo(RunRecord).count(), 1)  # keep_data 保留
-        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertTrue(owners.is_kept("test-store"))
+        self.assertTrue(await db.owner_kept("test-store"))
 
         await db.drop_owner("test-store")
         result = await db.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         self.assertNotIn("aetp_test_store_test_run", {row[0] for row in result})
-        self.assertEqual(OwnerRegistry(self.data_dir / "owners.sqlite").tables("test-store"), [])
+        self.assertEqual(await db.owner_tables("test-store"), [])
 
     async def test_drop_owner_rejects_cross_owner_caller(self) -> None:
         """DB-H1：业务插件不能清理别的 owner 的数据（只能清自己的归属）。"""
@@ -549,7 +551,7 @@ class SchemaLogTests(DbStackTestCase):
         """日志多的 owner 不挤掉别人的：各自保最新 limit 条。"""
         db = self.db
         versions_a = [
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Item(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             f"{extra}"
@@ -561,7 +563,7 @@ class SchemaLogTests(DbStackTestCase):
             )
         ]
         versions_b = [
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Row(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             f"{extra}"
@@ -594,63 +596,27 @@ class RegistrySweepSafetyTests(DbStackTestCase):
         return super()._ini(orphan_policy="drop")
 
     async def test_corrupt_registry_skips_self_check_but_clean_registry_checks(self) -> None:
-        """registry 损坏 → 自检整体跳过（数据保留）；可读且不含该 owner → 照常清理。"""
+        """安装记录事实源不可读 → 自检整体跳过（数据保留）；可读且不含该 owner → 照常清理。"""
         db = self.db
         await db.sync_schema(models=[RunRecord])
-        registry_path = registry_db_path(self.root)
-        registry_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # registry 损坏：残缺 id 集合不得当“已安装全集”，自检整体跳过（宁漏勿误删）
-        registry_path.write_bytes(b"this is not a sqlite database")
-        report = await db.self_check(policy="drop")
+        # 事实源损坏（残缺 id 集合不得当“已安装全集”）：自检整体跳过（宁漏勿误删）
+        with mock.patch.object(
+            DbService, "plugin_records", side_effect=RuntimeError("模拟事实源损坏")
+        ):
+            report = await db.self_check(policy="drop")
         self.assertTrue(report["skipped"])
         await self.db.repo(RunRecord).add(RunRecord(name="alive"))  # 数据不受影响
 
-        # 对照：registry 可读且不含该 owner、模型组已作废（模拟卸载后代码
+        # 对照：事实源可读且不含该 owner、模型组已作废（模拟卸载后代码
         # 不再导入）→ 真孤儿，policy=drop 清理（表与登记一并清掉）。
         # 仅"安装记录缺失"但模型仍注册的 owner 不算孤儿（内置插件豁免语义）
-        registry_path.unlink()
-        PluginRecordStore(registry_path).write({})
+        await db.replace_plugin_records({})
         reset_owner_group("test-store")
         report = await db.self_check(policy="drop")
         self.assertFalse(report["skipped"])
         self.assertEqual(report["cleaned"], ["test-store"])
-        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertNotIn("test-store", owners.owners())
-
-
-class InstallRootResolutionTests(unittest.IsolatedAsyncioTestCase):
-    """[node] install_root 相对路径按节点目录（config.ini 所在目录）解析。"""
-
-    async def asyncSetUp(self) -> None:
-        self._temp = tempfile.TemporaryDirectory()
-        self.root = Path(self._temp.name)
-        self.config_path = self.root / "config.ini"
-        self.config_path.write_text(
-            "[node]\n"
-            "kind = master\n"
-            "install_root = plugins\n"
-            "\n[db]\n"
-            f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
-            "orphan_policy = warn\n",
-            encoding="utf-8",
-        )
-        self.context = Context()
-        self.context.provide("node_kind", "master")
-        await self.context.plugin(AppConfigPlugin, {"path": str(self.config_path)})
-
-    async def asyncTearDown(self) -> None:
-        await unload_all(self.context)
-        self._temp.cleanup()
-
-    async def test_registry_db_anchors_to_config_dir(self) -> None:
-        """回归：registry.db 落节点目录 data/plugins/plugin-manager/ 下，不随 cwd 漂移。"""
-        await self.context.plugin(DbPlugin)
-        # 事实源惰性建库：读一次（自检入口）才落文件——验的正是解析后的落点
-        await cast(DbService, self.context.get("db")).self_check()
-        self.assertTrue(
-            (self.root / "data" / "plugins" / "plugin-manager" / "registry.db").is_file()
-        )
+        self.assertNotIn("test-store", await db.owner_names())
 
 
 class EngineResilienceTests(DbStackTestCase):
@@ -703,7 +669,7 @@ class DropOwnerTests(DbStackTestCase):
         """成功表登记/指纹即时清理；残表可观测可重试，不再卡半删态。"""
         db = self.db
         source = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Item(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "class Row(Model):\n"
@@ -723,16 +689,20 @@ class DropOwnerTests(DbStackTestCase):
         self.assertEqual(remaining, [row_table])
 
         # 成功表：登记已摘、指纹已清；残表登记保留（待重试/孤儿回收）
-        registry = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertEqual(registry.tables(owner), [row_table])
-        meta_rows = await db.execute(text("SELECT name FROM aetp_db_meta"))
-        names = {str(row[0]) for row in meta_rows}
-        self.assertNotIn(f"fp:{item_table}", names)
-        self.assertIn(f"fp:{row_table}", names)
+        self.assertEqual(await db.owner_tables(owner), [row_table])
+        claim_rows = await db.execute(
+            text("SELECT tables FROM aetp_db_claims WHERE owner = :owner").bindparams(
+                owner=owner
+            )
+        )
+        entries = json.loads(claim_rows[0][0])
+        names = {str(entry["name"]) for entry in entries if entry.get("fp")}
+        self.assertNotIn(item_table, names)
+        self.assertIn(row_table, names)
 
         # 残表重试可完成清理（可再次整体清理，不悬停）
         self.assertEqual(await db.drop_owner(owner), [])
-        self.assertEqual(OwnerRegistry(self.data_dir / "owners.sqlite").tables(owner), [])
+        self.assertEqual(await db.owner_tables(owner), [])
 
 
 class MigrationTests(DbStackTestCase):
@@ -753,7 +723,7 @@ class MigrationTests(DbStackTestCase):
         """DB-N1：严格补漏失败只影响该表——其他表照常记账，阶段 3 不被跳过。"""
         db = self.db
         v1 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Good(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str]\n"
@@ -761,7 +731,7 @@ class MigrationTests(DbStackTestCase):
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
         )
         v2 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Good(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str]\n"
@@ -787,13 +757,13 @@ class MigrationTests(DbStackTestCase):
     async def test_l1_add_column_and_index(self) -> None:
         db = self.db
         v1 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Evolve(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str]\n"
         )
         v2 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Evolve(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str] = mapped_column(index=True)\n"
@@ -812,13 +782,13 @@ class MigrationTests(DbStackTestCase):
         """DB-H3：事务内 sync_schema 派发的事件，其监听任务不得继承环境会话。"""
         db = self.db
         v1 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Evolve(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str]\n"
         )
         v2 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Evolve(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str]\n"
@@ -852,14 +822,14 @@ class MigrationTests(DbStackTestCase):
     async def test_l2_versioned_migrations_and_rollback(self) -> None:
         db = self.db
         v1 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Evolve(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    name: Mapped[str]\n"
         )
         # 新版插件交付：模型改用 title + 迁移步骤把 name 改名过来（同批发布）
         v2 = (
-            "from common.plugins.db import Model, Mapped, mapped_column\n"
+            "from common.models import Model, Mapped, mapped_column\n"
             "class Evolve(Model):\n"
             "    id: Mapped[int] = mapped_column(primary_key=True)\n"
             "    title: Mapped[str]\n"
@@ -884,9 +854,9 @@ class MigrationTests(DbStackTestCase):
         with self.assertRaises(DbError):
             await db.sync_schema(models=[reloaded.Evolve], migrations=[(3, broken)])
         version = await db.execute(
-            text("SELECT value FROM aetp_db_meta WHERE owner = 'migrate-shop' AND name = 'schema_version'")
+            text("SELECT version FROM aetp_db_claims WHERE owner = 'migrate-shop'")
         )
-        self.assertEqual([row[0] for row in version], ["2"])  # 失败回滚、版本不前移
+        self.assertEqual([row[0] for row in version], [2])  # 失败回滚、版本不前移
 
 
 # ---------------------------------------------------------------- 跨插件依赖
@@ -915,14 +885,14 @@ class DependencyTests(DbStackTestCase):
         self.assertIn("不存在", str(missing_table.exception))
 
     async def test_external_model_requires_declaration(self) -> None:
-        self.write_registry({"reporter": {"id": "reporter", "dependencies": []}})
+        await self.write_registry({"reporter": {"id": "reporter", "dependencies": []}})
         intruder = _capture_plugin(
             "reporter", lambda ctx: ctx.get("db").external_model("test-store", "test_run")
         )
         with self.assertRaises(DbDependencyError):  # 未声明一律拒绝
             await self.context.plugin(intruder)
 
-        self.write_registry({"reporter": {"id": "reporter", "dependencies": _PRODUCER_LIKE_DEPS}})
+        await self.write_registry({"reporter": {"id": "reporter", "dependencies": _PRODUCER_LIKE_DEPS}})
         declared = _capture_plugin(
             "reporter", lambda ctx: ctx.get("db").external_model("test-store", "test_run")
         )
@@ -931,7 +901,7 @@ class DependencyTests(DbStackTestCase):
 
     async def test_external_join_and_readonly_repo_rejected(self) -> None:
         db = self.db
-        self.write_registry({"reporter": {"id": "reporter", "dependencies": _PRODUCER_LIKE_DEPS}})
+        await self.write_registry({"reporter": {"id": "reporter", "dependencies": _PRODUCER_LIKE_DEPS}})
         runs = db.repo(RunRecord)
         for name, kind in (("r1", "a"), ("r2", "a"), ("r3", "b")):
             created = await runs.add(RunRecord(name=name, kind=kind))
@@ -958,7 +928,7 @@ class DependencyTests(DbStackTestCase):
             db.repo(external)
 
     async def test_recheck_consumers_reports_failure(self) -> None:
-        self.write_registry(
+        await self.write_registry(
             {
                 "reporter": {
                     "id": "reporter",
@@ -985,8 +955,6 @@ class DbSelfCheckTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._temp = tempfile.TemporaryDirectory()
         self.root = Path(self._temp.name)
-        self.data_dir = self.root / "db-data"
-        self.data_dir.mkdir(parents=True)
         self.contexts: list[Context] = []
 
     async def asyncTearDown(self) -> None:
@@ -994,15 +962,7 @@ class DbSelfCheckTests(unittest.IsolatedAsyncioTestCase):
             await unload_all(context)
         self._temp.cleanup()
 
-    def _write_owners(self) -> None:
-        registry = OwnerRegistry(self.data_dir / "owners.sqlite")
-        registry.claim("ghost", "aetp_ghost_note")
-        registry.claim("code-alive", "aetp_code_alive_note")
-        registry.claim("kept-owner", "aetp_kept_owner_note")
-        registry.set_keep("kept-owner", True)
-
     async def _boot(self, policy: str) -> Context:
-        self._write_owners()
         config_path = self.root / f"config-{policy}.ini"
         config_path.write_text(
             "[node]\n"
@@ -1010,7 +970,6 @@ class DbSelfCheckTests(unittest.IsolatedAsyncioTestCase):
             f"install_root = {(self.root / 'installed').as_posix()}\n"
             "\n[db]\n"
             f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
-            f"data_dir = {self.data_dir.as_posix()}\n"
             f"orphan_policy = {policy}\n",
             encoding="utf-8",
         )
@@ -1019,13 +978,18 @@ class DbSelfCheckTests(unittest.IsolatedAsyncioTestCase):
         self.contexts.append(context)
         await context.plugin(AppConfigPlugin, {"path": str(config_path)})
         await context.plugin(DbPlugin)
+        # 预置登记：ghost（真孤儿）/ code-alive（有已注册模型）/ kept-owner（keep 标记）
+        db = self._service(context)
+        await db.claim_table("ghost", "aetp_ghost_note")
+        await db.claim_table("code-alive", "aetp_code_alive_note")
+        await db.claim_table("kept-owner", "aetp_kept_owner_note")
+        await db.set_owner_keep("kept-owner", True)
         return context
 
     async def test_startup_does_not_sweep(self) -> None:
         """启动不再自动回收：drop 策略下 ghost 也原样保留，等手动自检。"""
-        await self._boot("drop")
-        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertIn("ghost", owners.owners())
+        context = await self._boot("drop")
+        self.assertIn("ghost", await self._service(context).owner_names())
 
     async def test_warn_policy_reports_without_cleaning(self) -> None:
         context = await self._boot("warn")
@@ -1033,17 +997,16 @@ class DbSelfCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(report["skipped"])
         self.assertEqual(self._owners_in(report, "orphans"), ["ghost"])
         self.assertEqual(self._owners_in(report, "kept"), ["kept-owner"])
-        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertIn("ghost", owners.owners())  # warn 只报告不删
+        self.assertIn("ghost", await self._service(context).owner_names())  # warn 只报告不删
 
     async def test_drop_policy_clears_orphans_but_keeps_kept(self) -> None:
         context = await self._boot("drop")
-        report = await self._service(context).self_check(policy="drop")
+        db = self._service(context)
+        report = await db.self_check(policy="drop")
         self.assertEqual(cast(list[str], report["cleaned"]), ["ghost"])
-        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertNotIn("ghost", owners.owners())
-        self.assertIn("code-alive", owners.owners())  # 有已注册模型 → 非孤儿
-        self.assertIn("kept-owner", owners.owners())  # keep_data 标记跳过
+        self.assertNotIn("ghost", await db.owner_names())
+        self.assertIn("code-alive", await db.owner_names())  # 有已注册模型 → 非孤儿
+        self.assertIn("kept-owner", await db.owner_names())  # keep_data 标记跳过
 
     async def test_invalid_policy_rejected(self) -> None:
         context = await self._boot("warn")
@@ -1067,7 +1030,6 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._temp = tempfile.TemporaryDirectory()
         self.root = Path(self._temp.name)
-        self.data_dir = self.root / "db-data"
         self.install_root = self.root / "installed"
         self.port = _free_port()
         config_path = self.root / "config.ini"
@@ -1079,8 +1041,7 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
             f"port = {self.port}\n"
             "auth_token = test-token\n"
             "\n[db]\n"
-            f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
-            f"data_dir = {self.data_dir.as_posix()}\n",
+            f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n",
             encoding="utf-8",
         )
         self.context = Context()
@@ -1148,6 +1109,17 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 400)  # 非法 policy 明确拒绝
 
+    async def test_db_ui_service_owns_web_surface(self) -> None:
+        """界面层独立成服务：自检接口归属 db_ui，核心服务无 Web 依赖（架构护栏）。"""
+        ui = None
+        for _attempt in range(20):  # webapi 就绪后界面服务异步激活
+            ui = self.context.get("db_ui")
+            if ui is not None:
+                break
+            await asyncio.sleep(0.05)
+        self.assertIsInstance(ui, DbUiService)
+        self.assertIsNotNone(self.context.get("db"))  # 核心照常独立提供
+
     async def test_install_enable_uninstall_data_chain(self) -> None:
         # 装 B 提示 A 未安装（安装时依赖预检）
         with self.assertRaises(PluginManagerError) as missing:
@@ -1185,8 +1157,9 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         await self.plugins.uninstall("data-producer", keep_data=True)
         self.assertTrue(await self._table_exists_async("aetp_data_producer_note"))
-        owners = OwnerRegistry(self.data_dir / "owners.sqlite")
-        self.assertTrue(owners.is_kept("data-producer"))
+        self.assertTrue(
+            await cast(DbService, self.context.get("db")).owner_kept("data-producer")
+        )
 
     async def _consumer_record(self) -> PublicPluginRecord:
         """取 data-consumer 的安装记录（含 enabled / last_error）。"""

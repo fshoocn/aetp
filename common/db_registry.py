@@ -1,12 +1,19 @@
-"""归属登记（``owners.json``）、库内元数据（指纹 / 变更日志 / 版本）与数据依赖声明。
+"""节点治理表（归属登记 / 插件安装记录）、变更日志与数据依赖声明。
 
-三块持久状态，各有各的落点：
+单一库设计：这些状态与业务表同住 ``aetp.db``（每节点唯一数据库）。治理表
+**各归其主**（按 ``aetp_{owner}_{logical}`` 命名约定，谁的账记谁名下）：
 
-* **归属登记** ``owners.json``（数据目录，原子写）：owner → 认领的物理表。
-  登记**先于建表**写入（崩溃后孤儿可回收），drop 成功后删除条目（DESIGN §4.2）；
-* **库内元数据**：``aetp_db_meta``（owner → schema_version / 结构指纹）与
-  ``aetp_schema_log``（变更日志：时间、变动内容 diff、归属、插件版本）——
-  与 DDL 同库，供消费方加载校验与「B 为什么拒载」排障（DESIGN §4.5）；
+* **归属登记** ``aetp_db_claims``（db 的账本）：owner 单行——认领的表清单
+  （JSON 条目 ``{"name", "fp"}``，逐表携带结构指纹）+ ``keep`` 标记 +
+  迁移 ``version`` 记账。登记**先于建表**写入（崩溃后孤儿可回收），drop
+  成功后删除；
+* **插件安装记录** ``aetp_plugin_manager_records``（plugin-manager 的账本，
+  经 Model DSL 归属 ``plugin-manager``）：**标量分列**（name / version /
+  entrypoint / enabled / last_error / digest），只有形状各异的配置类字段
+  （config / requires / kind / dependencies）按 JSON 文本列存放。由
+  plugin-manager 写、db 反查消费方依赖；定位是「丢了重装即可」的台账；
+* **变更日志** ``aetp_schema_log`` 是审计**流水**（自增 id、按上限截断）；
+  日志查询表（``aetp_log_entries``）归 log 插件。
 * **数据依赖声明**：``plugin.json`` 的 ``dependencies`` 字段（消费方静态
   manifest），形状 ``[{"plugin", "data", "requires"}]``，与节点能力标签
   ``requires`` 区分（DESIGN §8）。
@@ -14,23 +21,16 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
-import json
 import re
-import sqlite3
-import time
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
 from typing import Any, Final, TypedDict, cast
 
 from sqlalchemy import Column, Float, Integer, MetaData, String, Table
 
-from common.plugin_data import plugin_data_dir
-
-#: 库内元数据表：owner → （schema_version / 结构指纹）键值对
-META_TABLE: Final[str] = "aetp_db_meta"
-#: 库内结构变更日志表（保留上限见 ``[db] schema_log_limit``）
+#: 归属登记表（db 的账本：owner 单行 → 表清单 JSON（含逐表指纹）+ keep + version）
+CLAIMS_TABLE: Final[str] = "aetp_db_claims"
+#: 库内结构变更日志表（审计流水，保留上限见 ``[db] schema_log_limit``）
 LOG_TABLE: Final[str] = "aetp_schema_log"
 
 #: ``requires`` 声明接受的类型符（SQLAlchemy 类型的归一化词表，见 models.type_token）
@@ -112,14 +112,35 @@ def fingerprint(columns: Iterable[tuple[str, str]]) -> str:
 
 _META = MetaData()
 
-#: 库内元数据表（owner + 名称 → JSON 值）
-meta_table: Table[Any] = Table(
-    META_TABLE,
+#: 归属登记表（db 的账本）：owner 单行 —— 表清单 JSON（逐表指纹）+ keep + version
+claims_table: Table[Any] = Table(
+    CLAIMS_TABLE,
     _META,
     Column("owner", String(64), primary_key=True),
-    Column("name", String(128), primary_key=True),
-    Column("value", String(4096), nullable=False),
-    Column("updated_at", Float(), nullable=False),
+    Column("tables", String(4096), nullable=False),
+    Column("created_at", Float(), nullable=False),
+    Column("keep", Integer(), nullable=False, server_default="0"),
+    Column("version", Integer(), nullable=True),
+)
+
+#: 插件安装记录表（plugin-manager 的账本）：标量分列，形状各异的配置类
+#: 字段（config / requires / kind / dependencies）按 JSON 文本列存放。与
+#: Model 侧 ``common.plugins.webapi.plugin_models.InstallRecord`` 同名同形
+plugin_records_table: Table[Any] = Table(
+    "aetp_plugin_manager_records",
+    _META,
+    Column("id", String(64), primary_key=True),
+    Column("name", String(120), nullable=False, server_default=""),
+    Column("version", String(64), nullable=False, server_default=""),
+    Column("entrypoint", String(160), nullable=False, server_default=""),
+    Column("resource_root", String(240), nullable=True),
+    Column("enabled", Integer(), nullable=False, server_default="0"),
+    Column("last_error", String(2048), nullable=True),
+    Column("digest", String(64), nullable=False, server_default=""),
+    Column("config", String(4096), nullable=False, server_default="{}"),
+    Column("requires", String(2048), nullable=False, server_default="[]"),
+    Column("kind", String(64), nullable=False, server_default="[]"),
+    Column("dependencies", String(4096), nullable=False, server_default="[]"),
 )
 
 #: 库内结构变更日志表
@@ -136,225 +157,14 @@ schema_log_table: Table[Any] = Table(
 )
 
 
-def meta_tables() -> tuple[Table[Any], Table[Any]]:
-    """库内元数据表（``aetp_db_meta`` / ``aetp_schema_log``）。"""
-    return meta_table, schema_log_table
-
-
-#: 安装记录归属的插件 id（卸载清理豁免：内置插件不走卸载链）
-REGISTRY_OWNER: Final[str] = "plugin-manager"
-
-
-def registry_db_path(base_dir: Path) -> Path:
-    """安装记录 ``registry.db`` 的落点：``data/plugins/plugin-manager/``。
-
-    专属数据目录约定见 :mod:`common.plugin_data`；读写双方（plugin-manager
-    写、db 读）都经本函数取路径，保证同一落点。
-    """
-    return plugin_data_dir(base_dir, REGISTRY_OWNER) / "registry.db"
+def meta_tables() -> tuple[Table[Any], ...]:
+    """db 自用治理表（``aetp_db_claims`` / ``aetp_schema_log`` /
+    ``aetp_plugin_manager_records``）。"""
+    return claims_table, schema_log_table, plugin_records_table
 
 
 #: 物理表名白名单（纵深防御：拼 DDL 前先过模式校验；正常命名由 models.py 洗名产生）
-_TABLE_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_]{1,96}")
-
-
-def _open_store(path: Path) -> sqlite3.Connection:
-    """打开（或创建）元数据库连接：WAL + busy_timeout（与业务库同款韧性）。
-
-    元数据操作都是单行级短事务，采用**短连接**（用完即关）：不与调用方
-    的生命周期耦合，也不会让文件句柄阻止目录清理。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-    except sqlite3.DatabaseError:
-        # 打开损坏文件时 PRAGMA 失败——先关闭句柄再抛，避免 Windows 文件锁泄漏
-        conn.close()
-        raise
-    return conn
-
-
-class PluginRecordStore:
-    """插件安装记录（``registry.db``）：插件 id → 记录（JSON 文本）。
-
-    schema 版本化（``store_meta.schema_version``）：未来字段增删 bump 版本
-    并经迁移升级，不再是"加字段兼容、删字段必崩"的单边容忍；``write`` 全量
-    替换在一个事务里完成（原子，崩溃不半截）。
-    """
-
-    #: 本程序支持的登记 schema 版本
-    SCHEMA_VERSION: Final[str] = "1"
-
-    def __init__(self, path: Path) -> None:
-        # 惰性建库：构造不碰文件系统（服务能起），损坏仅在读写时显式报错
-        self.path = path
-
-    def _ensure(self, conn: sqlite3.Connection) -> None:
-        try:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS store_meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)"
-            )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS plugin_records (id TEXT PRIMARY KEY, record TEXT NOT NULL)"
-            )
-            conn.commit()
-            self._check_version(conn)
-        except sqlite3.Error as exc:
-            raise RuntimeError(f"插件注册表无法初始化：{self.path}：{exc}") from exc
-
-    @staticmethod
-    def _check_version(conn: sqlite3.Connection) -> None:
-        row = conn.execute(
-            "SELECT value FROM store_meta WHERE name = 'schema_version'"
-        ).fetchone()
-        if row is None:
-            with conn:
-                conn.execute(
-                    "INSERT INTO store_meta (name, value) VALUES ('schema_version', ?)",
-                    (PluginRecordStore.SCHEMA_VERSION,),
-                )
-            return
-        if str(row[0]) != PluginRecordStore.SCHEMA_VERSION:
-            raise RuntimeError(
-                f"插件注册表 schema 版本不兼容：{row[0]}（本程序支持 {PluginRecordStore.SCHEMA_VERSION}）"
-            )
-
-    def read(self) -> dict[str, object]:
-        """全部记录（id → 记录对象）；库损坏 / 不可读抛 ``RuntimeError``。"""
-        try:
-            with contextlib.closing(_open_store(self.path)) as conn:
-                self._ensure(conn)
-                rows = conn.execute("SELECT id, record FROM plugin_records").fetchall()
-            return {str(key): json.loads(str(raw)) for key, raw in rows}
-        except (sqlite3.Error, ValueError, RecursionError) as exc:
-            raise RuntimeError(f"插件注册表无法读取：{self.path}：{exc}") from exc
-
-    def write(self, records: Mapping[str, object]) -> None:
-        """全量替换（单事务原子）；失败抛 ``OSError``（与历史调用方约定一致）。"""
-        try:
-            with contextlib.closing(_open_store(self.path)) as conn:
-                self._ensure(conn)
-                with conn:
-                    conn.execute("DELETE FROM plugin_records")
-                    conn.executemany(
-                        "INSERT INTO plugin_records (id, record) VALUES (?, ?)",
-                        [
-                            (str(key), json.dumps(value, ensure_ascii=False))
-                            for key, value in records.items()
-                        ],
-                    )
-        except (sqlite3.Error, TypeError, ValueError) as exc:
-            raise OSError(f"插件注册表无法写入：{self.path}：{exc}") from exc
-
-
-class OwnerRegistry:
-    """归属登记（``owners.json``，原子写）：owner → 认领的物理表。
-
-    条目形状（DESIGN §4.2）::
-
-        {"test-runner": {"tables": ["aetp_test_runner_test_run"], "created_at": 1760000000.0}}
-
-    ``keep: true`` 表示卸载时显式保留数据（``keep_data``），孤儿回收跳过。
-    """
-
-    def __init__(self, path: Path) -> None:
-        # 惰性建库：构造不碰文件系统，损坏仅在读写时显式报错
-        self.path = path
-
-    def _connect(self) -> sqlite3.Connection:
-        """短连接 + 幂等建表（每操作一次，用完即关）。"""
-        conn = _open_store(self.path)
-        try:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS owners ("
-                "owner TEXT PRIMARY KEY, tables TEXT NOT NULL, "
-                "created_at REAL NOT NULL, keep INTEGER NOT NULL DEFAULT 0)"
-            )
-            conn.commit()
-        except sqlite3.Error:
-            conn.close()
-            raise
-        return conn
-
-    # -- 查询 ---------------------------------------------------------------
-    def owners(self) -> list[str]:
-        """全部已登记 owner。"""
-        with contextlib.closing(self._connect()) as conn:
-            rows = conn.execute("SELECT owner FROM owners ORDER BY owner").fetchall()
-        return [str(row[0]) for row in rows]
-
-    def _tables_of(self, owner: str) -> list[str]:
-        with contextlib.closing(self._connect()) as conn:
-            row = conn.execute(
-                "SELECT tables FROM owners WHERE owner = ?", (owner,)
-            ).fetchone()
-        if row is None:
-            return []
-        return [str(name) for name in cast(list[object], json.loads(str(row[0])))]
-
-    def tables(self, owner: str) -> list[str]:
-        """某 owner 认领的物理表名。"""
-        return self._tables_of(owner)
-
-    def is_kept(self, owner: str) -> bool:
-        """该 owner 是否显式保留数据（``keep_data`` 卸载，孤儿回收跳过）。"""
-        with contextlib.closing(self._connect()) as conn:
-            row = conn.execute(
-                "SELECT keep FROM owners WHERE owner = ?", (owner,)
-            ).fetchone()
-        return bool(row[0]) if row is not None else False
-
-    # -- 变更（每次操作一个短事务）------------------------------------------
-    def claim(self, owner: str, table: str) -> None:
-        """登记认领（幂等）；**登记先于建表**写入，崩溃后孤儿可回收。"""
-        if not _TABLE_NAME.fullmatch(table):
-            raise ValueError(f"表名不合法：{table!r}")
-        with contextlib.closing(self._connect()) as conn, conn:
-            tables = self._tables_of(owner)
-            if table in tables:
-                return
-            tables.append(table)
-            payload = json.dumps(tables, ensure_ascii=False)
-            row = conn.execute(
-                "SELECT created_at FROM owners WHERE owner = ?", (owner,)
-            ).fetchone()
-            if row is None:
-                conn.execute(
-                    "INSERT INTO owners (owner, tables, created_at, keep) VALUES (?, ?, ?, 0)",
-                    (owner, payload, time.time()),
-                )
-            else:
-                conn.execute(
-                    "UPDATE owners SET tables = ? WHERE owner = ?", (payload, owner)
-                )
-
-    def drop_table(self, owner: str, table: str) -> None:
-        """移除单表登记（drop 成功后调用）。"""
-        with contextlib.closing(self._connect()) as conn, conn:
-            tables = self._tables_of(owner)
-            if table not in tables:
-                return
-            tables.remove(table)
-            conn.execute(
-                "UPDATE owners SET tables = ? WHERE owner = ?",
-                (json.dumps(tables, ensure_ascii=False), owner),
-            )
-
-    def set_keep(self, owner: str, keep: bool) -> None:
-        """标记 / 取消「保留数据」（``keep_data`` 卸载后孤儿回收跳过）。"""
-        with contextlib.closing(self._connect()) as conn, conn:
-            conn.execute(
-                "UPDATE owners SET keep = ? WHERE owner = ?", (1 if keep else 0, owner)
-            )
-
-    def release(self, owner: str) -> None:
-        """删除 owner 的整条登记（全部表 drop 成功后调用）。"""
-        with contextlib.closing(self._connect()) as conn, conn:
-            conn.execute("DELETE FROM owners WHERE owner = ?", (owner,))
-
-    # （旧 json 实现已迁移至 sqlite，见上）
+TABLE_NAME: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_]{1,96}")
 
 
 def find_orphans(owners: Iterable[str], installed: Iterable[str]) -> list[str]:

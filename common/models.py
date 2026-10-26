@@ -2,7 +2,7 @@
 
 插件声明模型只给**逻辑表名**（类名蛇形或显式 ``__tablename__``）::
 
-    from common.plugins.db import Model, Mapped, mapped_column
+    from common.models import Model, Mapped, mapped_column
 
     class TestRun(Model):
         id: Mapped[int] = mapped_column(primary_key=True)

@@ -17,7 +17,7 @@ import zipfile
 from collections.abc import Iterable, Mapping
 from io import BytesIO
 from pathlib import Path, PurePosixPath
-from typing import Final, TypedDict, cast
+from typing import Any, Final, TypedDict, cast
 
 from cordis_port import Context, Fiber
 from sqlalchemy.exc import SQLAlchemyError
@@ -26,12 +26,12 @@ from common.cordis_utils import safe_dispose
 from common.db_errors import DbDependencyError, DbError
 from common.db_registry import (
     DataDependency,
-    PluginRecordStore,
     parse_dependencies,
-    registry_db_path,
 )
 from common.log_op import log_operation_async
 from common.plugin_data import plugin_data_dir
+
+from .plugin_models import InstallRecord
 
 MAX_ARCHIVE_SIZE: Final[int] = 32 * 1024 * 1024
 MAX_EXTRACTED_SIZE: Final[int] = 128 * 1024 * 1024
@@ -108,6 +108,10 @@ def builtin_specs(ctx: Context) -> dict[str, _BuiltinSpec]:
     for runtime in list(ctx.registry.values()):
         plugin = runtime.callback
         if not isinstance(plugin, type) or not is_builtin_plugin(plugin):
+            continue
+        if getattr(plugin, "service_of", None):
+            # 附属服务载体（一个插件的第二个服务，如 db 的 db_ui）：不是
+            # 独立插件，不进插件清单——服务随宿主插件一起呈现
             continue
         plugin_id = getattr(plugin, "name", None) or runtime.name
         if not isinstance(plugin_id, str) or not plugin_id:
@@ -312,20 +316,29 @@ class PluginManager:
         self.install_root.mkdir(parents=True, exist_ok=True)
         #: 节点目录（config.ini 所在目录）：插件专属数据目录的解析基准
         self._base_dir: Path = base_dir.resolve() if base_dir is not None else self.install_root.parent
-        #: 插件安装记录（registry.db）：落专属数据目录 data/plugins/plugin-manager/
-        registry_path = registry_db_path(self._base_dir)
-        self.registry_store: PluginRecordStore = PluginRecordStore(registry_path)
         #: 原始插件包归档目录（保留上传 ZIP，供未来主从分发与回溯）
         self.archives_dir: Path = self.install_root / ".archives"
         #: 预装插件 id（config.ini 的 ``[node] plugins`` 插件源解析而来）：
         #: 启停 / 卸载均允许，但下次启动 ``ensure_installed`` 会重装重置
         self.preinstalled_ids: frozenset[str] = frozenset(preinstalled_ids)
-        self.records: dict[str, _PluginRecord] = self._read_registry()
+        #: 插件安装记录（``aetp_plugin_manager_records``，plugin-manager 自己的表）；
+        #: 读取与磁盘对账延后到 :meth:`start`（db 异步，构造里做不了）
+        self.records: dict[str, _PluginRecord] = {}
+        self._started: bool = False
         self.fibers: dict[str, Fiber] = {}
         self._operation_lock = asyncio.Lock()
         #: 孤儿安装目录（目录在、registry 无记录）——kill 中断的残留，安装同名时覆盖
         self._orphan_dirs: set[str] = set()
-        self._reconcile_disk_state()
+
+    async def start(self) -> None:
+        """加载安装记录并对账磁盘状态（首次调用一次；幂等）。"""
+        if self._started:
+            return
+        self._started = True
+        # plugin-manager 自己的表（aetp_plugin_manager_records）：谁的账谁建
+        await self._db().sync_schema(models=[InstallRecord])
+        self.records = await self._read_registry()
+        await self._reconcile_disk_state()
 
     def _builtins(self) -> dict[str, _BuiltinSpec]:
         """内置插件元数据（按已加载插件动态发现，见 :func:`builtin_specs`）。"""
@@ -336,6 +349,7 @@ class PluginManager:
         return f"_aetp_plugin_{plugin_id.encode('ascii').hex()}"
 
     async def list_plugins(self) -> list[PublicPluginRecord]:
+        await self.start()
         records = [self._public_record(record) for record in self.records.values()]
         return sorted([*self._builtin_records(), *records], key=lambda item: item["id"])
 
@@ -372,6 +386,7 @@ class PluginManager:
     @log_operation_async
     async def install_archive(self, archive: bytes, *, replace: bool = False) -> PublicPluginRecord:
         """安装插件包；同 id 已安装时需显式 ``replace=True`` 才覆盖替换。"""
+        await self.start()
         async with self._operation_lock:
             record = await self._install_archive(archive, replace=replace)
         _audit_install(self.ctx, record, replace)
@@ -387,6 +402,7 @@ class PluginManager:
         同 id 已安装时需显式 ``replace=True`` 才覆盖替换（预装源更新换装
         走这里），否则报 409 并携带新旧版本信息。
         """
+        await self.start()
         async with self._operation_lock:
             source = Path(source_dir).expanduser().resolve()
             if not source.is_dir():
@@ -404,6 +420,7 @@ class PluginManager:
         中间可被并发 HTTP 操作（如卸载）插队；收进同一把锁后操作序列不再
         被打断。内容摘要判定是否换装的口径不变（与 ``source_digest`` 同）。
         """
+        await self.start()
         source = Path(source_dir).expanduser().resolve()
         if not source.is_dir() and not source.is_file():
             raise PluginManagerError(f"插件源不存在：{source}")
@@ -509,7 +526,7 @@ class PluginManager:
                     self._land_files, extracted, destination, archive_path, archive
                 )
                 self.records[plugin_id] = record
-                self._write_registry()
+                await self._write_registry()
             except BaseException:
                 self.records.pop(plugin_id, None)
                 await asyncio.to_thread(
@@ -595,7 +612,7 @@ class PluginManager:
                 "last_error": None,
                 "digest": digest,
             }
-            self._write_registry()
+            await self._write_registry()
             if was_enabled:
                 await self._enable(plugin_id)
         except BaseException as exc:
@@ -616,7 +633,7 @@ class PluginManager:
                 "last_error": f"覆盖安装失败：{exc}",
             }
             try:
-                self._write_registry()
+                await self._write_registry()
                 if was_enabled:
                     await self._enable(plugin_id)  # 回滚后重新启用旧版
                 # _enable 成功会清空 last_error；再补上失败原因，让界面能告知替换未生效
@@ -624,7 +641,7 @@ class PluginManager:
                     **self.records[plugin_id],
                     "last_error": f"覆盖安装失败：{exc}",
                 }
-                self._write_registry()
+                await self._write_registry()
             except OSError as registry_error:
                 self.ctx.logger.error("插件 %s 回滚状态无法写入注册表：%s", plugin_id, registry_error)
             except PluginManagerError as rollback_error:
@@ -679,6 +696,7 @@ class PluginManager:
 
     @log_operation_async
     async def enable(self, plugin_id: str) -> PublicPluginRecord:
+        await self.start()
         self._reject_builtin(plugin_id, "启停")
         async with self._operation_lock:
             return await self._enable(plugin_id)
@@ -732,7 +750,7 @@ class PluginManager:
 
             record["enabled"] = True
             record["last_error"] = None
-            self._write_registry()
+            await self._write_registry()
             self.fibers[plugin_id] = fiber
             # 审计只记**真正装载成功**的启用：幂等短路（已 ACTIVE）不重复留痕
             # —— 启动期 restore_enabled + ensure_installed 双链路不再打两条
@@ -774,7 +792,7 @@ class PluginManager:
         record["enabled"] = False
         record["last_error"] = error
         try:
-            self._write_registry()
+            await self._write_registry()
         except OSError as registry_error:
             self.ctx.logger.error("插件 %s 启用失败状态无法写入注册表：%s", plugin_id, registry_error)
 
@@ -806,6 +824,7 @@ class PluginManager:
     @log_operation_async
     async def disable(self, plugin_id: str, *, reason: str | None = None) -> PublicPluginRecord:
         """停用插件；``reason`` 会记入安装记录的 ``last_error``（如数据依赖失效）。"""
+        await self.start()
         self._reject_builtin(plugin_id, "停用")
         async with self._operation_lock:
             record = await self._disable(plugin_id, reason=reason)
@@ -827,7 +846,7 @@ class PluginManager:
         record["enabled"] = False
         if reason is not None:
             record["last_error"] = reason
-        self._write_registry()
+        await self._write_registry()
         return self._public_record(record)
 
     @log_operation_async
@@ -839,6 +858,7 @@ class PluginManager:
         * ``keep_data=True``：数据表与归属登记保留（重装复用）；
         * ``drop=True``：被其他插件依赖时强制删除数据（默认拒绝卸载）。
         """
+        await self.start()
         self._reject_builtin(plugin_id, "卸载")
         async with self._operation_lock:
             await self._uninstall(plugin_id, keep_data=keep_data, drop=drop)
@@ -868,7 +888,7 @@ class PluginManager:
             stale.unlink(missing_ok=True)
         self._prune_archives_dir()
         self.records.pop(plugin_id, None)
-        self._write_registry()
+        await self._write_registry()
 
     @log_operation_async
     async def update_config(
@@ -885,6 +905,7 @@ class PluginManager:
         抛出 :class:`PluginManagerError`：内置插件 403、未知插件 404、
         配置为空 400、校验失败 / 重载失败 422。
         """
+        await self.start()
         self._reject_builtin(plugin_id, "配置修改")
         async with self._operation_lock:
             record = await self._update_config(plugin_id, config)
@@ -904,7 +925,7 @@ class PluginManager:
         if fiber is None:
             # 未启用：只保存，下次 enable 时生效（启用链路负责 Schema 校验）
             record["config"] = merged
-            self._write_registry()
+            await self._write_registry()
             return self._public_record(record)
 
         # 运行时配置与 _enable 同口径：resource_root 由安装记录注入
@@ -929,7 +950,7 @@ class PluginManager:
         # 校验已通过、internal/commit 已写回 config.ini：安装记录同步更新
         record["config"] = merged
         record["last_error"] = None
-        self._write_registry()
+        await self._write_registry()
         if outcome is None:
             return self._public_record(record)  # 重启被钩子否决
 
@@ -937,16 +958,16 @@ class PluginManager:
             await outcome
         except Exception as exc:
             await self._discard_dead_fiber(plugin_id, fiber)
-            raise self._reload_error(record, exc) from exc
+            raise await self._reload_error(record, exc) from exc
         state = self._fiber_state_name(fiber)
         if state != "ACTIVE":
             await self._discard_dead_fiber(plugin_id, fiber)
-            raise self._reload_error(
+            raise await self._reload_error(
                 record, getattr(fiber, "_error", None) or state or "状态未激活"
             )
         return self._public_record(record)
 
-    def _reload_error(
+    async def _reload_error(
         self, record: _PluginRecord, reason: object
     ) -> PluginManagerError:
         """重载失败的统一处理：错误记入安装记录并构造 422（配置本身已保存）。
@@ -958,7 +979,7 @@ class PluginManager:
         record["enabled"] = False
         record["last_error"] = message
         try:
-            self._write_registry()
+            await self._write_registry()
         except OSError as registry_error:
             self.ctx.logger.error(
                 "插件 %s 更新失败状态无法写入注册表：%s", record["id"], registry_error
@@ -966,6 +987,7 @@ class PluginManager:
         return PluginManagerError(message, 422)
 
     async def restore_enabled(self) -> None:
+        await self.start()
         for plugin_id, record in list(self.records.items()):
             if not record.get("enabled"):
                 continue
@@ -974,7 +996,7 @@ class PluginManager:
                 await self.enable(plugin_id)
             except PluginManagerError as exc:
                 record["last_error"] = str(exc)
-                self._write_registry()
+                await self._write_registry()
 
     def _extract_and_read_manifest(self, archive: bytes, destination: Path) -> _PluginManifest:
         try:
@@ -1271,6 +1293,7 @@ class PluginManager:
         展示。文件名固定（无路径拼接，无穿越风险）；缺失报 404、超大
         报 413、非 UTF-8 报 400。内置插件读源码包根（``common/plugins/``）。
         """
+        await self.start()
         spec = self._builtins().get(plugin_id)
         if spec is not None:
             package_root = spec["root"]
@@ -1310,7 +1333,7 @@ class PluginManager:
             "protected": record["id"] in self.preinstalled_ids,
         }
 
-    def _reconcile_disk_state(self) -> None:
+    async def _reconcile_disk_state(self) -> None:
         """启动一致性自检（PS-H1/H2）：registry 与安装目录互相校验。
 
         - 目录在、registry 无记录 → 孤儿（安装中断残留）：不阻塞启动，
@@ -1348,10 +1371,10 @@ class PluginManager:
                 self.install_root / plugin_id,
             )
         if changed:
-            self._write_registry()
+            await self._write_registry()
 
-    def _read_registry(self) -> dict[str, _PluginRecord]:
-        data = self.registry_store.read()
+    async def _read_registry(self) -> dict[str, _PluginRecord]:
+        data = await self._db().plugin_records()
         records: dict[str, _PluginRecord] = {}
         for plugin_id, raw_record in data.items():
             # 防影子插件：遗留注册表里的内置 id 一律丢弃（安装现已拒绝，
@@ -1363,9 +1386,16 @@ class PluginManager:
             records[plugin_id] = cast(_PluginRecord, raw_record)
         return records
 
-    def _write_registry(self) -> None:
-        """原子写注册表（sqlite 单事务替换）：崩溃不半截。"""
-        self.registry_store.write(self.records)
+    async def _write_registry(self) -> None:
+        """全量替换安装记录（治理台账单事务原子写）：崩溃不半截。"""
+        await self._db().replace_plugin_records(self.records)
+
+    def _db(self) -> Any:
+        """``ctx.db`` 服务（安装记录治理表的唯一入口；经 cordis 取，不 import 插件包）。"""
+        db = self.ctx.get("db", strict=False)
+        if db is None:
+            raise PluginManagerError("db 未就绪：插件安装记录需要数据库服务", 503)
+        return db
 
 
 __all__: list[str] = ["PluginManager", "PluginManagerError", "PublicPluginRecord", "builtin_specs"]

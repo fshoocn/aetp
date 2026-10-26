@@ -22,6 +22,7 @@ from cordis_port import Context
 
 from _helpers import free_port as _free_port
 from _helpers import request as _request
+from common.capabilities import CapProblemAlerter, collect_capabilities
 from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
@@ -41,7 +42,6 @@ from slave_plugins.heartbeat import (
     parse_capability,
     select_capabilities,
 )
-from slave_plugins.heartbeat.capabilities import CapProblemAlerter, collect_capabilities
 
 
 def _status_dict(base_url: str) -> dict[str, object]:

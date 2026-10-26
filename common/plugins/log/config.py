@@ -27,7 +27,7 @@ class LogConfig(FieldConfig):
         "file": ((str, Path), "本地轮转文件路径（留空关闭；相对节点目录解析）"),
         "max_bytes": ((int,), "单个日志文件上限（字节），超出轮转"),
         "backup_count": ((int,), "轮转保留份数（.1 最新 … .N 最旧）"),
-        "store": ((str, Path), "查询库 log.sqlite 路径（留空关闭；相对节点目录解析）"),
+        "store": ((bool,), "日志入库开关（aetp.db 查询表；关=仅文件出口）"),
         "report": ((bool,), "经 comm 上报/入库（留 false 则仅本地出口）"),
         "report_level": ((str,), "入库 / 上报级别阈值（可高于 level，省流量）"),
         "retain_days": ((int, float), "查询库保留天数（仅汇聚点生效）"),
@@ -39,7 +39,7 @@ class LogConfig(FieldConfig):
     file: str = str(Path("data") / "plugins" / "log" / "aetp.log")
     max_bytes: int = 5 * 1024 * 1024
     backup_count: int = 3
-    store: str = str(Path("data") / "plugins" / "log" / "log.sqlite")
+    store: bool = True
     report: bool = True
     report_level: str = "info"
     retain_days: float = 7.0

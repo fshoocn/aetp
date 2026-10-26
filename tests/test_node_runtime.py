@@ -24,6 +24,7 @@ from common.node_runtime import (
     source_plugin_id,
 )
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
+from common.plugins.db import DbPlugin
 from common.plugins.webapi import WebApiConfig, WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 
@@ -212,6 +213,7 @@ class ZipDeliveryTests(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8",
         )
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)  # 安装记录住 aetp.db，管理器需要 db
         await self.context.plugin(WebApiPlugin)
         await self.context.plugin(PluginManagerPlugin)
 

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -38,15 +39,14 @@ from sqlalchemy.schema import CreateColumn, CreateIndex
 from common.db_errors import DbDependencyError, DbError
 from common.db_registry import (
     LOG_TABLE,
+    TABLE_NAME,
     DataDependency,
-    OwnerRegistry,
-    PluginRecordStore,
+    claims_table,
     consumers_of,
     find_orphans,
     fingerprint,
-    meta_table,
+    plugin_records_table,
     record_dependencies,
-    registry_db_path,
     schema_log_table,
 )
 from common.models import (
@@ -214,15 +214,6 @@ class DbService(Service[DbConfig]):
         #: 节点目录（config.ini 所在目录）：相对库路径 / data_dir 的解析基准
         self._base_dir: Path | None = base_dir
         self._engine: AsyncEngine = self._build_engine()
-        self._owners: OwnerRegistry = OwnerRegistry(self._data_dir() / "owners.sqlite")
-        #: 插件安装记录（registry.db 事实源）；db 不反向注入 plugin-manager。
-        #: DB-N3：事实源损坏/不可用 → 置 None，孤儿回收整体跳过（宁漏勿误删）
-        self._registry_store: PluginRecordStore | None = None
-        if self._base_dir is not None:
-            try:
-                self._registry_store = PluginRecordStore(registry_db_path(self._base_dir))
-            except (OSError, RuntimeError) as err:
-                ctx.logger.warning("registry.db 不可用，本次会话跳过依赖事实源：%s", err)
         self._ddl_lock: asyncio.Lock = asyncio.Lock()
         self._external_cache: dict[tuple[str, str], type[object]] = {}
         self._started: bool = False
@@ -242,13 +233,6 @@ class DbService(Service[DbConfig]):
         if not path.is_absolute() and self._base_dir is not None:
             path = self._base_dir / path
         return str(parsed.set(database=str(path)))
-
-    def _data_dir(self) -> Path:
-        """归属登记目录：相对路径锚定到节点目录。"""
-        data_dir = self.config.resolve_data_dir()
-        if not data_dir.is_absolute() and self._base_dir is not None:
-            return self._base_dir / data_dir
-        return data_dir
 
     def _build_engine(self) -> AsyncEngine:
         options: dict[str, Any] = {"echo": self.config.echo}
@@ -303,11 +287,7 @@ class DbService(Service[DbConfig]):
                 f"数据库连接失败（{self.config.to_dict().get('url')}）：{type(exc).__name__}"
             ) from exc
         self._started = True
-        self._provided_ctx.logger.info(
-            "数据库已就绪：%s（归属登记 %s）",
-            self.config.to_dict().get("url"),
-            self._owners.path,
-        )
+        self._provided_ctx.logger.info("数据库已就绪：%s", self.config.to_dict().get("url"))
 
     async def shutdown(self) -> None:
         """排空并销毁连接池（热更新 / 停机专用：**不动任何表**，数据保留）。"""
@@ -322,6 +302,251 @@ class DbService(Service[DbConfig]):
     def dialect(self) -> str:
         """方言名（业务侧极少数需要分支时用，能不用则不用）。"""
         return self._engine.dialect.name
+
+    # --------------------------------- 治理表（claims：db 账本 / 记录：插件账本）
+    @staticmethod
+    def _decode_tables(raw: object) -> list[dict[str, str]]:
+        """表清单 JSON 值 → ``[{"name", "fp"}]`` 条目（逐表携带结构指纹）。"""
+        try:
+            data = json.loads(str(raw))
+        except ValueError:
+            return []
+        entries: list[dict[str, str]] = []
+        for item in cast(list[object], data if isinstance(data, list) else []):
+            if isinstance(item, dict):
+                entry = cast(dict[str, object], item)
+                name = str(entry.get("name") or "")
+                if name:
+                    entries.append({"name": name, "fp": str(entry.get("fp") or "")})
+        return entries
+
+    @staticmethod
+    def _encode_tables(entries: Sequence[Mapping[str, str]]) -> str:
+        return json.dumps(
+            [{"name": entry["name"], "fp": entry.get("fp", "")} for entry in entries],
+            ensure_ascii=False,
+        )
+
+    async def claim_table(self, owner: str, table_name: str) -> None:
+        """归属登记认领（幂等）；**登记先于建表**写入，崩溃后孤儿可回收。"""
+        if not TABLE_NAME.fullmatch(table_name):
+            raise ValueError(f"表名不合法：{table_name!r}")
+        now = time.time()
+        async with self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    sa_select(claims_table.c.tables).where(claims_table.c.owner == owner)
+                )
+            ).first()
+            entries = self._decode_tables(row[0]) if row is not None else []
+            if any(entry["name"] == table_name for entry in entries):
+                return
+            entries.append({"name": table_name, "fp": ""})
+            if row is None:
+                await conn.execute(
+                    sa_insert(claims_table).values(
+                        owner=owner,
+                        tables=self._encode_tables(entries),
+                        created_at=now,
+                        keep=0,
+                    )
+                )
+                return
+            await conn.execute(
+                sa_update(claims_table)
+                .where(claims_table.c.owner == owner)
+                .values(tables=self._encode_tables(entries))
+            )
+
+    async def unclaim_table(self, owner: str, table_name: str) -> None:
+        """移除单表登记（drop 成功后调用）；指纹记账随条目一并删除。"""
+        async with self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    sa_select(claims_table.c.tables).where(claims_table.c.owner == owner)
+                )
+            ).first()
+            if row is None:
+                return
+            entries = [
+                entry for entry in self._decode_tables(row[0]) if entry["name"] != table_name
+            ]
+            await conn.execute(
+                sa_update(claims_table)
+                .where(claims_table.c.owner == owner)
+                .values(tables=self._encode_tables(entries))
+            )
+
+    async def owner_names(self) -> list[str]:
+        """全部已登记 owner。"""
+        async with self._engine.begin() as conn:
+            rows = (
+                await conn.execute(sa_select(claims_table.c.owner).order_by(claims_table.c.owner))
+            ).all()
+        return [str(row[0]) for row in rows]
+
+    async def owner_tables(self, owner: str) -> list[str]:
+        """某 owner 认领的物理表名。"""
+        async with self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    sa_select(claims_table.c.tables).where(claims_table.c.owner == owner)
+                )
+            ).first()
+        return [entry["name"] for entry in self._decode_tables(row[0])] if row is not None else []
+
+    async def owner_kept(self, owner: str) -> bool:
+        """该 owner 是否显式保留数据（``keep_data`` 卸载，孤儿自检跳过）。"""
+        async with self._engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    sa_select(claims_table.c.keep).where(claims_table.c.owner == owner)
+                )
+            ).first()
+        return bool(row[0]) if row is not None else False
+
+    async def set_owner_keep(self, owner: str, keep: bool) -> None:
+        """标记 / 取消「保留数据」。"""
+        async with self._engine.begin() as conn:
+            await conn.execute(
+                sa_update(claims_table)
+                .where(claims_table.c.owner == owner)
+                .values(keep=1 if keep else 0)
+            )
+
+    async def release_owner(self, owner: str) -> None:
+        """删除 owner 的整条登记（全部表 drop 成功后调用）；指纹 / 版本随之删除。"""
+        async with self._engine.begin() as conn:
+            await conn.execute(sa_delete(claims_table).where(claims_table.c.owner == owner))
+
+    async def _owner_version(self, owner: str) -> int | None:
+        """迁移版本记账（claims 行的 ``version`` 列）；无登记 / 未记账返回 ``None``。"""
+        async with self._engine.connect() as conn:
+            row = (
+                await conn.execute(
+                    sa_select(claims_table.c.version).where(claims_table.c.owner == owner)
+                )
+            ).first()
+        return int(row[0]) if row is not None and row[0] is not None else None
+
+    async def _put_owner_version(self, conn: AsyncConnection, owner: str, version: int) -> None:
+        await conn.execute(
+            sa_update(claims_table)
+            .where(claims_table.c.owner == owner)
+            .values(version=version)
+        )
+
+    async def plugin_records(self) -> dict[str, object]:
+        """插件安装记录（``aetp_plugin_manager_records``，plugin-manager 的账本）。
+
+        标量分列、形状各异的配置类字段按 JSON 列存放，读出即还原为记录字典；
+        读取失败抛 ``RuntimeError``。
+        """
+        try:
+            async with self._engine.begin() as conn:
+                rows = (
+                    await conn.execute(
+                        sa_select(
+                            plugin_records_table.c.id,
+                            plugin_records_table.c.name,
+                            plugin_records_table.c.version,
+                            plugin_records_table.c.entrypoint,
+                            plugin_records_table.c.resource_root,
+                            plugin_records_table.c.enabled,
+                            plugin_records_table.c.last_error,
+                            plugin_records_table.c.digest,
+                            plugin_records_table.c.config,
+                            plugin_records_table.c.requires,
+                            plugin_records_table.c.kind,
+                            plugin_records_table.c.dependencies,
+                        )
+                    )
+                ).all()
+            result: dict[str, object] = {}
+            for (
+                rid,
+                name,
+                version,
+                entrypoint,
+                resource_root,
+                enabled,
+                last_error,
+                digest,
+                config,
+                requires,
+                kind,
+                dependencies,
+            ) in rows:
+                record: dict[str, object] = {
+                    "id": str(rid),
+                    "name": str(name or ""),
+                    "version": str(version or ""),
+                    "entrypoint": str(entrypoint or ""),
+                    "resource_root": None if resource_root is None else str(resource_root),
+                    "enabled": bool(enabled),
+                    "last_error": None if last_error is None else str(last_error),
+                    "digest": str(digest or ""),
+                    "config": json.loads(str(config or "{}")),
+                    "requires": json.loads(str(requires or "[]")),
+                    "kind": json.loads(str(kind or "[]")),
+                    "dependencies": json.loads(str(dependencies or "[]")),
+                }
+                result[str(rid)] = record
+            return result
+        except (SQLAlchemyError, ValueError, RecursionError) as exc:
+            raise RuntimeError(f"插件安装记录无法读取：{exc}") from exc
+
+    async def replace_plugin_records(self, records: Mapping[str, object]) -> None:
+        """全量替换安装记录（单事务原子）；失败抛 ``OSError``。"""
+        try:
+            async with self._engine.begin() as conn:
+                await conn.execute(sa_delete(plugin_records_table))
+                if records:
+                    await conn.execute(
+                        sa_insert(plugin_records_table),
+                        [
+                            self._record_row(str(key), cast(dict[str, object], value))
+                            for key, value in records.items()
+                        ],
+                    )
+        except (SQLAlchemyError, TypeError, ValueError) as exc:
+            raise OSError(f"插件安装记录无法写入：{exc}") from exc
+
+    @staticmethod
+    def _record_row(record_id: str, record: Mapping[str, object]) -> dict[str, object]:
+        """记录字典 → 列行（标量分列；config / requires / kind / dependencies 转 JSON 列）。"""
+        resource_root = record.get("resource_root")
+        last_error = record.get("last_error")
+        return {
+            "id": record_id,
+            "name": str(record.get("name") or ""),
+            "version": str(record.get("version") or ""),
+            "entrypoint": str(record.get("entrypoint") or ""),
+            "resource_root": None if resource_root is None else str(resource_root),
+            "enabled": 1 if record.get("enabled") else 0,
+            "last_error": None if last_error is None else str(last_error),
+            "digest": str(record.get("digest") or ""),
+            "config": json.dumps(record.get("config") or {}, ensure_ascii=False),
+            "requires": json.dumps(record.get("requires") or [], ensure_ascii=False),
+            "kind": json.dumps(record.get("kind") or [], ensure_ascii=False),
+            "dependencies": json.dumps(record.get("dependencies") or [], ensure_ascii=False),
+        }
+
+    async def _claim_rows(self) -> dict[str, dict[str, object]]:
+        """归属登记全量：owner → ``{"tables": [...], "keep": bool}``。"""
+        async with self._engine.begin() as conn:
+            rows = (
+                await conn.execute(
+                    sa_select(claims_table.c.owner, claims_table.c.tables, claims_table.c.keep)
+                )
+            ).all()
+        return {
+            str(owner): {
+                "tables": [entry["name"] for entry in self._decode_tables(raw)],
+                "keep": bool(kept),
+            }
+            for owner, raw, kept in rows
+        }
 
     # ---------------------------------------------------------- 归属识别
     def _caller_fiber(self) -> Fiber | None:
@@ -465,7 +690,7 @@ class DbService(Service[DbConfig]):
                 owner = self._claim_owner(model, None)
                 table = _model_table(model)
                 # 登记先于建表：崩溃后孤儿可回收（DESIGN §4.2）
-                self._owners.claim(owner, table.name)
+                await self.claim_table(owner, table.name)
                 if await self._ensure_table(table):
                     result.created.append(table.name)
                     summaries[table.name] = ["create table"]
@@ -605,14 +830,14 @@ class DbService(Service[DbConfig]):
         ``fresh=True``（本次 L0 刚建的表）：表结构已是当前版本，历史迁移
         不重跑，直接记最新版本为基线（否则新装插件会被旧步骤误伤）。
         """
-        current = await self._meta_value(owner, "schema_version")
+        current = await self._owner_version(owner)
         latest = max(version for version, _ in migrations)
-        if fresh and not (current and current.isdigit()):
+        if fresh and current is None:
             async with self._engine.begin() as conn:
-                await self._meta_put(conn, owner, "schema_version", str(latest))
+                await self._put_owner_version(conn, owner, latest)
                 await self._append_log(conn, owner, "", "", "baseline", f"fresh schema at v{latest}")
             return latest
-        version_now = int(current) if current and current.isdigit() else 1
+        version_now = current if current is not None else 1
         reached: int | None = None
         for version, step in sorted(migrations, key=lambda item: item[0]):
             if version <= version_now:
@@ -620,7 +845,7 @@ class DbService(Service[DbConfig]):
             try:
                 async with self._engine.begin() as conn:
                     await step(conn)
-                    await self._meta_put(conn, owner, "schema_version", str(version))
+                    await self._put_owner_version(conn, owner, version)
                     await self._append_log(conn, owner, "", "", "migrate", f"upgrade to v{version}")
             except SQLAlchemyError as exc:
                 raise DbError(f"迁移步骤 v{version}（owner={owner}）失败已回滚，版本不前移：{exc}") from exc
@@ -631,13 +856,31 @@ class DbService(Service[DbConfig]):
     async def _sync_fingerprint(
         self, owner: str, table: Table[Any], summary: Sequence[str] = ()
     ) -> None:
-        """更新结构指纹（范围 = 整表）；结构变化即写变更日志。"""
+        """更新结构指纹（记在 claims 行的表条目上）；结构变化即写变更日志。"""
         columns = [(column.name, type_token(column.type)) for column in table.c]
         current = fingerprint(columns)
-        key = f"fp:{table.name}"
         async with self._engine.begin() as conn:
-            previous = await self._meta_value_on(conn, owner, key)
-            await self._meta_put(conn, owner, key, current)
+            row = (
+                await conn.execute(
+                    sa_select(claims_table.c.tables).where(claims_table.c.owner == owner)
+                )
+            ).first()
+            entries = self._decode_tables(row[0]) if row is not None else []
+            previous: str | None = None
+            found = False
+            for entry in entries:
+                if entry["name"] == table.name:
+                    found = True
+                    previous = entry["fp"] or None
+                    entry["fp"] = current
+            if not found:
+                entries.append({"name": table.name, "fp": current})
+            if row is not None:
+                await conn.execute(
+                    sa_update(claims_table)
+                    .where(claims_table.c.owner == owner)
+                    .values(tables=self._encode_tables(entries))
+                )
             if summary:
                 await self._append_log(conn, owner, "", table.name, "alter", "; ".join(summary))
             elif previous is not None and previous != current:
@@ -651,7 +894,7 @@ class DbService(Service[DbConfig]):
         if not changed:
             return
         self._external_cache.clear()  # 结构已变，反射映射缓存作废
-        records = self._installed_records()
+        records = await self._installed_records()
         for owner in sorted(owners):
             consumers = consumers_of(records, owner)
             if consumers:
@@ -712,23 +955,23 @@ class DbService(Service[DbConfig]):
         """
         self._require_cleanup_rights(owner)
         async with self._ddl_lock:
-            consumers = consumers_of(self._installed_records(), owner)
+            consumers = consumers_of(await self._installed_records(), owner)
             if consumers and not force:
                 raise DbDependencyError(
                     f"{owner!r} 的数据仍被依赖：{', '.join(sorted(consumers))}；"
                     f"请先处理依赖方，或用 drop=True 强制删除"
                 )
             if keep_data:
-                self._owners.set_keep(owner, True)
+                await self.set_owner_keep(owner, True)
                 self._provided_ctx.logger.info("owner %s 的数据按 keep_data 保留", owner)
                 return []
 
             failed: list[str] = []
-            for table_name in self._owners.tables(owner):
+            for table_name in await self.owner_tables(owner):
                 dropped = await self._drop_table(table_name)
                 if dropped:
-                    self._owners.drop_table(owner, table_name)
-                    await self._clear_table_meta(owner, table_name)
+                    # 指纹记账随表条目一并移除（unclaim 一次写完）
+                    await self.unclaim_table(owner, table_name)
                 else:
                     failed.append(table_name)
             if failed:
@@ -738,21 +981,16 @@ class DbService(Service[DbConfig]):
                     ", ".join(failed),
                 )
                 return failed
-            self._owners.release(owner)
+            await self.release_owner(owner)
             self._external_cache.clear()
-            await self._clear_owner_meta(owner)
+            await self._clear_owner_log(owner)
             self._provided_ctx.logger.info("owner %s 的数据表已清理", owner)
             return []
 
-    async def _clear_table_meta(self, owner: str, table_name: str) -> None:
-        """清理单表的指纹记账（部分失败时已成功表不悬停，DB-N2）。"""
+    async def _clear_owner_log(self, owner: str) -> None:
+        """清理 owner 的结构变更日志（审计流水随清理收尾）。"""
         async with self._engine.begin() as conn:
-            await conn.execute(
-                sa_delete(meta_table).where(
-                    meta_table.c.owner == owner,
-                    meta_table.c.name == f"fp:{table_name}",
-                )
-            )
+            await conn.execute(sa_delete(schema_log_table).where(schema_log_table.c.owner == owner))
 
     async def _drop_table(self, table_name: str) -> bool:
         """单表 drop（幂等）；失败重试一次。"""
@@ -790,17 +1028,8 @@ class DbService(Service[DbConfig]):
         if policy == "drop":
             self._require_cleanup_rights()
         checked_at = time.time()
-        if self._registry_store is None:
-            return {
-                "checked_at": checked_at,
-                "skipped": True,
-                "reason": "registry.db 不可读，事实源不完整，自检跳过（宁漏勿误删）",
-                "orphans": [],
-                "kept": [],
-                "cleaned": [],
-            }
         try:
-            installed = set(self._registry_store.read())
+            installed = set(await self.plugin_records())
         except (OSError, RuntimeError) as exc:
             return {
                 "checked_at": checked_at,
@@ -812,12 +1041,13 @@ class DbService(Service[DbConfig]):
             }
         alive = set(installed)
         alive.update(model_owner(model) for model in registered_models())
+        claims = await self._claim_rows()
         orphans: list[dict[str, object]] = []
         kept: list[dict[str, object]] = []
         cleaned: list[str] = []
-        for owner in find_orphans(self._owners.owners(), alive):
-            entry: dict[str, object] = {"owner": owner, "tables": self._owners.tables(owner)}
-            if self._owners.is_kept(owner):
+        for owner in find_orphans(claims, alive):
+            entry: dict[str, object] = {"owner": owner, "tables": claims[owner]["tables"]}
+            if claims[owner]["keep"]:
                 kept.append(entry)
                 continue
             orphans.append(entry)
@@ -857,7 +1087,7 @@ class DbService(Service[DbConfig]):
     async def recheck_consumers(self, owner: str) -> list[tuple[str, str]]:
         """复检某 owner 的全部消费方（``db/schema-changed`` 后调用），返回失配清单。"""
         failures: list[tuple[str, str]] = []
-        for consumer, dependencies in consumers_of(self._installed_records(), owner).items():
+        for consumer, dependencies in consumers_of(await self._installed_records(), owner).items():
             try:
                 await self.check_dependencies(consumer, dependencies)
             except DbDependencyError as exc:
@@ -881,7 +1111,7 @@ class DbService(Service[DbConfig]):
         需在调用方 ``plugin.json`` 的 ``dependencies`` 显式声明（运行时强校验，
         未声明一律拒绝）；表无主键时无法映射 ORM 模型，请用 :meth:`external_table`。
         """
-        self._require_declaration(owner, data)
+        await self._require_declaration(owner, data)
         cached = self._external_cache.get((owner, data))
         if cached is not None:
             return cached
@@ -896,15 +1126,15 @@ class DbService(Service[DbConfig]):
 
     async def external_table(self, owner: str, data: str) -> Table[Any]:
         """跨插件只读联查的反射表（``.c`` 列访问；无主键表的联查逃生舱）。"""
-        self._require_declaration(owner, data)
+        await self._require_declaration(owner, data)
         return await self._reflect(owner, data)
 
-    def _require_declaration(self, owner: str, data: str) -> None:
+    async def _require_declaration(self, owner: str, data: str) -> None:
         """跨 owner 访问强校验：调用方必须在 ``dependencies`` 声明（DESIGN §4.5②）。"""
         caller = self._caller_owner()
         if caller is None:
             return  # 内部直调（db 自维护 / 测试）：信任边界见 DESIGN §11-4
-        for dependency in record_dependencies(self._installed_records().get(caller)):
+        for dependency in record_dependencies((await self._installed_records()).get(caller)):
             if dependency["plugin"] == owner and dependency["data"] == data:
                 return
         raise DbDependencyError(
@@ -933,27 +1163,6 @@ class DbService(Service[DbConfig]):
                 return await conn.run_sync(work)
         except SQLAlchemyError as exc:
             raise DbError(f"反射表 {target} 失败：{exc}") from exc
-
-    # ---------------------------------------------------------- 库内元数据
-    async def _meta_value(self, owner: str, name: str) -> str | None:
-        async with self._engine.connect() as conn:
-            return await self._meta_value_on(conn, owner, name)
-
-    async def _meta_value_on(self, conn: AsyncConnection, owner: str, name: str) -> str | None:
-        statement = sa_select(meta_table.c.value).where(meta_table.c.owner == owner, meta_table.c.name == name)
-        row = (await conn.execute(statement)).first()
-        return str(row[0]) if row is not None else None
-
-    async def _meta_put(self, conn: AsyncConnection, owner: str, name: str, value: str) -> None:
-        await conn.execute(sa_delete(meta_table).where(meta_table.c.owner == owner, meta_table.c.name == name))
-        await conn.execute(
-            sa_insert(meta_table).values(owner=owner, name=name, value=value, updated_at=time.time())
-        )
-
-    async def _clear_owner_meta(self, owner: str) -> None:
-        async with self._engine.begin() as conn:
-            await conn.execute(sa_delete(meta_table).where(meta_table.c.owner == owner))
-            await conn.execute(sa_delete(schema_log_table).where(schema_log_table.c.owner == owner))
 
     async def _append_log(
         self,
@@ -998,12 +1207,10 @@ class DbService(Service[DbConfig]):
             )
 
     # ---------------------------------------------------------- 插件事实源
-    def _installed_records(self) -> dict[str, object]:
-        """读插件安装记录（``registry.db``，只读事实源）。"""
-        if self._registry_store is None:
-            return {}
+    async def _installed_records(self) -> dict[str, object]:
+        """读插件安装记录（``aetp_plugin_manager_records``，只读事实源）；失败按空处理。"""
         try:
-            return self._registry_store.read()
+            return await self.plugin_records()
         except (OSError, RuntimeError) as exc:
             self._provided_ctx.logger.error("插件安装记录无法读取：%s", exc)
             return {}
@@ -1042,8 +1249,9 @@ def sqlite_pool_warning(config: DbConfig, dialect_name: str) -> str | None:
 
 
 def _ensure_meta_tables(sync_conn: Any) -> None:
-    """库内元表（``aetp_db_meta`` / ``aetp_schema_log``）幂等建表。"""
-    meta_table.metadata.create_all(sync_conn, checkfirst=True)
+    """库内治理表（``aetp_db_claims`` / ``aetp_db_meta`` / ``aetp_schema_log`` /
+    ``aetp_plugin_manager_records``）幂等建表。"""
+    claims_table.metadata.create_all(sync_conn, checkfirst=True)
 
 
 def _model_table(model: type[Model]) -> Table[Any]:

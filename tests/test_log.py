@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
-import sqlite3
 import tempfile
 import time
 import unittest
@@ -12,15 +12,18 @@ from typing import Any
 from urllib.parse import quote
 
 from cordis_port import Context
+from sqlalchemy import text as sa_text
 
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
+from common.log_op import log_operation
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.comm import CommService
 from common.plugins.db import DbPlugin
-from common.plugins.log import LogPlugin, LogStore, log_operation
+from common.plugins.log import LogPlugin, LogStore
 from common.plugins.log.export import LEVELS, RotatingFile
+from common.plugins.log.store import LogEntry
 from common.plugins.webapi import WebApiPlugin
 
 
@@ -78,7 +81,7 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_level_filter_drops_below_threshold(self) -> None:
         """level=warn：info 丢弃、error 落盘。"""
-        await self.load("console = false\nlevel = warn\nstore =\n")
+        await self.load("console = false\nlevel = warn\nstore = false\n")
         assert self.context is not None
         self.context.logger.info("dropped-info")
         self.context.logger.error("kept-error")
@@ -88,7 +91,7 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_file_disables_file_exporter(self) -> None:
         """file / store 留空 = 关闭对应出口，不建目录。"""
-        await self.load("console = false\nfile =\nstore =\n")
+        await self.load("console = false\nfile =\nstore = false\n")
         assert self.context is not None
         self.context.logger.info("only-memory")
         self.assertFalse((self.root / "data").exists())
@@ -97,7 +100,7 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
         """控制台：info 走 stdout、error 走 stderr。"""
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            await self.load("file =\nstore =\n")
+            await self.load("file =\nstore = false\n")
             assert self.context is not None
             self.context.logger.info("to-stdout")
             self.context.logger.error("to-stderr")
@@ -113,7 +116,7 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
     async def test_rotation_keeps_backup(self) -> None:
         """超 max_bytes 轮转：.1 备份出现，当前文件重新累积。"""
         await self.load(
-            "console = false\nfile = rot.log\nmax_bytes = 80\nbackup_count = 1\nstore =\n"
+            "console = false\nfile = rot.log\nmax_bytes = 80\nbackup_count = 1\nstore = false\n"
         )
         assert self.context is not None
         for index in range(6):
@@ -139,110 +142,110 @@ class RotatingFileTests(unittest.TestCase):
         self.assertEqual(sorted(LEVELS), ["debug", "error", "info", "warn"])
 
 
-class LogStoreTests(unittest.TestCase):
-    """查询库：批量写 / 游标查 / 双限保留 / 时间戳钳制。"""
+class LogStoreTests(unittest.IsolatedAsyncioTestCase):
+    """查询库（aetp.db 内 aetp_log_entries）：批量写 / 游标查 / 双限保留 / 钳制。"""
 
-    def test_write_query_and_trim(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            store = LogStore(Path(temporary) / "log.sqlite")
-            store.write_batch(
-                "n1", [{"ts": time.time() - 20, "name": "a", "level": 2, "op": "", "msg": "m1"}]
-            )
-            store.write_batch(
-                "n2",
-                [{"ts": time.time() - 10, "name": "b", "level": 0, "op": "", "msg": "boom-needle"}],
-            )
-            rows = store.query()
-            self.assertEqual([row["msg"] for row in rows], ["boom-needle", "m1"])  # 新→旧
-            self.assertEqual([row["node"] for row in store.query(node="n2")], ["n2"])
-            self.assertEqual(len(store.query(q="needle")), 1)
-            self.assertEqual(len(store.query(level=0)), 1)
-            tail = store.query(after_id=0)
-            self.assertEqual([row["msg"] for row in tail], ["m1", "boom-needle"])  # 旧→新
-            self.assertEqual(store.nodes(), ["n1", "n2"])
+    async def asyncSetUp(self) -> None:
+        self._temp = tempfile.TemporaryDirectory()
+        root = Path(self._temp.name)
+        config_path = root / "config.ini"
+        config_path.write_text(
+            "[node]\nkind = master\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(root / 'aetp.db').as_posix()}\n",
+            encoding="utf-8",
+        )
+        self.context = Context()
+        self.context.provide("node_kind", "master")
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)
+        db = self.context.get("db")
+        await db.sync_schema(models=[LogEntry])
+        self.store = LogStore(db)
 
-            store.write_batch(
-                "n1",
-                [{"ts": time.time() - 200000, "name": "old", "level": 2, "op": "", "msg": "ancient"}],
-            )
-            store.trim(retain_days=1, max_rows=10)
-            self.assertEqual([row["msg"] for row in store.query()], ["boom-needle", "m1"])
-            store.trim(retain_days=30, max_rows=1)
-            self.assertEqual([row["msg"] for row in store.query()], ["boom-needle"])
+    async def asyncTearDown(self) -> None:
+        await unload_all(self.context)
+        self._temp.cleanup()
 
-    def test_delete_by_filter_and_clear_all(self) -> None:
+    async def test_write_query_and_trim(self) -> None:
+        store = self.store
+        await store.write_batch(
+            "n1", [{"ts": time.time() - 20, "name": "a", "level": 2, "op": "", "msg": "m1"}]
+        )
+        await store.write_batch(
+            "n2",
+            [{"ts": time.time() - 10, "name": "b", "level": 0, "op": "", "msg": "boom-needle"}],
+        )
+        rows = await store.query()
+        self.assertEqual([row["msg"] for row in rows], ["boom-needle", "m1"])  # 新→旧
+        self.assertEqual([row["node"] for row in await store.query(node="n2")], ["n2"])
+        self.assertEqual(len(await store.query(q="needle")), 1)
+        self.assertEqual(len(await store.query(level=0)), 1)
+        tail = await store.query(after_id=0)
+        self.assertEqual([row["msg"] for row in tail], ["m1", "boom-needle"])  # 旧→新
+        self.assertEqual(await store.nodes(), ["n1", "n2"])
+
+        await store.write_batch(
+            "n1",
+            [{"ts": time.time() - 200000, "name": "old", "level": 2, "op": "", "msg": "ancient"}],
+        )
+        await store.trim(retain_days=1, max_rows=10)
+        self.assertEqual([row["msg"] for row in await store.query()], ["boom-needle", "m1"])
+        await store.trim(retain_days=30, max_rows=1)
+        self.assertEqual([row["msg"] for row in await store.query()], ["boom-needle"])
+
+    async def test_delete_by_filter_and_clear_all(self) -> None:
         """删除：按筛选删（返回条数），不带条件 = 清空全部。"""
-        with tempfile.TemporaryDirectory() as temporary:
-            store = LogStore(Path(temporary) / "log.sqlite")
-            store.write_batch(
-                "n1", [{"ts": time.time(), "name": "a", "level": 2, "op": "", "msg": "keep"}]
-            )
-            store.write_batch(
-                "n2", [{"ts": time.time(), "name": "b", "level": 2, "op": "", "msg": "drop-me"}]
-            )
-            self.assertEqual(store.delete(q="drop-me"), 1)
-            self.assertEqual([row["msg"] for row in store.query()], ["keep"])
-            self.assertEqual(store.delete(), 1)
-            self.assertEqual(store.query(), [])
+        store = self.store
+        await store.write_batch(
+            "n1", [{"ts": time.time(), "name": "a", "level": 2, "op": "", "msg": "keep"}]
+        )
+        await store.write_batch(
+            "n2", [{"ts": time.time(), "name": "b", "level": 2, "op": "", "msg": "drop-me"}]
+        )
+        self.assertEqual(await store.delete(q="drop-me"), 1)
+        self.assertEqual([row["msg"] for row in await store.query()], ["keep"])
+        self.assertEqual(await store.delete(), 1)
+        self.assertEqual(await store.query(), [])
 
-    def test_keyword_matches_op_name_and_source(self) -> None:
+    async def test_keyword_matches_op_name_and_source(self) -> None:
         """关键字命中 msg / op / 来源名 / 调用点（``q=op-xxxx`` = 查看本次操作）。"""
-        with tempfile.TemporaryDirectory() as temporary:
-            store = LogStore(Path(temporary) / "log.sqlite")
-            store.write_batch(
-                "n1",
-                [
-                    {
-                        "ts": time.time(),
-                        "name": "webapi",
-                        "level": 2,
-                        "op": "op-1a2b3c",
-                        "msg": "enable done",
-                        "source": "plugin.py:20",
-                    },
-                    {"ts": time.time(), "name": "heartbeat", "level": 2, "op": "", "msg": "beat"},
-                ],
-            )
-            self.assertEqual([row["msg"] for row in store.query(q="op-1a2b3c")], ["enable done"])
-            self.assertEqual([row["msg"] for row in store.query(q="webapi")], ["enable done"])
-            self.assertEqual([row["msg"] for row in store.query(q="plugin.py:20")], ["enable done"])
-            self.assertEqual([row["msg"] for row in store.query(q="beat")], ["beat"])
-            self.assertEqual([row["msg"] for row in store.query(q="no-such")], [])
-            # 按筛选删除与查询同一套谓词：删 op 目标行，其余保留
-            self.assertEqual(store.delete(q="op-1a2b3c"), 1)
-            self.assertEqual([row["msg"] for row in store.query()], ["beat"])
+        store = self.store
+        await store.write_batch(
+            "n1",
+            [
+                {
+                    "ts": time.time(),
+                    "name": "webapi",
+                    "level": 2,
+                    "op": "op-1a2b3c",
+                    "msg": "enable done",
+                    "source": "plugin.py:20",
+                },
+                {"ts": time.time(), "name": "heartbeat", "level": 2, "op": "", "msg": "beat"},
+            ],
+        )
+        self.assertEqual([row["msg"] for row in await store.query(q="op-1a2b3c")], ["enable done"])
+        self.assertEqual([row["msg"] for row in await store.query(q="webapi")], ["enable done"])
+        self.assertEqual([row["msg"] for row in await store.query(q="plugin.py:20")], ["enable done"])
+        self.assertEqual([row["msg"] for row in await store.query(q="beat")], ["beat"])
+        self.assertEqual([row["msg"] for row in await store.query(q="no-such")], [])
+        # 按筛选删除与查询同一套谓词：删 op 目标行，其余保留
+        self.assertEqual(await store.delete(q="op-1a2b3c"), 1)
+        self.assertEqual([row["msg"] for row in await store.query()], ["beat"])
 
-    def test_corrupt_store_is_quarantined_and_rebuilt(self) -> None:
-        """库损坏：隔离留证（.corrupt）并重建新库（自愈）。"""
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "log.sqlite"
-            store = LogStore(path)
-            path.write_bytes(b"this is not a sqlite database")
-            with self.assertRaises(sqlite3.DatabaseError):
-                store.write_batch(
-                    "n", [{"ts": time.time(), "name": "a", "level": 2, "op": "", "msg": "x"}]
-                )
-            self.assertTrue(path.with_name("log.sqlite.corrupt").is_file())
-            # 自愈：下次操作自动重建新库
-            store.write_batch(
-                "n", [{"ts": time.time(), "name": "a", "level": 2, "op": "", "msg": "fresh"}]
-            )
-            self.assertEqual([row["msg"] for row in store.query()], ["fresh"])
-
-    def test_write_clamps_out_of_range_timestamps(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            store = LogStore(Path(temporary) / "log.sqlite")
-            clamped: list[int] = []
-            store.write_batch(
-                "n",
-                [{"ts": time.time() + 10**7, "name": "x", "level": 2, "op": "", "msg": "f"}],
-                clamped=clamped,
-            )
-            self.assertEqual(len(clamped), 1)
-            row = store.query()[0]
-            row_ts = row["ts"]
-            assert isinstance(row_ts, float)
-            self.assertLessEqual(row_ts, time.time() + 25 * 3600.0)
+    async def test_write_clamps_out_of_range_timestamps(self) -> None:
+        clamped: list[int] = []
+        await self.store.write_batch(
+            "n",
+            [{"ts": time.time() + 10**7, "name": "x", "level": 2, "op": "", "msg": "f"}],
+            clamped=clamped,
+        )
+        self.assertEqual(len(clamped), 1)
+        row = (await self.store.query())[0]
+        row_ts = row["ts"]
+        assert isinstance(row_ts, float)
+        self.assertLessEqual(row_ts, time.time() + 25 * 3600.0)
 
 
 class LogQueryTests(unittest.IsolatedAsyncioTestCase):
@@ -273,7 +276,7 @@ class LogQueryTests(unittest.IsolatedAsyncioTestCase):
             "\n[log]\n"
             "console = false\n"
             "file =\n"
-            "store = logs/log.sqlite\n"
+            "store = true\n"
             f"report_level = {report_level}\n",
             encoding="utf-8",
         )
@@ -389,16 +392,18 @@ class LogQueryTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("info-不入库", "\n".join(messages))
 
     async def test_store_failure_never_breaks_logging(self) -> None:
-        """库损坏时出口降级不炸业务调用；隔离重建后自动恢复入库。"""
+        """查询表异常时出口降级不炸业务调用；表恢复后自动继续入库。"""
         await self.boot()
         assert self.context is not None
-        (self.root / "logs" / "log.sqlite").write_bytes(b"corrupt!")
-        self.context.logger.error("损坏期间的日志")  # 不应抛出
+        db = self.context.get("db")
+        await db.execute(sa_text("DROP TABLE aetp_log_entries"))  # 模拟库表故障
+        self.context.logger.error("故障期间的日志")  # 不应抛出
+        await asyncio.sleep(0.5)  # 等一轮 flush（失败即降级计数）
+        await db.sync_schema(models=[LogEntry])  # 修复
         self.context.logger.error("恢复后的日志")
-        await self.context.comm.flush(timeout=5.0)
+        await asyncio.sleep(0.5)  # 等一轮 flush 落库
         data = await self.get_json(f"/api/logs?q={quote('恢复后')}")
         self.assertEqual(len(data["logs"]), 1)
-        self.assertTrue((self.root / "logs" / "log.sqlite.corrupt").is_file())
 
     async def test_time_window_filters(self) -> None:
         """from_ts / to_ts 时间窗过滤（体验 E 的快捷范围）。"""

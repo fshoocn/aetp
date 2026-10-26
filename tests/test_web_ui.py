@@ -17,6 +17,7 @@ from _helpers import AUTH_TOKEN
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
+from common.plugins.db import DbPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 from common.plugins.webapi.router import RouteRegistry
@@ -162,6 +163,7 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8",
         )
         await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)  # 安装记录住 aetp.db，管理器需要 db
         await self.context.plugin(WebApiPlugin)
         await self.context.plugin(PluginManagerPlugin)
         plugins = self.context.plugins

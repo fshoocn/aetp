@@ -23,6 +23,7 @@ from cordis_port.logger import Message as LogMessage
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from _helpers import request as _request
+from common.capabilities import capabilities_digest
 from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.comm import CommService
@@ -38,7 +39,6 @@ from master_plugins.heartbeat import (
     NodeStatus,
 )
 from slave_plugins.heartbeat import HeartbeatPlugin
-from slave_plugins.heartbeat.capabilities import capabilities_digest
 
 #: 主模块侧阈值（插件 / 集成测试用小值，避免真实等待）
 _FAST_SECTION = (

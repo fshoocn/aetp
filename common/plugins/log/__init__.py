@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 from .config import LogConfig
-from .op import current_operation, log_operation, log_operation_async
 from .plugin import LogPlugin
 from .store import LogStore
 
@@ -22,7 +21,4 @@ __all__: list[str] = [
     "LogConfig",
     "LogPlugin",
     "LogStore",
-    "current_operation",
-    "log_operation",
-    "log_operation_async",
 ]
