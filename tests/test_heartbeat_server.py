@@ -439,9 +439,10 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["extension_errors"], [])
 
     async def test_ui_page_registered_and_unload_cleanup(self) -> None:
-        self.assertEqual(len(self.webui.registrations), 1)
-        item = self.webui.registrations[0]
-        self.assertEqual(item["id"], "nodes")
+        # db 页面服务（db_ui）在同一桩上注册「数据库」页——按贡献 id 只看心跳页
+        items = [item for item in self.webui.registrations if item["id"] == "nodes"]
+        self.assertEqual(len(items), 1)
+        item = items[0]
         self.assertEqual(item["path"], "/nodes")
         self.assertTrue(
             (Path(str(item["resource_root"])) / str(item["entry"])).is_file()

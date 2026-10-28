@@ -23,20 +23,23 @@ class MyPlugin:
         await runs.add(TestRun(name="nightly"))
 ```
 
-## 服务分层（一个插件、两个服务）
+## 服务分层（一个插件、三个服务）
 
 cordis 一个插件可提供多个服务，且**每个服务的依赖集各不相同**——db 插件
-据此拆两层，核心永远不沾 Web 依赖：
+据此拆三层，核心永远不沾 Web 依赖：
 
 | 服务 | 依赖集 | 职责 |
 |---|---|---|
 | `ctx.db`（DbService） | `appconfig` | 核心数据服务：建表 / 查询 / 归属账本 / 自检引擎；从节点、无头部署照常工作 |
-| `ctx.db_ui`（DbUiService） | `db` + `webapi` | 界面层：`POST /api/db/self-check` 与「数据库」页面（`ui/DbPage.vue`） |
+| `ctx.db_api`（DbApiService） | `db` + `webapi` | 自检接口 `POST /api/db/self-check`（从节点 / 无头照常可用） |
+| `ctx.db_ui`（DbUiService） | `db` + `webui` | 「数据库」页面（`ui/DbPage.vue`） |
 
-`webui` 是**可选依赖**（从节点没有 webui，自检接口仍可用），不写进
-`inject`，页面走就绪守护注册（webui 装载 / 换装后自动补，log 查看页同款）；
-db 核心因此**永远不需要** `inject = ["webui"]`。依赖缺席时 `db_ui`
-安静 PENDING、`ctx.db` 不受影响。
+页面**注入式挂载**：`db_ui` 的 `inject = ["db", "webui"]`（自家核心 + UI
+宿主），两者就位 cordis 才装载页面服务并注册（核心没就位页面不出现）；
+核心 / webui 换装、重载时随依赖纪元自动卸载重挂，无需守护轮询。`webui` 是
+**可选依赖**（从节点没有 webui），只圈在页面服务里——缺席时 `db_ui`
+安静 PENDING、`ctx.db` 与自检接口不受影响，db 核心因此**永远不需要**
+`inject = ["webui"]`。
 
 ## 能力接口（`ctx.db`）
 

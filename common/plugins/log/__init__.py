@@ -4,7 +4,7 @@
 
     from common.plugins.log import LogPlugin
 
-    await ctx.plugin(LogPlugin)      # 依赖 appconfig，读 ``[log]`` 节
+    await ctx.plugin(LogPlugin)      # 依赖 appconfig，读 ``[log]`` 节，注册 ``ctx.log`` 服务
 
 业务代码照常 ``ctx.logger.info(...)``——本插件经 cordis **exporter 机制**
 给日志系统挂真实出口（控制台 + 轮转文件，二期追加上报 / 查询 / 查看页），
@@ -16,9 +16,11 @@ from __future__ import annotations
 from .config import LogConfig
 from .plugin import LogPlugin
 from .store import LogStore
+from .ui_service import LogUiService
 
 __all__: list[str] = [
     "LogConfig",
     "LogPlugin",
     "LogStore",
+    "LogUiService",
 ]

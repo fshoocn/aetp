@@ -9,12 +9,15 @@
             runs = ctx.db.repo(TestRun)
             await ctx.db.sync_schema()
 
-**两个服务、依赖各归各的**（cordis 一个插件可提供多个服务）：
+**核心 + 界面层，服务依赖各归各的**（cordis 一个插件可提供多个服务）：
 
 * ``ctx.db``（DbService）—— 核心数据服务，只依赖 ``appconfig``；
-* ``ctx.db_ui``（DbUiService）—— 界面层（自检接口 +「数据库」页面），
-  硬依赖 ``db`` + ``webapi``，由本插件一并拉起、依赖缺席时 PENDING。
-  db 核心因此**永远不需要** ``inject = ["webui"]``。
+* ``ctx.db_api``（DbApiService）—— 自检接口 ``POST /api/db/self-check``，
+  硬依赖 ``db`` + ``webapi``，从节点 / 无头部署照常可用；
+* ``ctx.db_ui``（DbUiService）—— 「数据库」页面，``inject = ["db",
+  "webui"]`` 注入式挂载（自家核心 + UI 宿主）：两者就位才装载页面服务，
+  换装 / 重载随依赖纪元自动重挂。两个界面服务都由本插件拉起、依赖缺席时
+  安静 PENDING；db 核心因此**永远不需要** ``inject = ["webui"]``。
 
 生命周期语义（DESIGN §4.3，关键）：
 
@@ -35,6 +38,7 @@ from typing import ClassVar
 
 from cordis_port import Context, Fiber
 
+from .api_service import DbApiService
 from .config import DbConfig
 from .service import DbService
 from .ui_service import DbUiService
@@ -49,7 +53,7 @@ class DbPlugin:
     display_name: ClassVar[str] = "数据库服务"
     version: ClassVar[str] = "1.0.0"
     #: 依赖应用配置（读 ``[db]`` 节）；界面层的 webapi / webui 依赖在
-    #: DbUiService 自己的依赖集里，不进本插件（核心不沾 Web 依赖）
+    #: DbApiService / DbUiService 自己的依赖集里，不进本插件（核心不沾 Web 依赖）
     inject: ClassVar[list[str]] = ["appconfig"]
     #: 配置模型（标准 Schema）：驱动校验、默认值注入与写回
     Config: ClassVar[type[DbConfig]] = DbConfig
@@ -62,14 +66,17 @@ class DbPlugin:
             self.config,
             base_dir=_base_dir(ctx),
         )
+        self._api_fiber: Fiber | None = None
         self._ui_fiber: Fiber | None = None
 
     async def init(self) -> None:
-        """验证连接、建库内元表并拉起界面服务（失败即启动失败，快速暴露）。"""
+        """验证连接、建库内元表并拉起界面层服务（失败即启动失败，快速暴露）。"""
         await self.service.start()
-        # 界面层独立成服务：依赖集（db + webapi）就绪才激活，从节点 / 无头
-        # 部署没有 webapi 时它安静 PENDING、不影响核心；fiber 挂在本插件
-        # 生命周期下，卸载 / 热更自动带走。不能 await——依赖缺席会一直挂起。
+        # 界面层独立成服务、依赖各归各的：db_api（db + webapi）就绪才激活，
+        # db_ui（webui）就绪才装载页面——从节点 / 无头缺 webapi / webui 时
+        # 它们安静 PENDING、不影响核心；fiber 挂在本插件生命周期下，卸载 /
+        # 热更自动带走。不能 await——依赖缺席会一直挂起。
+        self._api_fiber = self.ctx.plugin(DbApiService)
         self._ui_fiber = self.ctx.plugin(DbUiService)
         # 「排空连接池」的清理函数：effect 的**返回值**在 fiber 卸载时被调用
         # （注意不是调用）；只动连接池，不动表。

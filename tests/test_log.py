@@ -21,10 +21,20 @@ from common.log_op import log_operation
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.comm import CommService
 from common.plugins.db import DbPlugin
-from common.plugins.log import LogPlugin, LogStore
+from common.plugins.log import LogPlugin, LogStore, LogUiService
 from common.plugins.log.export import LEVELS, RotatingFile
 from common.plugins.log.store import LogEntry
 from common.plugins.webapi import WebApiPlugin
+
+
+class _WebUiStub:
+    """最小 webui 服务桩：只记录 register_ui（真实契约由 test_web_ui 覆盖）。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def register_ui(self, contribution_id: str, **options: object) -> None:
+        self.calls.append((contribution_id, dict(options)))
 
 
 class LogPluginTests(unittest.IsolatedAsyncioTestCase):
@@ -61,6 +71,38 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
         await self.context.plugin(WebApiPlugin)
         await self.context.plugin(CommService)
         await self.context.plugin(LogPlugin)
+
+    async def test_log_ui_page_registers_via_inject(self) -> None:
+        """查看页注入式挂载：log + webui 就位才装载 log_ui 并注册「日志」页（无守护轮询）。"""
+        await self.load("console = false\nfile =\nstore = false\n")
+        assert self.context is not None
+        self.assertEqual(LogUiService.inject, ["log", "webui"])  # 自家核心 + webui
+        stub = _WebUiStub()
+        self.assertIsNone(self.context.get("log_ui"))  # webui 缺席 → PENDING
+        self.context.provide("webui", stub)  # 迟到的依赖同样唤醒 PENDING fiber
+        ui = None
+        for _attempt in range(40):  # fiber 随依赖就绪异步激活
+            ui = self.context.get("log_ui")
+            if ui is not None:
+                break
+            await asyncio.sleep(0.05)
+        self.assertIsInstance(ui, LogUiService)
+        # db 页面服务（db_ui）在同一桩上注册「数据库」页——按贡献 id 只看日志页
+        logs_calls = [item for item in stub.calls if item[0] == "logs"]
+        self.assertEqual(len(logs_calls), 1)
+        _contribution_id, options = logs_calls[0]
+        self.assertEqual(options["path"], "/logs")
+        self.assertEqual(options["entry"], "LogsPage.vue")
+        self.assertEqual(options["title"], "日志")
+
+    async def test_log_ui_page_pending_without_core(self) -> None:
+        """依赖护栏：缺自家核心 log 服务时，即使 webui 就位页面服务也不装载。"""
+        context = Context()
+        context.provide("webui", _WebUiStub())
+        context.plugin(LogUiService)  # 不 await：log 核心缺席，fiber 停在 PENDING
+        await asyncio.sleep(0.1)  # 留出激活窗口——不该被激活
+        self.assertIsNone(context.get("log_ui"))
+        await unload_all(context)
 
     async def test_file_exporter_writes_formatted_line(self) -> None:
         """默认落盘到节点目录 data/plugins/log/aetp.log，带时间戳/级别/名称。"""

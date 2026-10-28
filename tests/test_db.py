@@ -48,6 +48,7 @@ from common.models import (
 )
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.db import (
+    DbApiService,
     DbConfig,
     DbDependencyError,
     DbError,
@@ -246,6 +247,16 @@ class DbStackTestCase(unittest.IsolatedAsyncioTestCase):
         await self.db.replace_plugin_records(records)
 
 
+class _WebUiStub:
+    """最小 webui 服务桩：只记录 register_ui（真实契约由 test_web_ui 覆盖）。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def register_ui(self, contribution_id: str, **options: object) -> None:
+        self.calls.append((contribution_id, dict(options)))
+
+
 class _CapturePlugin:
     """模拟插件：把 init 里的 ``ctx.db`` 调用结果收进 ClassVar（按测试复用）。
 
@@ -407,16 +418,49 @@ class ModelRegistryTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------- CRUD 与事务
+class UiServiceDependencyTests(unittest.IsolatedAsyncioTestCase):
+    """页面服务依赖护栏：缺自家核心服务时，即使 webui 就位也不装载。"""
+
+    async def test_page_pending_without_core_service(self) -> None:
+        context = Context()
+        context.provide("webui", _WebUiStub())
+        context.plugin(DbUiService)  # 不 await：db 缺席，fiber 停在 PENDING
+        await asyncio.sleep(0.1)  # 留出激活窗口——不该被激活
+        self.assertIsNone(context.get("db_ui"))
+        await unload_all(context)
+
+
 class DbServiceTests(DbStackTestCase):
     """CRUD / 事务 / 生命周期 / 清理（DESIGN §3、§4.3、§7）。"""
 
     async def test_core_runs_without_web_layer(self) -> None:
-        """架构护栏：核心不沾 Web 依赖——无 webapi 时 db 照常工作、db_ui 安静 PENDING。"""
+        """架构护栏：核心不沾 Web 依赖——无 webapi / webui 时界面服务安静 PENDING。"""
         self.assertEqual(DbPlugin.inject, ["appconfig"])
-        self.assertEqual(DbUiService.inject, ["db", "webapi"])
-        self.assertIsNone(self.context.get("db_ui"))  # 无 webapi → 界面服务不激活
+        self.assertEqual(DbApiService.inject, ["db", "webapi"])
+        self.assertEqual(DbUiService.inject, ["db", "webui"])
+        self.assertIsNone(self.context.get("db_api"))  # 无 webapi → API 服务不激活
+        self.assertIsNone(self.context.get("db_ui"))  # 无 webui → 页面服务不激活
         await self.db.claim_table("headless", "aetp_headless_note")
         self.assertIn("headless", await self.db.owner_names())
+
+    async def test_db_ui_page_registers_via_inject(self) -> None:
+        """页面注入式挂载：db + webui 就位才装载 db_ui 并注册「数据库」页（无守护轮询）。"""
+        stub = _WebUiStub()
+        self.assertIsNone(self.context.get("db_ui"))  # webui 缺席 → PENDING
+        self.context.provide("webui", stub)  # 迟到的依赖同样唤醒 PENDING fiber
+        ui = None
+        for _attempt in range(40):  # fiber 随依赖就绪异步激活
+            ui = self.context.get("db_ui")
+            if ui is not None:
+                break
+            await asyncio.sleep(0.05)
+        self.assertIsInstance(ui, DbUiService)
+        self.assertEqual(len(stub.calls), 1)
+        contribution_id, options = stub.calls[0]
+        self.assertEqual(contribution_id, "db")
+        self.assertEqual(options["path"], "/db")
+        self.assertEqual(options["entry"], "DbPage.vue")
+        self.assertEqual(options["title"], "数据库")
 
     async def test_crud_roundtrip(self) -> None:
         db = self.db
@@ -1086,7 +1130,7 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
         base_url = f"http://127.0.0.1:{self.port}"
         body = json.dumps({"policy": "warn"}).encode("utf-8")
         status, payload = 0, b""
-        for _attempt in range(20):  # 延迟挂载任务最多 0.5s 一轮
+        for _attempt in range(20):  # db_api 随 webapi 就绪异步激活后挂路由
             status, payload = await arequest(
                 base_url,
                 "/api/db/self-check",
@@ -1109,15 +1153,16 @@ class PluginLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 400)  # 非法 policy 明确拒绝
 
-    async def test_db_ui_service_owns_web_surface(self) -> None:
-        """界面层独立成服务：自检接口归属 db_ui，核心服务无 Web 依赖（架构护栏）。"""
-        ui = None
+    async def test_db_api_service_owns_web_surface(self) -> None:
+        """界面层独立成服务：自检接口归属 db_api（db + webapi），核心服务无 Web 依赖。"""
+        api = None
         for _attempt in range(20):  # webapi 就绪后界面服务异步激活
-            ui = self.context.get("db_ui")
-            if ui is not None:
+            api = self.context.get("db_api")
+            if api is not None:
                 break
             await asyncio.sleep(0.05)
-        self.assertIsInstance(ui, DbUiService)
+        self.assertIsInstance(api, DbApiService)
+        self.assertIsNone(self.context.get("db_ui"))  # 无 webui → 页面服务不激活
         self.assertIsNotNone(self.context.get("db"))  # 核心照常独立提供
 
     async def test_install_enable_uninstall_data_chain(self) -> None:

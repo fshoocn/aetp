@@ -15,12 +15,14 @@
 
 from __future__ import annotations
 
+from .api_service import DbApiService
 from .config import DbConfig
 from .plugin import DbPlugin
 from .service import DbDependencyError, DbError, DbService, MigrationStep, Repo, SyncResult
 from .ui_service import DbUiService
 
 __all__: list[str] = [
+    "DbApiService",
     "DbConfig",
     "DbDependencyError",
     "DbError",

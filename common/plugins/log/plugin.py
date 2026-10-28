@@ -21,7 +21,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
-from cordis_port import Context
+from cordis_port import Context, Fiber, Service
 from cordis_port.logger import Exporter, Logger, Message
 from starlette.requests import Request
 
@@ -31,6 +31,7 @@ from common.log_op import current_operation
 from .config import LogConfig
 from .export import LEVELS, RotatingFile, call_site, console_exporter, file_exporter
 from .store import LogEntry, LogStore
+from .ui_service import LogUiService
 
 
 def _level_value(name: str, label: str) -> int:
@@ -47,28 +48,38 @@ def _base_dir(ctx: Context) -> Path:
     return loaded.parent if loaded is not None else Path.cwd()
 
 
-class LogPlugin:
-    """日志插件（提供任务输出流接口见日志方案 §5.6，随任务下发落地）。"""
+class LogPlugin(Service[LogConfig]):
+    """日志插件（``ctx.log``，``provide = "log"``；任务输出流接口见日志方案
+    §5.6，随任务下发落地）。
+
+    Service 类自己就是插件（开发文档 13.1 惯用法）：``ctx.log`` 即日志核心
+    服务，查看页 ``LogUiService`` 以 ``inject = ["log", "webui"]`` 依赖它——
+    核心没就位页面不装载，核心换装 / 重载页面随依赖纪元级联重挂。
+    """
 
     #: 插件名（即插件 id）
-    name: ClassVar[str] = "log"
+    name: str = "log"
     display_name: ClassVar[str] = "日志服务"
     version: ClassVar[str] = "1.0.0"
-    #: 只声明 appconfig（读 ``[log]`` 节）：webapi / comm / webui 都是**延迟
-    #: 挂载**（见 :meth:`_late_setup`）——本插件要足够早装载以捕获装配期
-    #: 日志，而那三个服务尚未就绪；硬声明会要么死锁顺序、要么丢启动日志
+    #: 服务名（即 ``ctx.log``）
+    provide: str | None = "log"
+    #: 只声明 appconfig（读 ``[log]`` 节）：webapi / comm 延迟挂载（见
+    #: :meth:`_late_setup`），webui 圈在独立页面服务 LogUiService 里——
+    #: 本插件要足够早装载以捕获装配期日志，而那几个服务尚未就绪；硬声明
+    #: 会要么死锁顺序、要么丢启动日志
     inject: ClassVar[list[str]] = ["appconfig"]
-    Config: ClassVar[type[LogConfig]] = LogConfig
+    Config: type[LogConfig] = LogConfig
 
     def __init__(self, ctx: Context, config: LogConfig | None = None) -> None:
+        super().__init__(ctx)  # 最先调用：注册 ctx.log
         self.ctx: Context = ctx
         self.config: LogConfig = config if isinstance(config, LogConfig) else LogConfig()
         self._store: LogStore | None = None
         self._trim_task: asyncio.Task[None] | None = None
         self._flush_task: asyncio.Task[None] | None = None
         self._late_task: asyncio.Task[None] | None = None
+        self._ui_fiber: Fiber | None = None
         self._dispose_health: object = None
-        self._ui_registered: bool = False
         #: 入库缓冲（出口同步、入库异步）：(节点, 条目) 待批量写 aetp.db
         self._pending: list[tuple[str, dict[str, object]]] = []
         #: 落库串行锁：查询路径的 read-your-writes 等在途批次写完
@@ -118,10 +129,15 @@ class LogPlugin:
         if self.config.report:
             self.ctx.logger.exporter(self._sink_exporter(report_level))
 
-        # 查询 API / 远端入库 / 查看页：依赖的 webapi / comm / webui 晚于本插件
-        # 就绪（预装阶段才装），延迟挂载（无头部署自然放弃）
+        # 查询 API / 远端入库：依赖的 webapi / comm 晚于本插件就绪（预装阶段
+        # 才装），延迟挂载（无头部署自然放弃）
         self._late_task = asyncio.create_task(self._late_setup())
         self._late_task.add_done_callback(self._log_task_exit)
+        # 查看页独立成服务：inject = ["log", "webui"]（自家核心 + webui），
+        # 核心与 webui 就位才装载、换装 / 重载随依赖纪元自动重挂（无守护轮询）；
+        # fiber 挂在本插件生命周期下，卸载 / 热更自动带走。不能 await——
+        # 依赖缺席（从节点没有 webui）会一直挂起。
+        self._ui_fiber = self.ctx.plugin(LogUiService)
         self.ctx.logger.info(
             "日志插件已加载：%s", "aetp.db:aetp_log_entries" if self._store else "未启用查询库"
         )
@@ -150,10 +166,12 @@ class LogPlugin:
             self.ctx.logger.error("日志插件后台任务意外退出：%s", error)
 
     async def _late_setup(self) -> None:
-        """等 webapi / comm 就绪后挂查询 API、远端入库、健康指标与查看页。
+        """等 webapi / comm 就绪后挂查询 API、远端入库与健康指标。
 
         本插件早装（捕获装配期日志），这几个服务晚就绪（预装阶段）——
-        轮询等待，就绪即挂；无头部署 30 秒后自然放弃。
+        轮询等待，就绪即挂；无头部署 30 秒后自然放弃。查看页不在这里：
+        它是独立服务 :class:`~common.plugins.log.ui_service.LogUiService`
+        （``inject = ["log", "webui"]`` 注入式挂载）。
         """
         for _attempt in range(60):
             api = self.ctx.get("webapi")
@@ -166,25 +184,6 @@ class LogPlugin:
                 comm.on("log.batch", self._on_log_batch)
                 break
             await asyncio.sleep(0.5)
-        # 查看页常驻守护：webui 被换装 / 重载会连带清掉贡献清单（如 dist 重建后
-        # ensure_installed 换装），循环校验并自动补注册；无头部署自然空转
-        while True:
-            webui = self.ctx.get("webui")
-            if webui is not None:
-                known = {item.id for item in webui.ui_contributions()}
-                if "log:logs" not in known:
-                    webui.register_ui(
-                        "logs",
-                        kind="page",
-                        format="vue",
-                        resource_root=str(Path(__file__).resolve().parent / "ui"),
-                        entry="LogsPage.vue",
-                        path="/logs",
-                        title="日志",
-                        menu_group="",
-                        menu_order=100,
-                    )
-            await asyncio.sleep(5.0)
 
     def _metrics(self) -> dict[str, object]:
         return {

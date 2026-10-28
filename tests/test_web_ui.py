@@ -189,11 +189,13 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status, 200)
             self.assertIn("application/json", content_type)
             manifest = json.loads(body)
-            self.assertEqual(len(manifest), 1)
-            self.assertEqual(manifest[0]["owner"], "test-ui")
-            self.assertEqual(manifest[0]["path"], "/plugins/test-ui")
+            # db 页面服务（db_ui）随 webui 就位也注册「数据库」页——按 owner 只看样本贡献
+            sample = [item for item in manifest if item["owner"] == "test-ui"]
+            self.assertEqual(len(sample), 1)
+            self.assertEqual(sample[0]["owner"], "test-ui")
+            self.assertEqual(sample[0]["path"], "/plugins/test-ui")
 
-            status, _, body = await asyncio.to_thread(_request, base_url, manifest[0]["entry"])
+            status, _, body = await asyncio.to_thread(_request, base_url, sample[0]["entry"])
             self.assertEqual(status, 200)
             self.assertEqual(body.decode("utf-8"), component_source)
 
@@ -208,8 +210,9 @@ class WebUiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await fiber.dispose()
             status, _, body = await asyncio.to_thread(_request, base_url, "/api/web/ui")
             self.assertEqual(status, 200)
-            self.assertEqual(json.loads(body), [])
-            self.assertEqual((await asyncio.to_thread(_request, base_url, manifest[0]["entry"]))[0], 404)
+            remaining = [item for item in json.loads(body) if item["owner"] == "test-ui"]
+            self.assertEqual(remaining, [])
+            self.assertEqual((await asyncio.to_thread(_request, base_url, sample[0]["entry"]))[0], 404)
 
     async def test_unified_error_envelope(self) -> None:
         """错误信封统一 ``{"error"}``：404 与路径参数转换失败的 400 都带真实原因。"""
