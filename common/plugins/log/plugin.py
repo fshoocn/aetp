@@ -63,11 +63,15 @@ class LogPlugin(Service[LogConfig]):
     version: ClassVar[str] = "1.0.0"
     #: 服务名（即 ``ctx.log``）
     provide: str | None = "log"
-    #: 只声明 appconfig（读 ``[log]`` 节）：webapi / comm 延迟挂载（见
-    #: :meth:`_late_setup`），webui 圈在独立页面服务 LogUiService 里——
-    #: 本插件要足够早装载以捕获装配期日志，而那几个服务尚未就绪；硬声明
-    #: 会要么死锁顺序、要么丢启动日志
-    inject: ClassVar[list[str]] = ["appconfig"]
+    #: 硬声明只有 appconfig（读 ``[log]`` 节）：本插件要足够早装载以捕获装配期
+    #: 日志，硬声明 comm / webapi 会要么死锁顺序、要么丢启动日志。comm 用
+    #: **optional** 依赖（cordis-port 0.1.8 语义：缺席不阻塞加载、访问判空、
+    #: 就位不重载），出口热路径据此判空上报；webapi 延迟挂载（见
+    #: :meth:`_late_setup`），webui 圈在独立页面服务 LogUiService 里
+    inject: ClassVar[dict[str, list[str]]] = {
+        "required": ["appconfig"],
+        "optional": ["comm"],
+    }
     Config: type[LogConfig] = LogConfig
 
     def __init__(self, ctx: Context, config: LogConfig | None = None) -> None:
@@ -175,7 +179,7 @@ class LogPlugin(Service[LogConfig]):
         """
         for _attempt in range(60):
             api = self.ctx.get("webapi")
-            comm = self.ctx.get("comm")
+            comm = self.ctx.comm  # optional 依赖：缺席访问为 None
             if api is not None and comm is not None:
                 api.get("/api/logs", self._logs_handler, kind="api", name="log.query")
                 api.get("/api/logs/nodes", self._nodes_handler, kind="api", name="log.nodes")
@@ -219,8 +223,8 @@ class LogPlugin(Service[LogConfig]):
             }
             if self._store is not None:
                 self._enqueue(self._node_name(), entry)
-            # comm 延迟就绪：未就绪时仅本地入库，就绪后自动开始上报
-            comm = self.ctx.get("comm")
+            # comm（optional 依赖）未就绪时仅本地入库，就绪后自动开始上报
+            comm = self.ctx.comm
             if comm is not None:
                 comm.report("log.batch", {"logs": [entry]})
 
@@ -334,7 +338,7 @@ class LogPlugin(Service[LogConfig]):
                 return cast(dict[str, object], self.ctx.get("webapi").json(
                     {"error": f"查询库不可用：{type(exc).__name__}"}, status_code=503
                 ))
-        comm = self.ctx.get("comm")
+        comm = self.ctx.comm  # optional 依赖：缺席访问为 None
         if comm is not None:
             try:
                 names.update(comm.nodes())

@@ -104,6 +104,12 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(context.get("log_ui"))
         await unload_all(context)
 
+    async def test_comm_is_optional_dependency(self) -> None:
+        """comm 是 optional 依赖（cordis-port 0.1.8 语义）：缺席不阻塞、访问判空。"""
+        self.assertEqual(
+            LogPlugin.inject, {"required": ["appconfig"], "optional": ["comm"]}
+        )
+
     async def test_file_exporter_writes_formatted_line(self) -> None:
         """默认落盘到节点目录 data/plugins/log/aetp.log，带时间戳/级别/名称。"""
         await self.load("console = false\n")
