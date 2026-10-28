@@ -21,6 +21,7 @@ pip-wheel-metadata/
 MANIFEST
 *.whl
 *.tar.gz
+*.zip
 src/*.egg-info/
 
 # ---------------------------------------------------------------

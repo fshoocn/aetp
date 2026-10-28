@@ -22,6 +22,7 @@ from common.capabilities import (
     parse_capability,
     select_capabilities,
 )
+from common.contracts import NodeCapability, NodeInfo
 
 from .config import HeartbeatServerConfig
 
@@ -327,6 +328,52 @@ class NodeRegistry:
             maxlen=self.config.history_size,
         )
         return True
+
+
+class NodesService:
+    """``ctx.nodes`` 服务：``NodeRegistry`` 的只读服务化包装（GAP-3 / Phase 0.2）。
+
+    契约见 :class:`common.contracts.NodesInterface`；引擎对它是**可选依赖**
+    （从节点没有 nodes 服务，cordis-port 0.1.8 起 optional 声明、访问判空）。
+    """
+
+    def __init__(self, registry: NodeRegistry) -> None:
+        self._registry = registry
+
+    def list(self, *, online_only: bool = False) -> list[NodeInfo]:
+        """节点概要列表（按 node_id 稳定排序；``online_only`` 只看在线）。"""
+        return [
+            NodeInfo(
+                node_id=record.node_id,
+                node_kind=record.node_kind,
+                address=record.address,
+                status=str(record.status),
+            )
+            for record in self._registry.nodes()
+            if not online_only or record.status is NodeStatus.ONLINE
+        ]
+
+    def select(
+        self,
+        *,
+        kinds: Collection[str] | None = None,
+        labels: Mapping[str, str] | None = None,
+        online_only: bool = True,
+    ) -> list[NodeCapability]:
+        """跨节点能力查询（``NodeRegistry.capabilities`` 的服务化）。
+
+        条目 = 能力信封 + ``node_id``；``online_only`` 默认只看在线节点
+        （引擎选节点的第一道过滤）。
+        """
+        entries = self._registry.capabilities(kinds=kinds, labels=labels)
+        if online_only:
+            online = {
+                record.node_id
+                for record in self._registry.nodes()
+                if record.status is NodeStatus.ONLINE
+            }
+            entries = [entry for entry in entries if entry.get("node_id") in online]
+        return [cast(NodeCapability, entry) for entry in entries]
 
 
 # -- 载荷校验（协议 §2） -------------------------------------------------------

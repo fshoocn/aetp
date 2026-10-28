@@ -49,6 +49,7 @@ from starlette.requests import Request
 
 from .config import WebApiConfig
 from .interface import WebApiService
+from .pipeline import WEBAPI_PHASES
 from .uvicorn_web_service import UvicornWebApiService
 
 
@@ -141,6 +142,41 @@ class WebApiPlugin:
             kind="api",
             name="web.healthz",
         )
+
+        def pipeline_info(_: Request) -> dict[str, object]:
+            """拦截链自省（§4.4.4）：阶段词表 + 逐拦截器描述与统计。"""
+            chain = service.pipeline
+            hooks: list[dict[str, object]] = [
+                {
+                    "phase": info.phase,
+                    "order": info.order,
+                    "owner": info.owner,
+                    "name": info.name,
+                    "on_error": str(info.on_error),
+                    "calls": row["calls"],
+                    "errors": row["errors"],
+                    "self_ms": row["self_ms"],
+                }
+                for info, row in zip(chain.describe(), chain.stats(), strict=True)
+            ]
+            return {"phases": list(WEBAPI_PHASES), "hooks": hooks}
+
+        service.get(
+            "/api/web/pipeline",
+            pipeline_info,
+            kind="api",
+            name="web.pipeline",
+        )
+
+        def pipeline_metrics() -> dict[str, object]:
+            rows = service.pipeline.stats()
+            return {
+                "hooks": len(rows),
+                "errors": sum(int(row["errors"]) for row in rows),
+                "max_self_ms": max((float(row["self_ms"]) for row in rows), default=0.0),
+            }
+
+        service.add_health_provider("pipeline", pipeline_metrics)
 
     # -- 卸载 -----------------------------------------------------------------
     async def _shutdown(self) -> None:

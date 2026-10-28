@@ -25,7 +25,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
 
 from cordis_port import Context, Fiber
@@ -40,8 +40,11 @@ from starlette.responses import (
     StreamingResponse,
 )
 
+from common.hook_chain import HookChain, OnError
+
 from .auth import AuthContext
 from .config import WebApiConfig
+from .pipeline import RequestContext, WebInterceptor
 from .types import (
     RouteHandler,
     RouteKind,
@@ -71,7 +74,7 @@ class WebApiService(ABC):
 
     实现方还需满足两条**隐含契约**（无法用 ``abstractmethod`` 表达，但必须做到）：
 
-        * :meth:`route` 注册的条目要绑定到**调用方插件的 fiber**，
+        * :meth:`route` 与 :meth:`use` 注册的条目要绑定到**调用方插件的 fiber**，
             插件卸载时自动注销；
     * 实例需持有 ``ctx``，因为调用方身份正是从它推导出来的。
     """
@@ -115,6 +118,37 @@ class WebApiService(ABC):
 
         未来的用户管理插件（多用户登录 / 权限）只需替换
         ``ctx.webapi.auth.verifier``，中间件与业务路由不动。
+        """
+
+    # ------------------------------------------------------------ 拦截链（§4）
+    @property
+    @abstractmethod
+    def pipeline(self) -> HookChain[RequestContext, Response]:
+        """拦截链（只读自省：``describe()`` / ``stats()``，§4.4.4）。"""
+
+    @abstractmethod
+    def use(
+        self,
+        fn: WebInterceptor,
+        *,
+        phase: str = "inner",
+        order: int = 100,
+        name: str | None = None,
+        on_error: OnError = OnError.SKIP,
+        kinds: Collection[RouteKind] = ("api",),
+    ) -> Callable[[], None]:
+        """登记拦截器（§4.4.3）：绑调用方 fiber，卸载即摘；返回注销函数。
+
+        参数:
+            fn: 拦截器 ``async (rc, next) -> response``；不调 ``next`` 即短路。
+            phase: 阶段（``WEBAPI_PHASES`` 之一：observe / guard / authorize /
+                inner），未知阶段注册时抛 ``ValueError``。
+            order: 阶段内序号（缺省 100；建议 0–49 平台内置、50–149 常规、
+                150+ 宜靠后）。
+            name: 展示名（缺省取 ``fn.__name__``）。
+            on_error: 自身出错时的处置：``SKIP`` 记问题放行 / ``FAIL`` 上抛。
+            kinds: 只对指定路由种类生效（默认仅 ``api``）；种类不符时链上
+                直接放行到下一环。
         """
 
     # ------------------------------------------------------------ 生命周期

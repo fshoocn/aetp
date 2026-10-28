@@ -2,8 +2,24 @@ import asyncio
 import inspect
 import time
 from collections.abc import Callable
+from typing import Any
 
-from cordis_port import Context, Fiber
+from cordis_port import Context, EventDispatchError, Fiber
+
+
+async def parallel_event(ctx: Context, name: str, *args: Any) -> list[BaseException]:
+    """派发事件给全部监听器（``parallel``）：隔离异常，返回错误列表。
+
+    凡可能有 ``async def`` 监听器的事件一律经本 helper 或 ``ctx.parallel``
+    派发（``emit`` 会**静默丢弃** async 监听器，GAP-2 / 实测 E2）。监听器
+    异常被聚合为 ``EventDispatchError``：这里吞掉并**返回**错误列表，调用方
+    决定记日志还是忽略——事件派发不因单个监听器失败而中断（设计 §3.5.3）。
+    """
+    try:
+        await ctx.parallel(name, *args)
+    except EventDispatchError as exc:
+        return list(exc.errors)
+    return []
 
 
 async def safe_dispose(fiber: Fiber) -> BaseException | None:

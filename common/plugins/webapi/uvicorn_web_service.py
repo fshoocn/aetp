@@ -37,7 +37,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -59,9 +59,13 @@ from starlette.responses import (
 )
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from common.cordis_utils import parallel_event
+from common.hook_chain import HookChain, OnError
+
 from .auth import AuthContext, AuthMiddleware, SharedSecretVerifier
 from .config import WebApiConfig
 from .interface import WebApiService
+from .pipeline import WEBAPI_PHASES, RequestContext, WebInterceptor, WebNext
 from .router import (
     RouteError,
     RouteRegistry,
@@ -157,12 +161,17 @@ class UvicornHost:
         server: 底层 ``uvicorn.Server`` 实例（启动后才非 ``None``）。
     """
 
-    def __init__(self, config: WebApiConfig, auth: AuthContext) -> None:
+    def __init__(
+        self,
+        config: WebApiConfig,
+        auth: AuthContext,
+        on_denied: Callable[[dict[str, object]], object] | None = None,
+    ) -> None:
         self.config: WebApiConfig = config
         self.app: Starlette = Starlette()
         # 先加鉴权（栈内层），再加安全头 / CORS（外层）——鉴权的 401 响应
         # 也能带上 nosniff 与 CORS 头
-        self.app.add_middleware(AuthMiddleware, auth=auth)
+        self.app.add_middleware(AuthMiddleware, auth=auth, on_denied=on_denied)
         self.app.add_middleware(_SecurityHeadersMiddleware)
         origins = [str(origin) for origin in config.cors_origins]
         if origins:
@@ -333,11 +342,66 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         self._health_providers: dict[str, Callable[[], Mapping[str, object]]] = {}
         #: 鉴权接缝：默认共享密钥验证器，用户管理插件可替换（见 :mod:`.auth`）
         self._auth: AuthContext = AuthContext(SharedSecretVerifier(self.config))
+        #: 拦截链（设计 §4）：阶段 + order 确定顺序、逐拦截器失败策略；
+        #: 路由端点构造时把 handler 包进链（router.build_endpoint）
+        self._chain: HookChain[RequestContext, Response] = HookChain(
+            WEBAPI_PHASES, on_problem=self._chain_problem
+        )
+        self._registry.chain = self._chain
 
     @property
     def auth(self) -> AuthContext:
         """鉴权接缝：持有可替换的验证器（默认共享密钥）。"""
         return self._auth
+
+    @property
+    def pipeline(self) -> HookChain[RequestContext, Response]:
+        """拦截链（只读自省：``describe()`` / ``stats()``，§4.4.4）。"""
+        return self._chain
+
+    def use(
+        self,
+        fn: WebInterceptor,
+        *,
+        phase: str = "inner",
+        order: int = 100,
+        name: str | None = None,
+        on_error: OnError = OnError.SKIP,
+        kinds: Collection[RouteKind] = ("api",),
+    ) -> Callable[[], None]:
+        """登记拦截器（§4.4.3）：绑调用方 fiber，卸载即摘；返回注销函数。
+
+        ``kinds``：只对指定种类的路由生效（默认仅 ``api``），由 webapi 包一层
+        「种类不符就直接 ``await next()``」；``HookChain`` 本身与路由无关。
+        ``owner`` = 调用方 fiber 名（取冒号前的部分，§3.5.2）。
+        """
+        caller_fiber = self._caller_fiber()
+        allowed = frozenset(kinds)
+        label = name or getattr(fn, "__name__", "interceptor")
+
+        async def gated(rc: RequestContext, nxt: WebNext) -> Response:
+            if rc.route.kind not in allowed:
+                return await nxt()
+            return await fn(rc, nxt)
+
+        dispose = self._chain.use(
+            gated,
+            phase=phase,
+            order=order,
+            name=label,
+            on_error=on_error,
+            owner=_fiber_name(caller_fiber).split(":")[0],
+        )
+        caller_fiber.effect(lambda: dispose, f"ctx.webapi.use({phase})")
+        return dispose
+
+    def _chain_problem(self, message: str) -> None:
+        """``SKIP`` 出错的告警出口（§4.4.4：记 warning，不静默）。"""
+        self._provided_ctx.logger.warning(message)
+
+    def _on_auth_denied(self, payload: dict[str, object]) -> object:
+        """401 时派发 ``webapi/auth-denied``（§4.4.5：审计 / 统计插件订阅）。"""
+        return parallel_event(self._provided_ctx, "webapi/auth-denied", payload)
 
     # ---------------------------------- 健康探针 ----------------------------
     def add_health_provider(
@@ -415,7 +479,7 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
 
         在此之前注册的路由会被一次性挂载；之后注册的路由随 :meth:`route` 立即生效。
         """
-        host = UvicornHost(self.config, self.auth)
+        host = UvicornHost(self.config, self.auth, on_denied=self._on_auth_denied)
         host.app.state.web_service = self
         # 先把 app 交给路由表，再启动：这样启动期间注册的路由也能被匹配到
         self._attach_app(host.app)

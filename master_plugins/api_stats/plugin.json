@@ -1,0 +1,8 @@
+{
+  "id": "api-stats",
+  "name": "API 热点统计",
+  "version": "1.0.0",
+  "entrypoint": "plugin:ApiStatsPlugin",
+  "kind": "any",
+  "requires": []
+}

@@ -26,7 +26,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .config import HeartbeatServerConfig
-from .registry import NODE_STATUS_EVENT, HeartbeatServerError, NodeRegistry, NodeStatus
+from .registry import NODE_STATUS_EVENT, HeartbeatServerError, NodeRegistry, NodesService, NodeStatus
 
 #: fire-and-forget 投递策略（comm DeliveryPolicy 字面量，不 import 对方插件包）：
 #: 心跳下行容忍丢失，丢一条下一拍补上
@@ -69,6 +69,9 @@ class HeartbeatServerPlugin:
     # -- 生命周期 -------------------------------------------------------------
     async def init(self) -> object:
         """注册 API 路由 / comm 收件 / 管理页并启动状态扫描；返回卸载清理函数。"""
+        # 节点目录服务（GAP-3）：引擎经 ctx.nodes 选节点，契约在 common/；
+        # provide 绑本 fiber 生命周期，卸载自动注销
+        self.ctx.provide("nodes", NodesService(self._registry))
         api = self.ctx.webapi
         self.ctx.comm.on("heartbeat.beat", self._on_beat)
         api.get("/api/heartbeat/nodes", self._nodes, kind="api", name="heartbeat-server.nodes")

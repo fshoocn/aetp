@@ -17,7 +17,7 @@ from sqlalchemy import text as sa_text
 from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from common.cordis_utils import unload_all
-from common.log_op import log_operation
+from common.log_op import current_operation, log_operation
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.comm import CommService
 from common.plugins.db import DbPlugin
@@ -35,6 +35,21 @@ class _WebUiStub:
 
     def register_ui(self, contribution_id: str, **options: object) -> None:
         self.calls.append((contribution_id, dict(options)))
+
+
+class LogOperationTests(unittest.TestCase):
+    """``log_operation(op_id)``：指定 / 透传操作 id（GAP-4）。"""
+
+    def test_explicit_op_id_is_used_verbatim(self) -> None:
+        with log_operation("run-3f9a1c") as operation:
+            self.assertEqual(operation, "run-3f9a1c")
+            self.assertEqual(current_operation(), "run-3f9a1c")
+        self.assertIsNone(current_operation())
+
+    def test_auto_generated_when_omitted(self) -> None:
+        with log_operation() as operation:
+            self.assertTrue(operation.startswith("op-"))
+            self.assertEqual(current_operation(), operation)
 
 
 class LogPluginTests(unittest.IsolatedAsyncioTestCase):

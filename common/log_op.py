@@ -27,8 +27,8 @@ _R = TypeVar("_R")
 class _LogOperation:
     """操作作用域：``with _LogOperation() as op``（作用域内日志自动带 op 标记）。"""
 
-    def __init__(self) -> None:
-        self.operation: str = f"op-{secrets.token_hex(3)}"
+    def __init__(self, operation: str | None = None) -> None:
+        self.operation: str = operation or f"op-{secrets.token_hex(3)}"
         self._token: Token[str | None] | None = None
 
     def __enter__(self) -> str:
@@ -40,9 +40,14 @@ class _LogOperation:
             _OPERATION_ID.reset(self._token)
 
 
-def log_operation() -> _LogOperation:
-    """管理操作作用域：作用域内所有日志自动带 ``op-xxxxxx`` 标记。"""
-    return _LogOperation()
+def log_operation(op_id: str | None = None) -> _LogOperation:
+    """管理操作作用域：作用域内所有日志自动带 op 标记。
+
+    参数:
+        op_id: 指定 / 透传操作 id（如 flow 的 ``run-xxxx``，跨节点同源，
+            查看页 ``q=run-xxxx`` 一键聚齐）；缺省自动生成 ``op-xxxxxx``。
+    """
+    return _LogOperation(op_id)
 
 
 def current_operation() -> str | None:

@@ -24,6 +24,7 @@ from _helpers import arequest as _arequest
 from _helpers import free_port as _free_port
 from _helpers import request as _request
 from common.capabilities import capabilities_digest
+from common.contracts import NodesInterface
 from common.cordis_utils import unload_all, wait_until
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.comm import CommService
@@ -437,6 +438,32 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
         response = json.loads(body)
         self.assertEqual(response["extensions"]["probe"], {"ok": True})
         self.assertEqual(response["extension_errors"], [])
+
+    async def test_nodes_service_wraps_registry(self) -> None:
+        """nodes 服务（GAP-3）：list / select 包装注册表，引擎可经 ctx.nodes 选节点。"""
+        nodes = cast(NodesInterface, self.context.get("nodes"))
+        self.assertEqual(nodes.list(), [])  # 尚无心跳
+        entries = [
+            {
+                "kind": "flow.step",
+                "id": "report/html",
+                "provider": "report",
+                "labels": {"stage": "report", "format": "html"},
+            }
+        ]
+        await _send_beat(
+            self.context,
+            caps_digest=capabilities_digest(entries),
+            capabilities=entries,
+        )
+        listed = nodes.list()
+        self.assertEqual([node["node_id"] for node in listed], ["从节点-1"])
+        self.assertEqual(listed[0]["status"], "online")
+        picked = nodes.select(kinds=["flow.step"], labels={"stage": "report"})
+        self.assertEqual(len(picked), 1)
+        self.assertEqual(picked[0]["node_id"], "从节点-1")
+        self.assertEqual(picked[0]["id"], "report/html")
+        self.assertEqual(nodes.select(kinds=["nope"]), [])
 
     async def test_ui_page_registered_and_unload_cleanup(self) -> None:
         # db 页面服务（db_ui）在同一桩上注册「数据库」页——按贡献 id 只看心跳页

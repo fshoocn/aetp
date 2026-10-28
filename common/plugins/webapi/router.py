@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import time
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from pathlib import Path
 from string import Formatter
@@ -42,6 +43,9 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import BaseRoute
 
+from common.hook_chain import HookChain
+
+from .pipeline import RequestContext
 from .types import HTTP_METHODS, HttpMethod, RouteHandler, RouteKind, RouteRecord
 
 #: 支持的 HTTP 方法（大写，便于与 Starlette 对接）
@@ -228,7 +232,10 @@ def param_converters(
     return converters
 
 
-def build_endpoint(record: RouteRecord) -> Callable[[Request], Awaitable[Response]]:
+def build_endpoint(
+    record: RouteRecord,
+    chain: HookChain[RequestContext, Response] | None = None,
+) -> Callable[[Request], Awaitable[Response]]:
     """把用户 handler 包装成 Starlette 可用的异步端点。
 
     包装层的职责：
@@ -236,7 +243,11 @@ def build_endpoint(record: RouteRecord) -> Callable[[Request], Awaitable[Respons
     * 注入路径参数（见 :func:`injectable_params`）；
     * 兼容同步/异步 handler；
     * 把返回值交给 :func:`~plugins.web.responses.to_response` 转换；
-    * 用 ``functools.wraps`` 保留原函数的 ``__name__``/``__doc__``，便于排查。
+    * 用 ``functools.wraps`` 保留原函数的 ``__name__``/``__doc__``，便于排查；
+    * 给出 ``chain`` 时把「参数注入 → handler → to_response」整体包成
+      ``terminal``，请求依序穿过拦截链（[设计 §4.4.1]：挂在 endpoint 内，
+      而不是 ASGI 中间件层——此时已持有 RouteRecord）。链对象常驻、``run``
+      每次取排序快照，因此已缓存的 ``record.endpoint`` 无需重建。
     """
     from .responses import to_response
 
@@ -245,7 +256,8 @@ def build_endpoint(record: RouteRecord) -> Callable[[Request], Awaitable[Respons
     params = {name: name for name in record.params}
     converters: dict[str, Callable[[str], object]] = dict(record.converters or {})
 
-    async def endpoint(request: Request) -> Response:
+    async def terminal(rc: RequestContext) -> Response:
+        request = rc.request
         kwargs: dict[str, object] = {}
         for name, arg in params.items():
             raw = request.path_params[name]
@@ -266,6 +278,17 @@ def build_endpoint(record: RouteRecord) -> Callable[[Request], Awaitable[Respons
             result = await result
         return to_response(result, record)
 
+    async def endpoint(request: Request) -> Response:
+        rc = RequestContext(
+            request=request,
+            route=record,
+            identity=getattr(request.state, "auth", None),
+            started=time.perf_counter(),
+        )
+        if chain is None:
+            return await terminal(rc)
+        return await chain.run(rc, terminal)
+
     endpoint = functools.wraps(handler)(endpoint)
     return endpoint
 
@@ -283,6 +306,8 @@ class RouteRegistry:
         self.routes: dict[str, list[RouteRecord]] = {}
         #: 静态目录记录（静态挂载不参与方法冲突判断）
         self.statics: dict[str, RouteRecord] = {}
+        #: 拦截链（可选）：给出时 ``build_endpoint`` 把 handler 包进链（§4.4.1）
+        self.chain: HookChain[RequestContext, Response] | None = None
         #: 当前绑定的 Starlette 应用；``None`` 表示服务器尚未启动（只登记不挂载）
         self._app: Starlette | None = None
 
@@ -318,7 +343,7 @@ class RouteRegistry:
     def _validate(self, record: RouteRecord) -> None:
         """确保端点已构造（handler 可能在应用就绪后才补上）。"""
         if record.endpoint is None and record.handler is not None:
-            record.endpoint = build_endpoint(record)
+            record.endpoint = build_endpoint(record, self.chain)
 
     def _mount(self, record: RouteRecord) -> None:
         """把一条记录挂到 Starlette 路由表（幂等）。"""
