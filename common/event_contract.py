@@ -87,6 +87,31 @@ for _spec in (
         "parallel",
         "鉴权拒绝广播（载荷 {path, method, reason, remote}，审计 / 统计订阅）",
     ),
+    EventSpec(
+        "flow/run-started",
+        "parallel",
+        "run 开始执行（载荷 {run_id, flow_id, flow_version, initiator}）",
+    ),
+    EventSpec(
+        "flow/node-finished",
+        "parallel",
+        "一个节点（含全部尝试）结束（载荷见设计附录 E.1）",
+    ),
+    EventSpec(
+        "flow/run-finished",
+        "parallel",
+        "run 到达终态（载荷 {run_id, flow_id, flow_version, state, duration_ms, warnings, initiator}）",
+    ),
+    EventSpec(
+        "flow/run-interrupted",
+        "parallel",
+        "恢复时发现无法安全续跑（Phase 3；载荷 {run_id, node_id, reason}）",
+    ),
+    EventSpec(
+        "flow/steps-changed",
+        "parallel",
+        "步骤注册 / 注销（载荷 {stage, step_id, action, provider}）",
+    ),
 ):
     declare_event(_spec.name, _spec.mode, _spec.summary)
 

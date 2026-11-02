@@ -40,6 +40,7 @@ from common import cordis_utils
 from common.plugins.appconfig import AppConfig, AppConfigPlugin
 from common.plugins.comm import CommService
 from common.plugins.db import DbPlugin
+from common.plugins.flow import FlowService
 from common.plugins.log import LogPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager import source_plugin_id
@@ -162,6 +163,7 @@ async def _assemble(config_file: Path, profile: NodeProfile) -> Context:
     await ctx.plugin(LogPlugin)
     await ctx.plugin(WebApiPlugin)
     await ctx.plugin(CommService)  # webapi 后：挂 /api/comm/ingest
+    await ctx.plugin(FlowService)  # 流程引擎（编排只在主节点；从节点是 worker）
     await ctx.plugin(PluginManagerPlugin)
     for source in profile.plugin_sources:
         try:
