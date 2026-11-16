@@ -49,8 +49,23 @@ class MyPlugin:
 （自家核心 `ctx.log` + UI 宿主）**注入式挂载**——两者就位 cordis 才装载页面
 服务并注册「日志」页（核心没就位页面不出现）；核心 / webui 换装、重载时随
 依赖纪元自动重挂（无守护轮询），从节点 / 无头没有 webui 时安静 PENDING、
-日志核心不受影响。查询 API（`/api/logs*`）与远端入库仍在核心插件内延迟
-挂载（webapi / comm 就绪即挂）。
+日志核心不受影响。
+
+## 分批装载（附属服务）
+
+Web / comm 侧全部拆**附属服务**分批装载：核心 `ctx.log`（最早一批，只依赖
+`appconfig`）不沾晚到服务、**无守护轮询**——依赖就位 cordis 自动装载、
+换装 / 重载随依赖纪元自动重挂：
+
+| 服务 | 依赖集 | 职责 |
+| --- | --- | --- |
+| `LogApiService`（`ctx.log_api`） | `inject = ["log", "webapi"]` | 查询 API `/api/logs*` + 健康指标 |
+| `LogIngestService`（`ctx.log_ingest`） | `inject = ["log", "comm"]` | 远端入库 `log.batch` |
+| `LogUiService`（`ctx.log_ui`） | `inject = ["log", "webui"]` | 「日志」查看页 |
+
+出口热路径对 comm 用 `ctx.get("comm")` 运行期动态取用（缺席仅本地入库、
+就绪自动上报）。注意 optional 注入是**绑定期快照**，晚到服务经
+`ctx.<name>` 解析恒为 None，不可用作运行期取用。
 
 ## 路线图（详见日志方案）
 

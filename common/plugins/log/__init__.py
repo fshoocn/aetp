@@ -13,13 +13,17 @@
 
 from __future__ import annotations
 
+from .api_service import LogApiService
 from .config import LogConfig
+from .ingest_service import LogIngestService
 from .plugin import LogPlugin
 from .store import LogStore
 from .ui_service import LogUiService
 
 __all__: list[str] = [
+    "LogApiService",
     "LogConfig",
+    "LogIngestService",
     "LogPlugin",
     "LogStore",
     "LogUiService",

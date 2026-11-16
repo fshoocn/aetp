@@ -23,13 +23,14 @@ from typing import Any, ClassVar, cast
 
 from cordis_port import Context, Fiber, Service
 from cordis_port.logger import Exporter, Logger, Message
-from starlette.requests import Request
 
 from common.contracts import CommMeta
 from common.log_op import current_operation
 
+from .api_service import LogApiService
 from .config import LogConfig
 from .export import LEVELS, RotatingFile, call_site, console_exporter, file_exporter
+from .ingest_service import LogIngestService
 from .store import LogEntry, LogStore
 from .ui_service import LogUiService
 
@@ -64,14 +65,15 @@ class LogPlugin(Service[LogConfig]):
     #: 服务名（即 ``ctx.log``）
     provide: str | None = "log"
     #: 硬声明只有 appconfig（读 ``[log]`` 节）：本插件要足够早装载以捕获装配期
-    #: 日志，硬声明 comm / webapi 会要么死锁顺序、要么丢启动日志。comm 用
-    #: **optional** 依赖（cordis-port 0.1.8 语义：缺席不阻塞加载、访问判空、
-    #: 就位不重载），出口热路径据此判空上报；webapi 延迟挂载（见
-    #: :meth:`_late_setup`），webui 圈在独立页面服务 LogUiService 里
-    inject: ClassVar[dict[str, list[str]]] = {
-        "required": ["appconfig"],
-        "optional": ["comm"],
-    }
+    #: 日志，硬声明 comm / webapi 会要么死锁顺序、要么丢启动日志。Web / comm
+    #: 侧全部拆**附属服务**分批装载，核心不沾晚到服务、也无需轮询等待：
+    #: 查询 API（LogApiService，``inject = ["log", "webapi"]``）、远端入库
+    #: （LogIngestService，``inject = ["log", "comm"]``）、查看页（LogUiService，
+    #: ``inject = ["log", "webui"]``）——依赖就位自动装载、换装随依赖纪元重挂。
+    #: 出口热路径对 comm 用 ``ctx.get("comm")`` 运行期动态取用（缺席仅本地
+    #: 入库）；optional 注入是绑定期快照，晚到服务解析恒为 None，不可用作
+    #: 运行期取用。
+    inject: ClassVar[list[str]] = ["appconfig"]
     Config: type[LogConfig] = LogConfig
 
     def __init__(self, ctx: Context, config: LogConfig | None = None) -> None:
@@ -81,9 +83,9 @@ class LogPlugin(Service[LogConfig]):
         self._store: LogStore | None = None
         self._trim_task: asyncio.Task[None] | None = None
         self._flush_task: asyncio.Task[None] | None = None
-        self._late_task: asyncio.Task[None] | None = None
+        self._api_fiber: Fiber | None = None
+        self._ingest_fiber: Fiber | None = None
         self._ui_fiber: Fiber | None = None
-        self._dispose_health: object = None
         #: 入库缓冲（出口同步、入库异步）：(节点, 条目) 待批量写 aetp.db
         self._pending: list[tuple[str, dict[str, object]]] = []
         #: 落库串行锁：查询路径的 read-your-writes 等在途批次写完
@@ -133,31 +135,26 @@ class LogPlugin(Service[LogConfig]):
         if self.config.report:
             self.ctx.logger.exporter(self._sink_exporter(report_level))
 
-        # 查询 API / 远端入库：依赖的 webapi / comm 晚于本插件就绪（预装阶段
-        # 才装），延迟挂载（无头部署自然放弃）
-        self._late_task = asyncio.create_task(self._late_setup())
-        self._late_task.add_done_callback(self._log_task_exit)
-        # 查看页独立成服务：inject = ["log", "webui"]（自家核心 + webui），
-        # 核心与 webui 就位才装载、换装 / 重载随依赖纪元自动重挂（无守护轮询）；
-        # fiber 挂在本插件生命周期下，卸载 / 热更自动带走。不能 await——
-        # 依赖缺席（从节点没有 webui）会一直挂起。
+        # Web / comm / UI 侧拆附属服务分批装载：inject 依赖集就绪即装载，
+        # 无守护轮询。fiber 挂在本插件生命周期下，卸载 / 热更自动带走。
+        # 不能 await——webapi / comm / webui 晚于本插件（预装阶段才装），
+        # fiber 会停在 PENDING 等依赖，await 会把装配顺序卡死。
+        self._api_fiber = self.ctx.plugin(LogApiService)
+        self._ingest_fiber = self.ctx.plugin(LogIngestService)
         self._ui_fiber = self.ctx.plugin(LogUiService)
         self.ctx.logger.info(
             "日志插件已加载：%s", "aetp.db:aetp_log_entries" if self._store else "未启用查询库"
         )
 
         async def cleanup() -> None:
-            dispose = self._dispose_health
-            if callable(dispose):
-                dispose()
-            tasks = [t for t in (self._trim_task, self._flush_task, self._late_task) if t is not None]
+            tasks = [t for t in (self._trim_task, self._flush_task) if t is not None]
             for task in tasks:
                 task.cancel()
             # 取消必须**等落地**：后台任务要在 db 排空连接池前收干净，
             # 否则任务在关停后归还连接，Windows 上文件句柄不释放
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-            await self._flush_pending()  # 停机前把缓冲尽量落库
+            await self.flush_pending()  # 停机前把缓冲尽量落库
 
         return cleanup
 
@@ -169,27 +166,8 @@ class LogPlugin(Service[LogConfig]):
         if error is not None:
             self.ctx.logger.error("日志插件后台任务意外退出：%s", error)
 
-    async def _late_setup(self) -> None:
-        """等 webapi / comm 就绪后挂查询 API、远端入库与健康指标。
-
-        本插件早装（捕获装配期日志），这几个服务晚就绪（预装阶段）——
-        轮询等待，就绪即挂；无头部署 30 秒后自然放弃。查看页不在这里：
-        它是独立服务 :class:`~common.plugins.log.ui_service.LogUiService`
-        （``inject = ["log", "webui"]`` 注入式挂载）。
-        """
-        for _attempt in range(60):
-            api = self.ctx.get("webapi")
-            comm = self.ctx.comm  # optional 依赖：缺席访问为 None
-            if api is not None and comm is not None:
-                api.get("/api/logs", self._logs_handler, kind="api", name="log.query")
-                api.get("/api/logs/nodes", self._nodes_handler, kind="api", name="log.nodes")
-                api.delete("/api/logs", self._delete_logs, kind="api", name="log.delete")
-                self._dispose_health = api.add_health_provider("log", self._metrics)
-                comm.on("log.batch", self._on_log_batch)
-                break
-            await asyncio.sleep(0.5)
-
-    def _metrics(self) -> dict[str, object]:
+    def metrics(self) -> dict[str, object]:
+        """健康指标（``/healthz`` 的 ``log`` 提供方快照）。"""
         return {
             "store": "aetp_log_entries" if self._store else "",
             "clamped": self._clamped,
@@ -223,8 +201,8 @@ class LogPlugin(Service[LogConfig]):
             }
             if self._store is not None:
                 self._enqueue(self._node_name(), entry)
-            # comm（optional 依赖）未就绪时仅本地入库，就绪后自动开始上报
-            comm = self.ctx.comm
+            # comm 未就绪时仅本地入库，就绪后自动开始上报（ctx.get 动态解析）
+            comm = self.ctx.get("comm")
             if comm is not None:
                 comm.report("log.batch", {"logs": [entry]})
 
@@ -241,12 +219,12 @@ class LogPlugin(Service[LogConfig]):
     async def _flush_loop(self) -> None:
         while True:
             await asyncio.sleep(0.2)
-            await self._flush_pending()
+            await self.flush_pending()
 
-    async def _flush_pending(self) -> None:
+    async def flush_pending(self) -> None:
         """按节点分组批量落库；失败计数降级（绝不炸业务）。
 
-        全程持锁：查询路径的 ``_flush_pending``（read-your-writes）必须等
+        全程持锁：查询路径的 ``flush_pending``（read-your-writes）必须等
         在途批次写完才算落库——否则后来者看到空缓冲即返回，读到的却是
         少了在途批次的旧快照（CI 慢机器上实测踩中）。
         """
@@ -265,7 +243,7 @@ class LogPlugin(Service[LogConfig]):
                 except Exception as exc:  # noqa: BLE001 —— 入库故障绝不阻断日志出口
                     self._note_store_failure(exc)
 
-    def _on_log_batch(self, payload: Any, meta: CommMeta) -> None:
+    def ingest_remote(self, payload: Any, meta: CommMeta) -> None:
         """远端日志入本地库（汇聚点角色）；坏载荷跳过并告警。
 
         自环回流（发送方即本节点）跳过：本地入库已由出口直接完成，避免双写。
@@ -292,91 +270,75 @@ class LogPlugin(Service[LogConfig]):
                     max_rows=self.config.retain_max_rows,
                 )
 
-    # ----------------------------------------------------------- 查询 API
-    async def _logs_handler(self, request: Request) -> dict[str, object]:
-        """``GET /api/logs``：游标查询（新 → 旧；``after_id`` 为尾随方向）。"""
-        await self._flush_pending()  # read-your-writes：查询前先落库
+    # ----------------------------------------------------------- 查询门面
+    async def query_logs(
+        self,
+        *,
+        node: str | None = None,
+        level: int | None = None,
+        q: str | None = None,
+        after_id: int | None = None,
+        before_id: int | None = None,
+        around_id: int | None = None,
+        from_ts: float | None = None,
+        to_ts: float | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, object]]:
+        """游标查询（新 → 旧；语义同 :meth:`LogStore.query`）；read-your-writes。"""
+        await self.flush_pending()  # 查询前先落库
         if self._store is None:
-            return {"logs": [], "count": 0}
-        params = request.query_params
-
-        def as_int(raw: str | None) -> int | None:
-            return int(raw) if raw and raw.isdigit() else None
-
-        def as_float(raw: str | None) -> float | None:
-            try:
-                return float(raw) if raw else None
-            except ValueError:
-                return None
-
-        logs = await self._store.query(
-            node=params.get("node") or None,
-            level=as_int(params.get("level")),
-            q=params.get("q") or None,
-            after_id=as_int(params.get("after_id")),
-            before_id=as_int(params.get("before_id")),
-            around_id=as_int(params.get("around_id")),
-            from_ts=as_float(params.get("from_ts")),
-            to_ts=as_float(params.get("to_ts")),
-            limit=int(params.get("limit") or 200),
+            return []
+        return await self._store.query(
+            node=node,
+            level=level,
+            q=q,
+            after_id=after_id,
+            before_id=before_id,
+            around_id=around_id,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            limit=limit,
         )
-        return {"logs": logs, "count": len(logs)}
 
-    async def _nodes_handler(self, _request: Request) -> dict[str, object]:
-        """``GET /api/logs/nodes``：全部已知节点名（过滤下拉）。
+    async def known_nodes(self) -> list[str]:
+        """全部已知节点名（过滤下拉）。
 
         合并两个来源：日志库出现过的节点 + comm 通道已接入的节点
         （汇聚点可见所有节点，含尚未产生日志的）——下拉列**所有节点名称**，
         不受"是否有日志"限制。
         """
-        await self._flush_pending()  # read-your-writes
+        await self.flush_pending()  # read-your-writes
         names: set[str] = set()
         if self._store is not None:
-            try:
-                names.update(await self._store.nodes())
-            except Exception as exc:  # noqa: BLE001 —— 查询故障降级为空清单
-                return cast(dict[str, object], self.ctx.get("webapi").json(
-                    {"error": f"查询库不可用：{type(exc).__name__}"}, status_code=503
-                ))
-        comm = self.ctx.comm  # optional 依赖：缺席访问为 None
+            names.update(await self._store.nodes())
+        comm = self.ctx.get("comm")  # ctx.get 动态解析（ctx.comm 是绑定期快照，晚到恒 None）
         if comm is not None:
             try:
                 names.update(comm.nodes())
             except (AttributeError, TypeError):
                 pass  # 老服务无 nodes() 时静默降级为日志库来源
-        return {"nodes": sorted(names)}
+        return sorted(names)
 
-    async def _delete_logs(self, request: Request) -> dict[str, object]:
-        """``DELETE /api/logs``：按当前筛选删除（审计留痕，防灭迹）。"""
-        await self._flush_pending()  # read-your-writes：删的就是当前全部
+    async def delete_logs(
+        self,
+        *,
+        node: str | None = None,
+        level: int | None = None,
+        q: str | None = None,
+        from_ts: float | None = None,
+        to_ts: float | None = None,
+    ) -> int:
+        """按当前筛选删除（审计留痕，防灭迹）；返回删除行数。"""
+        await self.flush_pending()  # read-your-writes：删的就是当前全部
         if self._store is None:
-            return {"deleted": 0}
-        params = request.query_params
-
-        def as_int(raw: str | None) -> int | None:
-            return int(raw) if raw and raw.isdigit() else None
-
-        def as_float(raw: str | None) -> float | None:
-            try:
-                return float(raw) if raw else None
-            except ValueError:
-                return None
-
-        node = params.get("node") or None
-        level = as_int(params.get("level"))
-        q = params.get("q") or None
-        try:
-            deleted = await self._store.delete(
-                node=node,
-                level=level,
-                q=q,
-                from_ts=as_float(params.get("from_ts")),
-                to_ts=as_float(params.get("to_ts")),
-            )
-        except Exception as exc:  # noqa: BLE001 —— 查询故障降级为错误响应
-            return cast(dict[str, object], self.ctx.get("webapi").json(
-                {"error": f"删除失败：{type(exc).__name__}"}, status_code=503
-            ))
+            return 0
+        deleted = await self._store.delete(
+            node=node,
+            level=level,
+            q=q,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
         # 删除操作本身留审计（条件 + 条数）：日志可删，删除行为不隐匿
         self.ctx.logger.info(
             "审计：删除日志 %d 条（node=%s level=%s q=%s）",
@@ -385,7 +347,7 @@ class LogPlugin(Service[LogConfig]):
             level if level is not None else "*",
             q or "*",
         )
-        return {"deleted": deleted}
+        return deleted
 
 
 __all__: list[str] = ["LogPlugin"]

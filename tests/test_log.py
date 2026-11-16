@@ -21,7 +21,7 @@ from common.log_op import current_operation, log_operation
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.comm import CommService
 from common.plugins.db import DbPlugin
-from common.plugins.log import LogPlugin, LogStore, LogUiService
+from common.plugins.log import LogApiService, LogIngestService, LogPlugin, LogStore, LogUiService
 from common.plugins.log.export import LEVELS, RotatingFile
 from common.plugins.log.store import LogEntry
 from common.plugins.webapi import WebApiPlugin
@@ -119,11 +119,49 @@ class LogPluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(context.get("log_ui"))
         await unload_all(context)
 
-    async def test_comm_is_optional_dependency(self) -> None:
-        """comm 是 optional 依赖（cordis-port 0.1.8 语义）：缺席不阻塞、访问判空。"""
-        self.assertEqual(
-            LogPlugin.inject, {"required": ["appconfig"], "optional": ["comm"]}
+    async def test_batched_loading_without_polling(self) -> None:
+        """分批装载回归（生产装配序）：核心先于 webapi / comm 装载，附属服务
+        随依赖就位自动装载并挂路由——无守护轮询、无路由漏挂。"""
+        config_path = self.root / "config.ini"
+        config_path.write_text(
+            "[node]\nkind = master\n"
+            "\n[web]\n"
+            f"port = {self.port}\n"
+            "auth_token = test-token\n"
+            "\n[db]\n"
+            f"url = sqlite+aiosqlite:///{(self.root / 'aetp.db').as_posix()}\n"
+            "\n[comm]\n"
+            "batch_interval = 0.05\n"
+            "\n[log]\nconsole = false\nfile =\nstore = true\n",
+            encoding="utf-8",
         )
+        self.context = Context()
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(DbPlugin)
+        await self.context.plugin(LogPlugin)  # 先于 webapi / comm（生产装配序）
+        self.assertIsNone(self.context.get("log_api"))  # webapi 缺席 → PENDING
+        self.assertIsNone(self.context.get("log_ingest"))  # comm 缺席 → PENDING
+        await self.context.plugin(WebApiPlugin)
+        await self.context.plugin(CommService)
+        api = None
+        ingest = None
+        for _attempt in range(40):  # fiber 随依赖就绪异步激活
+            api = self.context.get("log_api")
+            ingest = self.context.get("log_ingest")
+            if api is not None and ingest is not None:
+                break
+            await asyncio.sleep(0.05)
+        self.assertIsInstance(api, LogApiService)
+        self.assertIsInstance(ingest, LogIngestService)
+        names = {record.name for record in self.context.get("webapi").routes()}
+        self.assertTrue({"log.query", "log.nodes", "log.delete"} <= names)
+
+    async def test_comm_is_optional_dependency(self) -> None:
+        """comm 可缺席：核心不声明 comm（inject 只有 appconfig），远端入库拆
+        在 LogIngestService（inject = ["log", "comm"]）——comm 缺席时该 fiber
+        安静 PENDING，日志核心与查询 API 不受影响。"""
+        self.assertEqual(LogPlugin.inject, ["appconfig"])
+        self.assertEqual(LogIngestService.inject, ["log", "comm"])
 
     async def test_file_exporter_writes_formatted_line(self) -> None:
         """默认落盘到节点目录 data/plugins/log/aetp.log，带时间戳/级别/名称。"""
