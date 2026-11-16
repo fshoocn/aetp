@@ -44,7 +44,7 @@ def log_operation(op_id: str | None = None) -> _LogOperation:
     """管理操作作用域：作用域内所有日志自动带 op 标记。
 
     参数:
-        op_id: 指定 / 透传操作 id（如 flow 的 ``run-xxxx``，跨节点同源，
+        op_id: 指定 / 透传操作 id（如 ``run-xxxx``，跨节点同源，
             查看页 ``q=run-xxxx`` 一键聚齐）；缺省自动生成 ``op-xxxxxx``。
     """
     return _LogOperation(op_id)
