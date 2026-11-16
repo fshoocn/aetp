@@ -17,60 +17,31 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import ClassVar, cast
 
-from cordis_port import Context, Service
+from cordis_port import Context, Fiber, Service
 from sqlalchemy.exc import SQLAlchemyError
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 from common.db_errors import DbError
 
 from .plugin_manager import (
-    MAX_ARCHIVE_SIZE,
     PluginManager,
     PluginManagerError,
     PublicPluginRecord,
     source_plugin_id,
 )
-
-#: 配置类接口的请求体上限（与 plugin.json 同量级；其余入口：ZIP 32 MiB、心跳 1 MiB）
-MAX_CONFIG_BODY_BYTES: int = 64 * 1024
-#: 超限请求的引流额度：拒绝前最多再读这么多字节丢弃，防无限长流挂死
-_DRAIN_SLACK: int = 256 * 1024
-
-
-async def _read_body_capped(request: Request, *, limit: int, message: str) -> bytes:
-    """读请求体（超限抛 413）。
-
-    超限不立刻中断读取，而是继续**引流丢弃**（最多再读 :data:`_DRAIN_SLACK`
-    字节）再拒绝：请求体读完后连接才能优雅收尾，否则服务端带未读数据关
-    连接触发 RST，客户端连拒绝响应都读不到。
-    """
-    chunks: list[bytes] = []
-    total = 0
-    overflow = False
-    async for chunk in request.stream():
-        total += len(chunk)
-        if overflow or total > limit:
-            overflow = True
-            chunks.clear()
-            if total > limit + _DRAIN_SLACK:
-                break  # 引流额度用完：不再陪恶意长流耗着
-            continue
-        chunks.append(chunk)
-    if overflow:
-        raise PluginManagerError(message, 413)
-    return b"".join(chunks)
+from .plugin_manager_api_service import MAX_CONFIG_BODY_BYTES as MAX_CONFIG_BODY_BYTES
+from .plugin_manager_api_service import PluginManagerApiService
 
 
 class PluginManagerPlugin(Service[None]):
     """插件管理插件（同时是 ``ctx.plugins`` 服务的载体）。
 
-    依赖 ``appconfig`` 与 ``webapi``，并从 ``[node].install_root`` 读取安装目录。
+    依赖 ``appconfig``，并从 ``[node].install_root`` 读取安装目录；管理
+    HTTP 层拆给 :class:`~common.plugins.webapi.plugin_manager_api_service.PluginManagerApiService`
+    （``inject = ["plugins", "webapi"]``，同包），核心不沾 webapi。
     """
 
     name: str = "plugin-manager"
@@ -78,7 +49,7 @@ class PluginManagerPlugin(Service[None]):
     display_name: ClassVar[str] = "插件管理"
     version: ClassVar[str] = "1.0.0"
     provide: str | None = "plugins"
-    inject: ClassVar[list[str]] = ["appconfig", "webapi"]
+    inject: ClassVar[list[str]] = ["appconfig"]
 
     def __init__(self, ctx: Context, _config: object | None = None) -> None:
         if _config is not None:
@@ -100,6 +71,8 @@ class PluginManagerPlugin(Service[None]):
             base_dir,
         )
         self.manager: PluginManager | None = None
+        #: 管理 API 服务 fiber（PluginManagerApiService）：随本插件 fiber 自动清理
+        self._api_fiber: Fiber | None = None
         #: ``db/schema-changed`` 触发的消费方复检任务（强引用防 GC）
         self._recheck_tasks: set[asyncio.Task[None]] = set()
 
@@ -131,7 +104,10 @@ class PluginManagerPlugin(Service[None]):
             base_dir=self._base_dir,
         )
         await self.manager.start()
-        self._register_routes()
+        # 管理 HTTP 层拆给 PluginManagerApiService（inject = ["plugins",
+        # "webapi"]）：依赖就位自动挂载、换装随依赖纪元自动重挂；fiber 挂在
+        # 本插件生命周期下。不能 await——webapi 缺席时 fiber 会停在 PENDING。
+        self._api_fiber = self.ctx.plugin(PluginManagerApiService)
         # 「恢复已启用」不再随插件初始化执行：预装链路（ensure_installed）
         # 装配完后由 node_runtime 显式调用 restore_enabled，避免同一插件
         # 先恢复启用、再被覆盖安装重装一遍（启动期加载两次）
@@ -261,109 +237,6 @@ class PluginManagerPlugin(Service[None]):
         return await asyncio.to_thread(
             self._require_manager().package_source, source_dir
         )
-
-    # -- HTTP 层（面向操作者）-------------------------------------------------
-    def _register_routes(self) -> None:
-        ctx = self.ctx
-
-        def manager() -> PluginManager:
-            if self.manager is None:
-                raise RuntimeError("插件管理器尚未初始化")
-            return self.manager
-
-        def error_response(error: PluginManagerError) -> JSONResponse:
-            payload: dict[str, object] = {"error": str(error)}
-            if error.details:
-                payload["details"] = error.details
-            return ctx.webapi.json(payload, status_code=error.status_code)
-
-        @ctx.webapi.get("/api/plugins", kind="api", name="plugins.list")
-        async def list_plugins(_: Request) -> dict[str, object] | JSONResponse:
-            try:
-                items = await manager().list_plugins()
-                return {"plugins": items}
-            except PluginManagerError as error:
-                return error_response(error)
-
-        @ctx.webapi.post("/api/plugins/upload", kind="api", name="plugins.upload")
-        async def upload_plugin(_request: Request) -> dict[str, object] | JSONResponse:
-            try:
-                archive = await _read_body_capped(
-                    _request,
-                    limit=MAX_ARCHIVE_SIZE,
-                    message="插件 ZIP 最大允许 32 MiB",
-                )
-                # replace=1 是操作者在确认弹窗后给出的显式替换确认
-                replace = _request.query_params.get("replace", "") in {"1", "true", "yes"}
-                item = await manager().install_archive(archive, replace=replace)
-                # 新装 201 Created；替换（含幂等重放）200 OK
-                return ctx.webapi.json(
-                    {"plugin": item}, status_code=201 if not replace else 200
-                )
-            except PluginManagerError as error:
-                return error_response(error)
-
-        @ctx.webapi.post("/api/plugins/{plugin_id}/enable", kind="api", name="plugins.enable")
-        async def enable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
-            try:
-                item = await manager().enable(plugin_id)
-                return {"plugin": item}
-            except PluginManagerError as error:
-                return error_response(error)
-
-        @ctx.webapi.post("/api/plugins/{plugin_id}/disable", kind="api", name="plugins.disable")
-        async def disable_plugin(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
-            try:
-                item = await manager().disable(plugin_id)
-                return {"plugin": item}
-            except PluginManagerError as error:
-                return error_response(error)
-
-        @ctx.webapi.delete("/api/plugins/{plugin_id}", kind="api", name="plugins.uninstall")
-        async def uninstall_plugin(request: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
-            try:
-                # keep_data=1 保留数据表；drop=1 强制删除被依赖插件的数据
-                keep_data = request.query_params.get("keep_data", "") in {"1", "true", "yes"}
-                drop = request.query_params.get("drop", "") in {"1", "true", "yes"}
-                await manager().uninstall(plugin_id, keep_data=keep_data, drop=drop)
-                return {"ok": True, "id": plugin_id}
-            except PluginManagerError as error:
-                return error_response(error)
-
-        @ctx.webapi.patch(
-            "/api/plugins/{plugin_id}/config", kind="api", name="plugins.update_config"
-        )
-        async def update_plugin_config(
-            _request: Request, plugin_id: str
-        ) -> dict[str, object] | JSONResponse:
-            """部分更新插件配置（请求体 JSON 对象 = 要改的键值，其余键保留）。"""
-            try:
-                raw_body = await _read_body_capped(
-                    _request,
-                    limit=MAX_CONFIG_BODY_BYTES,
-                    message="配置请求体最大允许 64 KiB",
-                )
-                try:
-                    body: object = json.loads(raw_body)
-                except (ValueError, RecursionError) as error:
-                    raise PluginManagerError(
-                        f"请求体不是合法 JSON：{error}", 400
-                    ) from error
-                if not isinstance(body, dict):
-                    raise PluginManagerError("请求体必须是 JSON 对象", 400)
-                item = await manager().update_config(plugin_id, cast(dict[str, object], body))
-                return {"plugin": item}
-            except PluginManagerError as error:
-                return error_response(error)
-
-        @ctx.webapi.get("/api/plugins/{plugin_id}/readme", kind="api", name="plugins.readme")
-        async def plugin_readme(_: Request, plugin_id: str) -> dict[str, object] | JSONResponse:
-            """插件描述文件（Markdown 文本），供管理页弹窗展示。"""
-            try:
-                content = await manager().plugin_readme(plugin_id)
-                return {"id": plugin_id, "content": content}
-            except PluginManagerError as error:
-                return error_response(error)
 
 
 __all__: list[str] = ["PluginManagerPlugin"]
