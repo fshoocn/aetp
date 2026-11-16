@@ -192,8 +192,11 @@ class ParallelEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("async", {"n": 1}), seen)
 
     async def test_returns_empty_list_on_success(self) -> None:
+        def _ignore(_payload: object) -> None:
+            pass
+
         ctx = Context()
-        ctx.on("test/ok", lambda _payload: None)
+        ctx.on("test/ok", _ignore)
         self.assertEqual(await parallel_event(ctx, "test/ok", {}), [])
 
 

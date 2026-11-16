@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from collections.abc import Callable
+from typing import cast
 
 from common.hook_chain import HookChain, OnError
 
@@ -86,7 +87,7 @@ class HookChainSemanticsTests(unittest.IsolatedAsyncioTestCase):
         chain: HookChain[str, str] = _chain([])
 
         async def bad(ctx: str, nxt: object) -> str:
-            first = await nxt()  # type: ignore[operator]
+            first = cast(str, await nxt())  # type: ignore[operator]
             await nxt()  # type: ignore[operator]
             return first
 
@@ -236,7 +237,7 @@ class HookChainLifecycleTests(unittest.IsolatedAsyncioTestCase):
         entry = chain.stats()[0]
         self.assertEqual(entry["calls"], 1)
         self.assertEqual(entry["errors"], 0)
-        self.assertLess(entry["self_ms"], 30.0)  # 不含下游 50ms
+        self.assertLess(cast(float, entry["self_ms"]), 30.0)  # 不含下游 50ms
 
     async def test_describe_and_stats_sorted(self) -> None:
         chain: HookChain[str, str] = _chain([])

@@ -209,7 +209,11 @@ class PipelineIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_auth_denied_dispatches_event(self) -> None:
         seen: list[dict[str, object]] = []
-        self.context.on("webapi/auth-denied", lambda payload: seen.append(payload))
+
+        def _collect(payload: dict[str, object]) -> None:
+            seen.append(payload)
+
+        self.context.on("webapi/auth-denied", _collect)
         self._ping()
         status, _body = await arequest(self.base_url, "/api/ping", token=None)
         self.assertEqual(status, 401)

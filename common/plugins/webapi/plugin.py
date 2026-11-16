@@ -42,7 +42,7 @@ UI 是可拆卸的上层：SPA 静态资源、页面回退与 ``register_ui`` �
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from cordis_port import Context
 from starlette.requests import Request
@@ -172,8 +172,8 @@ class WebApiPlugin:
             rows = service.pipeline.stats()
             return {
                 "hooks": len(rows),
-                "errors": sum(int(row["errors"]) for row in rows),
-                "max_self_ms": max((float(row["self_ms"]) for row in rows), default=0.0),
+                "errors": sum(cast(int, row["errors"]) for row in rows),
+                "max_self_ms": max((cast(float, row["self_ms"]) for row in rows), default=0.0),
             }
 
         service.add_health_provider("pipeline", pipeline_metrics)

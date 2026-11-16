@@ -461,8 +461,8 @@ class HeartbeatServerPluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listed[0]["status"], "online")
         picked = nodes.select(kinds=["flow.step"], labels={"stage": "report"})
         self.assertEqual(len(picked), 1)
-        self.assertEqual(picked[0]["node_id"], "从节点-1")
-        self.assertEqual(picked[0]["id"], "report/html")
+        self.assertEqual(picked[0].get("node_id"), "从节点-1")
+        self.assertEqual(picked[0].get("id"), "report/html")
         self.assertEqual(nodes.select(kinds=["nope"]), [])
 
     async def test_ui_page_registered_and_unload_cleanup(self) -> None:
