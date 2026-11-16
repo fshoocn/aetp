@@ -248,26 +248,31 @@ master_plugins/heartbeat/
     __init__.py
     config.py            # HeartbeatServerConfig（[heartbeat] 节）
     registry.py          # NodeRegistry：NodeRecord 存储 + 状态扫描 + 事件
-    plugin.py            # HeartbeatServerPlugin：装配 API 路由 + sweeper + UI
+    plugin.py            # HeartbeatServerPlugin：核心（comm 收件 + sweeper + 门面）
+    api_service.py       # HeartbeatApiService：管理 API（inject = [核心, webapi]）
+    ui_service.py        # HeartbeatUiService：「从模块管理」页（inject = [nodes, webui]）
     ui/
         NodesPage.vue    # 从模块管理页面
 ```
 
-插件类骨架（`inject` 注入的是**服务**：`appconfig` / `webapi` / `webui` 由
-同名插件提供，`node_kind` / `node_name` 是 `common/node_runtime.py` 装配时
-`ctx.provide(...)` 注册的值服务，**没有对应插件**）：
+插件类骨架（`inject` 注入的是**服务**：`appconfig` / `comm` 由同名插件提供，
+`node_kind` / `node_name` 是 `common/node_runtime.py` 装配时
+`ctx.provide(...)` 注册的值服务，**没有对应插件**。核心不依赖
+webapi / webui——管理 API 与管理页拆附属服务分批装载，依赖缺席 / 晚到
+不阻塞心跳与 `ctx.nodes`）：
 
 ```python
-class HeartbeatServerPlugin:
+class HeartbeatServerPlugin(Service[HeartbeatServerConfig]):
     name = "heartbeat-server"
-    inject = ["appconfig", "webapi", "webui", "node_kind", "node_name"]
+    provide = "heartbeat_server"
+    inject = ["appconfig", "comm", "node_kind", "node_name"]
 
     def __init__(self, ctx, config=None):
         ...
     async def init(self):
-        # 1. POST /api/heartbeat + 管理 API 注册
-        # 2. 启动 sweeper 后台任务
-        # 3. register_ui 登记 NodesPage.vue
+        # 1. provide("nodes", ...) + comm.on("heartbeat.beat")
+        # 2. 附属服务 fiber：HeartbeatApiService / HeartbeatUiService（不 await）
+        # 3. 启动 sweeper 后台任务
         return self._stop   # 清理函数：取消 sweeper
 ```
 

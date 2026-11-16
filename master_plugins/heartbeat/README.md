@@ -20,6 +20,17 @@
 - **管理页**：webui 页面「从模块管理」（`ui/NodesPage.vue`）——节点列表 +
   自动刷新 + 打开从模块页面 / 移除 + 状态历史。
 
+## 服务拆分
+
+核心 `HeartbeatServerPlugin`（`provide = "heartbeat_server"`）只依赖
+`appconfig` / `comm` / `node_*`；Web 侧拆**附属服务**分批装载（依赖就位
+自动装载、换装随依赖纪元自动重挂，核心永不被 webapi / webui 卡住）：
+
+| 服务 | 依赖集 | 职责 |
+| --- | --- | --- |
+| `HeartbeatApiService` | `inject = ["heartbeat_server", "webapi"]` | 管理 API `/api/heartbeat/*` + 健康指标 |
+| `HeartbeatUiService` | `inject = ["nodes", "webui"]` | 「从模块管理」页 |
+
 ## 能力接口
 
 ### HTTP（`kind="api"`，前缀 `/api/heartbeat`）
