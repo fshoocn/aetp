@@ -34,6 +34,7 @@ from cordis_port.events import EventDispatchError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .api_service import CommApiService
 from .config import CommConfig
 from .interface import (
     CommMeta,
@@ -154,8 +155,10 @@ class CommService(Service[CommConfig]):
 
     provide: str | None = "comm"
     name: str = "comm"
-    #: ingest / poll / ack 挂 webapi；outbox 经 db（db 是数据库操作唯一入口）
-    inject: ClassVar[list[str]] = ["appconfig", "db", "webapi"]
+    #: outbox 经 db（db 是数据库操作唯一入口）；ingest / poll / ack 三条通道
+    #: API 与健康指标拆给 CommApiService（inject = ["comm", "webapi"]）——
+    #: 核心不沾 webapi，webapi 缺席 / 换装不影响消息泵
+    inject: ClassVar[list[str]] = ["appconfig", "db"]
     Config: type[CommConfig] = CommConfig
 
     def __init__(self, ctx: Context, config: CommConfig | None = None) -> None:
@@ -180,6 +183,7 @@ class CommService(Service[CommConfig]):
         self._closing: bool = False
         self._pump_task: asyncio.Task[None] | None = None
         self._pull_task: asyncio.Task[None] | None = None
+        self._api_fiber: Fiber | None = None
         self._store: OutboxStore | None = None
         self._disk_count: int = 0
         self._bg: set[asyncio.Task[None]] = set()
@@ -212,11 +216,11 @@ class CommService(Service[CommConfig]):
                 self.config.default_max_attempts,
             )
 
-        api = self.ctx.webapi
-        api.post("/api/comm/ingest", self._ingest, kind="api", name="comm.ingest")
-        api.post("/api/comm/poll", self._poll, kind="api", name="comm.poll")
-        api.post("/api/comm/ack", self._ack, kind="api", name="comm.ack")
-        dispose_health = api.add_health_provider("comm", self._metrics)
+        # 通道 API / 健康指标拆给 CommApiService（inject = ["comm", "webapi"]）：
+        # 依赖就位自动挂载、换装随依赖纪元自动重挂；fiber 挂在本服务生命周期
+        # 下，卸载 / 热更自动带走。不能 await——webapi 缺席时 fiber 会停在
+        # PENDING（无头部署要能只跑消息泵）。
+        self._api_fiber = self.ctx.plugin(CommApiService)
 
         self._pump_task = asyncio.create_task(self._pump())
         self._pump_task.add_done_callback(self._log_task_exit)
@@ -233,7 +237,6 @@ class CommService(Service[CommConfig]):
                 )
 
         def cleanup() -> Any:
-            dispose_health()
             # 先让在途长轮询立即返回：uvicorn 优雅排水要等所有请求收尾，
             # 长轮询挂着会让关停被强推取消（starlette 把取消报成 lifespan
             # shutdown.failed，整段 traceback 被裸打，看着像崩溃）
@@ -298,7 +301,7 @@ class CommService(Service[CommConfig]):
         if rows:
             self.ctx.logger.info("comm outbox 恢复 %d 条未终结消息", len(self._records))
 
-    def _metrics(self) -> dict[str, object]:
+    def metrics(self) -> dict[str, object]:
         outbox: dict[str, int] = {}
         for rec in self._records.values():
             if rec.scope == "down" and rec.state in (
@@ -985,14 +988,17 @@ class CommService(Service[CommConfig]):
             await transport.ack(ids)
 
     # --------------------------------------------------------------- 接收侧
-    async def _ingest(self, request: Request) -> dict[str, object] | JSONResponse:
-        """汇聚点收件：report / 发给本节点 → 本地派发；direct → 目标 outbox。"""
+    async def handle_ingest(self, request: Request) -> dict[str, object] | JSONResponse:
+        """汇聚点收件：report / 发给本节点 → 本地派发；direct → 目标 outbox。
+
+        HTTP 处理器（路由由 CommApiService 挂载）。
+        """
         body, error = await self._read_body(request)
         if error is not None:
-            return self.ctx.webapi.json({"error": error[0]}, status_code=error[1])
+            return JSONResponse({"error": error[0]}, status_code=error[1])
         items = body.get("items")
         if not isinstance(items, list):
-            return self.ctx.webapi.json({"error": "缺少 items 列表"}, status_code=400)
+            return JSONResponse({"error": "缺少 items 列表"}, status_code=400)
         sender = str(
             body.get("node") or request.headers.get("x-aetp-node") or "unknown"
         )
@@ -1030,14 +1036,17 @@ class CommService(Service[CommConfig]):
             accepted += 1
         return {"accepted": accepted, "errors": errors}
 
-    async def _poll(self, request: Request) -> dict[str, object] | JSONResponse:
-        """下行长轮询：有件即返；挂起 ``poll_hang`` 秒等待新件。"""
+    async def handle_poll(self, request: Request) -> dict[str, object] | JSONResponse:
+        """下行长轮询：有件即返；挂起 ``poll_hang`` 秒等待新件。
+
+        HTTP 处理器（路由由 CommApiService 挂载）。
+        """
         body, error = await self._read_body(request)
         if error is not None:
-            return self.ctx.webapi.json({"error": error[0]}, status_code=error[1])
+            return JSONResponse({"error": error[0]}, status_code=error[1])
         node = str(body.get("node") or "").strip()
         if not node:
-            return self.ctx.webapi.json({"error": "缺少 node"}, status_code=400)
+            return JSONResponse({"error": "缺少 node"}, status_code=400)
         hang_raw = body.get("hang")
         hang = self.config.poll_hang if hang_raw is None else float(cast(float, hang_raw))
         hang = min(max(hang, 0.0), 60.0)
@@ -1065,14 +1074,17 @@ class CommService(Service[CommConfig]):
                 # 终点，吞掉并正常返回不会破坏传播语义，只消掉 ASGI 报错噪音
                 return {"items": []}
 
-    async def _ack(self, request: Request) -> dict[str, object] | JSONResponse:
-        """下行确认：成功投递记账（任一目标成功即整组达标，A4）。"""
+    async def handle_ack(self, request: Request) -> dict[str, object] | JSONResponse:
+        """下行确认：成功投递记账（任一目标成功即整组达标，A4）。
+
+        HTTP 处理器（路由由 CommApiService 挂载）。
+        """
         body, error = await self._read_body(request)
         if error is not None:
-            return self.ctx.webapi.json({"error": error[0]}, status_code=error[1])
+            return JSONResponse({"error": error[0]}, status_code=error[1])
         ids = body.get("ids")
         if not isinstance(ids, list):
-            return self.ctx.webapi.json({"error": "缺少 ids 列表"}, status_code=400)
+            return JSONResponse({"error": "缺少 ids 列表"}, status_code=400)
         acked = 0
         for raw in cast(list[object], ids):
             rid = str(raw or "")

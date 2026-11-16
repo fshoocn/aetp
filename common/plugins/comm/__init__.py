@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+from .api_service import CommApiService
 from .config import CommConfig
 from .interface import (
     AT_LEAST_ONCE,
@@ -45,6 +46,7 @@ from .service import CommService
 __all__: list[str] = [
     "AT_LEAST_ONCE",
     "FIRE_AND_FORGET",
+    "CommApiService",
     "CommConfig",
     "CommInterface",
     "CommMeta",
