@@ -10,9 +10,10 @@
    覆盖主模块不在线 / 掉线 / 上线三种场景，失败自动退避重试；
 3. 接收主模块下行：``heartbeat.config``（运行参数下发，即时应用）与
    ``heartbeat.caps``（请求全量能力，下一拍补发）；
-4. 在本节点 ``ctx.webapi`` 注册 ``GET /api/heartbeat/status`` 自省接口
-   （返回值带 ``extensions`` 展示扩展槽与 ``capabilities`` 能力信封列表，
-   其他插件可经 :data:`STATUS_EVENT` / ``heartbeat/collect-capabilities``
+4. ``GET /api/heartbeat/status`` 自省接口拆给 :mod:`.api_service` 的
+   ``HeartbeatApiService``（``inject = ["heartbeat", "webapi"]``；返回值带
+   ``extensions`` 展示扩展槽与 ``capabilities`` 能力信封列表，其他插件可经
+   :data:`STATUS_EVENT` / ``heartbeat/collect-capabilities``
    事件插入自家数据）；
 5. 卸载时取消心跳循环，不留后台任务。
 
@@ -39,22 +40,18 @@ import asyncio
 import time
 from typing import ClassVar, cast
 
-from cordis_port import Context, EventDispatchError
-from starlette.requests import Request
+from cordis_port import Context, Fiber, Service
 
 from common.capabilities import CapProblemAlerter, capabilities_digest, collect_capabilities
 
+from .api_service import STATUS_EVENT as STATUS_EVENT
+from .api_service import HeartbeatApiService
 from .config import HeartbeatConfig
 from .monitor import HeartbeatMonitor, HeartbeatSendError, MasterState
 
 #: fire-and-forget 投递策略（comm DeliveryPolicy 字面量，不 import 对方插件包）：
 #: 至少成功 0 次 = 发完即弃；心跳容忍丢失，丢一拍下一拍补上
 _FIRE_AND_FORGET: dict[str, int] = {"min_success": 0, "max_attempts": 1}
-
-#: 状态接口的扩展收集事件：``GET /api/heartbeat/status`` 构造好响应后派发它，
-#: 并把**响应 dict** 传给监听器；其他插件把自家数据写进
-#: ``response["extensions"]["<插件名>"]`` 即会出现在返回值里。
-STATUS_EVENT = "heartbeat/collect-status"
 
 #: 心跳序号上限：取 JSON / JS 消费端的安全整数上限（``2**53 - 1``)——
 #: Python 的 int 虽无界，但主模块侧（JS / 浏览器）超过此值会丢精度。
@@ -67,27 +64,35 @@ def next_seq(current: int) -> int:
     return current + 1 if current < SEQ_MAX else SEQ_MAX
 
 
-class HeartbeatPlugin:
-    """心跳上报插件。
+class HeartbeatPlugin(Service[HeartbeatConfig]):
+    """心跳上报插件（``provide = "heartbeat"``）。
 
     ``inject`` 注入的是**服务**（不是插件名，别和 ``plugin.json`` 的
     ``requires`` 混淆）：
 
     * ``appconfig`` —— 应用配置服务，由 ``AppConfigPlugin`` 提供；
-    * ``webapi`` —— Web API 服务，由 ``WebApiPlugin`` 提供；
     * ``comm`` —— 主从通信服务（心跳通道），由 ``CommService`` 提供；
     * ``node_kind`` —— 节点类型值服务，由 ``common/node_runtime.py`` 装配时
       ``ctx.provide("node_kind", kind)`` 注册，**没有对应插件**；
     * ``node_name`` —— 节点名值服务，同样由装配阶段注册（``[node] name``
       缺省取本机设备名），心跳上报的 ``node_id`` 即取自此服务。
+
+    核心**不依赖 webapi**：自省接口拆给 :class:`HeartbeatApiService`
+    （``inject = ["heartbeat", "webapi"]``，同包）——webapi 未就绪安静
+    PENDING，晚出现自动挂载；心跳载荷里的 ``address`` 运行期经
+    ``ctx.get("webapi")`` 动态取用（缺席为空串）。
     """
 
     name: ClassVar[str] = "heartbeat"
-    inject: ClassVar[list[str]] = ["appconfig", "webapi", "comm", "node_kind", "node_name"]
+    #: 服务名（附属服务按 ``heartbeat`` 声明核心依赖，经 ``ctx.get`` 取用）
+    provide: str | None = "heartbeat"
+    #: 核心依赖集无 webapi：自省 API 拆给 HeartbeatApiService
+    inject: ClassVar[list[str]] = ["appconfig", "comm", "node_kind", "node_name"]
     #: 配置模型（标准 Schema）：驱动校验、``[heartbeat]`` 默认值注入与写回
     Config: ClassVar[type[HeartbeatConfig]] = HeartbeatConfig
 
     def __init__(self, ctx: Context, config: HeartbeatConfig | None = None) -> None:
+        super().__init__(ctx)  # 最先调用：注册 ctx.heartbeat
         self.ctx: Context = ctx
         self.config: HeartbeatConfig = (
             config if isinstance(config, HeartbeatConfig) else HeartbeatConfig()
@@ -95,6 +100,8 @@ class HeartbeatPlugin:
         self._node_id: str = str(ctx.node_name)
         self._seq: int = 0
         self._task: asyncio.Task[None] | None = None
+        #: 自省 API 服务 fiber（HeartbeatApiService）：随本插件 fiber 自动清理
+        self._api_fiber: Fiber | None = None
         self._skip_warned: dict[str, str] = {}
         #: 能力问题告警去重（「消失即复位」语义，见 :class:`CapProblemAlerter`）
         self._cap_alerts: CapProblemAlerter = CapProblemAlerter(self._log_cap_problem)
@@ -130,7 +137,7 @@ class HeartbeatPlugin:
         payload: dict[str, object] = {
             "node_id": self._node_id,
             "node_kind": str(self.ctx.node_kind),
-            "address": self.ctx.webapi.address() or "",
+            "address": self._web_address(),
             "seq": self._seq,
             "sent_at": time.time(),
             "status": "alive",
@@ -139,6 +146,14 @@ class HeartbeatPlugin:
         if digest != self._caps_sent_digest:
             payload["capabilities"] = entries
         return payload
+
+    def _web_address(self) -> str:
+        """本节点 Web 地址（心跳载荷的 ``address``）；webapi 缺席为空串。
+
+        运行期 ``ctx.get`` 动态取用（核心不 inject webapi）。
+        """
+        webapi = self.ctx.get("webapi", strict=False)
+        return str(webapi.address() or "") if webapi is not None else ""
 
     async def _send(self, payload: dict[str, object]) -> dict[str, object]:
         """经 comm 上报心跳并维护能力同步状态（摘要已送达 / 主模块要全量）。
@@ -203,15 +218,11 @@ class HeartbeatPlugin:
 
     # -- 生命周期 -----------------------------------------------------------
     async def init(self) -> object:
-        """注册自省接口 / comm 下行处理器并启动心跳循环；返回值即卸载清理函数。"""
-        self.ctx.webapi.get(
-            "/api/heartbeat/status",
-            self._status,
-            kind="api",
-            name="heartbeat.status",
-        )
-        dispose = self.ctx.webapi.add_health_provider("heartbeat", self._health_metrics)
-        self.ctx.fiber.effect(lambda: dispose, "heartbeat.health")
+        """注册 comm 下行处理器并启动心跳循环；返回值即卸载清理函数。"""
+        # 自省 API 拆给 HeartbeatApiService（inject = ["heartbeat", "webapi"]）：
+        # 依赖就位自动挂载；fiber 挂在本插件生命周期下。不能 await——
+        # webapi 缺席时 fiber 会停在 PENDING。
+        self._api_fiber = self.ctx.plugin(HeartbeatApiService)
         # 主模块下行：运行参数下发 + 全量能力请求（绑本插件 fiber，卸载自动注销）
         self.ctx.comm.on("heartbeat.config", self._on_config_down)
         self.ctx.comm.on("heartbeat.caps", self._on_caps_request)
@@ -248,34 +259,8 @@ class HeartbeatPlugin:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
-    # -- 自省接口 -----------------------------------------------------------
-    async def _status(self, _request: Request) -> dict[str, object]:
-        """``GET /api/heartbeat/status``：状态快照 + 其他插件的扩展数据。
-
-        扩展契约：派发 :data:`STATUS_EVENT` 并把响应 dict 传给监听器，
-        其他插件把自家数据写进 ``response["extensions"]["<插件名>"]``
-        （核心字段只读，避免撞名）；监听器同步 / 异步均可，**并发**派发，
-        某个贡献者出错不影响本接口 —— 错误进 ``response["extension_errors"]``
-        （恒在，无错时为空列表；非法能力条目的问题也汇入这里），其余贡献
-        照常返回。能力信封列表见 ``response["capabilities"]`` / ``caps_digest``。
-        """
-        response = self.monitor.snapshot().to_dict()
-        extensions: dict[str, object] = {}
-        errors: list[str] = []
-        response["extensions"] = extensions
-        response["extension_errors"] = errors
-        entries, problems = await collect_capabilities(self.ctx)
-        response["capabilities"] = entries
-        response["caps_digest"] = capabilities_digest(entries)
-        errors.extend(problems)
-        try:
-            await self.ctx.parallel(STATUS_EVENT, response)
-        except EventDispatchError as exc:
-            errors.extend(f"{type(error).__name__}: {error}" for error in exc.errors)
-        return response
-
-    # -- 状态转换日志 -------------------------------------------------------
-    def _health_metrics(self) -> dict[str, object]:
+    # -- 健康指标（HTTP 层见 api_service.HeartbeatApiService）-----------------
+    def health_metrics(self) -> dict[str, object]:
         """/healthz 指标：心跳状态与最近往返时延（只读快照）。"""
         snapshot = self.monitor.snapshot()
         return {
@@ -286,6 +271,7 @@ class HeartbeatPlugin:
             "last_rtt_ms": snapshot.last_rtt_ms,
         }
 
+    # -- 状态转换日志 -------------------------------------------------------
     def _log_transition(
         self, previous: MasterState, current: MasterState, error: str | None
     ) -> None:
