@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import time
 from collections.abc import Callable, Collection, Generator, Mapping, Sequence
@@ -59,6 +60,7 @@ from starlette.responses import (
 )
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from common.contracts import UiCatalogInterface
 from common.cordis_utils import parallel_event
 from common.hook_chain import HookChain, OnError
 
@@ -140,6 +142,74 @@ def _cache_control(path: str, content_type: str) -> str | None:
     return None
 
 
+class RequestObserverMiddleware:
+    """请求完成观察者：响应真正发完后派发 ``webapi/request-completed``。
+
+    包装 ``send`` / ``receive``：计时到**响应发送完成**（含流式）；``aborted``
+    在「观察到 ``http.disconnect`` 或请求以异常 / 取消收场」时置位（响应未
+    正常发完，best-effort——不读 receive 的 handler 观察不到断连）。401 /
+    404 / 静态资源同样覆盖（route 可为空）。放在 ASGI 栈**最外层**（最后
+    add）——拦截链内测不到的短路响应（如鉴权 401）也计入，供统计 / 审计
+    插件订阅。
+    """
+
+    def __init__(
+        self, app: ASGIApp, emit: Callable[[dict[str, object]], object] | None = None
+    ) -> None:
+        self.app = app
+        self.emit = emit
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or self.emit is None:
+            await self.app(scope, receive, send)
+            return
+        started = time.perf_counter()
+        status = 0
+        sent_bytes = 0
+        aborted = False
+
+        async def wrapped_receive() -> Message:
+            nonlocal aborted
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                aborted = True
+            return message
+
+        async def wrapped_send(message: Message) -> None:
+            nonlocal status, sent_bytes
+            if message["type"] == "http.response.start":
+                status = int(message["status"])
+            elif message["type"] == "http.response.body":
+                sent_bytes += len(cast(bytes, message.get("body", b"")))
+            await send(message)
+
+        try:
+            await self.app(scope, wrapped_receive, wrapped_send)
+        except BaseException:
+            aborted = True  # 取消 / 断连 / 未捕获异常：响应未正常发完
+            raise
+        finally:
+            state = cast(dict[str, object], scope.get("state") or {})
+            identity = state.get("auth")
+            payload: dict[str, object] = {
+                "path": str(scope.get("path", "")),
+                "method": str(scope.get("method", "")),
+                "status": status,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                "bytes": sent_bytes,
+                "aborted": aborted,
+                "route": str(state.get("route", "")),
+                "identity": identity if isinstance(identity, dict) else None,
+            }
+            outcome = self.emit(payload)
+            if inspect.isawaitable(outcome):
+                # 取消传播中 finally 内的裸 await 会被二次打断（事件恰好在
+                # aborted 场景丢失）：shield 保证派发在后台完成，吞掉的只有
+                # 本次取消信号，原异常照常向上传播
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(outcome)
+
+
 class _EmbeddedServer(uvicorn.Server):
     """嵌入宿主事件循环的 uvicorn 服务器：禁用自带信号捕获。
 
@@ -166,6 +236,7 @@ class UvicornHost:
         config: WebApiConfig,
         auth: AuthContext,
         on_denied: Callable[[dict[str, object]], object] | None = None,
+        on_completed: Callable[[dict[str, object]], object] | None = None,
     ) -> None:
         self.config: WebApiConfig = config
         self.app: Starlette = Starlette()
@@ -182,6 +253,9 @@ class UvicornHost:
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
+        # 观察者最后加 = ASGI 栈最外层：一切请求（含鉴权 401 / 静态 / 预检）
+        # 都有 request-completed 通知（统计 / 审计的唯一必要订阅点）
+        self.app.add_middleware(RequestObserverMiddleware, emit=on_completed)
         self.server: _EmbeddedServer | None = None
         self._serve_task: asyncio.Task[None] | None = None
 
@@ -399,9 +473,19 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         """``SKIP`` 出错的告警出口（§4.4.4：记 warning，不静默）。"""
         self._provided_ctx.logger.warning(message)
 
+    async def _dispatch_event(self, name: str, payload: dict[str, object]) -> None:
+        """派发事件；监听器错误记 warning（隔离不吞声，也不阻断请求）。"""
+        errors = await parallel_event(self._provided_ctx, name, payload)
+        for error in errors:
+            self._provided_ctx.logger.warning("事件 %s 监听器出错：%s", name, error)
+
     def _on_auth_denied(self, payload: dict[str, object]) -> object:
         """401 时派发 ``webapi/auth-denied``（§4.4.5：审计 / 统计插件订阅）。"""
-        return parallel_event(self._provided_ctx, "webapi/auth-denied", payload)
+        return self._dispatch_event("webapi/auth-denied", payload)
+
+    def _on_request_completed(self, payload: dict[str, object]) -> object:
+        """请求完成时派发 ``webapi/request-completed``（统计 / 审计订阅）。"""
+        return self._dispatch_event("webapi/request-completed", payload)
 
     # ---------------------------------- 健康探针 ----------------------------
     def add_health_provider(
@@ -479,7 +563,12 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
 
         在此之前注册的路由会被一次性挂载；之后注册的路由随 :meth:`route` 立即生效。
         """
-        host = UvicornHost(self.config, self.auth, on_denied=self._on_auth_denied)
+        host = UvicornHost(
+            self.config,
+            self.auth,
+            on_denied=self._on_auth_denied,
+            on_completed=self._on_request_completed,
+        )
         host.app.state.web_service = self
         # 先把 app 交给路由表，再启动：这样启动期间注册的路由也能被匹配到
         self._attach_app(host.app)
@@ -618,7 +707,9 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
             methods=frozenset({"GET"}),
             handler=None,
             endpoint=None,
-            name=name,
+            # 静态挂载缺省也有确定性名字：request-completed / mounts() 按 name
+            # 匹配权限规则时不留盲区（url_for 不用于静态，名字仅作标识）
+            name=name or f"static:{resolved_path}",
             owner=_fiber_name(caller_fiber),
             directory=str(resolved_dir),
             html=html,
@@ -663,6 +754,44 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
 
     def routes(self) -> list[RouteRecord]:
         return [*self._registry, *self._registry.statics.values()]
+
+    def mounts(self) -> dict[str, object]:
+        """全部挂载资源清单（权限精细匹配用）：HTTP 端点 + UI 页面。
+
+        * ``endpoints``：路由表全部记录（``path`` 为含 ``{param}`` 的模板、
+          ``methods``、``kind``、``name``、``owner``）；
+        * ``pages``：UI 页面贡献（SPA 路径 + 标题 + 归属），经 ``ctx.webui``
+          动态汇集（webui 缺席为空列表，webapi 不依赖 webui）。
+
+        权限插件按「请求方法 + 链接」匹配规则时以此清单为来源；同一清单
+        也经 ``GET /api/web/mounts`` 对外（管理页配置权限用）。
+        """
+        endpoints: list[dict[str, object]] = [
+            {
+                "path": record.path,
+                "methods": sorted(record.methods),
+                "kind": record.kind,
+                "name": record.name,
+                "owner": record.owner,
+            }
+            for record in self.routes()
+        ]
+        pages: list[dict[str, object]] = []
+        webui = cast(
+            "UiCatalogInterface | None", self._provided_ctx.get("webui", strict=False)
+        )
+        if webui is not None:
+            for item in webui.ui_contributions():
+                if item.kind == "page":
+                    pages.append(
+                        {
+                            "id": item.id,
+                            "path": item.path,
+                            "title": item.title,
+                            "owner": item.owner,
+                        }
+                    )
+        return {"endpoints": endpoints, "pages": pages}
 
     def has_route(self, path: str) -> bool:
         return self._registry.get(normalize_path(path)) is not None

@@ -87,6 +87,13 @@ for _spec in (
         "parallel",
         "鉴权拒绝广播（载荷 {path, method, reason, remote}，审计 / 统计订阅）",
     ),
+    EventSpec(
+        "webapi/request-completed",
+        "parallel",
+        "请求完成通知（计时到响应发完，含流式 / 静态 / 404；载荷 {path, method, "
+        "status, duration_ms, bytes, aborted, route, identity}，统计 / 审计订阅；"
+        "aborted=响应未正常发完，best-effort）",
+    ),
 ):
     declare_event(_spec.name, _spec.mode, _spec.summary)
 

@@ -279,6 +279,8 @@ def build_endpoint(
         return to_response(result, record)
 
     async def endpoint(request: Request) -> Response:
+        state = cast(dict[str, object], request.scope.setdefault("state", {}))
+        state["route"] = record.name  # 观察者 / 中间件读路由名（request-completed）
         rc = RequestContext(
             request=request,
             route=record,

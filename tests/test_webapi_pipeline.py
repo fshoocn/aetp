@@ -7,22 +7,42 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
+import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 from cordis_port import Context
 from starlette.datastructures import Headers
+from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.types import Message, Receive, Scope, Send
 
 from _helpers import arequest, free_port
 from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
 from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.auth import DENY, AuthContext, AuthIdentity, VerifyResult
-from common.plugins.webapi.pipeline import RequestContext
+from common.plugins.webapi.pipeline import MAX_ENHANCE_BODY_BYTES, RequestContext
+from common.plugins.webapi.types import RouteRecord
+from common.plugins.webapi.uvicorn_web_service import RequestObserverMiddleware
 from master_plugins.api_stats import ApiStatsPlugin
+
+
+class _StubWebUi:
+    """最小 webui 桩：一条页面贡献（mounts 的 pages 汇集用）。"""
+
+    def ui_contributions(self) -> list[object]:
+        return [
+            SimpleNamespace(
+                id="demo:home", kind="page", owner="demo", path="/home", title="主页"
+            )
+        ]
 
 
 class _StubVerifier:
@@ -235,6 +255,170 @@ class PipelineIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["top"][0]["path"], "/api/ping")
         self.assertEqual(stats["top"][0]["count"], 2)
         self.assertIn("p95", stats["top"][0])
+
+    async def test_request_completed_event(self) -> None:
+        """request-completed：每请求一条（含鉴权 401），载荷齐全。"""
+        seen: list[dict[str, object]] = []
+
+        def _collect(payload: dict[str, object]) -> None:
+            seen.append(payload)
+
+        self.context.on("webapi/request-completed", _collect)
+        self._ping()
+        status, _body = await arequest(self.base_url, "/api/ping")
+        self.assertEqual(status, 200)
+        record = await self._wait_for(lambda: seen[0] if seen else None)
+        self.assertEqual(record["path"], "/api/ping")
+        self.assertEqual(record["method"], "GET")
+        self.assertEqual(record["status"], 200)
+        self.assertEqual(record["route"], "ping")
+        self.assertFalse(record["aborted"])
+        self.assertGreaterEqual(cast(float, record["duration_ms"]), 0.0)
+        self.assertGreater(cast(int, record["bytes"]), 0)
+        # 鉴权短路（401）同样计入：观察者在 ASGI 栈最外层
+        status, _body = await arequest(self.base_url, "/api/ping", token=None)
+        self.assertEqual(status, 401)
+        denied = await self._wait_for(lambda: seen[1] if len(seen) > 1 else None)
+        self.assertEqual(denied["status"], 401)
+        self.assertEqual(denied["route"], "")
+
+    async def test_enhance_headers_query_body(self) -> None:
+        """请求增强：headers / query / body 在 handler 视角生效。"""
+
+        async def enrich(rc: RequestContext, nxt: object) -> object:
+            rc.enhance(headers={"X-Trace": "42"}, query={"extra": "1"}, body=b"hello")
+            return await nxt()  # type: ignore[operator]
+
+        self.context.webapi.use(enrich, phase="guard", order=10)
+
+        async def echo(request: Request) -> dict[str, object]:
+            return {
+                "header": request.headers.get("x-trace"),
+                "query": request.query_params.get("extra"),
+                "body": (await request.body()).decode(),
+            }
+
+        self.context.webapi.get("/api/echo", echo, kind="api", name="echo")
+        status, body = await arequest(self.base_url, "/api/echo")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["header"], "42")
+        self.assertEqual(payload["query"], "1")
+        self.assertEqual(payload["body"], "hello")
+
+    def test_enhance_rejects_oversized_body(self) -> None:
+        """请求增强 body 超限直接拒绝（防止把大 body 缓存进内存）。"""
+        request = Request(
+            cast(
+                "Any",
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/x",
+                    "headers": [],
+                    "query_string": b"",
+                },
+            )
+        )
+        rc = RequestContext(
+            request=request,
+            route=RouteRecord(path="/api/x", kind="api"),
+            identity=None,
+        )
+        with self.assertRaises(ValueError):
+            rc.enhance(body=b"x" * (MAX_ENHANCE_BODY_BYTES + 1))
+
+    async def test_mounts_catalog(self) -> None:
+        """挂载资源清单：端点 + 页面（webui 动态汇集），供权限精细匹配。"""
+        self._ping()
+        self.context.provide("webui", _StubWebUi())
+        status, body = await arequest(self.base_url, "/api/web/mounts")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        endpoints = {item["name"]: item for item in payload["endpoints"]}
+        self.assertEqual(endpoints["ping"]["path"], "/api/ping")
+        self.assertEqual(endpoints["ping"]["methods"], ["GET", "HEAD"])
+        self.assertIn("web.mounts", endpoints)
+        pages = {item["id"]: item for item in payload["pages"]}
+        self.assertEqual(pages["demo:home"]["path"], "/home")
+        self.assertEqual(pages["demo:home"]["owner"], "demo")
+
+    async def _wait_for(
+        self, fetch: Callable[[], dict[str, object] | None], timeout: float = 2.0
+    ) -> dict[str, object]:
+        """轮询等待事件到达（响应发完与客户端收完之间存在微小时差）。"""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            item = fetch()
+            if item is not None:
+                return item
+            await asyncio.sleep(0.02)
+        self.fail("等待 request-completed 事件超时")
+        raise AssertionError("unreachable")
+
+
+class ObserverMiddlewareTests(unittest.IsolatedAsyncioTestCase):
+    """观察者中间件的取消 / 断连语义（HTTP 层模拟不到的路径）。"""
+
+    async def test_dispatch_survives_double_cancellation(self) -> None:
+        """取消传播中事件照发（shield 兜底）：aborted 置位、载荷完整。"""
+        seen: list[dict[str, object]] = []
+        started = asyncio.Event()
+
+        async def emit(payload: dict[str, object]) -> None:
+            await asyncio.sleep(0.05)  # 模拟 parallel_event 的异步派发
+            seen.append(payload)
+
+        async def hanging_app(_scope: Scope, _receive: Receive, _send: Send) -> None:
+            started.set()
+            await asyncio.Event().wait()  # 挂起直到被取消
+
+        async def never_receive() -> Message:
+            await asyncio.Event().wait()
+            return cast("Message", {"type": "http.disconnect"})
+
+        async def record_send(_message: Message) -> None:
+            return None
+
+        middleware = RequestObserverMiddleware(hanging_app, emit=emit)
+        scope = cast("Scope", {"type": "http", "path": "/api/x", "method": "GET"})
+        task = asyncio.create_task(middleware(scope, never_receive, record_send))
+        await started.wait()
+        task.cancel()
+        await asyncio.sleep(0.01)  # 让取消进入 unwind，第二次取消打在派发上
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        for _ in range(100):  # shield 的后台派发随后完成
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0]["aborted"])
+        self.assertEqual(seen[0]["path"], "/api/x")
+        self.assertEqual(seen[0]["status"], 0)
+
+    async def test_disconnect_marks_aborted(self) -> None:
+        """观察到 http.disconnect 时 aborted 置位。"""
+        seen: list[dict[str, object]] = []
+
+        def emit(payload: dict[str, object]) -> None:
+            seen.append(payload)
+
+        async def app(_scope: Scope, receive: Receive, _send: Send) -> None:
+            await receive()  # 读到 http.disconnect
+
+        async def disconnect_receive() -> Message:
+            return cast("Message", {"type": "http.disconnect"})
+
+        async def record_send(_message: Message) -> None:
+            return None
+
+        middleware = RequestObserverMiddleware(app, emit=emit)
+        scope = cast("Scope", {"type": "http", "path": "/api/y", "method": "GET"})
+        await middleware(scope, disconnect_receive, record_send)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0]["aborted"])
 
 
 if __name__ == "__main__":

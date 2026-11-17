@@ -132,6 +132,17 @@ class WebApiPlugin:
             name="web.routes",
         )
 
+        def mounts_view(_: Request) -> dict[str, object]:
+            """全部挂载资源清单（端点 + 页面，权限精细匹配用）。"""
+            return service.mounts()
+
+        service.get(
+            "/api/web/mounts",
+            mounts_view,
+            kind="api",
+            name="web.mounts",
+        )
+
         async def healthz(_: Request) -> dict[str, object]:
             """存活探针（非 /api 路径免令牌）+ 各提供方指标快照。"""
             return await service.health_snapshot()

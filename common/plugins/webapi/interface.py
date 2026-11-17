@@ -306,6 +306,14 @@ class WebApiService(ABC):
         """列出全部已注册路由（按注册顺序，同路径的多方法记录都会列出）。"""
 
     @abstractmethod
+    def mounts(self) -> dict[str, object]:
+        """全部挂载资源清单：``endpoints``（路由记录）+ ``pages``（UI 页面贡献）。
+
+        权限插件按「请求方法 + 链接」精细匹配时的规则来源；``pages`` 经
+        ``ctx.webui`` 动态汇集（缺席为空列表）。
+        """
+
+    @abstractmethod
     def has_route(self, path: str) -> bool:
         """判断某路径是否已注册。"""
 
