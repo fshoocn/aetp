@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from typing import Protocol, TypedDict
 
 
@@ -67,4 +67,38 @@ class NodesInterface(Protocol):
         ...
 
 
-__all__: list[str] = ["CommMeta", "NodeCapability", "NodeInfo", "NodesInterface"]
+class UiContributionLike(Protocol):
+    """UI 贡献的只读面（webui 的 ``UiContribution`` 结构上满足）。
+
+    只声明清单消费需要的字段；属性用只读 ``property`` 保持协变
+    （实现方字段类型是本接口的子类型即可，如 ``kind`` 的字面量）。
+    """
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def owner(self) -> str: ...
+
+    @property
+    def path(self) -> str | None: ...
+
+    @property
+    def title(self) -> str | None: ...
+
+
+class UiCatalogInterface(Protocol):
+    """UI 清单服务（``ctx.webui``）的消费面：枚举全部前端贡献。
+
+    webapi 的 ``mounts()`` 按此契约汇集页面清单（权限按「方法 + 链接」
+    精细匹配的规则来源）——消费方依赖**本契约**而非 webui 插件包，
+    符合插件铁律；webui 的 ``WebUiPlugin`` 显式声明实现本接口。
+    """
+
+    def ui_contributions(self) -> Sequence[UiContributionLike]: ...
+
+
+__all__: list[str] = ["CommMeta", "NodeCapability", "NodeInfo", "NodesInterface", "UiCatalogInterface", "UiContributionLike"]

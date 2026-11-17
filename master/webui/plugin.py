@@ -35,11 +35,13 @@ from cordis_port import Context, Fiber, Service
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
+from common.contracts import UiCatalogInterface
+
 from .config import WebUiConfig
 from .types import UiContribution, UiFormat, UiKind
 
 
-class WebUiPlugin(Service[WebUiConfig]):
+class WebUiPlugin(Service[WebUiConfig], UiCatalogInterface):
     """UI 宿主插件（Service 类自己就是插件，见开发文档 13.1 的惯用法）。
 
     业务插件用法::
