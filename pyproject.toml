@@ -30,6 +30,7 @@ ignore = [
     "RUF002",
     "RUF003",
     "TRY003",  # 长消息内联是本项目风格（中文错误消息直接可展示）
+    "TRY004",  # HTTP 解析层（spec_from_dict 等）统一抛 ValueError 映射 400，不按 TypeError 分流
     "TRY300",  # 回滚 / 安装流程的 try-else 结构刻意为之（大段 try 包裹落地与回滚）
     "TRY301",
     "TRY400",  # cordis Logger 无 exception 方法，error + 异常实参是等效做法
