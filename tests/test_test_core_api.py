@@ -109,7 +109,9 @@ def _raw_request(
     跟随 302（外部 URI 会炸未知协议），这两类断言走此封装，其余一律用 _helpers。
     """
     parsed = urlparse(base_url)
-    connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=10)
+    connection = http.client.HTTPConnection(
+        cast(str, parsed.hostname), parsed.port, timeout=10
+    )
     merged = dict(headers or {})
     if token:
         merged["X-AETP-Token"] = token
@@ -333,6 +335,11 @@ class _ApiStack:
     base_url: str
     fiber: Fiber
     root: Path
+    # 断言方法由混入宿主（IsolatedAsyncioTestCase）在运行时提供；
+    # 此处纯注解声明类型面（不生成类属性），供混入方法内调用。
+    assertEqual: Callable[..., None]
+    assertIs: Callable[..., None]
+    assertIsNotNone: Callable[..., None]
 
     async def asyncSetUp(self) -> None:
         self._temp: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
@@ -409,10 +416,11 @@ class _ApiStack:
         async def fetch() -> object:
             status, payload = await self._call(f"/api/test/tasks/{quote(task_id)}/jobs")
             jobs = payload.get("jobs") if status == 200 else None
+            candidates: list[dict[str, Any]] = jobs or []
             return next(
                 (
                     job
-                    for job in jobs or []
+                    for job in candidates
                     if job.get("state") in ("leased", "running")
                 ),
                 None,

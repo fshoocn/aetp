@@ -88,7 +88,7 @@ class ExecutorSelector:
 
     id: str  # 能力 id，如 "pytest"
     kind: str = "executor"  # 固定大类
-    labels: Mapping[str, str] = field(default_factory=dict)  # 可选筛选轴，如 {"lang": "python"}
+    labels: Mapping[str, str] = field(default_factory=dict[str, str])  # 可选筛选轴，如 {"lang": "python"}
 
 
 @dataclass(frozen=True)
@@ -107,7 +107,7 @@ class StageSpec:
     executor: ExecutorSelector
     params: Mapping[str, Any]  # 执行器自有参数（核心不解析）
     shard: ShardSpec = ShardSpec()
-    requires: Mapping[str, int] = field(default_factory=dict)  # 资源需求，如 {"canoe": 1}
+    requires: Mapping[str, int] = field(default_factory=dict[str, int])  # 资源需求，如 {"canoe": 1}
     timeout_s: float = 0.0  # 0 = 取配置默认
 
 
@@ -118,8 +118,8 @@ class TaskSpec:
     name: str
     stages: Sequence[StageSpec]  # v1 线性顺序执行 + 屏障
     priority: int = 0  # 大者先出队
-    labels: Mapping[str, str] = field(default_factory=dict)  # 项目/租户轴，配额与筛选
-    params: Mapping[str, Any] = field(default_factory=dict)  # 任务级参数（注入各 Stage）
+    labels: Mapping[str, str] = field(default_factory=dict[str, str])  # 项目/租户轴，配额与筛选
+    params: Mapping[str, Any] = field(default_factory=dict[str, Any])  # 任务级参数（注入各 Stage）
     idempotency_key: str = ""  # 提交去重（CI 重复触发）
     failure_policy: Literal["fail_fast", "continue"] = "fail_fast"
     timeout_s: float = 0.0  # 任务总超时，0 = 不限

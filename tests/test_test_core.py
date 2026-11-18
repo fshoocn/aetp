@@ -43,7 +43,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 from unittest import mock
 
 from cordis_port import Context
@@ -269,7 +269,7 @@ class FakeNodes:
         for entry in self.caps:
             if kinds is not None and entry.get("kind") not in set(kinds):
                 continue
-            entry_labels = entry.get("labels") or {}
+            entry_labels = cast(Mapping[str, str], entry.get("labels") or {})
             if labels is not None and not all(
                 entry_labels.get(key) == value for key, value in dict(labels).items()
             ):
@@ -372,7 +372,7 @@ class TestCoreStackTestCase(unittest.IsolatedAsyncioTestCase):
     def _make_collector(self, name: str) -> Callable[[Any], None]:
         def collect(payload: Any) -> None:
             if isinstance(payload, Mapping):
-                self.events[name].append(dict(payload))
+                self.events[name].append(dict(cast(Mapping[str, Any], payload)))
 
         return collect
 
@@ -433,7 +433,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_valid_values_normalize(self) -> None:
         result = CoreConfig.validate({"lease_timeout": 5, "max_attempts": 2})
-        config = result.get("value")
+        config = cast(CoreConfig, result.get("value"))
         self.assertIsInstance(config, CoreConfig)
         self.assertEqual(config.lease_timeout, 5.0)  # 归一化为 float
         self.assertEqual(config.max_attempts, 2)
@@ -453,9 +453,9 @@ class ConfigTests(unittest.TestCase):
         for values, path in bad:
             with self.subTest(values=values):
                 result = CoreConfig.validate(values)
-                issues = result.get("issues")
+                issues = cast("list[Mapping[str, Any]]", result.get("issues"))
                 self.assertIsInstance(issues, list, f"期望拒绝 {values}，实得 {result}")
-                paths = [issue.get("path") for issue in issues]  # type: ignore[union-attr]
+                paths = [issue.get("path") for issue in issues]
                 self.assertIn([path], paths)
 
 
