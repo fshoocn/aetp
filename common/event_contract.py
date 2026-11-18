@@ -94,6 +94,43 @@ for _spec in (
         "status, duration_ms, bytes, aborted, route, identity}，统计 / 审计订阅；"
         "aborted=响应未正常发完，best-effort）",
     ),
+    EventSpec(
+        "test/task-created",
+        "parallel",
+        "任务创建广播（submit 落库后，载荷 = 引用 + 摘要 {task_id, name, labels, "
+        "source, priority}，含 schema_version）",
+    ),
+    EventSpec(
+        "test/task-state",
+        "parallel",
+        "任务状态迁移通知（载荷 {task_id, from, to, reason}，含 schema_version）",
+    ),
+    EventSpec(
+        "test/job-finished",
+        "parallel",
+        "Job 终结通知（载荷含 task_id / job_id / attempt / 状态 / 摘要）",
+    ),
+    EventSpec(
+        "test/case-finished",
+        "parallel",
+        "用例失败批通知（聚合后，载荷含失败明细引用与 truncated 标记）",
+    ),
+    EventSpec(
+        "test/task-finished",
+        "parallel",
+        "任务终结通知（载荷含终态、计数摘要与耗时）",
+    ),
+    EventSpec(
+        "test/artifact-ready",
+        "parallel",
+        "产物登记完成通知（载荷含 kind / uri / size / sha256）",
+    ),
+    EventSpec(
+        "test/collect-task",
+        "parallel",
+        "任务详情接口的 extensions 收集槽（同 heartbeat/collect-node 模式，监听器"
+        "把自家数据写进 response）",
+    ),
 ):
     declare_event(_spec.name, _spec.mode, _spec.summary)
 
