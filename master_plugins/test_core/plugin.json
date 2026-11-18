@@ -1,0 +1,1 @@
+{"id": "test-core", "name": "测试核心", "version": "1.0.0", "entrypoint": "plugin:TestCorePlugin", "kind": "master", "requires": []}
