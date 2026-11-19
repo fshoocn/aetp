@@ -19,8 +19,8 @@ from cordis_port import Context, Service
 
 
 class TestCoreUiService(Service[None]):
-    """test-core 页面服务：注册「脚本管理」（``ui/ScriptsPage.vue``）与
-    「测试任务」（``ui/TasksPage.vue``）页面。"""
+    """test-core 页面服务：注册「脚本管理」（``ui/ScriptsPage.vue``）、
+    「测试计划」（``ui/PlansPage.vue``）与「测试任务」（``ui/TasksPage.vue``）页面。"""
 
     #: 附属服务标记：随宿主 ``test-core`` 一起呈现，不单列插件
     service_of: ClassVar[str] = "test-core"
@@ -48,6 +48,18 @@ class TestCoreUiService(Service[None]):
             menu_group="脚本管理",
             menu_icon="pi pi-folder-open",
             menu_order=10,
+        )
+        self.ctx.webui.register_ui(
+            "plans",
+            kind="page",
+            format="vue",
+            resource_root=str(Path(__file__).resolve().parent / "ui"),
+            entry="PlansPage.vue",
+            path="/plans",
+            title="测试计划",
+            menu_group="测试计划与下发",
+            menu_icon="pi pi-list-check",
+            menu_order=20,
         )
         self.ctx.webui.register_ui(
             "tasks",
