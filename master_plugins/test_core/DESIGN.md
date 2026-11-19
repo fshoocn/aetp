@@ -415,7 +415,7 @@ sequenceDiagram
     participant C as test_core
     participant E as executor（某节点）
     participant W as executor（多节点）
-    C->>E: test.job {shard:null, params:{plan:true}}
+    C->>E: test.job {shard:{"plan":true,"hint":N}}
     E-->>C: test.job.result {summary.shards:[{unit_refs},…]}
     C->>C: 建 N 个分片 Job（queued）
     C->>W: test.job {shard:{index,total,unit_refs}}（N 个节点并行）
@@ -423,7 +423,9 @@ sequenceDiagram
     C->>C: Stage 屏障聚合 → 下一 Stage
 ```
 
-plan 型 Job 的 `JobResult.summary.shards` 是唯一分片接口；核心不理解测试套件结构。
+plan 型 Job 的 `shard = {"plan": true, "hint": N}`（`hint` = `ShardSpec.hint`
+期望分片数提示，0 = 执行器自定），分片接口是 `JobResult.summary.shards`；
+核心不理解测试套件结构。
 
 ### 9.4 背压
 

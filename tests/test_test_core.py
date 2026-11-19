@@ -149,13 +149,14 @@ def _stage(
     labels: Mapping[str, str] | None = None,
     params: Mapping[str, Any] | None = None,
     shard_mode: str = "none",
+    shard_hint: int = 0,
     timeout_s: float = 0.0,
 ) -> StageSpec:
     return StageSpec(
         name=name,
         executor=ExecutorSelector(id=executor_id, labels=dict(labels or {})),
         params=dict(params or {}),
-        shard=ShardSpec(mode=shard_mode),  # type: ignore[arg-type]
+        shard=ShardSpec(mode=shard_mode, hint=shard_hint),  # type: ignore[arg-type]
         timeout_s=timeout_s,
     )
 
@@ -1292,14 +1293,19 @@ class ShardTests(TestCoreStackTestCase):
         await self.boot(caps=[_cap("node-a"), _cap("node-b")])
         task_id = await self.submit_spec(
             _spec(
-                [_stage("unit", shard_mode="plan", params={"target": "x"}), _stage("report")],
+                [
+                    _stage(
+                        "unit", shard_mode="plan", shard_hint=2, params={"target": "x"}
+                    ),
+                    _stage("report"),
+                ],
                 params={"env": "test"},
             )
         )
         self.assertEqual(await self.task_state(task_id), "planning")
         await self.tick()
         plan = self.job_messages()[0][1]
-        self.assertEqual(plan["shard"], {"plan": True})
+        self.assertEqual(plan["shard"], {"plan": True, "hint": 2})
 
         # 回报分片清单（含 params 覆盖）
         await self.send_result(

@@ -129,6 +129,9 @@ def validate_task_spec(spec: TaskSpec) -> list[str]:
         mode = getattr(getattr(stage, "shard", None), "mode", None)
         if mode is not None and mode not in ("none", "plan"):
             problems.append(f"{where}.shard.mode 非法，收到 {mode!r}（可选：none / plan）")
+        hint = getattr(getattr(stage, "shard", None), "hint", None)
+        if isinstance(hint, bool) or not isinstance(hint, int) or hint < 0:
+            problems.append(f"{where}.shard.hint 需是非负 int，收到 {hint!r}")
     return problems
 
 

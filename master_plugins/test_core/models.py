@@ -54,6 +54,8 @@ class TestStage(Model):
     #: JSON 文本（执行器自有参数，核心不解析）
     params: Mapped[str]
     shard_mode: Mapped[str]
+    #: 期望分片数提示（ShardSpec.hint；plan Job 的 shard 载荷透传给执行器）
+    shard_hint: Mapped[int] = mapped_column(default=0)
     #: JSON 文本（资源需求，如 {"canoe": 1}）
     requires: Mapped[str]
     state: Mapped[str]

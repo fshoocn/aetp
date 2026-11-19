@@ -334,6 +334,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
                     ),
                     params=_json_dumps(dict(stage_spec.params or {})),
                     shard_mode=stage_spec.shard.mode,
+                    shard_hint=int(stage_spec.shard.hint),
                     requires=_json_dumps(dict(stage_spec.requires or {})),
                     state="pending",
                     timeout_s=float(stage_spec.timeout_s),
@@ -527,7 +528,10 @@ class TestCorePlugin(Service[TestCoreConfig]):
         )
         task.current_stage = stage.name
         if stage.shard_mode == "plan":
-            await self._create_job(task, stage, shard={"plan": True})
+            # plan Job 的 shard 载荷带 hint：分片规划的期望数由执行器裁量
+            await self._create_job(
+                task, stage, shard={"plan": True, "hint": int(stage.shard_hint or 0)}
+            )
         else:
             await self._create_job(task, stage, shard=None)
 
@@ -1342,6 +1346,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
             "executor": _decode_dict(row.executor),
             "params": _decode_dict(row.params),
             "shard_mode": row.shard_mode,
+            "shard_hint": row.shard_hint,
             "requires": _decode_dict(row.requires),
             "state": row.state,
             "timeout_s": row.timeout_s,
