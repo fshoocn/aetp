@@ -1,3 +1,9 @@
+<!--
+  已退役：计划编辑器取代（任务下发并入「测试计划与下发」页 /plans 的测试计划
+  编辑器，W3 交付）。本页（/pytest/submit）已随 W2-D 同批退役：ui_service.py
+  不再注册旧两页。文件保留不删：W3 迁移动态表单逻辑（按能力信封 detail.schema
+  生成参数表单、raw JSON ⇄ 表单双向同步、raw 优先）时仍要参考本页实现。
+-->
 <template>
     <section class="submit-page">
         <header class="submit-page__header">

@@ -1,3 +1,9 @@
+<!--
+  已退役：MaterialsPanel.vue 取代（脚本管理页 slot 面板 scripts:executor-pytest）。
+  本页（/pytest/materials）与 SubmitPage.vue（/pytest/submit）已随 W2-D 同批退役：
+  ui_service.py 不再注册旧两页，全部能力已迁入 ui/MaterialsPanel.vue（上传自动带
+  X-Material-Executor: pytest）。文件保留仅作迁移对照参考，勿再改功能。
+-->
 <template>
     <section class="materials-page">
         <header class="materials-page__header">

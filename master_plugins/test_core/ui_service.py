@@ -1,4 +1,4 @@
-"""test-core 的页面服务（``ctx.test_core_ui``）：「测试任务」页。
+"""test-core 的页面服务（``ctx.test_core_ui``）：「脚本管理」/「测试任务」页。
 
 任务列表 / 详情页拆给本服务（``inject = ["test_core", "webui"]``），核心不沾
 webui：webui 缺席 / 晚到不阻塞核心（同 heartbeat-server 的 ui_service 模式）：
@@ -19,7 +19,8 @@ from cordis_port import Context, Service
 
 
 class TestCoreUiService(Service[None]):
-    """test-core 页面服务：注册「测试任务」页面（``ui/TasksPage.vue``）。"""
+    """test-core 页面服务：注册「脚本管理」（``ui/ScriptsPage.vue``）与
+    「测试任务」（``ui/TasksPage.vue``）页面。"""
 
     #: 附属服务标记：随宿主 ``test-core`` 一起呈现，不单列插件
     service_of: ClassVar[str] = "test-core"
@@ -35,7 +36,19 @@ class TestCoreUiService(Service[None]):
         self.ctx: Context = ctx
 
     async def init(self) -> object:
-        """注册「测试任务」页；返回清理函数（依赖集由 fiber 保证就绪）。"""
+        """注册「脚本管理」/「测试任务」页；返回清理函数（依赖集由 fiber 保证就绪）。"""
+        self.ctx.webui.register_ui(
+            "scripts",
+            kind="page",
+            format="vue",
+            resource_root=str(Path(__file__).resolve().parent / "ui"),
+            entry="ScriptsPage.vue",
+            path="/scripts",
+            title="脚本管理",
+            menu_group="脚本管理",
+            menu_icon="pi pi-folder-open",
+            menu_order=10,
+        )
         self.ctx.webui.register_ui(
             "tasks",
             kind="page",
@@ -44,9 +57,9 @@ class TestCoreUiService(Service[None]):
             entry="TasksPage.vue",
             path="/tasks",
             title="测试任务",
-            menu_group="",
+            menu_group="测试任务与结果",
             menu_icon="pi pi-list",
-            menu_order=98,
+            menu_order=30,
         )
 
         def cleanup() -> None:

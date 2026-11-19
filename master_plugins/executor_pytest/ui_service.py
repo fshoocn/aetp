@@ -1,4 +1,4 @@
-"""executor_pytest 管理端的页面服务（``ctx.executor_pytest_master_ui``）：材料与下发页。
+"""executor_pytest 管理端的页面服务（``ctx.executor_pytest_master_ui``）：脚本管理页 pytest 材料 slot 面板。
 
 页面层与核心解耦（与 heartbeat / test_core 的页面服务同模式）：核心
 ``ExecPytestMasterPlugin`` **不再** ``inject = ["webui"]``、不在 ``init`` 里直接
@@ -9,7 +9,7 @@
   服务 ``executor_pytest_master``（核心 ``provide`` 的同一
   :class:`~master_plugins.executor_pytest.plugin.ExecPytestMasterPlugin` 实例，
   经 ``ctx.executor_pytest_master`` 传递，本服务按**服务名**声明依赖、不 import
-  核心代码）与 UI 宿主 ``webui``；两者就位 cordis 才装载本服务并注册页面；
+  核心代码）与 UI 宿主 ``webui``；  两者就位 cordis 才装载本服务并注册 UI 贡献；
 * ``webui`` 是**可选依赖**：缺席时本服务安静 PENDING（长期 pending 不报
   ERROR），核心（预推 / inspect 编排 / 管理 API）照常 ACTIVE；webui 晚出现自动
   挂载、卸载自动撤回、重载自动重新注册（随依赖纪元流转，每次恰好一条，不重复）；
@@ -30,14 +30,14 @@ from cordis_port import Context, Service
 
 
 class ExecPytestUiService(Service[None]):
-    """executor_pytest 管理端页面服务：注册「测试材料」与「下发测试任务」两页。"""
+    """executor_pytest 管理端页面服务：注册脚本管理页的 pytest 材料 slot 面板。"""
 
     #: 附属服务标记：本类是 ``executor-pytest-master`` 插件的界面层载体，不是独立
     #: 插件——插件清单（builtin_specs）据此不单列，随宿主插件一起呈现
     service_of: ClassVar[str] = "executor-pytest-master"
     #: 服务名（即 ``ctx.executor_pytest_master_ui``）
     provide: str | None = "executor_pytest_master_ui"
-    #: fiber 名（UI 贡献归属由此而来：``executor-pytest-master_ui:pytest-materials``；
+    #: fiber 名（UI 贡献归属由此而来：``executor-pytest-master_ui:pytest-materials-panel``；
     #: 权限层 ``plugin_owner`` 规范化去 ``_ui`` 后缀 → 归属名 ``executor-pytest-master``）
     name: str = "executor-pytest-master_ui"
     #: 页面层的依赖集 = 自家核心服务 ``executor_pytest_master`` + UI 宿主 ``webui``：
@@ -51,35 +51,29 @@ class ExecPytestUiService(Service[None]):
         self.ctx: Context = ctx
 
     def init(self) -> None:
-        """注册「测试材料」「下发测试任务」两页（依赖集由 fiber 保证就绪，无需轮询）。
+        """注册脚本管理页的 pytest 材料 slot 面板（依赖集由 fiber 保证就绪，无需轮询）。
+
+        旧「测试材料」（``pytest-materials``，/pytest/materials）与「下发测试任务」
+        （``pytest-submit``，/pytest/submit）两页已退役（W2-D）：与本 slot 同批
+        注销、不再注册——材料能力整体迁入 ``ui/MaterialsPanel.vue``，面板挂脚本
+        管理页 slot ``scripts:executor-pytest``（脚本总览 tab=pytest）；任务下发
+        并入测试计划编辑器（「测试计划与下发」页，W3 交付）。contribution_id 用
+        新 id ``pytest-materials-panel``（旧 id 不可复用：同 owner 同 id 二次注册
+        抛 ValueError，新旧注册必须同批切换）。
 
         注册项绑定本 fiber：卸载自动移除清单与静态挂载，webui 卸载 / 重载
         触发的重新装载会自动重新注册（每次恰好一条，不重复）。
         """
         ui_root = str(Path(__file__).resolve().parent / "ui")
         self.ctx.webui.register_ui(
-            "pytest-materials",
-            kind="page",
+            "pytest-materials-panel",
+            kind="slot",
             format="vue",
             resource_root=ui_root,
-            entry="MaterialsPage.vue",
-            path="/pytest/materials",
-            title="测试材料",
-            menu_group="",
-            menu_icon="pi pi-folder",
-            menu_order=96,
-        )
-        self.ctx.webui.register_ui(
-            "pytest-submit",
-            kind="page",
-            format="vue",
-            resource_root=ui_root,
-            entry="SubmitPage.vue",
-            path="/pytest/submit",
-            title="下发测试任务",
-            menu_group="",
-            menu_icon="pi pi-send",
-            menu_order=97,
+            entry="MaterialsPanel.vue",
+            target="scripts:executor-pytest",
+            title="pytest 脚本",
+            order=10,
         )
 
 
