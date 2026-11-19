@@ -38,6 +38,8 @@ TOPIC_JOB_CANCEL = "test.job.cancel"
 TOPIC_JOB_RESULT = "test.job.result"
 #: slave → master：进度（可选，丢了无害）
 TOPIC_JOB_PROGRESS = "test.job.progress"
+#: slave → master：测试输出流小包（fire-and-forget，载荷 LogChunk，§10.4）
+TOPIC_JOB_LOG = "test.job.log"
 
 # -- 事件名（§11.1，登记于 common/event_contract.py，模式全 parallel） -------
 
@@ -148,6 +150,18 @@ class JobDescriptor:
 
 
 @dataclass(frozen=True)
+class LogChunk:
+    """测试输出流小包（§11.2 / §10.4）；lines 每项 {ts: float, level: int, msg: str}。"""
+    proto: int
+    job_id: str
+    attempt: int
+    seq: int
+    stream: Literal["stdout", "stderr", "case"]
+    case_id: str = ""
+    lines: Sequence[Mapping[str, Any]] = field(default_factory=list[Mapping[str, Any]])
+
+
+@dataclass(frozen=True)
 class ArtifactRef:
     """产物引用。"""
 
@@ -207,6 +221,14 @@ class InvalidTransition(TestCoreError):
 
 class DuplicateSubmission(TestCoreError):
     """重复提交（idempotency_key 冲突）。"""
+
+
+class MaterialNotFound(TestCoreError):
+    """材料不存在。"""
+
+
+class MaterialInUse(TestCoreError):
+    """材料被引用（任务 params / 选择集在用），禁止删除。"""
 
 
 # -- 服务门面（ctx.test_core，§6） -------------------------------------------
@@ -292,6 +314,80 @@ class TestCoreInterface(Protocol):
         """产物状态/URI 回填（artifact_oss / artifact_gc 专用写口，仅此一个）。"""
         ...
 
+    # -- 材料服务面（材料 / 用例清单 / 选择集，D10） ---------------------------
+
+    async def upload_material(
+        self,
+        *,
+        name: str,
+        data: bytes,
+        recipe: Mapping[str, Any],
+        source: str = "api",
+        created_by: str = "",
+        labels: Mapping[str, str] | None = None,
+    ) -> Mapping[str, Any]:
+        """落盘+入库；(sha256, recipe_fingerprint) 命中返回既有材料 dict（幂等）；返回含 id/state/…。"""
+        ...
+
+    async def list_materials(
+        self,
+        *,
+        state: str = "",
+        labels: Mapping[str, str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Mapping[str, Any]]:
+        """材料列表（state / labels 过滤、分页）。"""
+        ...
+
+    async def get_material(self, material_id: str) -> Mapping[str, Any] | None:
+        """材料详情；不存在返回 None。"""
+        ...
+
+    async def get_material_bytes(self, material_id: str) -> bytes | None:
+        """材料 zip 本体；不存在返回 None。"""
+        ...
+
+    async def update_recipe(
+        self, material_id: str, recipe: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """更新配方，状态回 uploaded（需重分析）；不存在抛 MaterialNotFound。"""
+        ...
+
+    async def put_problems(
+        self, material_id: str, problems: Sequence[Mapping[str, Any]], *, state: str
+    ) -> bool:
+        """inspect 结果写入（全量替换）；state ∈ {"analyzed","failed"}；不存在返回 False。"""
+        ...
+
+    async def put_cases(
+        self, material_id: str, cases: Sequence[Mapping[str, Any]]
+    ) -> int:
+        """全量替换该材料用例清单，返回条数。"""
+        ...
+
+    async def list_material_cases(self, material_id: str) -> list[Mapping[str, Any]]:
+        """材料的用例清单（material_case 行）。"""
+        ...
+
+    async def save_selection(
+        self, material_id: str, name: str, case_ids: Sequence[str], *, created_by: str = ""
+    ) -> str:
+        """保存选择集，返回 selection_id。"""
+        ...
+
+    async def get_selection(self, selection_id: str) -> Mapping[str, Any] | None:
+        """选择集详情；不存在返回 None。"""
+        ...
+
+    async def delete_material(self, material_id: str) -> bool:
+        """删除材料；有引用（任务 params 引用 / 选择集在用）抛 MaterialInUse，不存在抛 MaterialNotFound。"""
+        ...
+
+    async def list_unreferenced(self, *, older_than_ts: float) -> list[Mapping[str, Any]]:
+        """GC 辅助：无引用且 updated_ts < older_than_ts 的材料列表。"""
+        ...
+
     # -- 扩展点（HookChain 宿主） ---------------------------------------------
 
     def register_hook(
@@ -333,6 +429,7 @@ __all__: list[str] = [
     # 通信 topic
     "TOPIC_JOB",
     "TOPIC_JOB_CANCEL",
+    "TOPIC_JOB_LOG",
     "TOPIC_JOB_PROGRESS",
     "TOPIC_JOB_RESULT",
     # 上行面
@@ -347,6 +444,9 @@ __all__: list[str] = [
     "JobDescriptor",
     "JobResult",
     "JobState",
+    "LogChunk",
+    "MaterialInUse",
+    "MaterialNotFound",
     "ShardSpec",
     "StageKind",
     "StageSpec",

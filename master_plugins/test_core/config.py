@@ -49,6 +49,15 @@ def _non_negative_int(name: str, raw: object) -> int:
     return raw
 
 
+def _positive_int(name: str, raw: object) -> int:
+    """把配置值收敛成**正 int**（bool 拒绝）；不满足则抛异常（类型错 TypeError）。"""
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise TypeError(f"{name} 需是正整数，收到 {raw!r}")
+    if raw <= 0:
+        raise ValueError(f"{name} 需是正整数，收到 {raw!r}")
+    return raw
+
+
 class TestCoreConfig(FieldConfig):
     """test_core 插件配置；类属性即默认值（DESIGN §13）。
 
@@ -72,6 +81,8 @@ class TestCoreConfig(FieldConfig):
         "case_results_limit": ((int,), "case_results_limit（单 Job 用例结果截断上限）"),
         "retention_days": ((int,), "retention_days（产物本地保留天数，GC 插件消费）"),
         "history_size": ((int,), "history_size（task_history 单任务保留条数）"),
+        "material_max_bytes": ((int,), "material_max_bytes（材料上传字节上限）"),
+        "materials_dir": ((str,), "materials_dir（材料存储目录，空 = data/plugins/test_core/materials）"),
     }
 
     #: Job 租约秒数（发出 → 结果/续期）
@@ -96,9 +107,14 @@ class TestCoreConfig(FieldConfig):
     retention_days: int = 30
     #: task_history 单任务保留条数
     history_size: int = 200
+    #: 材料上传字节上限（executor_pytest DESIGN §12.1）
+    material_max_bytes: int = 16777216
+    #: 材料存储目录（空 = 运行时取 data/plugins/test_core/materials，解析基准同 db/log）
+    materials_dir: str = ""
 
     def _validate(self) -> list[Issue]:
-        """校验与归一化：超时收敛有限数、计数收敛非负 int、max_attempts ≥ 1。
+        """校验与归一化：超时收敛有限数、计数收敛非负 int、max_attempts ≥ 1、
+        material_max_bytes 正 int、materials_dir 去首尾空白。
 
         问题以 ``Issue`` 列表返回（不抛），命中即归一化写回属性。
         """
@@ -113,6 +129,7 @@ class TestCoreConfig(FieldConfig):
         collect("lease_timeout", _positive_seconds)
         collect("job_timeout", _positive_seconds)
         collect("task_timeout", _non_negative_seconds)
+        collect("material_max_bytes", _positive_int)
         for name in (
             "max_attempts",
             "max_inflight_jobs",
@@ -124,6 +141,8 @@ class TestCoreConfig(FieldConfig):
             "history_size",
         ):
             collect(name, _non_negative_int)
+        if isinstance(self.materials_dir, str):
+            self.materials_dir = self.materials_dir.strip()
         attempts = self.max_attempts
         if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts < 1:
             issues.append(

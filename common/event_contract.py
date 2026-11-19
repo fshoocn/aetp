@@ -111,6 +111,11 @@ for _spec in (
         "Job 终结通知（载荷含 task_id / job_id / attempt / 状态 / 摘要）",
     ),
     EventSpec(
+        "test/job-log",
+        "parallel",
+        "测试输出流通知（载荷 = 引用 + 少量行，UI tail / 告警订阅）",
+    ),
+    EventSpec(
         "test/case-finished",
         "parallel",
         "用例失败批通知（聚合后，载荷含失败明细引用与 truncated 标记）",
@@ -124,6 +129,11 @@ for _spec in (
         "test/artifact-ready",
         "parallel",
         "产物登记完成通知（载荷含 kind / uri / size / sha256）",
+    ),
+    EventSpec(
+        "test/material-state",
+        "parallel",
+        "材料状态变化广播（载荷 {material_id, from, to, reason}）",
     ),
     EventSpec(
         "test/collect-task",

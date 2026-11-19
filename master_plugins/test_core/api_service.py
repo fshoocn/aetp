@@ -29,6 +29,8 @@ from common.test_contracts import (
     ExecutorSelector,
     InvalidSpec,
     InvalidTransition,
+    MaterialInUse,
+    MaterialNotFound,
     ShardSpec,
     StageSpec,
     TaskNotFound,
@@ -52,13 +54,20 @@ TASK_STATES: tuple[str, ...] = (
 
 
 # -- 错误边界（统一异常映射，DESIGN §12） -------------------------------------
+
+
+class _BodyTooLarge(Exception):
+    """请求体超限（材料上传映射 413）。"""
+
+
 def _guarded(
     fn: Callable[..., dict[str, object] | JSONResponse],
 ) -> Callable[..., dict[str, object] | JSONResponse]:
     """把 handler 的异常映射为错误响应：``{"ok": false, "error", "code"}``。
 
-    映射表：TaskNotFound→404、InvalidSpec→400、InvalidTransition→409、
-    DuplicateSubmission→409、JSON 解析 / 参数校验（ValueError）→400、
+    映射表：TaskNotFound→404、MaterialNotFound→404、InvalidSpec→400、
+    InvalidTransition→409、DuplicateSubmission→409、MaterialInUse→409、
+    请求体超限（_BodyTooLarge）→413、JSON 解析 / 参数校验（ValueError）→400、
     其余→500（不泄漏堆栈，只记 ``ctx.logger``）。
     """
 
@@ -70,12 +79,18 @@ def _guarded(
             return await fn(self, request, *args, **kwargs)
         except TaskNotFound as exc:
             return _error_response(404, str(exc) or "任务不存在", "not_found")
+        except MaterialNotFound as exc:
+            return _error_response(404, str(exc) or "材料 / 选择集不存在", "not_found")
         except InvalidSpec as exc:
             return _error_response(400, str(exc) or "任务规格无效", "invalid_spec")
         except InvalidTransition as exc:
             return _error_response(409, str(exc) or "非法状态迁移", "invalid_transition")
         except DuplicateSubmission as exc:
             return _error_response(409, str(exc) or "重复提交", "duplicate_submission")
+        except MaterialInUse as exc:
+            return _error_response(409, str(exc) or "材料被引用，禁止删除", "material_in_use")
+        except _BodyTooLarge as exc:
+            return _error_response(413, str(exc) or "请求体超限", "payload_too_large")
         except json.JSONDecodeError as exc:
             return _error_response(400, f"请求体不是合法 JSON：{exc}", "invalid_json")
         except ValueError as exc:
@@ -150,6 +165,43 @@ class TestCoreApiService(Service[None]):
             self._artifact_download,
             kind="api",
             name="test-core.artifact-download",
+        )
+        api.post(
+            "/api/test/materials",
+            self._material_upload,
+            kind="api",
+            name="test-core.material-upload",
+        )
+        api.get("/api/test/materials", self._material_list, kind="api", name="test-core.materials")
+        api.get(
+            "/api/test/materials/{material_id}",
+            self._material_detail,
+            kind="api",
+            name="test-core.material",
+        )
+        api.delete(
+            "/api/test/materials/{material_id}",
+            self._material_delete,
+            kind="api",
+            name="test-core.material-delete",
+        )
+        api.get(
+            "/api/test/materials/{material_id}/cases",
+            self._material_cases,
+            kind="api",
+            name="test-core.material-cases",
+        )
+        api.get(
+            "/api/test/materials/{material_id}/download",
+            self._material_download,
+            kind="api",
+            name="test-core.material-download",
+        )
+        api.get(
+            "/api/test/selections/{selection_id}",
+            self._selection_detail,
+            kind="api",
+            name="test-core.selection",
         )
         return api.add_health_provider("test_core", self._core.health_metrics)
 
@@ -347,6 +399,119 @@ class TestCoreApiService(Service[None]):
                     return item
         return None
 
+    # -- 材料 / 选择集 API（executor_pytest DESIGN §18.5） ---------------------
+    @_guarded
+    async def _material_upload(
+        self, request: Request
+    ) -> dict[str, object] | JSONResponse:
+        """上传材料 zip：二进制 body（上限 config.material_max_bytes，超限 413）。
+
+        ``X-Material-Name`` 头（或 query ``name``）必填；``X-Material-Recipe`` 头
+        （或 query ``recipe``）为配方 JSON 串，缺省 ``{}``。``(sha256,
+        recipe_fingerprint)`` 命中返回既有材料（``deduplicated`` = true，幂等，
+        §4.3）。
+        """
+        params = request.query_params
+        name = (
+            request.headers.get("X-Material-Name", "").strip()
+            or params.get("name", "").strip()
+        )
+        if not name:
+            raise ValueError("缺少材料名（X-Material-Name 头或 name 查询参数）")
+        recipe_raw = (
+            request.headers.get("X-Material-Recipe", "").strip()
+            or params.get("recipe", "").strip()
+        )
+        recipe = _json_object(recipe_raw.encode("utf-8")) if recipe_raw else {}
+        data = await _read_body_capped(
+            request, limit=self._core.config.material_max_bytes
+        )
+        material = await self._core.upload_material(name=name, data=data, recipe=recipe)
+        return {
+            "ok": True,
+            "material": dict(material),
+            "deduplicated": bool(material.get("deduplicated")),
+        }
+
+    @_guarded
+    async def _material_list(
+        self, request: Request
+    ) -> dict[str, object] | JSONResponse:
+        """材料列表：query ``state`` / ``labels``（JSON 或 k=v 逗号分隔）/ ``limit`` / ``offset``。"""
+        params = request.query_params
+        limit = _parse_int(params.get("limit"), default=50, minimum=1, name="limit")
+        offset = _parse_int(params.get("offset"), default=0, minimum=0, name="offset")
+        materials = await self._core.list_materials(
+            state=params.get("state", "").strip(),
+            labels=_parse_labels(params.get("labels", "")),
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "ok": True,
+            "materials": list(materials),
+            "count": len(materials),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    @_guarded
+    async def _material_detail(
+        self, request: Request, material_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """材料详情（含 recipe / problems）；不存在 404。"""
+        material = await self._core.get_material(material_id)
+        if material is None:
+            raise MaterialNotFound(f"找不到材料：{material_id}")
+        return {"ok": True, "material": dict(material)}
+
+    @_guarded
+    async def _material_delete(
+        self, request: Request, material_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """删除材料：有引用 409（material_in_use）、不存在 404（§3.2）。"""
+        await self._core.delete_material(material_id)
+        return {"ok": True, "material_id": material_id, "deleted": True}
+
+    @_guarded
+    async def _material_cases(
+        self, request: Request, material_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """材料用例清单（转调核心 material_case 查询）；材料不存在 404。"""
+        if await self._core.get_material(material_id) is None:
+            raise MaterialNotFound(f"找不到材料：{material_id}")
+        cases = await self._core.list_material_cases(material_id)
+        return {
+            "ok": True,
+            "material_id": material_id,
+            "cases": list(cases),
+            "count": len(cases),
+        }
+
+    @_guarded
+    async def _material_download(self, request: Request, material_id: str) -> Response:
+        """材料 zip 本体下载：FileResponse 回文件；材料或文件缺失 404。"""
+        material = await self._core.get_material(material_id)
+        if material is None:
+            return _error_response(404, f"找不到材料：{material_id}", "not_found")
+        uri = str(material.get("uri") or "")
+        path = _local_uri_path(uri) if uri.startswith("local://") else Path()
+        if not path.is_file():
+            return _error_response(404, f"材料文件不存在：{material_id}", "not_found")
+        return FileResponse(
+            path, filename=f"{material_id}.zip", media_type="application/zip"
+        )
+
+    @_guarded
+    async def _selection_detail(
+        self, request: Request, selection_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """选择集详情；不存在 404。"""
+        selection = await self._core.get_selection(selection_id)
+        if selection is None:
+            raise MaterialNotFound(f"找不到选择集：{selection_id}")
+        return {"ok": True, "selection": dict(selection)}
+
     async def _extend(self, response: dict[str, object], event: str) -> None:
         """可扩展返回值契约（同 heartbeat ``collect-node`` 模式，DESIGN §11.3）。
 
@@ -522,6 +687,33 @@ def _error_response(status_code: int, message: str, code: str) -> JSONResponse:
         {"ok": False, "error": message, "code": code},
         status_code=status_code,
     )
+
+
+#: 超限请求的引流额度：拒绝前最多再读这么多字节丢弃，防无限长流挂死
+_DRAIN_SLACK: int = 256 * 1024
+
+
+async def _read_body_capped(request: Request, *, limit: int) -> bytes:
+    """读请求体（超限抛 :class:`_BodyTooLarge` → 413）。
+
+    超限不立刻中断读取，而是继续引流丢弃（最多再读 :data:`_DRAIN_SLACK` 字节）
+    再拒绝：请求体读完后连接才能优雅收尾（webapi plugin_manager 先例）。
+    """
+    chunks: list[bytes] = []
+    total = 0
+    overflow = False
+    async for chunk in request.stream():
+        total += len(chunk)
+        if overflow or total > limit:
+            overflow = True
+            chunks.clear()
+            if total > limit + _DRAIN_SLACK:
+                break  # 引流额度用完：不再陪恶意长流耗着
+            continue
+        chunks.append(chunk)
+    if overflow:
+        raise _BodyTooLarge(f"请求体超限（上限 {limit} 字节）")
+    return b"".join(chunks)
 
 
 def _required_json_object(raw: bytes) -> Mapping[str, Any]:

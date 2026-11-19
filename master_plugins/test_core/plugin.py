@@ -15,15 +15,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import secrets
+import shutil
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, ClassVar
+from pathlib import Path
+from typing import Any, ClassVar, Literal, cast
 
 from cordis_port import Context, EventDispatchError, Fiber, Service
 
+from common.capabilities import canonical_json
 from common.hook_chain import OnError
 from common.test_contracts import (
     CHAIN_ARTIFACT_SINK,
@@ -31,14 +35,19 @@ from common.test_contracts import (
     CHAIN_TASK_TRANSFORM,
     SCHEMA_VERSION,
     TEST_PROTO,
+    TOPIC_JOB_LOG,
     TOPIC_JOB_PROGRESS,
     TOPIC_JOB_RESULT,
     ArtifactRef,
     CaseResult,
     ExecutorSelector,
+    InvalidSpec,
     InvalidTransition,
     JobDescriptor,
     JobResult,
+    LogChunk,
+    MaterialInUse,
+    MaterialNotFound,
     TaskNotFound,
     TaskSpec,
     TestCoreInterface,
@@ -52,6 +61,9 @@ from .models import (
     TestCaseResult,
     TestJob,
     TestJobResult,
+    TestMaterial,
+    TestMaterialCase,
+    TestMaterialSelection,
     TestStage,
     TestTask,
     TestTaskHistory,
@@ -77,6 +89,8 @@ EVENT_CASE_FINISHED = "test/case-finished"
 EVENT_TASK_FINISHED = "test/task-finished"
 EVENT_ARTIFACT_READY = "test/artifact-ready"
 EVENT_COLLECT_TASK = "test/collect-task"
+EVENT_JOB_LOG = "test/job-log"
+EVENT_MATERIAL_STATE = "test/material-state"
 
 #: heartbeat/node-status 事件名（emit 模式，监听器必须同步）
 _NODE_STATUS_EVENT = "heartbeat/node-status"
@@ -85,6 +99,8 @@ _NODE_STATUS_EVENT = "heartbeat/node-status"
 _DISPATCH_INTERVAL: float = 1.0
 #: case-finished 事件里失败明细的载荷上限（载荷 = 引用 + 摘要，禁止大对象）
 _CASE_EVENT_LIMIT: int = 200
+#: test/job-log 转发事件里 lines 的行数上限（载荷恒小，§10.4）
+_LOG_EVENT_LIMIT: int = 3
 
 #: JobResult.status → Job 状态（timeout 归为基础设施失败，§5.2 无 timeout 目标态）
 _JOB_RESULT_STATES: dict[str, str] = {
@@ -129,6 +145,84 @@ def _public_params(params: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in params.items() if key != TASK_TIMEOUT_KEY}
 
 
+def _decode_list(raw: object) -> list[Any]:
+    """JSON 列读出为 list（坏行降级空列表）。"""
+    data = _decode_json(raw, [])
+    return list(data) if isinstance(data, list) else []
+
+
+def _base_dir(ctx: Context) -> Path:
+    """节点目录（config.ini 所在目录）：相对路径的解析基准（同 db/log）。"""
+    loaded = ctx.appconfig.path_loaded
+    return loaded.parent if loaded is not None else Path.cwd()
+
+
+def _recipe_fingerprint(recipe: Mapping[str, Any]) -> str:
+    """配方指纹 = sha256(canonical_json(recipe)) 截 16 hex（§4.3）。"""
+    return hashlib.sha256(canonical_json(recipe).encode("utf-8")).hexdigest()[:16]
+
+
+def _ingest_meta(meta: object, ctx: Context) -> Mapping[str, Any]:
+    """``log.ingest_remote`` 的 meta：优先沿用 comm 收件 meta（node = 发送节点，
+    按 node 分组、溯源到真实输出节点），缺 node 时合成（node_name 或 "master"）。"""
+    if isinstance(meta, Mapping) and meta.get("node"):
+        return meta
+    return {
+        "node": str(ctx.get("node_name") or "master"),
+        "topic": "log.batch",
+        "ts": time.time(),
+        "received_ts": time.time(),
+        "id": "",
+    }
+
+
+def _log_line(raw: object) -> dict[str, object] | None:
+    """日志行归一化为 {ts, level, msg}；坏行返回 None。"""
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        ts = float(raw.get("ts") or 0.0)
+        level = int(raw.get("level") or 0)
+    except (TypeError, ValueError):
+        return None
+    return {"ts": ts, "level": level, "msg": str(raw.get("msg") or "")}
+
+
+def _parse_log_chunk(raw: object) -> LogChunk | None:
+    """``test.job.log`` 载荷 → LogChunk（忽略未知字段、缺省给默认值，§3.2）。
+
+    proto 不匹配拒收（D8）、缺 job_id/attempt/seq 或 stream 非法返回 None。
+    """
+    if not isinstance(raw, Mapping):
+        return None
+    job_id = str(raw.get("job_id") or "")
+    stream = str(raw.get("stream") or "")
+    if not job_id or stream not in ("stdout", "stderr", "case"):
+        return None
+    try:
+        proto = int(raw.get("proto") or 0)
+        attempt = int(raw.get("attempt") or 0)
+        seq = int(raw.get("seq", -1))
+    except (TypeError, ValueError):
+        return None
+    if proto != TEST_PROTO or attempt < 1 or seq < 0:
+        return None
+    lines: list[Mapping[str, Any]] = []
+    for item in raw.get("lines") or []:
+        line = _log_line(item)
+        if line is not None:
+            lines.append(line)
+    return LogChunk(
+        proto=proto,
+        job_id=job_id,
+        attempt=attempt,
+        seq=seq,
+        stream=cast("Literal['stdout', 'stderr', 'case']", stream),
+        case_id=str(raw.get("case_id") or ""),
+        lines=lines,
+    )
+
+
 class TestCorePlugin(Service[TestCoreConfig]):
     """test-core 测试核心插件（``provide = "test_core"``，DESIGN §6）。
 
@@ -169,9 +263,14 @@ class TestCorePlugin(Service[TestCoreConfig]):
         self._ui_fiber: Fiber | None = None
         self._results_duplicate_total: int = 0
         self._late_results_total: int = 0
+        #: test.job.log 幂等游标：(job_id, attempt) → 已收最大 seq（重复/乱序旧包丢弃）
+        self._log_cursors: dict[tuple[str, int], int] = {}
+        self._logs_lost_total: int = 0
+        self._logs_duplicate_total: int = 0
         #: /healthz 仪表缓存（扫描循环定期刷新，health_metrics 是同步接口）
         self._gauge_inflight_jobs: int = 0
         self._gauge_running_tasks: int = 0
+        self._gauge_materials_total: int = 0
 
     # ================================================================ 生命周期
     async def init(self) -> object:
@@ -187,11 +286,15 @@ class TestCorePlugin(Service[TestCoreConfig]):
                 TestCaseResult,
                 TestArtifact,
                 TestTaskHistory,
+                TestMaterial,
+                TestMaterialCase,
+                TestMaterialSelection,
             ]
         )
         await self._recover()
         self.ctx.comm.on(TOPIC_JOB_RESULT, self._on_job_result)
         self.ctx.comm.on(TOPIC_JOB_PROGRESS, self._on_job_progress)
+        self.ctx.comm.on(TOPIC_JOB_LOG, self._on_job_log)
         # node-status 是 emit 事件：监听器必须同步（只投递 deque，调度循环消费）
         self.ctx.effect(
             lambda: self.ctx.on(_NODE_STATUS_EVENT, self._on_node_status),
@@ -294,6 +397,12 @@ class TestCorePlugin(Service[TestCoreConfig]):
 
         labels = dict(spec.labels or {})
         params = dict(spec.params or {})
+        # 材料/选择集引用防悬空（executor_pytest DESIGN §18 注）：顶层与各 Stage params 都查
+        await self._check_material_refs(params, where="task params")
+        for index, stage_spec in enumerate(spec.stages, start=1):
+            await self._check_material_refs(
+                dict(stage_spec.params or {}), where=f"stages[{index}].params"
+            )
         if spec.timeout_s > 0:
             params[TASK_TIMEOUT_KEY] = float(spec.timeout_s)  # 模型缺口：暂存进 params
         task_id = _new_id("t", now)
@@ -417,6 +526,365 @@ class TestCorePlugin(Service[TestCoreConfig]):
         )
         self._scheduler.reprioritize(task_id, int(priority))
         return True
+
+    # ============================================================== 材料服务面
+    # （executor_pytest DESIGN §3/§4：材料 / 用例清单 / 选择集归核心存储，内容
+    # 不透明；去重键 (sha256, recipe_fingerprint)，状态机 §3.1，引用约束 §3.2）
+
+    def _materials_dir(self) -> Path:
+        """材料存储目录：config.materials_dir 空取 data/plugins/test_core/materials。"""
+        configured = self.config.materials_dir.strip()
+        if configured:
+            path = Path(configured)
+            return path if path.is_absolute() else _base_dir(self.ctx) / path
+        return _base_dir(self.ctx) / "data" / "plugins" / "test_core" / "materials"
+
+    def _bundle_path(self, material_id: str) -> Path:
+        """材料 zip 本体路径：materials_dir/{material_id}/bundle.zip（§3）。"""
+        return self._materials_dir() / material_id / "bundle.zip"
+
+    def _material_dict(self, row: TestMaterial) -> dict[str, Any]:
+        """材料行 → 对外 dict（recipe/problems/labels 解码，uri 指向 zip 本体）。"""
+        return {
+            "id": row.id,
+            "material_id": row.id,
+            "name": row.name,
+            "kind": row.kind,
+            "size": row.size,
+            "sha256": row.sha256,
+            "recipe_fingerprint": row.recipe_fingerprint,
+            "recipe": _decode_dict(row.recipe),
+            "state": row.state,
+            "problems": _decode_list(row.problems),
+            "source": row.source,
+            "created_by": row.created_by,
+            "labels": _decode_dict(row.labels),
+            "created_ts": row.created_ts,
+            "updated_ts": row.updated_ts,
+            "uri": f"local:///{self._bundle_path(row.id).as_posix()}",
+        }
+
+    async def _emit_material_state(
+        self, *, material_id: str, from_state: str, to: str, reason: str
+    ) -> None:
+        """材料状态迁移广播（test/material-state）+ logger 审计（task_history 可省）。"""
+        self.ctx.logger.info(
+            "材料 %s 状态：%s → %s（%s）", material_id, from_state or "[*]", to, reason
+        )
+        try:
+            await self.ctx.parallel(
+                EVENT_MATERIAL_STATE,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "material_id": material_id,
+                    "from": from_state,
+                    "to": to,
+                    "reason": reason,
+                },
+            )
+        except EventDispatchError as exc:
+            self._log_dispatch_error(EVENT_MATERIAL_STATE, exc)
+
+    async def upload_material(
+        self,
+        *,
+        name: str,
+        data: bytes,
+        recipe: Mapping[str, Any],
+        source: str = "api",
+        created_by: str = "",
+        labels: Mapping[str, str] | None = None,
+    ) -> Mapping[str, Any]:
+        """落盘+入库；(sha256, recipe_fingerprint) 命中返回既有材料 dict（幂等）。
+
+        返回 dict 含 id/state/…，另带 ``deduplicated`` 标记是否命中去重（§4.3）。
+        """
+        now = self._clock()
+        recipe_dict = dict(recipe or {})
+        sha256 = hashlib.sha256(data).hexdigest()
+        fingerprint = _recipe_fingerprint(recipe_dict)
+        repo = self._repo(TestMaterial)
+        existing = await repo.list(
+            where=(TestMaterial.sha256 == sha256)
+            & (TestMaterial.recipe_fingerprint == fingerprint)
+        )
+        if existing:
+            self.ctx.logger.info(
+                "材料上传去重命中（sha256=%s…，指纹 %s）：%s",
+                sha256[:12],
+                fingerprint,
+                existing[0].id,
+            )
+            dedup = self._material_dict(existing[0])
+            dedup["deduplicated"] = True
+            return dedup
+        material_id = _new_id("m", now)
+        path = self._bundle_path(material_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        row = TestMaterial(
+            id=material_id,
+            name=name,
+            kind="zip",
+            size=len(data),
+            sha256=sha256,
+            recipe_fingerprint=fingerprint,
+            recipe=_json_dumps(recipe_dict),
+            state="uploaded",
+            problems=_json_dumps([]),
+            source=source,
+            created_by=created_by,
+            labels=_json_dumps(dict(labels or {})),
+            created_ts=now,
+            updated_ts=now,
+        )
+        await repo.add(row)
+        await self._emit_material_state(
+            material_id=material_id, from_state="", to="uploaded", reason="uploaded"
+        )
+        out = self._material_dict(row)
+        out["deduplicated"] = False
+        return out
+
+    async def list_materials(
+        self,
+        *,
+        state: str = "",
+        labels: Mapping[str, str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Mapping[str, Any]]:
+        """材料列表（state 精确过滤、labels 子集匹配、分页）。"""
+        where = TestMaterial.state == state if state else None
+        rows = await self._repo(TestMaterial).list(
+            where=where, order_by=TestMaterial.created_ts
+        )
+        wanted = dict(labels or {})
+        if wanted:
+            rows = [
+                row
+                for row in rows
+                if all(_decode_dict(row.labels).get(k) == v for k, v in wanted.items())
+            ]
+        start = max(0, offset)
+        end = start + max(0, limit)
+        return [self._material_dict(row) for row in rows[start:end]]
+
+    async def get_material(self, material_id: str) -> Mapping[str, Any] | None:
+        """材料详情；不存在返回 None。"""
+        row = await self._repo(TestMaterial).get(material_id)
+        return self._material_dict(row) if row is not None else None
+
+    async def get_material_bytes(self, material_id: str) -> bytes | None:
+        """材料 zip 本体；不存在（行或文件）返回 None。"""
+        row = await self._repo(TestMaterial).get(material_id)
+        if row is None:
+            return None
+        path = self._bundle_path(row.id)
+        return path.read_bytes() if path.is_file() else None
+
+    async def update_recipe(
+        self, material_id: str, recipe: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        """更新配方（指纹重算、状态回 uploaded 需重分析，§3.1）；不存在抛 MaterialNotFound。"""
+        repo = self._repo(TestMaterial)
+        row = await repo.get(material_id)
+        if row is None:
+            raise MaterialNotFound(f"材料不存在：{material_id}")
+        now = self._clock()
+        recipe_dict = dict(recipe or {})
+        from_state = row.state
+        row.recipe = _json_dumps(recipe_dict)
+        row.recipe_fingerprint = _recipe_fingerprint(recipe_dict)
+        row.state = "uploaded"
+        row.updated_ts = now
+        await repo.update(
+            material_id,
+            {
+                "recipe": row.recipe,
+                "recipe_fingerprint": row.recipe_fingerprint,
+                "state": row.state,
+                "updated_ts": now,
+            },
+        )
+        if from_state != row.state:
+            await self._emit_material_state(
+                material_id=material_id,
+                from_state=from_state,
+                to=row.state,
+                reason="recipe updated",
+            )
+        return self._material_dict(row)
+
+    async def put_problems(
+        self, material_id: str, problems: Sequence[Mapping[str, Any]], *, state: str
+    ) -> bool:
+        """inspect 结果写入（problems 全量替换，§3.1）；state ∈ {"analyzed","failed"}；不存在返回 False。"""
+        if state not in ("analyzed", "failed"):
+            raise ValueError(f"state 只能是 analyzed / failed，收到 {state!r}")
+        repo = self._repo(TestMaterial)
+        row = await repo.get(material_id)
+        if row is None:
+            return False
+        now = self._clock()
+        from_state = row.state
+        row.problems = _json_dumps([dict(item) for item in problems])
+        row.state = state
+        row.updated_ts = now
+        await repo.update(
+            material_id, {"problems": row.problems, "state": state, "updated_ts": now}
+        )
+        if from_state != state:
+            await self._emit_material_state(
+                material_id=material_id, from_state=from_state, to=state, reason="inspect result"
+            )
+        return True
+
+    async def put_cases(
+        self, material_id: str, cases: Sequence[Mapping[str, Any]]
+    ) -> int:
+        """全量替换该材料用例清单（幂等：id = material_id::case_id，§3），返回条数。
+
+        不存在抛 :class:`MaterialNotFound`；输入内重复 case_id 保留首条。
+        """
+        if await self._repo(TestMaterial).get(material_id) is None:
+            raise MaterialNotFound(f"材料不存在：{material_id}")
+        repo = self._repo(TestMaterialCase)
+        for row in await repo.list(where=TestMaterialCase.material_id == material_id):
+            await repo.delete(row.id)
+        count = 0
+        seen: set[str] = set()
+        for item in cases:
+            case_id = str(item.get("case_id") or "")
+            if not case_id or case_id in seen:
+                continue
+            seen.add(case_id)
+            markers = item.get("markers")
+            params = item.get("params")
+            await repo.add(
+                TestMaterialCase(
+                    id=f"{material_id}::{case_id}",
+                    material_id=material_id,
+                    case_id=case_id,
+                    name=str(item.get("name") or ""),
+                    path=str(item.get("path") or ""),
+                    markers=_json_dumps(
+                        list(markers) if isinstance(markers, (list, tuple)) else []
+                    ),
+                    params=_json_dumps(dict(params) if isinstance(params, Mapping) else {}),
+                    status=str(item.get("status") or "ok"),
+                )
+            )
+            count += 1
+        return count
+
+    async def list_material_cases(self, material_id: str) -> list[Mapping[str, Any]]:
+        """材料的用例清单（material_case 行，按 id 排序）。"""
+        rows = await self._repo(TestMaterialCase).list(
+            where=TestMaterialCase.material_id == material_id,
+            order_by=TestMaterialCase.id,
+        )
+        return [
+            {
+                "id": row.id,
+                "material_id": row.material_id,
+                "case_id": row.case_id,
+                "name": row.name,
+                "path": row.path,
+                "markers": _decode_list(row.markers),
+                "params": _decode_dict(row.params),
+                "status": row.status,
+            }
+            for row in rows
+        ]
+
+    async def save_selection(
+        self, material_id: str, name: str, case_ids: Sequence[str], *, created_by: str = ""
+    ) -> str:
+        """保存选择集（Job 只带 selection_id 引用，D19），返回 selection_id。"""
+        if await self._repo(TestMaterial).get(material_id) is None:
+            raise MaterialNotFound(f"材料不存在：{material_id}")
+        now = self._clock()
+        selection_id = _new_id("sel", now)
+        await self._repo(TestMaterialSelection).add(
+            TestMaterialSelection(
+                id=selection_id,
+                material_id=material_id,
+                name=name,
+                case_ids=_json_dumps([str(case_id) for case_id in case_ids]),
+                created_by=created_by,
+                created_ts=now,
+            )
+        )
+        return selection_id
+
+    async def get_selection(self, selection_id: str) -> Mapping[str, Any] | None:
+        """选择集详情；不存在返回 None。"""
+        row = await self._repo(TestMaterialSelection).get(selection_id)
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "selection_id": row.id,
+            "material_id": row.material_id,
+            "name": row.name,
+            "case_ids": _decode_list(row.case_ids),
+            "created_by": row.created_by,
+            "created_ts": row.created_ts,
+        }
+
+    async def delete_material(self, material_id: str) -> bool:
+        """删除材料（行 + zip 目录）；有引用抛 MaterialInUse，不存在抛 MaterialNotFound（§3.2）。"""
+        repo = self._repo(TestMaterial)
+        if await repo.get(material_id) is None:
+            raise MaterialNotFound(f"材料不存在：{material_id}")
+        if await self._material_referenced(material_id):
+            raise MaterialInUse(f"材料被引用（任务 params / 选择集在用），禁止删除：{material_id}")
+        await repo.delete(material_id)
+        shutil.rmtree(self._bundle_path(material_id).parent, ignore_errors=True)
+        self.ctx.logger.info("材料已删除：%s", material_id)
+        return True
+
+    async def list_unreferenced(self, *, older_than_ts: float) -> list[Mapping[str, Any]]:
+        """GC 辅助：无引用且 updated_ts < older_than_ts 的材料（§3.2）。"""
+        rows = await self._repo(TestMaterial).list(
+            where=TestMaterial.updated_ts < older_than_ts,
+            order_by=TestMaterial.updated_ts,
+        )
+        out: list[Mapping[str, Any]] = []
+        for row in rows:
+            if not await self._material_referenced(row.id):
+                out.append(self._material_dict(row))
+        return out
+
+    async def _material_referenced(self, material_id: str) -> bool:
+        """引用检查（§3.2）：任务（含 Stage）params JSON 文本含该 id，或选择集关联。"""
+        pattern = f"%{material_id}%"
+        if await self._repo(TestTask).count(where=TestTask.params.like(pattern)) > 0:
+            return True
+        if await self._repo(TestStage).count(where=TestStage.params.like(pattern)) > 0:
+            return True
+        return (
+            await self._repo(TestMaterialSelection).count(
+                where=TestMaterialSelection.material_id == material_id
+            )
+            > 0
+        )
+
+    async def _check_material_refs(self, params: Mapping[str, Any], *, where: str) -> None:
+        """params 带 material_id / selection_id 时防悬空（不存在抛 InvalidSpec）。"""
+        material_id = params.get("material_id")
+        if isinstance(material_id, str) and material_id:
+            if await self._repo(TestMaterial).get(material_id) is None:
+                raise InvalidSpec(f"{where} 引用的 material_id 不存在：{material_id}")
+        elif material_id is not None and material_id != "":
+            raise InvalidSpec(f"{where}.material_id 需是字符串，收到 {material_id!r}")
+        selection_id = params.get("selection_id")
+        if isinstance(selection_id, str) and selection_id:
+            if await self._repo(TestMaterialSelection).get(selection_id) is None:
+                raise InvalidSpec(f"{where} 引用的 selection_id 不存在：{selection_id}")
+        elif selection_id is not None and selection_id != "":
+            raise InvalidSpec(f"{where}.selection_id 需是字符串，收到 {selection_id!r}")
 
     # ============================================================== 状态机编排
     def _repo(self, model: Any) -> Any:
@@ -996,6 +1464,83 @@ class TestCorePlugin(Service[TestCoreConfig]):
         if node_id and to in ("offline", "lost"):
             self._node_events.append(node_id)
 
+    # ============================================================== 测试输出流
+    async def _on_job_log(self, payload: object, meta: object) -> None:
+        """``test.job.log`` 收件（fire-and-forget；comm 派发走 parallel，可 async）。"""
+        try:
+            await self._handle_job_log(payload, meta)
+        except Exception as error:  # noqa: BLE001
+            self.ctx.logger.error("处理 test.job.log 失败：%s", error)
+
+    async def _handle_job_log(self, raw: object, meta: object) -> None:
+        """日志流主路径：幂等排序 → 转发事件（载荷恒小）→ ``ctx.log`` 入库（§10.4）。
+
+        幂等排序：每 ``(job_id, attempt)`` 维护已收最大 seq 游标——重复/乱序旧包
+        丢弃并计 ``logs_duplicate_total``；跳号差值计 ``logs_lost_total``。
+        """
+        chunk = _parse_log_chunk(raw)
+        if chunk is None:
+            self._warn(f"test.job.log 载荷不合法，忽略：{raw!r}")
+            return
+        key = (chunk.job_id, chunk.attempt)
+        cursor = self._log_cursors.get(key, -1)
+        if chunk.seq <= cursor:
+            self._logs_duplicate_total += 1
+            self._warn(
+                f"丢弃重复/乱序日志包（{key[0]} a{key[1]} seq={chunk.seq} ≤ {cursor}）"
+            )
+            return
+        if chunk.seq > cursor + 1:
+            self._logs_lost_total += chunk.seq - cursor - 1
+        self._log_cursors[key] = chunk.seq
+        job = await self._repo(TestJob).get(chunk.job_id)
+        task_id = job.task_id if job is not None else ""
+        # 转发：引用 + 少量行（裁剪至 _LOG_EVENT_LIMIT 行，载荷恒小）
+        lines: list[dict[str, object]] = []
+        for item in chunk.lines[:_LOG_EVENT_LIMIT]:
+            line = _log_line(item)
+            if line is not None:
+                lines.append(line)
+        try:
+            await self.ctx.parallel(
+                EVENT_JOB_LOG,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    **({"task_id": task_id} if task_id else {}),
+                    "job_id": chunk.job_id,
+                    "attempt": chunk.attempt,
+                    "seq": chunk.seq,
+                    "stream": chunk.stream,
+                    "case_id": chunk.case_id,
+                    "lines": lines,
+                },
+            )
+        except EventDispatchError as exc:
+            self._log_dispatch_error(EVENT_JOB_LOG, exc)
+        # 入库：条目形状对齐 log 插件出口（ts/name/level/op/msg/source），
+        # 追踪元组 op=task_id / name=test.{job_id}.{attempt} / source=case_id 或 stream
+        log = self.ctx.get("log")
+        if log is None:
+            self.ctx.logger.debug("log 插件缺席，test.job.log 只转发不入库")
+            return
+        entries: list[dict[str, object]] = []
+        for item in chunk.lines:
+            line = _log_line(item)
+            if line is None:
+                continue
+            entries.append(
+                {
+                    "ts": line["ts"],
+                    "name": f"test.{chunk.job_id}.{chunk.attempt}",
+                    "level": line["level"],
+                    "op": task_id,
+                    "msg": line["msg"],
+                    "source": chunk.case_id or chunk.stream,
+                }
+            )
+        if entries:
+            log.ingest_remote({"logs": entries}, _ingest_meta(meta, self.ctx))
+
     # ============================================================== 屏障与收尾
     async def _finish_job(
         self,
@@ -1557,6 +2102,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
         self._gauge_running_tasks = await self._repo(TestTask).count(
             where=TestTask.state == "running"
         )
+        self._gauge_materials_total = await self._repo(TestMaterial).count()
 
     def health_metrics(self) -> dict[str, object]:
         """/healthz 指标：队列 / 在途 / 运行任务与累计计数（只读）。"""
@@ -1564,8 +2110,11 @@ class TestCorePlugin(Service[TestCoreConfig]):
             **self._scheduler.metrics(),
             "inflight_jobs": self._gauge_inflight_jobs,
             "running_tasks": self._gauge_running_tasks,
+            "materials_total": self._gauge_materials_total,
             "results_duplicate_total": self._results_duplicate_total,
             "late_results_total": self._late_results_total,
+            "logs_lost_total": self._logs_lost_total,
+            "logs_duplicate_total": self._logs_duplicate_total,
             "hooks": self._hooks.stats(),
         }
 

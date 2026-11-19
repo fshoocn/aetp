@@ -151,11 +151,80 @@ class TestTaskHistory(Model):
     ts: Mapped[float]
 
 
+class TestMaterial(Model):
+    """材料（脚本包）主表（executor_pytest DESIGN §3；内容不透明，归核心存储）。
+
+    去重键 ``(sha256, recipe_fingerprint)``（§4.3）：同内容不同配方是不同材料；
+    材料文件本体在 ``data/plugins/test_core/materials/{id}/bundle.zip``，不建
+    material_file 表（D13）。
+    """
+
+    __owner__ = "test-core"
+    __tablename__ = "material"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    name: Mapped[str]
+    kind: Mapped[str]
+    size: Mapped[int]
+    sha256: Mapped[str]
+    #: 配方指纹（sha256(canonical_json(recipe)) 截 16 hex，§4.3）
+    recipe_fingerprint: Mapped[str]
+    #: JSON 文本（组装配方，核心只存不解释）
+    recipe: Mapped[str]
+    state: Mapped[str]
+    #: JSON 文本（最近一次 inspect 问题列表 [{code, path, line?, message, severity}]）
+    problems: Mapped[str]
+    source: Mapped[str]
+    created_by: Mapped[str]
+    #: JSON 文本（标签轴）
+    labels: Mapped[str]
+    created_ts: Mapped[float]
+    updated_ts: Mapped[float]
+
+
+class TestMaterialCase(Model):
+    """材料用例清单（inspect / collect 解析结果；id 取 ``material_id::case_id`` 天然幂等）。"""
+
+    __owner__ = "test-core"
+    __tablename__ = "material_case"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    material_id: Mapped[str]
+    #: pytest nodeid（用例稳定标识，D2）
+    case_id: Mapped[str]
+    name: Mapped[str]
+    path: Mapped[str]
+    #: JSON 文本（marker 列表）
+    markers: Mapped[str]
+    #: JSON 文本（nodeid 解析的近似参数值，§7）
+    params: Mapped[str]
+    #: ok / error（error = 解析异常的用例，不阻塞其余入库）
+    status: Mapped[str]
+
+
+class TestMaterialSelection(Model):
+    """选择集（任务下发 UI 勾选结果；Job 只带 selection_id 引用，D19）。"""
+
+    __owner__ = "test-core"
+    __tablename__ = "material_selection"
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    material_id: Mapped[str]
+    name: Mapped[str]
+    #: JSON 文本（case_id 列表）
+    case_ids: Mapped[str]
+    created_by: Mapped[str]
+    created_ts: Mapped[float]
+
+
 __all__: list[str] = [
     "TestArtifact",
     "TestCaseResult",
     "TestJob",
     "TestJobResult",
+    "TestMaterial",
+    "TestMaterialCase",
+    "TestMaterialSelection",
     "TestStage",
     "TestTask",
     "TestTaskHistory",
