@@ -1,0 +1,2 @@
+pytest>=8
+aetp-missing-probe-dep>=99.0

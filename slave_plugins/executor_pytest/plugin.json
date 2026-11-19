@@ -1,0 +1,8 @@
+{
+    "id": "executor-pytest",
+    "name": "pytest 执行端",
+    "version": "1.0.0",
+    "entrypoint": "plugin:PytestExecutorPlugin",
+    "kind": "slave",
+    "requires": []
+}
