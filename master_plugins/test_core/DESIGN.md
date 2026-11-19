@@ -511,6 +511,16 @@ class ReporterJiraPlugin(Service[...]):
 | GET | `/api/test/cases` | 用例结果查询（status/keyword 过滤） |
 | GET | `/api/test/artifacts` | 产物列表 |
 | GET | `/api/test/artifacts/{artifact_id}/download` | 本地产物下载（uploaded 后 302 到外部 URI） |
+| POST | `/api/test/materials` | 材料上传（二进制 body；`X-Material-Name`/`X-Material-Recipe`/`X-Material-Executor` 头；超限 413） |
+| GET | `/api/test/materials[/{id}[/cases]]` | 材料列表（state/labels/**executor** 过滤，`executor_id==X OR =''`）/ 详情 / 用例清单 |
+| DELETE | `/api/test/materials/{id}` | 删除（被任务/计划/选择集引用 → 409） |
+| GET | `/api/test/materials/{id}/download` | 材料 zip 下载 |
+| GET | `/api/test/selections/{sid}` | 选择集详情 |
+| GET/POST | `/api/test/plans` | 计划列表（keyword/labels/分页）/ 创建 |
+| GET/PUT/DELETE | `/api/test/plans/{plan_id}` | 详情 / 更新 / 删除（缺失 404/False 语义见 §6） |
+| POST | `/api/test/plans/{plan_id}/clone` | 另存为 |
+| POST | `/api/test/plans/{plan_id}/dispatch` | 下发（overrides；`Idempotency-Key` 头优先；返回 `{task_id, deduplicated}`） |
+| GET | `/api/test/jobs/{job_id}/logs` | 测试输出流 tail（`since_id`/`limit`；log 插件缺席降级 `log_available=false`） |
 
 鉴权走 webapi 既有 auth 链（`webapi/auth-denied` 事件已可审计）；写操作记审计日志。
 

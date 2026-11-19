@@ -78,6 +78,16 @@ history_size = 200          # task_history 单任务保留条数
 | `GET /api/test/cases` | 用例结果查询（task_id / job_id / status / limit） |
 | `GET /api/test/artifacts` | 产物列表（task_id / state） |
 | `GET /api/test/artifacts/{artifact_id}/download` | 产物下载（`local://` 回文件；`oss://` 等外部 URI 302） |
+| `POST /api/test/materials` | 材料（脚本包）上传（二进制 body；`X-Material-Name` / `X-Material-Recipe` / `X-Material-Executor` 头） |
+| `GET /api/test/materials[/{id}[/cases]]` | 材料列表（executor 过滤：`==X OR =''`）/ 详情 / 用例清单 |
+| `DELETE /api/test/materials/{id}` | 材料删除（被任务/计划/选择集引用 → 409） |
+| `GET /api/test/materials/{id}/download` | 材料 zip 下载 |
+| `GET /api/test/selections/{sid}` | 选择集详情 |
+| `GET /POST /api/test/plans` | 测试计划列表 / 创建（可保存复用的任务模板） |
+| `GET /PUT /DELETE /api/test/plans/{plan_id}` | 计划详情 / 更新 / 删除 |
+| `POST /api/test/plans/{plan_id}/clone` | 计划另存为 |
+| `POST /api/test/plans/{plan_id}/dispatch` | 计划下发（overrides 运行时覆盖；返回 `{task_id, deduplicated}`） |
+| `GET /api/test/jobs/{job_id}/logs` | 测试输出流 tail（`since_id` / `limit` 游标） |
 
 管理页「测试任务」（`/tasks`）：任务列表（状态过滤 / 分页）、任务详情
 （阶段 / 作业表、状态时间线、产物列表）、取消 / 重跑操作与 `extensions`
