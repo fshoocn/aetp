@@ -3,7 +3,7 @@
         <header class="tasks-page__header">
             <div>
                 <h2>测试任务</h2>
-                <p class="tasks-page__hint">任务状态机与阶段 / 作业明细；点击行查看概要、状态时间线与产物</p>
+                <p class="tasks-page__hint">任务状态机与阶段 / 作业明细；点击行查看时间线、结果与日志视图</p>
             </div>
             <div class="tasks-page__actions">
                 <Button label="刷新" icon="pi pi-refresh" size="small" :loading="loading" @click="load()" />
@@ -13,16 +13,28 @@
         <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
 
         <div class="tasks-page__toolbar">
-            <Select
-                v-model="stateFilter"
-                :options="stateFilterOptions"
-                optionLabel="label"
-                optionValue="value"
-                placeholder="全部状态"
-                showClear
-                class="tasks-page__filter"
-                @change="onFilterChange"
-            />
+            <div class="tasks-page__actions">
+                <Select
+                    v-model="stateFilter"
+                    :options="stateFilterOptions"
+                    optionLabel="label"
+                    optionValue="value"
+                    placeholder="全部状态"
+                    showClear
+                    class="tasks-page__filter"
+                    @change="onFilterChange"
+                />
+                <Select
+                    v-model="planFilter"
+                    :options="plans"
+                    optionLabel="label"
+                    optionValue="value"
+                    placeholder="全部计划"
+                    showClear
+                    class="tasks-page__filter"
+                    @change="onFilterChange"
+                />
+            </div>
             <div class="tasks-page__actions">
                 <Button
                     label="上一页"
@@ -66,6 +78,11 @@
             </Column>
             <Column field="priority" header="优先级" sortable style="min-width: 5rem">
                 <template #body="{ data }">{{ data.priority }}</template>
+            </Column>
+            <Column field="plan_text" header="计划" sortable style="min-width: 8rem">
+                <template #body="{ data }">
+                    <span class="tasks-page__muted">{{ data.plan_text }}</span>
+                </template>
             </Column>
             <Column field="labels" header="标签" style="min-width: 9rem">
                 <template #body="{ data }">
@@ -119,6 +136,34 @@
             </p>
             <p v-if="detail.task.error" class="tasks-page__error-text">{{ detail.task.error }}</p>
 
+            <div class="tasks-page__view-tabs">
+                <Button
+                    label="时间线"
+                    icon="pi pi-history"
+                    size="small"
+                    :severity="detailView === 'timeline' ? 'primary' : 'secondary'"
+                    :outlined="detailView !== 'timeline'"
+                    @click="setDetailView('timeline')"
+                />
+                <Button
+                    label="结果"
+                    icon="pi pi-chart-bar"
+                    size="small"
+                    :severity="detailView === 'result' ? 'primary' : 'secondary'"
+                    :outlined="detailView !== 'result'"
+                    @click="setDetailView('result')"
+                />
+                <Button
+                    label="日志"
+                    icon="pi pi-align-left"
+                    size="small"
+                    :severity="detailView === 'logs' ? 'primary' : 'secondary'"
+                    :outlined="detailView !== 'logs'"
+                    @click="setDetailView('logs')"
+                />
+            </div>
+
+            <template v-if="detailView === 'timeline'">
             <h4>阶段</h4>
             <DataTable v-if="stages.length" :value="stages" dataKey="name" scrollable size="small">
                 <Column field="seq" header="#" style="min-width: 3rem">
@@ -240,6 +285,169 @@
                 <h4>扩展错误</h4>
                 <pre class="tasks-page__raw">{{ extensionErrors.join('\n') }}</pre>
             </template>
+            </template>
+
+            <Panel v-else-if="detailView === 'result'" header="结果">
+                <Message v-if="resultError" severity="error" :closable="false" role="alert">{{ resultError }}</Message>
+                <p v-if="resultLoading" class="tasks-page__muted">结果加载中…</p>
+                <template v-if="result">
+                    <div class="tasks-page__stats">
+                        <div class="tasks-page__stat">
+                            <span class="tasks-page__stat-label">状态</span>
+                            <Tag :value="stateText(result.state)" :severity="stateSeverity(result.state)" />
+                        </div>
+                        <div class="tasks-page__stat">
+                            <span class="tasks-page__stat-label">耗时</span>
+                            <strong>{{ formatDuration(result.duration_s) }}</strong>
+                        </div>
+                        <div v-for="entry in resultCounts" :key="entry.key" class="tasks-page__stat">
+                            <span class="tasks-page__stat-label">{{ entry.key }}</span>
+                            <strong>{{ entry.value }}</strong>
+                        </div>
+                        <div class="tasks-page__stat">
+                            <span class="tasks-page__stat-label">用例</span>
+                            <strong>{{ resultCaseCount }}</strong>
+                        </div>
+                        <div class="tasks-page__stat">
+                            <span class="tasks-page__stat-label">产物</span>
+                            <strong>{{ result.artifacts || 0 }}</strong>
+                        </div>
+                    </div>
+
+                    <h4>Jobs 明细</h4>
+                    <DataTable v-if="resultJobs.length" :value="resultJobs" dataKey="job_id" scrollable size="small">
+                        <Column header="Job" style="min-width: 9rem">
+                            <template #body="{ data }">
+                                <span class="tasks-page__mono" :title="data.job_id">{{ shortId(data.job_id) }}</span>
+                            </template>
+                        </Column>
+                        <Column header="attempt" style="min-width: 5rem">
+                            <template #body="{ data }">{{ data.attempt }}</template>
+                        </Column>
+                        <Column header="状态" style="min-width: 7rem">
+                            <template #body="{ data }">
+                                <Tag :value="jobStateText(data.status)" :severity="jobStateSeverity(data.status)" />
+                            </template>
+                        </Column>
+                        <Column header="节点" style="min-width: 7rem">
+                            <template #body="{ data }">{{ data.node_id || '—' }}</template>
+                        </Column>
+                        <Column header="summary" style="min-width: 10rem">
+                            <template #body="{ data }">
+                                <span class="tasks-page__muted">{{ formatLabels(data.summary) || '—' }}</span>
+                            </template>
+                        </Column>
+                        <template #empty>
+                            <span class="tasks-page__muted">暂无作业</span>
+                        </template>
+                    </DataTable>
+                    <p v-else class="tasks-page__muted">暂无作业</p>
+
+                    <div class="tasks-page__toolbar">
+                        <h4>失败用例</h4>
+                        <Select
+                            v-model="caseStatus"
+                            :options="caseStatusOptions"
+                            optionLabel="label"
+                            optionValue="value"
+                            class="tasks-page__filter"
+                            @change="loadCases"
+                        />
+                    </div>
+                    <DataTable v-if="cases.length" :value="cases" dataKey="id" scrollable size="small">
+                        <Column header="用例" style="min-width: 10rem">
+                            <template #body="{ data }">
+                                <span class="tasks-page__mono" :title="data.case_id">{{ data.case_id || '—' }}</span>
+                            </template>
+                        </Column>
+                        <Column header="耗时" style="min-width: 5rem">
+                            <template #body="{ data }">{{ formatDuration(data.duration_s) }}</template>
+                        </Column>
+                        <Column header="message" style="min-width: 14rem">
+                            <template #body="{ data }">
+                                <div class="tasks-page__case-message">
+                                    <span class="tasks-page__clamp" :title="data.message || ''">{{ data.message || '—' }}</span>
+                                    <Button
+                                        v-if="data.message"
+                                        :label="caseExpanded[data.id] ? '收起' : '展开'"
+                                        size="small"
+                                        severity="secondary"
+                                        text
+                                        @click="toggleCaseMessage(data.id)"
+                                    />
+                                    <pre v-if="caseExpanded[data.id]" class="tasks-page__raw">{{ data.message }}</pre>
+                                </div>
+                            </template>
+                        </Column>
+                        <Column header="detail_ref" style="min-width: 8rem">
+                            <template #body="{ data }">
+                                <span class="tasks-page__mono tasks-page__muted" :title="data.detail_ref || ''">{{ data.detail_ref || '—' }}</span>
+                            </template>
+                        </Column>
+                        <template #empty>
+                            <span class="tasks-page__muted">暂无{{ caseStatus === 'failed' ? '失败' : '错误' }}用例</span>
+                        </template>
+                    </DataTable>
+                    <p v-else class="tasks-page__muted">暂无{{ caseStatus === 'failed' ? '失败' : '错误' }}用例</p>
+
+                    <h4>产物</h4>
+                    <DataTable v-if="artifacts.length" :value="artifacts" dataKey="artifact_id" scrollable size="small">
+                        <Column header="类型" style="min-width: 5rem">
+                            <template #body="{ data }">{{ data.kind || '—' }}</template>
+                        </Column>
+                        <Column header="名称" style="min-width: 9rem">
+                            <template #body="{ data }">{{ data.name || '—' }}</template>
+                        </Column>
+                        <Column header="大小" style="min-width: 5rem">
+                            <template #body="{ data }">{{ formatSize(data.size) }}</template>
+                        </Column>
+                        <Column header="操作" style="min-width: 5rem">
+                            <template #body="{ data }">
+                                <div class="tasks-page__actions" @click.stop>
+                                    <Button label="下载" icon="pi pi-download" size="small" severity="secondary" text @click="downloadArtifact(data)" />
+                                </div>
+                            </template>
+                        </Column>
+                        <template #empty>
+                            <span class="tasks-page__muted">暂无产物</span>
+                        </template>
+                    </DataTable>
+                    <p v-else class="tasks-page__muted">暂无产物</p>
+                </template>
+                <p v-else-if="!resultLoading" class="tasks-page__muted">暂无结果</p>
+            </Panel>
+
+            <Panel v-else header="日志">
+                <div class="tasks-page__actions">
+                    <Select
+                        v-model="logJobId"
+                        :options="jobOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        placeholder="选择 Job"
+                        class="tasks-page__filter"
+                        @change="onLogJobChange"
+                    />
+                    <Tag v-if="selectedJob" :value="`attempt ${selectedJob.attempt}`" severity="info" />
+                    <span class="tasks-page__muted">已加载 {{ logRows.length }} 行 · 游标 {{ logSinceId }}</span>
+                </div>
+                <Message v-if="!logAvailable" severity="warn" :closable="false">日志服务未启用</Message>
+                <Message v-else-if="logError" severity="error" :closable="false" role="alert">{{ logError }}</Message>
+                <div ref="logScroller" class="tasks-page__log">
+                    <div
+                        v-for="row in logRows"
+                        :key="row.id"
+                        class="tasks-page__log-row"
+                        :class="{ 'tasks-page__log-row--case': isCaseRow(row) }"
+                    >
+                        <span class="tasks-page__log-ts">{{ formatLogTime(row.ts) }}</span>
+                        <span class="tasks-page__log-level">{{ logLevelText(row.level) }}</span>
+                        <span class="tasks-page__log-source" :title="row.name || ''">{{ row.source || '—' }}</span>
+                        <span class="tasks-page__log-msg">{{ row.msg }}</span>
+                    </div>
+                    <p v-if="!logRows.length" class="tasks-page__muted">{{ logJobId ? '暂无日志' : '请选择 Job 后开始拉取日志' }}</p>
+                </div>
+            </Panel>
         </Panel>
     </section>
 </template>
@@ -312,6 +520,10 @@ const JOB_STATE_TEXT = {
 
 const FINISHED_STATES = ['succeeded', 'failed', 'canceled', 'error'];
 
+// 日志游标轮询节律（§5.6 / S6）：基础 2s；连续空轮询退避 2s→4s→8s→10s 封顶，有新行复位
+const LOG_POLL_DELAYS = [2000, 4000, 8000, 10000];
+const LOG_POLL_LIMIT = 200;
+
 export default {
     data() {
         return {
@@ -324,16 +536,43 @@ export default {
             busy: false,
             selected: null,
             stateFilter: null,
+            planFilter: null,
             offset: 0,
             limit: 20,
             cancelReason: '',
+            plans: [],
+            detailView: 'timeline',
+            result: null,
+            resultLoading: false,
+            resultError: '',
+            cases: [],
+            caseStatus: 'failed',
+            caseExpanded: {},
+            logJobId: '',
+            logRows: [],
+            logSinceId: 0,
+            logEmptyStreak: 0,
+            logAvailable: true,
+            logError: '',
+            logTimer: null,
+            visibilityHandler: null,
+            disposed: false,
+            caseStatusOptions: [
+                { label: '失败（failed）', value: 'failed' },
+                { label: '错误（error）', value: 'error' }
+            ],
             stateFilterOptions: Object.entries(TASK_STATE_TEXT).map(([value, label]) => ({ label, value }))
         };
     },
     computed: {
         rows() {
-            // 展示行：补一个格式化后的标签文本，供表格与筛选共用
-            return this.tasks.map((task) => ({ ...task, id: this.taskIdOf(task), labels_text: this.formatLabels(task.labels) }));
+            // 展示行：补一个格式化后的标签文本与计划名，供表格与筛选共用
+            return this.tasks.map((task) => ({
+                ...task,
+                id: this.taskIdOf(task),
+                labels_text: this.formatLabels(task.labels),
+                plan_text: this.planText(task.labels)
+            }));
         },
         hasMore() {
             return this.tasks.length >= this.limit;
@@ -361,10 +600,58 @@ export default {
         },
         extensionErrors() {
             return (this.detail && this.detail.extension_errors) || [];
+        },
+        resultCounts() {
+            // counts 键序：常见状态键固定在前，其余按名称排，展示稳定
+            const counts = (this.result && this.result.counts) || {};
+            const preferred = ['total', 'passed', 'failed', 'skipped', 'error'];
+            const keys = Object.keys(counts).sort((a, b) => {
+                const ia = preferred.indexOf(a);
+                const ib = preferred.indexOf(b);
+                if (ia !== ib) return (ia === -1 ? preferred.length : ia) - (ib === -1 ? preferred.length : ib);
+                return a < b ? -1 : a > b ? 1 : 0;
+            });
+            return keys.map((key) => ({ key, value: counts[key] }));
+        },
+        resultJobs() {
+            return (this.result && this.result.jobs) || [];
+        },
+        resultCaseCount() {
+            const counts = (this.result && this.result.cases) || {};
+            return Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
+        },
+        jobOptions() {
+            return this.jobs.map((job) => {
+                const id = this.jobIdOf(job);
+                return {
+                    value: id,
+                    label: `${this.shortId(id)} · ${this.stageNameOf(job)} · 第 ${job.attempt} 次`,
+                    attempt: job.attempt
+                };
+            });
+        },
+        selectedJob() {
+            return this.jobs.find((job) => this.jobIdOf(job) === this.logJobId) || null;
         }
     },
     mounted() {
         this.load();
+        this.loadPlans();
+        // 后台标签页暂停日志轮询，回到前台恢复（§5.6 / S6）
+        this.visibilityHandler = () => {
+            if (this.disposed) return;
+            if (document.hidden) {
+                this.stopLogPolling();
+            } else if (this.detailView === 'logs' && this.logJobId) {
+                this.startLogPolling();
+            }
+        };
+        document.addEventListener('visibilitychange', this.visibilityHandler);
+    },
+    beforeUnmount() {
+        this.disposed = true;
+        this.stopLogPolling();
+        if (this.visibilityHandler) document.removeEventListener('visibilitychange', this.visibilityHandler);
     },
     methods: {
         async load(silent) {
@@ -372,6 +659,7 @@ export default {
             try {
                 const query = new URLSearchParams({ limit: String(this.limit), offset: String(this.offset) });
                 if (this.stateFilter) query.set('state', this.stateFilter);
+                if (this.planFilter) query.set('labels', JSON.stringify({ plan_id: this.planFilter }));
                 const data = await fetchJson(apiUrl(`/api/test/tasks?${query.toString()}`));
                 this.tasks = data.tasks || [];
                 this.error = '';
@@ -399,6 +687,11 @@ export default {
                 this.jobs = jobsData.jobs || [];
                 this.artifacts = artifactsData.artifacts || [];
                 this.error = '';
+                if (this.detailView === 'result') await this.loadResult();
+                if (this.detailView === 'logs') {
+                    this.ensureLogSelection();
+                    this.startLogPolling();
+                }
             } catch (reason) {
                 if (!silent) this.error = String(reason && reason.message ? reason.message : reason);
             } finally {
@@ -407,6 +700,8 @@ export default {
         },
         onRowSelect(event) {
             this.cancelReason = '';
+            this.resetResultView();
+            this.resetLogView();
             this.showDetail(this.taskIdOf(event.data));
         },
         closeDetail() {
@@ -415,6 +710,9 @@ export default {
             this.artifacts = [];
             this.selected = null;
             this.cancelReason = '';
+            this.detailView = 'timeline';
+            this.resetResultView();
+            this.resetLogView();
         },
         onFilterChange() {
             this.offset = 0;
@@ -460,6 +758,161 @@ export default {
             } finally {
                 this.busy = false;
             }
+        },
+        // ============================ 详情视图切换（时间线 / 结果 / 日志） ========
+        setDetailView(view) {
+            if (this.detailView === view) return;
+            this.detailView = view;
+            if (view === 'result') {
+                this.stopLogPolling();
+                this.loadResult();
+            } else if (view === 'logs') {
+                this.ensureLogSelection();
+                this.startLogPolling();
+            } else {
+                this.stopLogPolling();
+            }
+        },
+        async loadPlans() {
+            // 计划下拉 id→name 映射（§5.6）；失败仅清空下拉，不影响任务列表
+            try {
+                const data = await fetchJson(apiUrl('/api/test/plans'));
+                this.plans = (data.plans || []).map((plan) => ({
+                    label: String(plan.name || plan.plan_id || plan.id || '未命名计划'),
+                    value: String(plan.plan_id || plan.id || '')
+                }));
+            } catch {
+                this.plans = [];
+            }
+        },
+        // ============================ 结果视图 ================================
+        async loadResult() {
+            const taskId = this.taskIdOf(this.task);
+            if (!taskId) return;
+            this.resultLoading = true;
+            try {
+                const data = await fetchJson(apiUrl(`/api/test/tasks/${encodeURIComponent(taskId)}/result`));
+                this.result = (data && data.result) || null;
+                this.resultError = '';
+                await this.loadCases();
+            } catch (reason) {
+                this.result = null;
+                this.resultError = String(reason && reason.message ? reason.message : reason);
+            } finally {
+                this.resultLoading = false;
+            }
+        },
+        async loadCases() {
+            const taskId = this.taskIdOf(this.task);
+            if (!taskId) return;
+            this.caseExpanded = {};
+            try {
+                const query = new URLSearchParams({ task_id: taskId, status: this.caseStatus, limit: '200' });
+                const data = await fetchJson(apiUrl(`/api/test/cases?${query.toString()}`));
+                this.cases = (data && data.cases) || [];
+            } catch (reason) {
+                this.cases = [];
+                this.resultError = String(reason && reason.message ? reason.message : reason);
+            }
+        },
+        toggleCaseMessage(caseId) {
+            this.caseExpanded = { ...this.caseExpanded, [caseId]: !this.caseExpanded[caseId] };
+        },
+        resetResultView() {
+            this.result = null;
+            this.resultError = '';
+            this.resultLoading = false;
+            this.cases = [];
+            this.caseStatus = 'failed';
+            this.caseExpanded = {};
+        },
+        // ============================ 日志视图（游标轮询） ====================
+        ensureLogSelection() {
+            // Job 明细变化后选中项可能失效：自动落到第一个 Job
+            const known = this.jobs.some((job) => this.jobIdOf(job) === this.logJobId);
+            if (!known) {
+                this.logJobId = this.jobs.length ? this.jobIdOf(this.jobs[0]) : '';
+                this.resetLogRows();
+            }
+        },
+        onLogJobChange() {
+            this.resetLogRows();
+            this.startLogPolling();
+        },
+        resetLogRows() {
+            this.logRows = [];
+            this.logSinceId = 0;
+            this.logEmptyStreak = 0;
+            this.logError = '';
+            this.logAvailable = true;
+        },
+        resetLogView() {
+            this.stopLogPolling();
+            this.logJobId = '';
+            this.resetLogRows();
+        },
+        startLogPolling() {
+            this.stopLogPolling();
+            if (this.disposed || this.detailView !== 'logs' || !this.logJobId || !this.logAvailable) return;
+            if (typeof document !== 'undefined' && document.hidden) return; // 后台标签页暂停，visibilitychange 恢复
+            this.scheduleLogPoll(0); // 进入视图先立即拉一拍
+        },
+        stopLogPolling() {
+            if (this.logTimer) {
+                window.clearTimeout(this.logTimer);
+                this.logTimer = null;
+            }
+        },
+        scheduleLogPoll(delayMs) {
+            if (this.disposed || this.detailView !== 'logs' || !this.logJobId || !this.logAvailable) return;
+            if (typeof document !== 'undefined' && document.hidden) return;
+            // 超时链轮询：上一拍收完才排下一拍；连续空轮询退避 2s→4s→8s→10s 封顶
+            const wait = typeof delayMs === 'number'
+                ? delayMs
+                : LOG_POLL_DELAYS[Math.min(this.logEmptyStreak, LOG_POLL_DELAYS.length - 1)];
+            this.logTimer = window.setTimeout(async () => {
+                await this.pollLogs();
+                if (!this.disposed) this.scheduleLogPoll();
+            }, wait);
+        },
+        async pollLogs() {
+            const jobId = this.logJobId;
+            if (!jobId) return;
+            try {
+                const query = new URLSearchParams({
+                    since_id: String(this.logSinceId),
+                    limit: String(LOG_POLL_LIMIT)
+                });
+                const data = await fetchJson(
+                    apiUrl(`/api/test/jobs/${encodeURIComponent(jobId)}/logs?${query.toString()}`)
+                );
+                if (this.disposed || this.logJobId !== jobId) return;
+                if (data.log_available === false) {
+                    this.logAvailable = false;
+                    this.stopLogPolling();
+                    return;
+                }
+                this.logAvailable = true;
+                this.logError = '';
+                const rows = data.logs || [];
+                if (rows.length) {
+                    this.logRows = this.logRows.concat(rows); // API 恒返回旧 → 新，直接追加
+                    this.logEmptyStreak = 0; // 有新行复位
+                    this.$nextTick(() => this.scrollLogsToBottom());
+                } else {
+                    this.logEmptyStreak += 1;
+                }
+                const next = Number(data.next_since_id);
+                if (Number.isFinite(next) && next > this.logSinceId) this.logSinceId = next;
+            } catch (reason) {
+                if (this.disposed || this.logJobId !== jobId) return;
+                this.logError = String(reason && reason.message ? reason.message : reason);
+                this.logEmptyStreak += 1; // 拉取失败同样退避，避免打爆故障端点
+            }
+        },
+        scrollLogsToBottom() {
+            const box = this.$refs.logScroller;
+            if (box) box.scrollTop = box.scrollHeight;
         },
         downloadArtifact(artifact) {
             const uri = String(artifact.uri || '');
@@ -570,6 +1023,33 @@ export default {
             return Object.entries(source)
                 .map(([key, value]) => `${key}=${value}`)
                 .join(', ');
+        },
+        planText(labels) {
+            // 计划列（§5.6）：labels.plan_name 显示，缺省 labels.plan_id，再缺省「—」
+            let source = labels;
+            if (typeof labels === 'string') {
+                try {
+                    source = JSON.parse(labels) || {};
+                } catch {
+                    source = {};
+                }
+            }
+            const map = source && typeof source === 'object' ? source : {};
+            return map.plan_name || map.plan_id || '—';
+        },
+        isCaseRow(row) {
+            // case 归属高亮依据行 source 字段（评审 S6）：非 stream 值即用例行
+            const source = String((row && row.source) || '');
+            return source !== '' && source !== 'stdout' && source !== 'stderr';
+        },
+        logLevelText(level) {
+            return { 0: '错误', 1: '警告', 2: '信息', 3: '调试' }[level] || '调试';
+        },
+        formatLogTime(value) {
+            if (!value) return '—';
+            const date = new Date(value * 1000);
+            const ms = String(date.getMilliseconds()).padStart(3, '0');
+            return `${date.toLocaleTimeString()}.${ms}`;
         },
         durationOf(task) {
             const created = Number(task.created_ts) || 0;
@@ -694,5 +1174,101 @@ export default {
     border-radius: var(--content-border-radius);
     background: var(--surface-card);
     font-size: 0.75rem;
+}
+
+.tasks-page__view-tabs {
+    display: flex;
+    gap: 0.375rem;
+    margin: 0.75rem 0 0.25rem;
+}
+
+/* 结果视图：聚合卡片 */
+.tasks-page__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.tasks-page__stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 5.5rem;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--surface-border);
+    border-radius: var(--content-border-radius);
+    background: var(--surface-card);
+}
+
+.tasks-page__stat-label {
+    color: var(--text-color-secondary);
+    font-size: 0.75rem;
+}
+
+/* 失败用例：message 截断 + 展开 */
+.tasks-page__case-message {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-start;
+}
+
+.tasks-page__clamp {
+    display: block;
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 日志视图：游标追加滚动区 */
+.tasks-page__log {
+    max-height: 24rem;
+    overflow: auto;
+    padding: 0.5rem;
+    border: 1px solid var(--surface-border);
+    border-radius: var(--content-border-radius);
+    background: var(--surface-card);
+    font-family: monospace;
+    font-size: 0.75rem;
+}
+
+.tasks-page__log-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.125rem 0.25rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* case 归属高亮（评审 S6：依据行 source 字段） */
+.tasks-page__log-row--case {
+    background: color-mix(in srgb, var(--primary-color, #4f9cf9) 18%, transparent);
+    font-weight: 700;
+}
+
+.tasks-page__log-ts {
+    flex: none;
+    color: var(--text-color-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.tasks-page__log-level {
+    flex: none;
+    min-width: 2.25rem;
+}
+
+.tasks-page__log-source {
+    flex: none;
+    max-width: 10rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-color-secondary);
+}
+
+.tasks-page__log-msg {
+    flex: 1;
+    min-width: 0;
 }
 </style>
