@@ -45,6 +45,7 @@ from .material import (
     NoCandidateNode,
     require_core,
 )
+from .ui_service import ExecPytestUiService
 
 #: inspect 通道的分析 / 解析模式（与执行端 ``InspectMode`` 同值）
 type InspectMode = Literal["analyze", "collect"]
@@ -157,6 +158,8 @@ class ExecPytestMasterPlugin(Service[ExecPytestMasterConfig]):
         self._watchdog_task: asyncio.Task[None] | None = None
         self._gc_task: asyncio.Task[None] | None = None
         self._api_fiber: Fiber | None = None
+        #: 页面服务 fiber：webui 缺席停 PENDING，晚到自动挂载（同 api fiber）
+        self._ui_fiber: Fiber | None = None
         #: materials_total 仪表缓存（stats() 是同步接口，周期刷新）
         self._materials_gauge: int = 0
         self._stats: dict[str, int] = {"inspect_failed": 0, "late_results_total": 0}
@@ -170,8 +173,9 @@ class ExecPytestMasterPlugin(Service[ExecPytestMasterConfig]):
         self._watchdog_task.add_done_callback(self._log_task_exit)
         self._gc_task = asyncio.create_task(self._gc_loop())
         self._gc_task.add_done_callback(self._log_task_exit)
-        # 附属服务不 await：webapi 缺席时 fiber 停在 PENDING，晚到自动挂载
+        # 附属服务不 await：webapi / webui 缺席时 fiber 停在 PENDING，晚到自动挂载
         self._api_fiber = self.ctx.plugin(ExecPytestMasterApiService)
+        self._ui_fiber = self.ctx.plugin(ExecPytestUiService)
         await self._refresh_materials_gauge()
         self.ctx.logger.info(
             "pytest 执行器管理端已启动：分块 %s 字节 / 预推并发 %s / inspect 超时 %s 秒",
