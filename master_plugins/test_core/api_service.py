@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast
 
 from cordis_port import Context, EventDispatchError, Service
 from starlette.requests import Request
@@ -31,6 +31,7 @@ from common.test_contracts import (
     InvalidTransition,
     MaterialInUse,
     MaterialNotFound,
+    PlanNotFound,
     ShardSpec,
     StageSpec,
     TaskNotFound,
@@ -65,10 +66,11 @@ def _guarded(
 ) -> Callable[..., dict[str, object] | JSONResponse]:
     """把 handler 的异常映射为错误响应：``{"ok": false, "error", "code"}``。
 
-    映射表：TaskNotFound→404、MaterialNotFound→404、InvalidSpec→400、
-    InvalidTransition→409、DuplicateSubmission→409、MaterialInUse→409、
-    请求体超限（_BodyTooLarge）→413、JSON 解析 / 参数校验（ValueError）→400、
-    其余→500（不泄漏堆栈，只记 ``ctx.logger``）。
+    映射表：TaskNotFound→404、MaterialNotFound→404、PlanNotFound→404
+    （``plan_not_found``）、InvalidSpec→400、InvalidTransition→409、
+    DuplicateSubmission→409、MaterialInUse→409、请求体超限（_BodyTooLarge）
+    →413、JSON 解析 / 参数校验（ValueError）→400、其余→500（不泄漏堆栈，
+    只记 ``ctx.logger``）。
     """
 
     @wraps(fn)
@@ -81,6 +83,8 @@ def _guarded(
             return _error_response(404, str(exc) or "任务不存在", "not_found")
         except MaterialNotFound as exc:
             return _error_response(404, str(exc) or "材料 / 选择集不存在", "not_found")
+        except PlanNotFound as exc:
+            return _error_response(404, str(exc) or "测试计划不存在", "plan_not_found")
         except InvalidSpec as exc:
             return _error_response(400, str(exc) or "任务规格无效", "invalid_spec")
         except InvalidTransition as exc:
@@ -165,6 +169,39 @@ class TestCoreApiService(Service[None]):
             self._artifact_download,
             kind="api",
             name="test-core.artifact-download",
+        )
+        api.get(
+            "/api/test/jobs/{job_id}/logs",
+            self._job_logs,
+            kind="api",
+            name="test-core.job-logs",
+        )
+        api.get("/api/test/plans", self._plan_list, kind="api", name="test-core.plans")
+        api.post("/api/test/plans", self._plan_create, kind="api", name="test-core.plan-create")
+        api.get("/api/test/plans/{plan_id}", self._plan_detail, kind="api", name="test-core.plan")
+        api.put(
+            "/api/test/plans/{plan_id}",
+            self._plan_update,
+            kind="api",
+            name="test-core.plan-update",
+        )
+        api.delete(
+            "/api/test/plans/{plan_id}",
+            self._plan_delete,
+            kind="api",
+            name="test-core.plan-delete",
+        )
+        api.post(
+            "/api/test/plans/{plan_id}/clone",
+            self._plan_clone,
+            kind="api",
+            name="test-core.plan-clone",
+        )
+        api.post(
+            "/api/test/plans/{plan_id}/dispatch",
+            self._plan_dispatch,
+            kind="api",
+            name="test-core.plan-dispatch",
         )
         api.post(
             "/api/test/materials",
@@ -399,6 +436,141 @@ class TestCoreApiService(Service[None]):
                     return item
         return None
 
+    # -- 测试计划 API（§4.4 / §6）与 Job 日志端点 ------------------------------
+    @_guarded
+    async def _plan_list(self, request: Request) -> dict[str, object] | JSONResponse:
+        """计划列表：query ``keyword`` / ``labels``（JSON 或 k=v 逗号分隔）/ ``limit`` / ``offset``。"""
+        params = request.query_params
+        plans = await self._core.list_plans(
+            keyword=params.get("keyword", "").strip(),
+            labels=_parse_labels(params.get("labels", "")),
+            limit=_parse_int(params.get("limit"), default=50, minimum=1, name="limit"),
+            offset=_parse_int(params.get("offset"), default=0, minimum=0, name="offset"),
+        )
+        return {"ok": True, "plans": list(plans), "count": len(plans)}
+
+    @_guarded
+    async def _plan_create(self, request: Request) -> dict[str, object] | JSONResponse:
+        """新建计划：body = name / description / labels / defaults / steps（§4.1）。"""
+        fields = _plan_body(_required_json_object(await request.body()))
+        plan = await self._core.save_plan(
+            name=fields.name,
+            description=fields.description,
+            labels=fields.labels,
+            defaults=fields.defaults,
+            steps=fields.steps,
+            created_by=fields.created_by,
+        )
+        return {"ok": True, "plan": dict(plan)}
+
+    @_guarded
+    async def _plan_detail(
+        self, request: Request, plan_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """计划详情；缺失 404（``plan_not_found``）。"""
+        plan = await self._core.get_plan(plan_id)
+        if plan is None:
+            raise PlanNotFound(f"找不到测试计划：{plan_id}")
+        return {"ok": True, "plan": dict(plan)}
+
+    @_guarded
+    async def _plan_update(
+        self, request: Request, plan_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """更新计划（save_plan 全量落字段）；计划不存在由 save_plan 抛 PlanNotFound → 404。"""
+        fields = _plan_body(_required_json_object(await request.body()))
+        plan = await self._core.save_plan(
+            plan_id=plan_id,
+            name=fields.name,
+            description=fields.description,
+            labels=fields.labels,
+            defaults=fields.defaults,
+            steps=fields.steps,
+            created_by=fields.created_by,
+        )
+        return {"ok": True, "plan": dict(plan)}
+
+    @_guarded
+    async def _plan_delete(
+        self, request: Request, plan_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """删除计划：缺失 404（``plan_not_found``）。"""
+        if not await self._core.delete_plan(plan_id):
+            raise PlanNotFound(f"找不到测试计划：{plan_id}")
+        return {"ok": True, "deleted": True}
+
+    @_guarded
+    async def _plan_clone(
+        self, request: Request, plan_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """另存为（get + save 组合）：name 加「副本」后缀；created_by 取 query / body（可选）。"""
+        source = await self._core.get_plan(plan_id)
+        if source is None:
+            raise PlanNotFound(f"找不到测试计划：{plan_id}")
+        body = _optional_json_object(await request.body())
+        created_by = request.query_params.get("created_by", "").strip()
+        if not created_by:
+            created_by = _as_str(body.get("created_by", ""), "created_by")
+        plan = await self._core.save_plan(
+            name=f"{source.get('name') or plan_id} 副本",
+            description=str(source.get("description") or ""),
+            labels=source.get("labels"),
+            defaults=source.get("defaults"),
+            steps=source.get("steps"),
+            created_by=created_by,
+        )
+        return {"ok": True, "plan": dict(plan)}
+
+    @_guarded
+    async def _plan_dispatch(
+        self, request: Request, plan_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """下发计划：body = overrides（可空）；``Idempotency-Key`` 头优先于 body.idempotency_key。
+
+        幂等域 ``source="plan-dispatch"``（评审 #13）在核心 dispatch_plan 内隔离；
+        overrides 未知键由核心抛 InvalidSpec → 400。
+        """
+        overrides = dict(_optional_json_object(await request.body()))
+        idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+        if idempotency_key:  # 头显式给出时以头为准（既有惯例，同任务提交）
+            overrides["idempotency_key"] = idempotency_key
+        result = await self._core.dispatch_plan(plan_id, overrides or None)
+        return {
+            "ok": True,
+            "task_id": str(result.get("task_id") or ""),
+            "deduplicated": bool(result.get("deduplicated")),
+        }
+
+    @_guarded
+    async def _job_logs(
+        self, request: Request, job_id: str
+    ) -> dict[str, object] | JSONResponse:
+        """Job 日志游标端点（§6）：``ctx.log.query_logs(name_prefix="test.{job_id}.")``。
+
+        恒返回旧 → 新；``since_id`` > 0 才下传 after_id 游标；``limit`` 钳到
+        [1, 1000]；``next_since_id`` = 本批最大 id（空批保持原游标不回退）；
+        log 插件缺席降级 ``log_available: false``。
+        """
+        params = request.query_params
+        since_id = _parse_int(params.get("since_id"), default=0, minimum=0, name="since_id")
+        limit = _parse_int(params.get("limit"), default=200, minimum=0, name="limit")
+        log = self.ctx.get("log")
+        if log is None:
+            return {"ok": True, "logs": [], "log_available": False}
+        rows = await log.query_logs(
+            name_prefix=f"test.{job_id}.",
+            after_id=since_id if since_id > 0 else None,
+            limit=min(max(limit, 1), 1000),
+        )
+        ordered = sorted(rows, key=_row_id)  # 恒旧 → 新（尾随序）
+        max_id = max((_row_id(row) for row in ordered), default=0)
+        return {
+            "ok": True,
+            "logs": ordered,
+            "log_available": True,
+            "next_since_id": max(max_id, since_id),
+        }
+
     # -- 材料 / 选择集 API（executor_pytest DESIGN §18.5） ---------------------
     @_guarded
     async def _material_upload(
@@ -407,7 +579,8 @@ class TestCoreApiService(Service[None]):
         """上传材料 zip：二进制 body（上限 config.material_max_bytes，超限 413）。
 
         ``X-Material-Name`` 头（或 query ``name``）必填；``X-Material-Recipe`` 头
-        （或 query ``recipe``）为配方 JSON 串，缺省 ``{}``。``(sha256,
+        （或 query ``recipe``）为配方 JSON 串，缺省 ``{}``；``X-Material-Executor``
+        头（可选）绑定执行器归属（空 = 通用材料，§4.5）。``(sha256,
         recipe_fingerprint)`` 命中返回既有材料（``deduplicated`` = true，幂等，
         §4.3）。
         """
@@ -426,7 +599,12 @@ class TestCoreApiService(Service[None]):
         data = await _read_body_capped(
             request, limit=self._core.config.material_max_bytes
         )
-        material = await self._core.upload_material(name=name, data=data, recipe=recipe)
+        material = await self._core.upload_material(
+            name=name,
+            data=data,
+            recipe=recipe,
+            executor_id=request.headers.get("X-Material-Executor", "").strip(),
+        )
         return {
             "ok": True,
             "material": dict(material),
@@ -437,12 +615,16 @@ class TestCoreApiService(Service[None]):
     async def _material_list(
         self, request: Request
     ) -> dict[str, object] | JSONResponse:
-        """材料列表：query ``state`` / ``labels``（JSON 或 k=v 逗号分隔）/ ``limit`` / ``offset``。"""
+        """材料列表：query ``executor`` / ``state`` / ``labels``（JSON 或 k=v 逗号分隔）
+        / ``limit`` / ``offset``。``executor`` 过滤谓词 ``executor_id == X OR = ''``
+        （通用可见）由服务面实现（§4.5）。
+        """
         params = request.query_params
         limit = _parse_int(params.get("limit"), default=50, minimum=1, name="limit")
         offset = _parse_int(params.get("offset"), default=0, minimum=0, name="offset")
         materials = await self._core.list_materials(
             state=params.get("state", "").strip(),
+            executor_id=params.get("executor", "").strip(),
             labels=_parse_labels(params.get("labels", "")),
             limit=limit,
             offset=offset,
@@ -666,6 +848,51 @@ def _as_int_map(value: object, path: str) -> dict[str, int]:
     return out
 
 
+# -- 测试计划 body 解析（§4.1 / §4.4） ---------------------------------------
+
+
+class _PlanFields(NamedTuple):
+    """计划 body 解析结果（save_plan 入参，plan_id 由路径另行给出）。"""
+
+    name: str
+    description: str
+    labels: dict[str, str] | None
+    defaults: dict[str, Any] | None
+    steps: list[dict[str, Any]] | None
+    created_by: str
+
+
+def _plan_body(data: Mapping[str, Any]) -> _PlanFields:
+    """计划 body → save_plan 入参；形状 / 类型问题统一 InvalidSpec（400）。
+
+    语义校验（步骤 name 唯一、material_id 悬空 / 归属匹配等）在核心 save_plan
+    逐条抛 InvalidSpec，本层只做传输形状解析；缺省字段给 None 交核心落空值。
+    """
+    try:
+        name = _as_str(_require(data, "name"), "name", allow_empty=False)
+        description = _as_str(data.get("description", ""), "description")
+        labels_raw = data.get("labels")
+        defaults_raw = data.get("defaults")
+        steps_raw = data.get("steps")
+        return _PlanFields(
+            name=name,
+            description=description,
+            labels=_as_str_map(labels_raw, "labels") if labels_raw is not None else None,
+            defaults=_as_any_map(defaults_raw, "defaults") if defaults_raw is not None else None,
+            steps=_plan_steps(steps_raw) if steps_raw is not None else None,
+            created_by=_as_str(data.get("created_by", ""), "created_by"),
+        )
+    except ValueError as exc:
+        raise InvalidSpec(str(exc)) from exc
+
+
+def _plan_steps(value: object) -> list[dict[str, Any]]:
+    """steps 数组解析：逐项须是对象（形状校验，语义校验在核心）。"""
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError(f"steps 需是数组，收到 {type(value).__name__}")
+    return [dict(_as_mapping(item, f"steps[{index}]")) for index, item in enumerate(value)]
+
+
 # -- HTTP 辅助 ----------------------------------------------------------------
 
 
@@ -679,6 +906,12 @@ def _task_section(detail: Mapping[str, Any]) -> dict[str, object]:
         for key, value in detail.items()
         if key not in ("stages", "history", "extensions", "extension_errors")
     }
+
+
+def _row_id(row: Mapping[str, object]) -> int:
+    """日志行 id（游标 / 旧→新排序用）；缺失或非整数按 0。"""
+    value = row.get("id")
+    return value if isinstance(value, int) else 0
 
 
 def _error_response(status_code: int, message: str, code: str) -> JSONResponse:

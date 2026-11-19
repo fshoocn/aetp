@@ -2,8 +2,8 @@
 
 单库设计：日志查询数据住进 ``aetp.db``（Model 归属 ``log``），不再单开
 ``log.sqlite``；本地留档由文本文件 ``aetp.log`` 负责。查询语义不变：游标
-（id）+ 节点 / 级别 / 关键字 / 时间窗过滤，保留策略双限（天数 + 条数）
-先到先删，ingest 后顺带清理。
+（id）+ 节点 / 级别 / 关键字 / name 前缀 / 时间窗过滤，保留策略双限（天数 +
+条数）先到先删，ingest 后顺带清理。
 """
 
 from __future__ import annotations
@@ -92,6 +92,7 @@ class LogStore:
         node: str | None,
         level: int | None,
         q: str | None,
+        name_prefix: str | None = None,
         after_id: int | None,
         before_id: int | None,
         from_ts: float | None,
@@ -114,6 +115,9 @@ class LogStore:
                     LogEntry.source.like(like, escape="\\"),
                 )
             )
+        if name_prefix:
+            escaped = name_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conditions.append(LogEntry.name.like(f"{escaped}%", escape="\\"))
         if after_id is not None:
             conditions.append(LogEntry.id > after_id)
         if before_id is not None:
@@ -130,6 +134,7 @@ class LogStore:
         node: str | None = None,
         level: int | None = None,
         q: str | None = None,
+        name_prefix: str | None = None,
         after_id: int | None = None,
         before_id: int | None = None,
         around_id: int | None = None,
@@ -141,15 +146,18 @@ class LogStore:
         ``around_id`` 为**前后文模式**：返回锚点行及其前 / 后各约一半 ``limit``
         条（体验 B，统一时间轴）；``from_ts`` / ``to_ts`` 时间窗（秒）。
         关键字 ``q`` 命中 msg / op / 来源名 / 调用点任一列
-        （``q=op-xxxx`` 即「查看本次操作」）。"""
+        （``q=op-xxxx`` 即「查看本次操作」）；``name_prefix`` 为 name 列前缀
+        匹配（转义规则同 ``q``），与其余过滤条件 AND 组合。"""
         if around_id is not None:
             half = max(1, min(limit, 1000)) // 2
             older = await self.query(
-                node=node, level=level, q=q, before_id=around_id,
+                node=node, level=level, q=q, name_prefix=name_prefix,
+                before_id=around_id,
                 from_ts=from_ts, to_ts=to_ts, limit=half,
             )  # 新→旧
             newer = await self.query(
-                node=node, level=level, q=q, after_id=around_id,
+                node=node, level=level, q=q, name_prefix=name_prefix,
+                after_id=around_id,
                 from_ts=from_ts, to_ts=to_ts, limit=half,
             )  # 旧→新
             anchor = await self._row_by_id(around_id)
@@ -163,7 +171,7 @@ class LogStore:
             LogEntry.level, LogEntry.op, LogEntry.msg, LogEntry.source,
         ).where(
             *self._filters(
-                node=node, level=level, q=q,
+                node=node, level=level, q=q, name_prefix=name_prefix,
                 after_id=after_id, before_id=before_id,
                 from_ts=from_ts, to_ts=to_ts,
             )
