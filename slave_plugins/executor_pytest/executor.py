@@ -263,7 +263,17 @@ async def run_process(
     except TimeoutError:
         for task in readers:
             task.cancel()
+    _close_pipes(process)
     return ProcessOutcome(exit_code=process.returncode, timed_out=timed_out, canceled=canceled)
+
+
+def _close_pipes(process: asyncio.subprocess.Process) -> None:
+    """收尾关闭子进程管道传输（Windows proactor 的未关闭句柄 / ``__del__`` 告警）。"""
+    for stream in (process.stdout, process.stderr):
+        transport = getattr(stream, "_transport", None)
+        close = getattr(transport, "close", None)
+        if callable(close):
+            close()
 
 
 async def _pump(

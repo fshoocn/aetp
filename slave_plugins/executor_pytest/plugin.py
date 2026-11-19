@@ -512,6 +512,9 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
         self._items: dict[tuple[str, int], _QueuedJob] = {}
         self._running: dict[tuple[str, int], _RunningJob] = {}
         self._inspect_cache: dict[str, dict[str, Any]] = {}
+        #: 在途 inspect 的 request_id（幂等：在途重复不重跑，完成后补发同一应答）
+        self._inspect_running: set[str] = set()
+        self._inspect_resends: dict[str, int] = {}
         self._listeners: list[Any] = []
         self._stats: dict[str, int] = {
             "executed": 0,
@@ -839,12 +842,14 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
         override = cast(Mapping[str, Any], recipe_override) if isinstance(recipe_override, Mapping) else None
         recipe = merge_recipe(base_recipe, override)
         work_raw = typed_params.get("workdir") or self.config.workdir
-        base = Path(str(work_raw)).resolve() if work_raw else self._node_dir
+        base = self._anchor_node(str(work_raw)) if work_raw else self._node_dir
         base = self._inside_node(base, "workdir")
         project_dir = self._inside_node(
             base / "workdir" / _safe_segment(item.job_id) / f"a{item.attempt}", "组装目录"
         )
-        artifact_dir = self._inside_node(Path(str(raw.get("artifact_dir") or "")), "artifact_dir")
+        artifact_dir = self._inside_node(
+            self._anchor_node(str(raw.get("artifact_dir") or "")), "artifact_dir"
+        )
         artifact_dir.mkdir(parents=True, exist_ok=True)
         shard = raw.get("shard") if isinstance(raw.get("shard"), Mapping) else None
         request = JobRequest(
@@ -870,6 +875,11 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
             values["python"] = override_python.strip()
             return PytestExecutorConfig(**values)
         return self.config
+
+    def _anchor_node(self, raw: str) -> Path:
+        """节点本地路径解析（§8.4 / §15）：相对路径锚定**节点目录**，不是进程 cwd。"""
+        path = Path(raw)
+        return (path if path.is_absolute() else self._node_dir / path).resolve()
 
     def _inside_node(self, path: Path, label: str) -> Path:
         """路径安全（§15）：resolve 后必须在节点目录内。"""
@@ -1063,6 +1073,11 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
         if cached is not None:
             self._report_inspect(cached)
             return
+        if request_id in self._inspect_running:
+            # 在途重复（§6.1 幂等）：不重跑，完成后把同一应答补发给每个重复请求
+            self._inspect_resends[request_id] = self._inspect_resends.get(request_id, 0) + 1
+            return
+        self._inspect_running.add(request_id)
         self._spawn(self._do_inspect(request_id, material_id, mode))
 
     async def _do_inspect(self, request_id: str, material_id: str, mode: InspectMode) -> None:
@@ -1112,7 +1127,10 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
         self._inspect_cache[request_id] = response
         while len(self._inspect_cache) > _INSPECT_CACHE_LIMIT:
             self._inspect_cache.pop(next(iter(self._inspect_cache)))
+        self._inspect_running.discard(request_id)
         self._report_inspect(response)
+        for _ in range(self._inspect_resends.pop(request_id, 0)):
+            self._report_inspect(response)
 
     def _inspect_response(
         self,

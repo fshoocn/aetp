@@ -834,13 +834,18 @@ class TestCorePlugin(Service[TestCoreConfig]):
         }
 
     async def delete_material(self, material_id: str) -> bool:
-        """删除材料（行 + zip 目录）；有引用抛 MaterialInUse，不存在抛 MaterialNotFound（§3.2）。"""
+        """删除材料（行 + 用例清单 + zip 目录）；有引用抛 MaterialInUse，不存在抛 MaterialNotFound（§3.2）。"""
         repo = self._repo(TestMaterial)
         if await repo.get(material_id) is None:
             raise MaterialNotFound(f"材料不存在：{material_id}")
         if await self._material_referenced(material_id):
             raise MaterialInUse(f"材料被引用（任务 params / 选择集在用），禁止删除：{material_id}")
         await repo.delete(material_id)
+        case_repo = self._repo(TestMaterialCase)
+        for row in await case_repo.list(
+            where=TestMaterialCase.material_id == material_id
+        ):
+            await case_repo.delete(row.id)
         shutil.rmtree(self._bundle_path(material_id).parent, ignore_errors=True)
         self.ctx.logger.info("材料已删除：%s", material_id)
         return True
