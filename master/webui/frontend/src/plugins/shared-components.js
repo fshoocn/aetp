@@ -9,6 +9,7 @@ import Panel from 'primevue/panel';
 import Select from 'primevue/select';
 import Tag from 'primevue/tag';
 import Timeline from 'primevue/timeline';
+import PluginUiOutlet from '@/plugins/PluginUiOutlet.vue';
 
 /**
  * 插件 UI 共享组件表。
@@ -18,6 +19,7 @@ import Timeline from 'primevue/timeline';
  * 与宿主页面共享同一套 Aura 主题样式。需要更多组件时按需扩充此清单。
  */
 const SHARED_COMPONENTS = {
+    PluginUiOutlet,
     Button,
     Column,
     DataTable,

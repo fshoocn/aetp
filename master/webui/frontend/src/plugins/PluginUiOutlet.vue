@@ -14,6 +14,10 @@ const contributions = computed(() =>
 
 const scriptValues = computed(() => Object.values(pluginUiState.scriptValues).filter((item) => item.target === props.name));
 
+// 空槽 fallback（宿主改动②）：插件页无法感知槽是否为空，渲染列表为空时
+// 交给父级 <slot/> 兜底（如「该执行器未提供脚本管理面板」占位提示）
+const isEmpty = computed(() => contributions.value.length === 0 && scriptValues.value.length === 0);
+
 const html = ref({});
 const htmlErrors = ref({});
 const requests = new Map();
@@ -60,5 +64,6 @@ watch(contributions, onContributionChange, { immediate: true });
         <div v-for="item in scriptValues" :key="item.contributionId + item.target" class="plugin-ui-script-value" :data-plugin="item.contributionId">
             {{ item.value }}
         </div>
+        <slot v-if="isEmpty" />
     </div>
 </template>

@@ -22,7 +22,7 @@ from common.plugins.webapi import WebApiPlugin
 from common.plugins.webapi.plugin_manager_plugin import PluginManagerPlugin
 from common.plugins.webapi.router import RouteRegistry
 from common.plugins.webapi.types import RouteRecord
-from master.webui.plugin import owner_slug
+from master.webui.plugin import WebUiPlugin, owner_slug
 
 _SOURCE_ROOT: Path = Path(__file__).resolve().parents[1]
 
@@ -461,6 +461,102 @@ class AuthTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises((TypeError, ValueError)):
             await context.plugin(WebApiPlugin)
         await unload_all(context)
+
+
+class SlotRegistrationContractTests(unittest.IsolatedAsyncioTestCase):
+    """slot 注册契约（W2-C，评审 S9）：生产端此前零先例，补齐三类断言。
+
+    * 成功注册：``target`` / ``order`` / ``title`` 生效，清单序列化携带 ``target``；
+    * 非法组合拒绝：``kind="slot"`` 只收 ``vue`` / ``html``，``format="js"`` 必须拒；
+    * 撞键拒绝：同 owner 同 contribution_id 二次注册必须 ``ValueError``。
+    """
+
+    async def asyncSetUp(self) -> None:
+        self.context: Context = Context()
+        self.temp_dir: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
+        self.port: int = _free_port()
+        self.context.provide("node_kind", "master")
+        config_path = Path(self.temp_dir.name) / "config.ini"
+        config_path.write_text(
+            "[node]\n"
+            "kind = master\n"
+            "\n[web]\n"
+            f"port = {self.port}\n"
+            "auth_token = test-token\n",
+            encoding="utf-8",
+        )
+        await self.context.plugin(AppConfigPlugin, {"path": str(config_path)})
+        await self.context.plugin(WebApiPlugin)
+        await self.context.plugin(WebUiPlugin)
+        resource_root = Path(self.temp_dir.name) / "ui"
+        resource_root.mkdir()
+        (resource_root / "Panel.vue").write_text("<template><p>slot</p></template>", encoding="utf-8")
+        (resource_root / "panel.js").write_text("export default {};", encoding="utf-8")
+        self.resource_root: Path = resource_root
+
+    async def asyncTearDown(self) -> None:
+        await unload_all(self.context)
+        self.temp_dir.cleanup()
+
+    async def test_slot_fields_effective_and_manifest_serializes_target(self) -> None:
+        item = self.context.webui.register_ui(
+            "pytest-materials-panel",
+            kind="slot",
+            format="vue",
+            resource_root=str(self.resource_root),
+            entry="Panel.vue",
+            target="scripts:executor-pytest",
+            title="pytest 脚本",
+            order=10,
+        )
+        self.assertEqual(item.target, "scripts:executor-pytest")
+        self.assertEqual(item.order, 10)
+        self.assertEqual(item.title, "pytest 脚本")
+
+        status, _, body = await asyncio.to_thread(
+            _request, f"http://127.0.0.1:{self.port}", "/api/web/ui"
+        )
+        self.assertEqual(status, 200)
+        manifest = json.loads(body)
+        slots = [entry for entry in manifest if entry["kind"] == "slot"]
+        self.assertEqual(len(slots), 1)
+        self.assertIn("target", slots[0])
+        self.assertEqual(slots[0]["target"], "scripts:executor-pytest")
+        self.assertEqual(slots[0]["order"], 10)
+        self.assertEqual(slots[0]["title"], "pytest 脚本")
+        self.assertEqual(slots[0]["format"], "vue")
+
+    async def test_slot_rejects_js_format(self) -> None:
+        """slot + js 是非法组合：accepted_formats 之外一律拒绝。"""
+        with self.assertRaisesRegex(ValueError, "不支持的 UI 类型与资源格式组合"):
+            self.context.webui.register_ui(
+                "bad-slot",
+                kind="slot",
+                format="js",
+                resource_root=str(self.resource_root),
+                entry="panel.js",
+                target="scripts:executor-pytest",
+            )
+
+    async def test_duplicate_contribution_id_rejected(self) -> None:
+        """同 owner 同 id 二次注册必须 ValueError（撞键保护）。"""
+        self.context.webui.register_ui(
+            "dup",
+            kind="slot",
+            format="vue",
+            resource_root=str(self.resource_root),
+            entry="Panel.vue",
+            target="scripts:executor-pytest",
+        )
+        with self.assertRaisesRegex(ValueError, "已注册"):
+            self.context.webui.register_ui(
+                "dup",
+                kind="slot",
+                format="vue",
+                resource_root=str(self.resource_root),
+                entry="Panel.vue",
+                target="scripts:executor-pytest",
+            )
 
 
 if __name__ == "__main__":
