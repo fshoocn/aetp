@@ -1,0 +1,8 @@
+{
+    "id": "executor-pytest-master",
+    "name": "pytest 执行器管理端",
+    "version": "1.0.0",
+    "entrypoint": "plugin:ExecPytestMasterPlugin",
+    "kind": "master",
+    "requires": []
+}
