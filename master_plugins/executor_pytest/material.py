@@ -60,6 +60,8 @@ CAP_ID = "pytest"
 MATERIAL_WAIT = "material_wait"
 #: 就绪跟踪状态：预推完成（补发仍按 pending 清单幂等进行）
 PUSH_DONE = "pushed"
+#: 就绪跟踪状态：预推失败（条目保留供 missing 自愈 / 补发；不计 pushing）
+PUSH_FAILED = "push_failed"
 
 
 class NoCandidateNode(TestCoreError, ValueError):
@@ -135,7 +137,7 @@ class MaterialPusher:
         return self._chunks_resent
 
     def pushing_count(self) -> int:
-        """预推在途数（``material_wait`` 状态条目）。"""
+        """预推在途数（仅 ``material_wait`` 状态；已失败条目保留跟踪但不计）。"""
         return sum(1 for entry in self._entries.values() if entry.state == MATERIAL_WAIT)
 
     # -- 候选节点（§5.2 / §6.1 共用口径） ------------------------------------
@@ -213,6 +215,9 @@ class MaterialPusher:
                 try:
                     await self._push_to_node(node_id, material_id, meta_payload, chunks)
                 except Exception as error:  # noqa: BLE001 —— 单节点失败不影响其余节点
+                    failed_entry = self._entries.get((node_id, material_id))
+                    if failed_entry is not None:
+                        failed_entry.state = PUSH_FAILED
                     self._push_failed += 1
                     errors[node_id] = str(error)
                     self._ctx.logger.warning(
@@ -317,7 +322,8 @@ class MaterialPusher:
         * ``missing`` 空清单 = 从端 total 未知（执行端 ``MaterialStore.missing``
           口径）→ 整包补推（元包 + 全部块）；
         * 非空清单只发列出的缺块（§5.2「主端只发缺块」）；
-        * 无就绪跟踪记录（主端重启后）忽略并告警，请重新预推。
+        * 无就绪跟踪记录（主端重启 / 未预推即触发）：**自愈**——候选节点整包
+          补推（§5.2 兜底），非候选节点忽略告警。
         """
         if not isinstance(payload, Mapping):
             return 0
@@ -335,10 +341,12 @@ class MaterialPusher:
             return 0
         entry = self._entries.get((node_id, material_id))
         if entry is None:
-            self._ctx.logger.warning(
-                "材料 %s 缺块请求来自未跟踪节点 %s，忽略（请重新预推）", material_id, node_id
-            )
-            return 0
+            if node_id not in self.candidate_nodes():
+                self._ctx.logger.warning(
+                    "材料 %s 缺块请求来自非候选节点 %s，忽略", material_id, node_id
+                )
+                return 0
+            return await self._heal_untracked(node_id, material_id)
         listed = [
             item
             for item in cast("list[object]", missing_raw)
@@ -389,6 +397,48 @@ class MaterialPusher:
             "整包" if resend_meta else "缺块",
         )
         return len(indices)
+
+    async def _heal_untracked(self, node_id: str, material_id: str) -> int:
+        """未跟踪条目的整包自愈（§5.2 兜底）：重建跟踪条目并整包补推。
+
+        元包优先复用同材料既有条目的 meta（**含 selections**）；无则按核心现读
+        重建（不含 selections——选择集物化仍以预推为准）。材料已删则放弃。
+        """
+        core = require_core(self._ctx)
+        material = await core.get_material(material_id)
+        data = await core.get_material_bytes(material_id)
+        if material is None or data is None:
+            self._ctx.logger.warning("材料 %s 不存在，缺块自愈放弃", material_id)
+            return 0
+        prior = next(
+            (item for (_n, m), item in self._entries.items() if m == material_id),
+            None,
+        )
+        if prior is not None:
+            meta = dict(prior.meta)
+        else:
+            recipe = material.get("recipe")
+            meta = {
+                "proto": PROTO,
+                "material_id": material_id,
+                "recipe_fingerprint": str(material.get("recipe_fingerprint") or ""),
+                "recipe": dict(cast("Mapping[str, Any]", recipe))
+                if isinstance(recipe, Mapping)
+                else {},
+            }
+        chunk_size = max(1, int(self._chunk_size()))
+        chunks = split_chunks(data, chunk_size)
+        meta["proto"] = PROTO
+        meta["material_id"] = material_id
+        meta["sha256"] = str(material.get("sha256") or "")
+        meta["total"] = len(chunks)
+        meta["chunk_size"] = chunk_size
+        await self._push_to_node(node_id, material_id, meta, chunks)
+        self._chunks_resent += len(chunks)
+        self._ctx.logger.info(
+            "材料 %s 未跟踪缺块请求自愈：%s 整包补推 %s 块", material_id, node_id, len(chunks)
+        )
+        return len(chunks)
 
 
 def _int_or(raw: object, fallback: int) -> int:

@@ -139,6 +139,9 @@ stateDiagram-v2
     analyzed --> uploaded: recipe 修改（配方变，需重分析）
 ```
 
+- **状态归属**：`analyzing` 是**管理端编排态**（经 `inspect_status` 暴露，
+  核心服务面不写）；核心持久态仅 `uploaded / analyzed / failed`（`put_problems`
+  与 `update_recipe` 写入），UI 徽标由「核心状态 + 在途 inspect」合成；
 - **并发互斥**：同 `material_id` 已有 `analyzing` 在途时，新的分析请求合并
   （复用在途 `request_id` 应答广播给新等待者），不并发双跑；
 - **迟到应答**：超时置 `failed` 后 `inspect.result` 才到 → 收下刷新状态并记
@@ -219,7 +222,9 @@ stateDiagram-v2
    `material_wait_s`（默认 60s）**，其间材料到即执行；超时回
    `failed: material missing`（属基础设施错误，核心重试新 attempt 给补推
    留窗口）；
-3. 补推幂等：`missing` 带块清单，主端只发缺块。
+3. 补推幂等：`missing` 带块清单，主端只发缺块；**无就绪跟踪记录**（主端重启 /
+   未预推即触发）时自愈——候选节点整包补推（元包优先复用同材料既有
+   selections），非候选节点忽略告警。
 
 ## 6. 脚本分析（inspect / analyze）
 
@@ -268,20 +273,29 @@ stateDiagram-v2
   （`case_ids` 列表）→ Job 只带 `params.selection_id`（修复：载荷恒小，
   §11）。
 
-## 8. 管理端 API（api_service，`inject = ["executor_pytest_master", "webapi"]`）
+## 8. API 面（材料 CRUD 归核心，族内操作归管理端）
+
+**核心既有端点**（`test_core` 的 api_service，`/api/test/*`——材料存储在核心，
+上传/列表/详情/删除/用例/下载/选择集查询由它承担）：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/pytest/materials` | 上传 zip（二进制 body + `X-Material-Name` 头；超限 413、zip-slip 400、指纹命中 200 返回既有 id） |
-| GET | `/api/pytest/materials` | 列表（state/labels/keyword 过滤） |
-| GET | `/api/pytest/materials/{id}` | 详情（含 recipe/problems/文件清单——运行时列 zip） |
+| POST | `/api/test/materials` | 上传 zip（二进制 body + `X-Material-Name`/`X-Material-Recipe` 头；超限 413、指纹命中 200 返回既有 id） |
+| GET | `/api/test/materials[/{id}[/cases]]` | 列表 / 详情 / 用例清单 |
+| DELETE | `/api/test/materials/{id}` | 删除（有引用 409，§3.2） |
+| GET | `/api/test/materials/{id}/download` | zip 下载 |
+| GET | `/api/test/selections/{sid}` | 选择集详情 |
+
+**族内端点**（管理端 api_service，`inject = ["executor_pytest_master", "webapi"]`）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
 | PUT | `/api/pytest/materials/{id}/recipe` | 更新配方（→ 状态回 `uploaded` 需重分析；指纹变化即新指纹） |
-| DELETE | `/api/pytest/materials/{id}` | 删除（有引用 409，§3.2） |
+| POST | `/api/pytest/materials/{id}/selections` | 保存选择集（`{"name", "case_ids"}`）→ 返回 `selection_id` |
+| POST | `/api/pytest/materials/{id}/push` | 预推（`{"selection_ids": […]}` 可选）→ 各节点 pushed/failed |
 | POST | `/api/pytest/materials/{id}/inspect` | 触发分析/解析（`{"mode": "analyze"\|"collect"}`，返回 `request_id`） |
 | GET | `/api/pytest/inspects/{request_id}` | inspect 请求状态 / 结果 |
-| GET | `/api/pytest/materials/{id}/cases` | 用例清单（转调核心） |
-| POST | `/api/pytest/materials/{id}/selections` | 保存选择集（`{"name", "case_ids"}`）→ 返回 `selection_id` |
-| GET | `/api/pytest/selections/{sid}` | 选择集详情 |
+| GET | `/api/pytest/stats` | 管理端运行统计 |
 
 错误映射同核心 API 惯例（400/404/409/500 + `{"ok", "error", "code"}`）。
 
@@ -542,13 +556,13 @@ capability("executor", "pytest", "executor-pytest", ..., detail={
 | D18 | 下发前置**预推**，missing 宽限兜底 | 消除材料就绪与租约竞态 |
 | D19 | 选例存 `material_selection`，Job 带 `selection_id` | 载荷恒小（大选例不进消息） |
 
-## 20. 开放问题（仅余 2 个，请评审拍板）
+## 20. 开放问题（已定案，实施时裁决）
 
-1. **`selection_id` 的展开位置**：执行端展开需要 case_ids——（a）selection
-   随材料预推时同步给从端（简单，但 selection 与材料解耦弱）；（b）执行端
-   收 Job 后经 comm 回查核心（准确，但多一来回）；**现设计倾向 (a)**（下发
-   前预推阶段把 selection 清单一并推给候选节点），是否同意？
-2. **collect 的 conftest import 风险（D16）与 `setup` 执行（D15）**：
-   v1 按内部可信 + 不执行 setup 处理。若近期要面向**不可信上传**，需立项
-   容器/低权限隔离；若组装确需运行生成脚本，建议「仅执行材料内声明的
-   python 模块 + 白名单」二选一定制。v1 范围是否维持现边界？
+1. **`selection_id` 的展开位置** → **定案 (a)**：selection 清单随预推元包
+   `selections` 字段同步给候选节点，执行端落
+   `{cache}/{material_id}/selections/{selection_id}.json` 就地展开——载荷恒小
+   且无额外来回；主端 missing 自愈时优先复用同材料既有 selections 元数据。
+2. **不可信材料边界（D16）与 `setup` 执行（D15）** → **定案维持 v1 边界**：
+   材料按内部可信处理（collect 会 import conftest）、`setup` 只记录不执行。
+   面向不可信上传时另行立项容器/低权限隔离，或按「仅执行材料内声明的
+   python 模块 + 白名单」定制。
