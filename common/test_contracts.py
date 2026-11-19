@@ -80,6 +80,13 @@ type JobState = Literal[
 # 上行 JobResult.status 允许 "timeout"（执行器自报超时），落库归 job "failed"
 type StageKind = Literal["run", "approval"]  # 执行阶段 / 人工确认门（预留）
 
+# -- 计划标签键（§4.3：计划下发自动注入任务 labels） --------------------------
+
+#: 计划 id 标签（任务回溯所属计划）
+LABEL_PLAN_ID = "plan_id"
+#: 计划名标签（已删计划仍可显示名，评审 #21）
+LABEL_PLAN_NAME = "plan_name"
+
 
 # -- 提交面（API/服务入参） --------------------------------------------------
 
@@ -228,7 +235,11 @@ class MaterialNotFound(TestCoreError):
 
 
 class MaterialInUse(TestCoreError):
-    """材料被引用（任务 params / 选择集在用），禁止删除。"""
+    """材料被引用（任务 params / 计划步骤 / 选择集在用），禁止删除。"""
+
+
+class PlanNotFound(TestCoreError):
+    """测试计划不存在。"""
 
 
 # -- 服务门面（ctx.test_core，§6） -------------------------------------------
@@ -325,8 +336,12 @@ class TestCoreInterface(Protocol):
         source: str = "api",
         created_by: str = "",
         labels: Mapping[str, str] | None = None,
+        executor_id: str = "",
     ) -> Mapping[str, Any]:
-        """落盘+入库；(sha256, recipe_fingerprint) 命中返回既有材料 dict（幂等）；返回含 id/state/…。"""
+        """落盘+入库；(sha256, recipe_fingerprint) 命中返回既有材料 dict（幂等）；返回含 id/state/…。
+
+        ``executor_id`` 为材料归属执行器（空 = 通用材料，§4.5）。
+        """
         ...
 
     async def list_materials(
@@ -336,8 +351,13 @@ class TestCoreInterface(Protocol):
         labels: Mapping[str, str] | None = None,
         limit: int = 50,
         offset: int = 0,
+        executor_id: str = "",
     ) -> list[Mapping[str, Any]]:
-        """材料列表（state / labels 过滤、分页）。"""
+        """材料列表（state / labels 过滤、分页）。
+
+        ``executor_id`` 过滤谓词 ``executor_id == X OR executor_id == ""``
+        （通用材料恒可见）；空串 = 不按归属过滤（§4.5）。
+        """
         ...
 
     async def get_material(self, material_id: str) -> Mapping[str, Any] | None:
@@ -388,6 +408,51 @@ class TestCoreInterface(Protocol):
         """GC 辅助：无引用且 updated_ts < older_than_ts 的材料列表。"""
         ...
 
+    # -- 计划服务面（测试计划 CRUD / 下发，§4.4） ------------------------------
+
+    async def save_plan(
+        self,
+        *,
+        plan_id: str = "",
+        name: str,
+        description: str = "",
+        labels: Mapping[str, str] | None = None,
+        defaults: Mapping[str, Any] | None = None,
+        steps: Sequence[Mapping[str, Any]] | None = None,
+        created_by: str = "",
+    ) -> Mapping[str, Any]:
+        """新建或更新计划；plan_id 空 = 新建。更新不存在抛 PlanNotFound，校验失败抛 InvalidSpec。"""
+        ...
+
+    async def list_plans(
+        self,
+        *,
+        keyword: str = "",
+        labels: Mapping[str, str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Mapping[str, Any]]:
+        """计划列表（keyword 模糊匹配 name/description、labels 子集匹配、分页）。"""
+        ...
+
+    async def get_plan(self, plan_id: str) -> Mapping[str, Any] | None:
+        """计划详情；不存在返回 None。"""
+        ...
+
+    async def delete_plan(self, plan_id: str) -> bool:
+        """删除计划；不存在返回 False。"""
+        ...
+
+    async def dispatch_plan(
+        self, plan_id: str, overrides: Mapping[str, Any] | None = None
+    ) -> Mapping[str, Any]:
+        """下发计划实例化任务，返回 {task_id, deduplicated}。
+
+        缺失抛 PlanNotFound；overrides 未知键 / 校验失败抛 InvalidSpec；
+        source 固定 "plan-dispatch"（幂等域隔离，评审 #13）。
+        """
+        ...
+
     # -- 扩展点（HookChain 宿主） ---------------------------------------------
 
     def register_hook(
@@ -423,6 +488,9 @@ __all__: list[str] = [
     "EVENT_TASK_CREATED",
     "EVENT_TASK_FINISHED",
     "EVENT_TASK_STATE",
+    # 计划标签键
+    "LABEL_PLAN_ID",
+    "LABEL_PLAN_NAME",
     "SCHEMA_VERSION",
     # 版本与协议常量
     "TEST_PROTO",
@@ -447,6 +515,7 @@ __all__: list[str] = [
     "LogChunk",
     "MaterialInUse",
     "MaterialNotFound",
+    "PlanNotFound",
     "ShardSpec",
     "StageKind",
     "StageSpec",

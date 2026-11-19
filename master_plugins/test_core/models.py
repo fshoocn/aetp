@@ -164,6 +164,8 @@ class TestMaterial(Model):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     name: Mapped[str]
+    #: 归属执行器 id（空 = 通用材料，§4.5；筛选谓词 == X OR = ''）
+    executor_id: Mapped[str] = mapped_column(default="")
     kind: Mapped[str]
     size: Mapped[int]
     sha256: Mapped[str]
@@ -217,6 +219,27 @@ class TestMaterialSelection(Model):
     created_ts: Mapped[float]
 
 
+class TestPlan(Model):
+    """测试计划（保存 / 复用 / 复制，测试计划设计 §4.1；下发 = 实例化为任务）。"""
+
+    __owner__ = "test-core"
+    __tablename__ = "plan"
+
+    #: `_new_id("p", now)` 时间有序 id（plugin 生成）
+    id: Mapped[str] = mapped_column(primary_key=True)
+    name: Mapped[str]
+    description: Mapped[str]
+    #: JSON 文本（注入任务 labels）
+    labels: Mapped[str]
+    #: JSON 文本（{priority, failure_policy, timeout_s}）
+    defaults: Mapped[str]
+    #: JSON 文本（步骤数组，§4.2：StageSpec + material_id）
+    steps: Mapped[str]
+    created_by: Mapped[str]
+    created_ts: Mapped[float]
+    updated_ts: Mapped[float]
+
+
 __all__: list[str] = [
     "TestArtifact",
     "TestCaseResult",
@@ -225,6 +248,7 @@ __all__: list[str] = [
     "TestMaterial",
     "TestMaterialCase",
     "TestMaterialSelection",
+    "TestPlan",
     "TestStage",
     "TestTask",
     "TestTaskHistory",

@@ -33,6 +33,8 @@ from common.test_contracts import (
     CHAIN_ARTIFACT_SINK,
     CHAIN_RESULT_TRANSFORM,
     CHAIN_TASK_TRANSFORM,
+    LABEL_PLAN_ID,
+    LABEL_PLAN_NAME,
     SCHEMA_VERSION,
     TEST_PROTO,
     TOPIC_JOB_LOG,
@@ -48,6 +50,9 @@ from common.test_contracts import (
     LogChunk,
     MaterialInUse,
     MaterialNotFound,
+    PlanNotFound,
+    ShardSpec,
+    StageSpec,
     TaskNotFound,
     TaskSpec,
     TestCoreInterface,
@@ -64,6 +69,7 @@ from .models import (
     TestMaterial,
     TestMaterialCase,
     TestMaterialSelection,
+    TestPlan,
     TestStage,
     TestTask,
     TestTaskHistory,
@@ -74,6 +80,7 @@ from .registry import (
     ensure_valid,
     history_row,
     transition,
+    validate_task_spec,
 )
 from .scheduler import MODEL_OWNER, TASK_TIMEOUT_KEY, Scheduler, project_of
 from .ui_service import TestCoreUiService
@@ -109,6 +116,13 @@ _JOB_RESULT_STATES: dict[str, str] = {
     "canceled": "canceled",
     "timeout": "failed",
 }
+
+#: dispatch_plan overrides 白名单（测试计划设计 §5.5；未知键 → InvalidSpec 逐条）
+_PLAN_OVERRIDE_KEYS: frozenset[str] = frozenset(
+    {"name", "priority", "labels", "env", "stage_params", "idempotency_key"}
+)
+#: 环境变量保留前缀（AETP_* 禁止经 overrides 注入，评审 #9；执行端纵深保留）
+_ENV_RESERVED_PREFIX = "AETP_"
 
 
 def _new_id(prefix: str, now: float) -> str:
@@ -223,6 +237,108 @@ def _parse_log_chunk(raw: object) -> LogChunk | None:
     )
 
 
+def _as_mapping(value: object) -> dict[str, Any]:
+    """值 → dict[str, Any]（非对象降级空对象；显式转换避免推断出 Unknown 键值）。"""
+    return dict(cast("Mapping[str, Any]", value)) if isinstance(value, Mapping) else {}
+
+
+def _is_mapping(value: Any) -> bool:
+    """值是否为对象（独立函数边界：避免 isinstance 把 Any 窄化成 Mapping[Unknown, …]）。"""
+    return isinstance(value, Mapping)
+
+
+def _plan_step_params(step: Mapping[str, Any]) -> dict[str, Any]:
+    """步骤 params → dict（缺失 / 非对象降级空对象）。"""
+    return _as_mapping(step.get("params"))
+
+
+def _plan_stage_specs(steps: Sequence[Mapping[str, Any]]) -> list[StageSpec]:
+    """计划步骤 → StageSpec（§4.2 转换，调用方先过 :func:`_check_plan_steps`）。
+
+    ``executor.kind`` 缺省补 ``"executor"``；``material_id`` 仅顶层有 →
+    并入 ``params.material_id``（同名冲突在校验链已拒，评审 #5）。
+    """
+    stages: list[StageSpec] = []
+    for step in steps:
+        params = _plan_step_params(step)
+        top_material: Any = step.get("material_id")
+        if isinstance(top_material, str) and top_material and not params.get("material_id"):
+            params["material_id"] = top_material
+        executor = _as_mapping(step.get("executor"))
+        shard = _as_mapping(step.get("shard"))
+        raw_name: Any = step.get("name")
+        raw_executor_id: Any = executor.get("id")
+        raw_kind: Any = executor.get("kind")
+        raw_timeout: Any = step.get("timeout_s", 0.0)
+        stages.append(
+            StageSpec(
+                name=raw_name,
+                executor=ExecutorSelector(
+                    id=raw_executor_id,
+                    kind=str(raw_kind or "executor"),
+                    labels=_as_mapping(executor.get("labels")),
+                ),
+                params=params,
+                shard=ShardSpec(mode=shard.get("mode", "none"), hint=shard.get("hint", 0)),
+                requires=_as_mapping(step.get("requires")),
+                timeout_s=raw_timeout,
+            )
+        )
+    return stages
+
+
+def _check_plan_steps(steps: Sequence[Mapping[str, Any]]) -> list[str]:
+    """计划步骤静态校验（§4.2/§4.3，纯函数）：返回问题清单（空 = 合法）。
+
+    口径复用 :func:`registry.validate_task_spec`（归一化为 TaskSpec 后整体校验
+    步骤 name 非空且唯一 / executor.id / shard / timeout_s，消息路径改写
+    ``steps[i]``）；另加 shape 与 ``material_id`` ↔ ``params.material_id``
+    同名冲突检查（评审 #5）。材料悬空 / 归属 / selection 交叉是异步查询，
+    在 :meth:`TestCorePlugin._check_plan_materials` 内联，问题口径相同。
+    """
+    items = list(steps)
+    if not items:
+        return ["steps 不能为空"]
+    problems: list[str] = []
+    for index, step in enumerate(items):
+        where = f"steps[{index}]"
+        params_raw: Any = step.get("params")
+        if params_raw is not None and not _is_mapping(params_raw):
+            problems.append(f"{where}.params 需是对象，收到 {params_raw!r}")
+        executor_raw: Any = step.get("executor")
+        if executor_raw is not None and not _is_mapping(executor_raw):
+            problems.append(f"{where}.executor 需是对象，收到 {executor_raw!r}")
+        else:
+            labels_raw: Any = _as_mapping(executor_raw).get("labels")
+            if labels_raw is not None and not _is_mapping(labels_raw):
+                problems.append(f"{where}.executor.labels 需是对象，收到 {labels_raw!r}")
+        shard_raw: Any = step.get("shard")
+        if shard_raw is not None and not _is_mapping(shard_raw):
+            problems.append(f"{where}.shard 需是对象，收到 {shard_raw!r}")
+        requires_raw: Any = step.get("requires")
+        if requires_raw is not None and not _is_mapping(requires_raw):
+            problems.append(f"{where}.requires 需是对象，收到 {requires_raw!r}")
+        top_material: Any = step.get("material_id")
+        inner_material: Any = _plan_step_params(step).get("material_id")
+        if (
+            isinstance(top_material, str)
+            and top_material
+            and isinstance(inner_material, str)
+            and inner_material
+            and top_material != inner_material
+        ):
+            problems.append(
+                f"{where}.material_id 与 params.material_id 同名冲突："
+                f"{top_material!r} ≠ {inner_material!r}"
+            )
+    spec = TaskSpec(name="plan", stages=_plan_stage_specs(items))
+    for problem in validate_task_spec(spec):
+        problems.append(
+            problem.replace("stages[", "steps[").replace("stages 不能为空", "steps 不能为空")
+        )
+    return problems
+
+
 class TestCorePlugin(Service[TestCoreConfig]):
     """test-core 测试核心插件（``provide = "test_core"``，DESIGN §6）。
 
@@ -289,6 +405,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
                 TestMaterial,
                 TestMaterialCase,
                 TestMaterialSelection,
+                TestPlan,
             ]
         )
         await self._recover()
@@ -549,6 +666,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
             "id": row.id,
             "material_id": row.id,
             "name": row.name,
+            "executor_id": row.executor_id,
             "kind": row.kind,
             "size": row.size,
             "sha256": row.sha256,
@@ -594,10 +712,12 @@ class TestCorePlugin(Service[TestCoreConfig]):
         source: str = "api",
         created_by: str = "",
         labels: Mapping[str, str] | None = None,
+        executor_id: str = "",
     ) -> Mapping[str, Any]:
         """落盘+入库；(sha256, recipe_fingerprint) 命中返回既有材料 dict（幂等）。
 
         返回 dict 含 id/state/…，另带 ``deduplicated`` 标记是否命中去重（§4.3）。
+        ``executor_id`` 为材料归属执行器（空 = 通用材料，§4.5）。
         """
         now = self._clock()
         recipe_dict = dict(recipe or {})
@@ -625,6 +745,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
         row = TestMaterial(
             id=material_id,
             name=name,
+            executor_id=executor_id,
             kind="zip",
             size=len(data),
             sha256=sha256,
@@ -653,12 +774,19 @@ class TestCorePlugin(Service[TestCoreConfig]):
         labels: Mapping[str, str] | None = None,
         limit: int = 50,
         offset: int = 0,
+        executor_id: str = "",
     ) -> list[Mapping[str, Any]]:
-        """材料列表（state 精确过滤、labels 子集匹配、分页）。"""
+        """材料列表（state 精确过滤、labels 子集匹配、分页）。
+
+        ``executor_id`` 过滤谓词 ``executor_id == X OR executor_id == ""``
+        （通用材料恒可见）；空串 = 不按归属过滤（§4.5）。
+        """
         where = TestMaterial.state == state if state else None
         rows = await self._repo(TestMaterial).list(
             where=where, order_by=TestMaterial.created_ts
         )
+        if executor_id:
+            rows = [row for row in rows if row.executor_id in ("", executor_id)]
         wanted = dict(labels or {})
         if wanted:
             rows = [
@@ -839,7 +967,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
         if await repo.get(material_id) is None:
             raise MaterialNotFound(f"材料不存在：{material_id}")
         if await self._material_referenced(material_id):
-            raise MaterialInUse(f"材料被引用（任务 params / 选择集在用），禁止删除：{material_id}")
+            raise MaterialInUse(f"材料被引用（任务 params / 计划步骤 / 选择集在用），禁止删除：{material_id}")
         await repo.delete(material_id)
         case_repo = self._repo(TestMaterialCase)
         for row in await case_repo.list(
@@ -863,11 +991,14 @@ class TestCorePlugin(Service[TestCoreConfig]):
         return out
 
     async def _material_referenced(self, material_id: str) -> bool:
-        """引用检查（§3.2）：任务（含 Stage）params JSON 文本含该 id，或选择集关联。"""
+        """引用检查（§3.2 / 评审 #12）：任务（含 Stage）params、计划 steps 的
+        JSON 文本含该 id，或选择集关联。"""
         pattern = f"%{material_id}%"
         if await self._repo(TestTask).count(where=TestTask.params.like(pattern)) > 0:
             return True
         if await self._repo(TestStage).count(where=TestStage.params.like(pattern)) > 0:
+            return True
+        if await self._repo(TestPlan).count(where=TestPlan.steps.like(pattern)) > 0:
             return True
         return (
             await self._repo(TestMaterialSelection).count(
@@ -890,6 +1021,283 @@ class TestCorePlugin(Service[TestCoreConfig]):
                 raise InvalidSpec(f"{where} 引用的 selection_id 不存在：{selection_id}")
         elif selection_id is not None and selection_id != "":
             raise InvalidSpec(f"{where}.selection_id 需是字符串，收到 {selection_id!r}")
+
+    # ============================================================== 计划服务面
+    # （测试计划设计 §4：TestPlan CRUD + 下发实例化；校验链保存 / 下发共用，
+    # 悬空 / 归属 / selection 交叉的异步查询内联在 _check_plan_materials）
+
+    def _plan_dict(self, row: TestPlan) -> dict[str, Any]:
+        """计划行 → 对外 dict（labels / defaults / steps 解码）。"""
+        return {
+            "id": row.id,
+            "plan_id": row.id,
+            "name": row.name,
+            "description": row.description,
+            "labels": _decode_dict(row.labels),
+            "defaults": _decode_dict(row.defaults),
+            "steps": _decode_list(row.steps),
+            "created_by": row.created_by,
+            "created_ts": row.created_ts,
+            "updated_ts": row.updated_ts,
+        }
+
+    async def _check_plan_materials(self, steps: Sequence[Mapping[str, Any]]) -> list[str]:
+        """计划步骤材料引用校验（§4.3）：悬空 + selection 交叉一致 + 材料归属匹配。
+
+        异步查询内联（悬空消息口径同 :meth:`_check_material_refs`），问题逐条
+        收集，调用方统一抛 :class:`InvalidSpec`。
+        """
+        problems: list[str] = []
+        for index, step in enumerate(steps):
+            where = f"steps[{index}]"
+            params = _plan_step_params(step)
+            top_material: Any = step.get("material_id")
+            if top_material is not None and top_material != "" and not isinstance(top_material, str):
+                problems.append(f"{where}.material_id 需是字符串，收到 {top_material!r}")
+            inner_material: Any = params.get("material_id")
+            if inner_material is not None and inner_material != "" and not isinstance(inner_material, str):
+                problems.append(f"{where}.params.material_id 需是字符串，收到 {inner_material!r}")
+            material_id = (
+                top_material
+                if isinstance(top_material, str) and top_material
+                else inner_material if isinstance(inner_material, str) else ""
+            )
+            if material_id:
+                material = await self._repo(TestMaterial).get(material_id)
+                if material is None:
+                    problems.append(f"{where} 引用的 material_id 不存在：{material_id}")
+                else:
+                    executor_id = str(_as_mapping(step.get("executor")).get("id") or "")
+                    if material.executor_id not in ("", executor_id):
+                        problems.append(
+                            f"{where} 引用的材料归属不符：材料 executor_id={material.executor_id!r}，"
+                            f"步骤 executor.id={executor_id!r}"
+                        )
+            selection_id: Any = params.get("selection_id")
+            if selection_id is not None and selection_id != "" and not isinstance(selection_id, str):
+                problems.append(f"{where}.params.selection_id 需是字符串，收到 {selection_id!r}")
+            elif isinstance(selection_id, str) and selection_id:
+                selection = await self._repo(TestMaterialSelection).get(selection_id)
+                if selection is None:
+                    problems.append(f"{where} 引用的 selection_id 不存在：{selection_id}")
+                elif material_id and selection.material_id != material_id:
+                    problems.append(
+                        f"{where} 的 selection 归属不符：selection.material_id={selection.material_id!r}，"
+                        f"步骤 material_id={material_id!r}"
+                    )
+        return problems
+
+    async def save_plan(
+        self,
+        *,
+        plan_id: str = "",
+        name: str,
+        description: str = "",
+        labels: Mapping[str, str] | None = None,
+        defaults: Mapping[str, Any] | None = None,
+        steps: Sequence[Mapping[str, Any]] | None = None,
+        created_by: str = "",
+    ) -> Mapping[str, Any]:
+        """新建或更新计划（§4.4）：plan_id 空 = 新建；更新不存在抛 PlanNotFound。
+
+        校验链与 :meth:`dispatch_plan` 共用（§4.3），失败抛 InvalidSpec（逐条）。
+        """
+        repo = self._repo(TestPlan)
+        row = await repo.get(plan_id) if plan_id else None
+        if plan_id and row is None:
+            raise PlanNotFound(f"计划不存在：{plan_id}")
+        step_list = [dict(step) for step in (steps or ())]
+        problems: list[str] = []
+        if not name.strip():
+            problems.append(f"name 需是非空字符串，收到 {name!r}")
+        problems += _check_plan_steps(step_list)
+        problems += await self._check_plan_materials(step_list)
+        if problems:
+            raise InvalidSpec("计划规格无效：" + "；".join(problems))
+        now = self._clock()
+        fields = {
+            "name": name,
+            "description": description,
+            "labels": _json_dumps(dict(labels or {})),
+            "defaults": _json_dumps(dict(defaults or {})),
+            "steps": _json_dumps(step_list),
+        }
+        if row is not None:
+            await repo.update(plan_id, {**fields, "updated_ts": now})
+            for key, value in fields.items():
+                setattr(row, key, value)
+            row.updated_ts = now
+            return self._plan_dict(row)
+        row = TestPlan(
+            id=_new_id("p", now),
+            created_by=created_by,
+            created_ts=now,
+            updated_ts=now,
+            **fields,
+        )
+        await repo.add(row)
+        return self._plan_dict(row)
+
+    async def list_plans(
+        self,
+        *,
+        keyword: str = "",
+        labels: Mapping[str, str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Mapping[str, Any]]:
+        """计划列表（keyword 模糊匹配 name/description、labels 子集匹配、分页）。"""
+        rows: list[TestPlan] = await self._repo(TestPlan).list(
+            order_by=TestPlan.created_ts
+        )
+        key = keyword.strip().lower()
+        if key:
+            rows = [
+                row
+                for row in rows
+                if key in row.name.lower() or key in row.description.lower()
+            ]
+        wanted = dict(labels or {})
+        if wanted:
+            rows = [
+                row
+                for row in rows
+                if all(_decode_dict(row.labels).get(k) == v for k, v in wanted.items())
+            ]
+        start = max(0, offset)
+        end = start + max(0, limit)
+        return [self._plan_dict(row) for row in rows[start:end]]
+
+    async def get_plan(self, plan_id: str) -> Mapping[str, Any] | None:
+        """计划详情；不存在返回 None。"""
+        row = await self._repo(TestPlan).get(plan_id)
+        return self._plan_dict(row) if row is not None else None
+
+    async def delete_plan(self, plan_id: str) -> bool:
+        """删除计划；不存在返回 False（已删计划的任务仍经 labels 回显，评审 #21）。"""
+        repo = self._repo(TestPlan)
+        if await repo.get(plan_id) is None:
+            return False
+        await repo.delete(plan_id)
+        return True
+
+    async def dispatch_plan(
+        self, plan_id: str, overrides: Mapping[str, Any] | None = None
+    ) -> Mapping[str, Any]:
+        """下发计划（§4.3/§5.5）：实例化 TaskSpec 提交，返回 {task_id, deduplicated}。
+
+        合并次序（评审 #8）：每步先 ``stage_params[步骤名]`` 浅合并（同名替换、
+        数组整体替换）→ 再 ``env`` 增量注入每步 ``params.env``（后者胜）；
+        ``AETP_*`` 环境键拒绝注入（评审 #9）；幂等域 ``source="plan-dispatch"``
+        （评审 #13，缺省空 key = 每次新建）。
+        """
+        plan = await self._repo(TestPlan).get(plan_id)
+        if plan is None:
+            raise PlanNotFound(f"计划不存在：{plan_id}")
+        ov = dict(overrides or {})
+        problems: list[str] = [
+            f"overrides 未知键：{key!r}" for key in sorted(ov) if key not in _PLAN_OVERRIDE_KEYS
+        ]
+        name_override: Any = ov.get("name", "")
+        if name_override is not None and not isinstance(name_override, str):
+            problems.append(f"overrides.name 需是字符串，收到 {name_override!r}")
+            name_override = ""
+        labels_raw: Any = ov.get("labels")
+        if labels_raw is not None and not _is_mapping(labels_raw):
+            problems.append(f"overrides.labels 需是对象，收到 {labels_raw!r}")
+        labels_override = _as_mapping(labels_raw)
+        env_raw: Any = ov.get("env")
+        if env_raw is not None and not _is_mapping(env_raw):
+            problems.append(f"overrides.env 需是对象，收到 {env_raw!r}")
+        env_override = _as_mapping(env_raw)
+        stage_params_raw: Any = ov.get("stage_params")
+        if stage_params_raw is not None and not _is_mapping(stage_params_raw):
+            problems.append(f"overrides.stage_params 需是对象，收到 {stage_params_raw!r}")
+        stage_params = _as_mapping(stage_params_raw)
+        idem_override: Any = ov.get("idempotency_key")
+        if idem_override is not None and not isinstance(idem_override, str):
+            problems.append(f"overrides.idempotency_key 需是字符串，收到 {idem_override!r}")
+            idem_override = ""
+
+        # AETP_* 环境键（overrides.env 与 stage_params[*].env，评审 #9）
+        for key in env_override:
+            if str(key).startswith(_ENV_RESERVED_PREFIX):
+                problems.append(f"overrides.env 含保留键：{key!r}（{_ENV_RESERVED_PREFIX}* 禁止注入）")
+        for step_key, override_params in stage_params.items():
+            if override_params is not None and not _is_mapping(override_params):
+                problems.append(f"stage_params[{step_key!r}] 需是对象，收到 {override_params!r}")
+                continue
+            step_env: Any = _as_mapping(override_params).get("env")
+            if _is_mapping(step_env):
+                for key in _as_mapping(step_env):
+                    if str(key).startswith(_ENV_RESERVED_PREFIX):
+                        problems.append(
+                            f"stage_params[{step_key!r}].env 含保留键：{key!r}"
+                            f"（{_ENV_RESERVED_PREFIX}* 禁止注入）"
+                        )
+
+        raw_steps = [
+            _as_mapping(item) for item in _decode_list(plan.steps) if _is_mapping(item)
+        ]
+        # stage_params 键必须命中步骤名（评审 #7）
+        step_names = {str(step.get("name") or "") for step in raw_steps}
+        for key in stage_params:
+            if key not in step_names:
+                problems.append(f"stage_params 键未命中步骤名：{key!r}")
+
+        # 合并次序（评审 #8）：stage_params 浅合并（同名替换、数组整体替换）
+        # → env 增量注入每步 params.env（后者胜）
+        merged_steps: list[dict[str, Any]] = []
+        for step in raw_steps:
+            merged = dict(step)
+            params = _plan_step_params(step)
+            override_params = stage_params.get(str(step.get("name") or ""))
+            if _is_mapping(override_params):
+                params = {**params, **_as_mapping(override_params)}
+            if env_override:
+                params["env"] = {**_as_mapping(params.get("env")), **env_override}
+            merged["params"] = params
+            merged_steps.append(merged)
+
+        # 校验链（与保存共用，§4.3）：steps 非空 / name 唯一 / executor.id /
+        # material_id 冲突 / 悬空 / selection 交叉 / 材料归属
+        problems += _check_plan_steps(merged_steps)
+        problems += await self._check_plan_materials(merged_steps)
+        if problems:
+            raise InvalidSpec("计划规格无效：" + "；".join(problems))
+
+        # 组装 TaskSpec（§4.3）：steps→stages、defaults→顶层、labels 注入
+        defaults = _decode_dict(plan.defaults)
+        name = str(name_override or plan.name)
+        priority_value: Any = ov.get("priority") or defaults.get("priority") or 0
+        timeout_value: Any = defaults.get("timeout_s") or 0
+        spec = TaskSpec(
+            name=name,
+            stages=_plan_stage_specs(merged_steps),
+            priority=priority_value,
+            labels={
+                **_decode_dict(plan.labels),
+                **labels_override,
+                LABEL_PLAN_ID: plan_id,
+                LABEL_PLAN_NAME: plan.name,
+            },
+            idempotency_key=str(idem_override or ""),
+            failure_policy=cast(
+                "Literal['fail_fast', 'continue']",
+                str(defaults.get("failure_policy") or "fail_fast"),
+            ),
+            timeout_s=timeout_value,
+        )
+        # 幂等判定（评审 #13）：(source="plan-dispatch", idempotency_key) 预查
+        deduplicated = False
+        if spec.idempotency_key:
+            existing = await self._repo(TestTask).list(
+                where=(TestTask.source == "plan-dispatch")
+                & (TestTask.idempotency_key == spec.idempotency_key)
+            )
+            deduplicated = bool(existing)
+        task_id = await self.submit(spec, source="plan-dispatch")
+        return {"task_id": task_id, "deduplicated": deduplicated}
 
     # ============================================================== 状态机编排
     def _repo(self, model: Any) -> Any:
