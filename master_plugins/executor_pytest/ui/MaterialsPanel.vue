@@ -99,6 +99,15 @@
             <Column field="updated_ts" header="更新时间" sortable style="min-width: 10rem">
                 <template #body="{ data }">{{ formatTime(data.updated_ts) }}</template>
             </Column>
+            <Column header="操作" style="min-width: 12rem">
+                <template #body="{ data }">
+                    <div class="materials-panel__row-actions">
+                        <Button label="详情" icon="pi pi-search" size="small" severity="secondary" text @click="openDetail(materialIdOf(data))" />
+                        <Button label="下载" icon="pi pi-download" size="small" severity="secondary" text @click="downloadMaterial(materialIdOf(data))" />
+                        <Button label="删除" icon="pi pi-trash" size="small" severity="danger" text @click="deleteMaterial(materialIdOf(data))" />
+                    </div>
+                </template>
+            </Column>
             <template #empty>
                 <span class="materials-panel__muted">暂无材料，先上传 zip 脚本包</span>
             </template>
@@ -106,10 +115,10 @@
 
         <Panel v-if="detail" :header="`${detail.name || materialIdOf(detail)} · 详情`">
             <div class="materials-panel__actions">
-                <Button label="下载 zip" icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadMaterial" />
+                <Button label="下载 zip" icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadMaterial(materialIdOf(detail))" />
                 <Select v-model="inspectMode" :options="inspectModeOptions" optionLabel="label" optionValue="value" class="materials-panel__filter" />
                 <Button label="开始 inspect" icon="pi pi-search" size="small" :loading="inspecting" @click="runInspect" />
-                <Button label="删除" icon="pi pi-trash" size="small" severity="danger" text @click="deleteMaterial" />
+                <Button label="删除" icon="pi pi-trash" size="small" severity="danger" text @click="deleteMaterial(materialIdOf(detail))" />
                 <Button label="关闭" icon="pi pi-times" size="small" severity="secondary" text @click="closeDetail" />
             </div>
 
@@ -588,8 +597,7 @@ export default {
                 this.pushing = false;
             }
         },
-        deleteMaterial() {
-            const materialId = this.materialIdOf(this.detail);
+        deleteMaterial(materialId) {
             if (!materialId) return;
             // 插件 SFC 拿不到 useConfirm，走宿主 app.use(ConfirmationService) 装的 $confirm
             this.$confirm.require({
@@ -602,7 +610,7 @@ export default {
                     try {
                         await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`), { method: 'DELETE' });
                         this.notice = `材料已删除：${materialId}`;
-                        this.closeDetail();
+                        if (this.detail && this.materialIdOf(this.detail) === materialId) this.closeDetail();
                         await this.load();
                     } catch (reason) {
                         if (reason && (reason.code === 'material_in_use' || reason.status === 409)) {
@@ -614,8 +622,7 @@ export default {
                 }
             });
         },
-        downloadMaterial() {
-            const materialId = this.materialIdOf(this.detail);
+        downloadMaterial(materialId) {
             if (!materialId) return;
             this.downloadZip(materialId);
         },
@@ -766,6 +773,13 @@ export default {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.materials-panel__row-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
     flex-wrap: wrap;
 }
 
