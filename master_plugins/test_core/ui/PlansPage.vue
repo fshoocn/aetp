@@ -432,7 +432,7 @@ async function fetchJson(url, options) {
 }
 
 // 动态表单不重复渲染的保留键（专用区块装配 / raw JSON 直改，同 SubmitPage 口径）
-const RESERVED_PARAMS = ['material_id', 'selection_id', 'targets', 'env', 'recipe_override'];
+const RESERVED_PARAMS = ['material_id', 'selection_id', 'targets', 'env'];
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SCALAR_TYPES = ['string', 'number', 'boolean', 'enum'];
 

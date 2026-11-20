@@ -65,7 +65,7 @@ graph TB
 | 职责 | test_core（核心） | 管理端（主） | 执行端（从） |
 |---|---|---|---|
 | 材料上传接口 / 存储 | ✅（内容不透明） | UI + 调接口 | — |
-| 组装配方（recipe） | 存（材料 meta） | ✅ 定义 / 编辑 | 解释执行 |
+| recipe（不透明字符串） | 存原样字符串（core 不解析） | pytest 不使用；未来执行器面板表单生成 | 自定义解析 |
 | 脚本分析 | 存问题结果 | 触发 + 展示 + **选节点** | ✅ 真实环境执行 |
 | 用例数据 / 选择集 | ✅ 存储 / 查询接口 | 展示 / 选例 | ✅ 解析 |
 | 任务下发 | ✅ `submit()` / 状态机 | ✅ 任务编辑 UI | — |
@@ -158,7 +158,13 @@ stateDiagram-v2
   （默认 2 GiB）双限，超限按 LRU 清**未被在跑 Job 使用**的缓存；
 - 组装工程目录：Job result 上报后删除；启动时扫尾（崩溃残留）。
 
-## 4. 材料与配方
+## 4. 材料与 recipe（执行器自定义不透明字符串）
+
+> **v2.1 语义修订**（用户裁决）：recipe 是**执行器自定义的不透明字符串**——
+> core 只存取不解析、不知含义；生成方式是各执行器面板的表单选择/配置拼串。
+> **pytest 不使用 recipe**（面板无配方输入、执行端不解释，材料即传即跑）；
+> 未来 canoe 等在**自己的面板**做表单 → 生成自己的格式字符串。
+> 本文 §4.2 原 JSON 结构（layout/entry/args/env/requirements/setup）作废。
 
 ### 4.1 材料（脚本包）
 
@@ -166,31 +172,22 @@ stateDiagram-v2
   `webapi._read_body_capped`）；上限 `material_max_bytes`（默认 16 MiB）；
 - zip-slip 防护（解包路径校验）；`sha256` 落档。
 
-### 4.2 组装配方（recipe；管理端编辑、执行端解释）
+### 4.2 recipe（不透明字符串）
 
-```json
-{
-  "layout": [{"src": "cases/", "dst": "tests/"}],
-  "entry": "tests",
-  "args": ["-q"],
-  "env": {"PYTHONPATH": "."},
-  "requirements": ["pytest>=8"],
-  "setup": []
-}
-```
+- 类型 `str`（可空串）：core 存原样字符串、上传 API 原样透传
+  （`X-Material-Recipe` 头 / query 降级）；
+- **解析格式由执行器自定义**，core 与上传 API 不关心含义；
+- pytest 执行器：**不解析 recipe**（任何内容均忽略）——工程 = zip 原样解压，
+  执行目标 = 分片 unit_refs → params.targets → selection 展开 → 兜底 `["."]`；
+- 未来执行器（canoe）：自己的面板表单 → 拼自己的字符串 → 自己解释。
 
-- 配方语义归**执行端**解释（组装是「怎么跑」的一部分）；核心只存 JSON；
-- `setup`：预处理命令声明，**v1 不执行只记录**（决策 D15，防上传内容借
-  配方执行任意命令）；
-- `recipe_override`（params，§11）浅合并：**标量/对象同名替换、数组整体
-  替换**（含 `layout`）——显式规则，UI 提示。
+### 4.3 指纹与去重
 
-### 4.3 指纹与去重（修复：内容 + 配方联合去重）
-
-- `recipe_fingerprint` = `sha256(canonical_json(recipe))`（16 位 hex）；
-- 上传去重键 **`(sha256, recipe_fingerprint)`**：同内容不同配方是**不同
-  材料**（不同测试工程）；命中 → 返回既有 `material_id`（幂等上传）；
-- 这样「同一批文件、改配方另存」是新材料，互不污染分析结果与用例清单。
+- `recipe_fingerprint` = `sha256(recipe.encode("utf-8"))`（16 位 hex；空串
+  合法、恒定指纹）；
+- 上传去重键 **`(sha256, recipe_fingerprint)`**：同内容同字符串 = 同一材料
+  （幂等复用），同内容不同字符串 = **不同测试工程**（如 canoe 同素材不同
+  工程配置）；命中 → 返回既有 `material_id`。
 
 ## 5. 材料分发协议（管理端 → 执行端）
 
@@ -317,7 +314,6 @@ stateDiagram-v2
 | 参数 | **动态表单**（按能力信封 `detail.schema` 生成，§11）+ raw JSON 兜底 | Stage `params` |
 | 环境变量 | 键值编辑（UI 即拒 `AETP_*` 前缀） | `params.env` |
 | 分片 | plan 开关 + hint | Stage `shard` |
-| 配方覆盖 | 临时 override（数组整体替换有提示） | `params.recipe_override` |
 
 提交流程：**保存 selection → 预推材料（§5.2）→ `ctx.test_core.submit()`**
 （幂等键 UI 生成）；预推失败的节点在 UI 上明示（可选择仍提交——失败节点
@@ -337,9 +333,9 @@ stateDiagram-v2
 
 ### 10.2 组装（assemble.py）
 
-材料 zip 解到 `{节点目录}/workdir/{job_id}/a{attempt}/`（路径穿越校验）→
-按 recipe `layout` 铺排（`recipe_override` 按 §4.2 合并规则覆盖）→
-工程目录即 pytest `cwd`；组装失败 → `failed: assemble error`（不重试）。
+材料 zip 解到 `{节点目录}/workdir/{job_id}/a{attempt}/`（zip-slip / 越界安全
+校验）→ **原样即工程**（v2.1：pytest 不解释 recipe，无铺排/覆盖）→
+工程目录即 pytest `cwd`；解压失败 → `failed: assemble error`（不重试）。
 
 ### 10.3 执行与结果
 
@@ -377,7 +373,6 @@ capability("executor", "pytest", "executor-pytest", ..., detail={
         "extra_args": {"type": "array", "items": {"type": "string"}},
         "keyword": {"type": "string"},
         "env": {"type": "object"},
-        "recipe_override": {"type": "object"},
         "selection_id": {"type": "string"},
         "workdir": {"type": "string"}, "python": {"type": "string"}}
     }})
@@ -395,7 +390,6 @@ capability("executor", "pytest", "executor-pytest", ..., detail={
 | `targets` | nodeid/文件/目录列表（选例聚合或手填） |
 | `extra_args` / `keyword` | 追加参数 / `-k`（并存时 extra_args 优先） |
 | `env` | 环境变量增量（拒 `AETP_*`；argv 化不进 shell） |
-| `recipe_override` | 配方浅合并覆盖（§4.2） |
 | `workdir` / `python` | 覆盖执行端配置 |
 
 未知键忽略；核心注入保留键（`__timeout_s__`）忽略；`material_id` 与
