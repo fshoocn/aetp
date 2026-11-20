@@ -55,6 +55,8 @@ exclude = [
     "master/plugins",
     "slave/plugins",
     "master/webui/frontend",
+    "master/data",
+    "slave/data",
 ]
 typeCheckingMode = "strict"
 pythonVersion = "3.14"
