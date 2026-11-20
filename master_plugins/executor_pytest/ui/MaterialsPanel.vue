@@ -1,22 +1,23 @@
 <!-- pytest 脚本处理面板（W2-D）：脚本管理页 /scripts 的 slot 面板（target=scripts:executor-pytest）。
-     只处理「当前上传的脚本」：上传区 → 上传成功（含 deduplicated 复用 id）自动展开处理区
-     （状态 / inspect 分析·解析 / 用例清单 / 选择集 / 预推 / 下载 / 刷新）；
-     全量脚本清单归 test_core 跨执行器总表（ScriptsPage），本面板不列清单、无配方编辑。
-     插件 SFC 自包含：不 import 宿主 / npm 模块，仅用全局共享组件 + 原生控件 + $confirm（Options API）。 -->
+     「上传 → 自动分析 → 取消 / 保存」向导：只处理「当前上传的脚本」——上传成功（含 deduplicated
+     复用 id）自动触发 analyze inspect 并轮询至终结，只呈现「分析是否通过」（未通过附问题
+     code / 条数一行摘要）；用例 / 标签查看归脚本总表「详情」，选例归计划编辑器，预推归下发流程，
+     下载 / 删除归脚本总表。
+     插件 SFC 自包含：不 import 宿主 / npm 模块，仅用全局共享组件 + 原生控件（Options API）。 -->
 <template>
     <section class="materials-panel">
         <header class="materials-panel__header">
             <div>
                 <h3>pytest 脚本处理</h3>
-                <p class="materials-panel__hint">上传脚本包（zip）→ 分析 / 解析 → 选例 → 预推；材料内容对核心不透明，语义归 pytest 执行器族</p>
+                <p class="materials-panel__hint">上传脚本包（zip）→ 自动分析 → 取消 / 保存；用例查看归脚本总表「详情」，选例归计划编辑器，预推归下发流程</p>
             </div>
         </header>
 
         <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
         <Message v-if="notice" severity="info" :closable="true" @close="notice = ''">{{ notice }}</Message>
 
-        <!-- 上传态：未选中当前脚本时展示 -->
-        <Panel v-if="!detail" header="上传脚本（zip）">
+        <!-- 上传态 -->
+        <Panel v-if="phase === 'upload'" header="上传脚本（zip）">
             <div class="materials-panel__form">
                 <input ref="fileInput" type="file" accept=".zip,application/zip" class="materials-panel__file" @change="onFileChange" />
                 <div class="materials-panel__picker">
@@ -31,128 +32,46 @@
             </div>
             <p class="materials-panel__hint">
                 上传按内容指纹去重：命中既有材料会提示 <code>deduplicated</code> 并复用 id；归属执行器经
-                <code>X-Material-Executor: pytest</code> 头自动标记。上传成功后在下方直接处理当前脚本。
+                <code>X-Material-Executor: pytest</code> 头自动标记。上传成功后自动开始分析，只呈现「是否通过」。
             </p>
         </Panel>
 
-        <!-- 处理态：上传成功（或复用既有 id）后自动展开 -->
-        <Panel v-if="detail" :header="`当前脚本：${detail.name || materialIdOf(detail)}`">
-            <div class="materials-panel__actions">
-                <Button label="下载 zip" icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadMaterial(materialIdOf(detail))" />
-                <Select v-model="inspectMode" :options="inspectModeOptions" optionLabel="label" optionValue="value" class="materials-panel__filter" />
-                <Button label="开始 inspect" icon="pi pi-search" size="small" :loading="inspecting" @click="runInspect" />
-                <Button label="刷新" icon="pi pi-refresh" size="small" severity="secondary" :loading="loading" @click="refreshDetail" />
-                <Button label="更换脚本" icon="pi pi-times" size="small" severity="secondary" text @click="closeDetail" />
-            </div>
-
+        <!-- 分析态：上传成功后自动触发 analyze，轮询至终结 -->
+        <Panel v-else-if="phase === 'analyzing'" :header="`正在分析：${detailTitle}`">
             <p class="materials-panel__hint">
-                <Tag :value="stateText(detail.state)" :severity="stateSeverity(detail.state)" />
-                · <span class="materials-panel__mono">{{ materialIdOf(detail) }}</span>
-                · {{ formatSize(detail.size) }} · 更新 {{ formatTime(detail.updated_ts) }}
-                · sha256 <span class="materials-panel__mono">{{ shortSha(detail.sha256) }}</span>
+                <Tag :value="stateText(material.state)" :severity="stateSeverity(material.state)" />
+                · <span class="materials-panel__mono">{{ materialIdOf(material) }}</span>
+                · {{ formatSize(material.size) }} · 更新 {{ formatTime(material.updated_ts) }}
+                · sha256 <span class="materials-panel__mono">{{ shortSha(material.sha256) }}</span>
             </p>
-
-            <h4>分析 / 解析结果（inspect）</h4>
-            <p v-if="inspectRecord" class="materials-panel__hint">
-                <Tag :value="inspectStateText(inspectRecord.state)" :severity="inspectStateSeverity(inspectRecord.state)" />
-                · {{ inspectRecord.mode }} · 节点 {{ inspectRecord.node_id || '—' }}
-                · 耗时 {{ formatDuration(inspectRecord.duration_s) }}
-                <template v-if="inspectRecord.late"> · 迟到应答（已收下刷新）</template>
-                <template v-if="inspectRecord.error"> · {{ inspectRecord.error }}</template>
-            </p>
-            <p v-else class="materials-panel__muted">暂无 inspect 记录（「分析」查语法 / 依赖 / 可收集性，「解析」产出用例清单）</p>
-            <template v-if="problems.length">
-                <div v-for="(problem, index) in problems" :key="index" class="materials-panel__problem">
-                    <Tag :value="problem.severity || 'info'" :severity="problemSeverity(problem.severity)" />
-                    <span class="materials-panel__mono">{{ problem.code }}</span>
-                    <span v-if="problem.path" class="materials-panel__mono materials-panel__muted">{{ problem.path }}<template v-if="problem.line">:{{ problem.line }}</template></span>
-                    <span>{{ problem.message }}</span>
-                </div>
-            </template>
-
-            <h4>用例清单</h4>
-            <div class="materials-panel__toolbar">
-                <Select
-                    v-model="markerFilter"
-                    :options="markerOptions"
-                    optionLabel="label"
-                    optionValue="value"
-                    placeholder="全部 marker"
-                    showClear
-                    class="materials-panel__filter"
-                />
-                <span class="materials-panel__muted">已勾选 {{ selectedCases.length }} 条</span>
+            <div class="materials-panel__progress" role="status">
+                <span class="materials-panel__spinner" aria-hidden="true"></span>
+                <span>分析中…已用时 {{ analyzingSeconds }}s（语法 / 依赖 / 可收集性，自动完成）</span>
             </div>
-            <DataTable
-                v-if="visibleCases.length"
-                :value="visibleCases"
-                dataKey="case_id"
-                scrollable
-                size="small"
-                selectionMode="multiple"
-                v-model:selection="selectedCases"
+        </Panel>
+
+        <!-- 完成态：只告诉用户是否分析通过（明细归总表「详情」） -->
+        <Panel v-else :header="`分析结果：${detailTitle}`">
+            <p class="materials-panel__hint">
+                <Tag :value="stateText(material.state)" :severity="stateSeverity(material.state)" />
+                · <span class="materials-panel__mono">{{ materialIdOf(material) }}</span>
+                · {{ formatSize(material.size) }} · 更新 {{ formatTime(material.updated_ts) }}
+                · sha256 <span class="materials-panel__mono">{{ shortSha(material.sha256) }}</span>
+            </p>
+            <p
+                class="materials-panel__result"
+                :class="analyzeOk ? 'materials-panel__result--ok' : 'materials-panel__result--fail'"
+                role="status"
             >
-                <Column field="case_id" header="case_id（nodeid）" style="min-width: 14rem">
-                    <template #body="{ data }">
-                        <span class="materials-panel__mono" :title="data.case_id">{{ data.case_id }}</span>
-                    </template>
-                </Column>
-                <Column field="path" header="文件" style="min-width: 8rem">
-                    <template #body="{ data }">{{ data.path || '—' }}</template>
-                </Column>
-                <Column field="markers" header="markers" style="min-width: 8rem">
-                    <template #body="{ data }">
-                        <span class="materials-panel__muted">{{ (data.markers || []).join(', ') || '—' }}</span>
-                    </template>
-                </Column>
-                <Column field="status" header="状态" style="min-width: 5rem">
-                    <template #body="{ data }">{{ data.status || 'ok' }}</template>
-                </Column>
-            </DataTable>
-            <p v-else class="materials-panel__muted">暂无用例清单（先以 collect 模式 inspect 解析用例）</p>
-
+                {{ analyzeOk ? '✅ 分析通过' : '❌ 分析未通过' }}
+            </p>
+            <p v-if="!analyzeOk && problemSummary" class="materials-panel__hint">{{ problemSummary }}</p>
             <div class="materials-panel__actions">
-                <InputText v-model="selectionName" placeholder="选择集名称" class="materials-panel__name" />
-                <Button
-                    label="保存选择集"
-                    icon="pi pi-save"
-                    size="small"
-                    :loading="savingSelection"
-                    :disabled="!selectedCases.length"
-                    @click="saveSelection"
-                />
+                <Button v-if="!decided && analyzeOk" label="保存" icon="pi pi-save" size="small" @click="saveMaterial" />
+                <Button v-if="!decided" label="取消" icon="pi pi-trash" size="small" severity="danger" outlined :loading="deleting" @click="cancelMaterial" />
+                <Button label="继续上传" icon="pi pi-upload" size="small" severity="secondary" text @click="restartUpload" />
             </div>
-            <p class="materials-panel__hint">勾选用例后保存选择集 → 得到 <code>selection_id</code>（Job 只带引用，载荷恒小，§5/§11）。</p>
-            <ul v-if="selections.length" class="materials-panel__list">
-                <li v-for="sel in selections" :key="sel.selection_id">
-                    <label class="materials-panel__check">
-                        <input v-model="sel.include" type="checkbox" />
-                        {{ sel.name }}（{{ sel.count }} 条）
-                    </label>
-                    <span class="materials-panel__mono">{{ sel.selection_id }}</span>
-                    <Button label="复制" icon="pi pi-copy" size="small" severity="secondary" text @click="copyText(sel.selection_id)" />
-                </li>
-            </ul>
-
-            <h4>预推（下发前置）</h4>
-            <div class="materials-panel__actions">
-                <Button label="预推到候选节点" icon="pi pi-upload" size="small" :loading="pushing" @click="pushMaterial" />
-            </div>
-            <p class="materials-panel__hint">按上方勾选的 selection_ids 随材料元包同步给全部 <code>executor/pytest</code> 候选节点（§5.2）；失败节点可重试或依赖 missing 兜底。</p>
-            <template v-if="pushResult">
-                <p class="materials-panel__hint">
-                    成功节点：
-                    <template v-if="pushResult.pushed.length">
-                        <Tag v-for="node in pushResult.pushed" :key="node" :value="node" severity="success" class="materials-panel__tag" />
-                    </template>
-                    <span v-else class="materials-panel__muted">无</span>
-                    ；失败节点：
-                    <template v-if="pushResult.failed.length">
-                        <Tag v-for="node in pushResult.failed" :key="node" :value="node" severity="danger" class="materials-panel__tag" />
-                    </template>
-                    <span v-else class="materials-panel__muted">无</span>
-                </p>
-            </template>
+            <p class="materials-panel__hint">{{ doneHint }}</p>
         </Panel>
     </section>
 </template>
@@ -218,100 +137,47 @@ const STATE_TEXT = { uploaded: '待分析', analyzing: '分析中', analyzed: '�
 export default {
     data() {
         return {
-            // 当前脚本（处理区）；null = 上传态
+            // 向导阶段：upload（上传）→ analyzing（自动分析）→ done（完成：取消 / 保存）
+            phase: 'upload',
+            // 当前材料详情（analyzing / done 展示基本信息）
             detail: null,
             error: '',
             notice: '',
-            loading: false,
             // 上传区
             file: null,
             uploadName: '',
             uploading: false,
-            // inspect
-            inspectMode: 'analyze',
-            inspectModeOptions: [
-                { label: '分析（analyze：语法 / 依赖 / 可收集性）', value: 'analyze' },
-                { label: '解析（collect：用例清单）', value: 'collect' }
-            ],
-            inspecting: false,
-            inspectRecord: null,
-            // 用例清单与选择集
-            cases: [],
-            selectedCases: [],
-            markerFilter: null,
-            selectionName: '',
-            savingSelection: false,
-            selections: [],
-            // 预推
-            pushing: false,
-            pushResult: null,
+            // 自动分析（analyze inspect → 轮询至终结）
+            analyzingSeconds: 0,
+            analyzeOk: false,
+            problemSummary: '',
+            // 完成态决策：'' 未决策 / 'saved' 已保存 / 'deleted' 已取消并删除
+            decided: '',
+            deleting: false,
             disposed: false
         };
     },
     computed: {
-        problems() {
-            if (this.inspectRecord && (this.inspectRecord.problems || []).length) {
-                return this.inspectRecord.problems;
-            }
-            return (this.detail && this.detail.problems) || [];
+        material() {
+            return this.detail || {};
         },
-        markerOptions() {
-            const markers = new Set();
-            for (const item of this.cases) {
-                for (const marker of item.markers || []) markers.add(marker);
-            }
-            return [...markers].sort().map((marker) => ({ label: marker, value: marker }));
+        detailTitle() {
+            const name = String((this.detail && this.detail.name) || '').trim();
+            return name || this.materialIdOf(this.detail) || '当前脚本';
         },
-        visibleCases() {
-            if (!this.markerFilter) return this.cases;
-            return this.cases.filter((item) => (item.markers || []).includes(this.markerFilter));
+        doneHint() {
+            if (this.decided === 'saved') return '材料已保留，可在脚本总表查看 / 删除。点「继续上传」处理下一个脚本。';
+            if (this.decided === 'deleted') return '材料已删除。点「继续上传」处理下一个脚本。';
+            const keep = '「继续上传」直接处理下一个脚本（材料保留）；点弹窗 X 关闭同样保留现状（总表可见 / 可删）。';
+            return this.analyzeOk
+                ? `「保存」保留材料；「取消」删除该材料；${keep}`
+                : `「取消」删除该材料；${keep}`;
         }
     },
     beforeUnmount() {
         this.disposed = true;
     },
     methods: {
-        async refreshDetail() {
-            // 刷新当前脚本的状态 / 问题 / 用例清单（处理区「刷新」）
-            const materialId = this.materialIdOf(this.detail);
-            if (!materialId) return;
-            this.loading = true;
-            try {
-                await this.openDetail(materialId);
-            } finally {
-                this.loading = false;
-            }
-        },
-        closeDetail() {
-            // 「更换脚本」：回上传态
-            this.detail = null;
-            this.inspectRecord = null;
-            this.cases = [];
-            this.selectedCases = [];
-            this.markerFilter = null;
-            this.selections = [];
-            this.pushResult = null;
-            this.error = '';
-        },
-        async openDetail(materialId, silent) {
-            if (!materialId) return;
-            try {
-                const data = await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`));
-                this.detail = data.material || null;
-                await this.loadCases(materialId);
-                this.error = '';
-            } catch (reason) {
-                if (!silent) this.error = String(reason && reason.message ? reason.message : reason);
-            }
-        },
-        async loadCases(materialId) {
-            try {
-                const data = await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}/cases`));
-                this.cases = data.cases || [];
-            } catch {
-                this.cases = [];
-            }
-        },
         pickFile() {
             // 原生 input 被面板样式拉伸后按钮在部分浏览器/DPI 下不可见：
             // 隐藏原生 input、以显式按钮触发文件选择（跨浏览器稳定）
@@ -341,36 +207,53 @@ export default {
                 const material = data.material || {};
                 const materialId = this.materialIdOf(material);
                 this.notice = data.deduplicated
-                    ? `内容指纹命中既有材料（deduplicated），复用 id=${materialId}`
-                    : `脚本已上传：${material.name || ''}（id=${materialId}）`;
+                    ? `内容指纹命中既有材料（deduplicated），复用 id=${materialId}，已自动开始分析`
+                    : `脚本已上传：${material.name || ''}（id=${materialId}），已自动开始分析`;
                 this.file = null;
-                // 上传成功自动展开「当前脚本」处理区（含 deduplicated 复用 id）
-                await this.openDetail(materialId);
+                this.error = '';
+                this.resetWizard();
+                this.phase = 'analyzing';
+                await this.openDetail(materialId, true);
+                await this.startAnalyze(materialId);
             } catch (reason) {
                 this.error = String(reason && reason.message ? reason.message : reason);
             } finally {
                 this.uploading = false;
             }
         },
-        async runInspect() {
-            const materialId = this.materialIdOf(this.detail);
-            if (!materialId || this.inspecting) return;
-            this.inspecting = true;
-            this.inspectRecord = null;
+        resetWizard() {
+            this.analyzingSeconds = 0;
+            this.analyzeOk = false;
+            this.problemSummary = '';
+            this.decided = '';
+        },
+        async openDetail(materialId, silent) {
+            if (!materialId) return;
+            try {
+                const data = await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`));
+                this.detail = data.material || null;
+                this.error = '';
+            } catch (reason) {
+                if (!silent) this.error = String(reason && reason.message ? reason.message : reason);
+            }
+        },
+        async startAnalyze(materialId) {
+            // 上传成功（含 deduplicated 复用 id）自动触发 analyze：编译结果 + 用例 / 标签清单
+            // 由后端产出（analyze 应答带 cases），UI 只轮询到 ok 字段呈现「是否通过」
+            if (!materialId) return;
+            this.analyzingSeconds = 0;
             try {
                 const data = await fetchJson(apiUrl(`/api/pytest/materials/${encodeURIComponent(materialId)}/inspect`), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mode: this.inspectMode })
+                    body: JSON.stringify({ mode: 'analyze' })
                 });
-                this.notice = `inspect 已提交（${this.inspectMode}）：request_id=${data.request_id}`;
-                await this.pollInspect(data.request_id, materialId);
+                await this.pollInspect(data.request_id);
             } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
-                this.inspecting = false;
+                this.finishAnalyze(false, `分析触发失败：${String(reason && reason.message ? reason.message : reason)}`);
             }
         },
-        async pollInspect(requestId, materialId) {
+        async pollInspect(requestId) {
             // 轮询至终结态（inspecting → done / failed）；后端看门狗保证 inspect_timeout_s 内终结
             for (let attempt = 0; attempt < 150 && !this.disposed; attempt += 1) {
                 await new Promise((resolve) => window.setTimeout(resolve, 2000));
@@ -380,103 +263,72 @@ export default {
                     const data = await fetchJson(apiUrl(`/api/pytest/inspects/${encodeURIComponent(requestId)}`));
                     record = data.inspect || null;
                 } catch (reason) {
-                    this.error = String(reason && reason.message ? reason.message : reason);
-                    this.inspecting = false;
+                    this.finishAnalyze(false, `分析状态查询失败：${String(reason && reason.message ? reason.message : reason)}`);
                     return;
                 }
-                this.inspectRecord = record;
                 if (record && record.state !== 'inspecting') {
-                    this.inspecting = false;
-                    this.notice = record.state === 'done'
-                        ? `inspect 完成（${record.mode}，耗时 ${this.formatDuration(record.duration_s)}）`
-                        : `inspect 失败：${record.error || '见问题列表'}`;
-                    await this.openDetail(materialId, true);
+                    // 通过口径与后端落核心一致：done + ok，且问题清单无 error 级（否则核心置 failed）
+                    const problems = Array.isArray(record.problems) ? record.problems : [];
+                    const hasError = problems.some((item) => String((item && item.severity) || '') === 'error');
+                    const passed = record.state === 'done' && Boolean(record.ok) && !hasError;
+                    this.finishAnalyze(passed, this.problemSummaryOf(record));
                     return;
                 }
+                this.analyzingSeconds += 2;
             }
-            this.inspecting = false;
+            if (!this.disposed) this.finishAnalyze(false, '分析超时未终结，可稍后在脚本总表查看状态');
         },
-        async saveSelection() {
+        problemSummaryOf(record) {
+            // 未通过摘要只报「问题 code / 条数」一行，不展开明细（明细归总表「详情」）
+            const problems = record && Array.isArray(record.problems) ? record.problems : [];
+            if (!problems.length) return String((record && record.error) || '未给出问题明细');
+            const counts = new Map();
+            for (const item of problems) {
+                const code = String((item && item.code) || 'unknown');
+                counts.set(code, (counts.get(code) || 0) + 1);
+            }
+            const parts = [...counts.entries()].map(([code, count]) => `${code} ×${count}`);
+            return `问题 ${problems.length} 条：${parts.join('、')}`;
+        },
+        finishAnalyze(passed, summary) {
+            this.analyzeOk = Boolean(passed);
+            this.problemSummary = passed ? '' : summary;
+            this.phase = 'done';
+            // 核心已按应答刷新材料状态（analyzed / failed），静默拉新基本信息
             const materialId = this.materialIdOf(this.detail);
-            const name = (this.selectionName || '').trim();
-            if (!materialId || !this.selectedCases.length) return;
-            if (!name) {
-                this.error = '选择集名称必填';
-                return;
-            }
-            this.savingSelection = true;
-            try {
-                const caseIds = this.selectedCases.map((item) => item.case_id);
-                const data = await fetchJson(apiUrl(`/api/pytest/materials/${encodeURIComponent(materialId)}/selections`), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, case_ids: caseIds })
-                });
-                this.selections.unshift({
-                    selection_id: data.selection_id,
-                    name,
-                    count: caseIds.length,
-                    include: true
-                });
-                this.notice = `选择集已保存：selection_id=${data.selection_id}`;
-                this.selectionName = '';
-            } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
-            } finally {
-                this.savingSelection = false;
-            }
+            if (materialId) this.openDetail(materialId, true);
         },
-        async pushMaterial() {
+        saveMaterial() {
+            // 「保存」= 保留材料（不删除），提示「已保存」；用例查看 / 删除归脚本总表
+            this.decided = 'saved';
+            this.notice = '已保存';
+            this.error = '';
+        },
+        async cancelMaterial() {
+            // 「取消」= 删除该材料（生命周期收口 core：被任务 / 计划 / 选择集引用时 409）
             const materialId = this.materialIdOf(this.detail);
-            if (!materialId) return;
-            this.pushing = true;
+            if (!materialId || this.deleting) return;
+            this.deleting = true;
             try {
-                const included = this.selections.filter((item) => item.include).map((item) => item.selection_id);
-                const body = included.length ? JSON.stringify({ selection_ids: included }) : '';
-                const data = await fetchJson(apiUrl(`/api/pytest/materials/${encodeURIComponent(materialId)}/push`), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body
-                });
-                this.pushResult = { pushed: data.pushed || [], failed: data.failed || [] };
-                this.notice = `预推完成：成功 ${this.pushResult.pushed.length} 台，失败 ${this.pushResult.failed.length} 台`;
+                await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`), { method: 'DELETE' });
+                this.decided = 'deleted';
+                this.notice = '已取消并删除';
+                this.error = '';
             } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
+                const text = String(reason && reason.message ? reason.message : reason);
+                this.error = text.includes('material_in_use') || text.includes('引用')
+                    ? `取消失败（引用冲突）：${text}——被任务 / 计划 / 选择集引用的材料禁止删除，请先解除引用`
+                    : `取消失败（删除材料）：${text}`;
             } finally {
-                this.pushing = false;
+                this.deleting = false;
             }
         },
-        downloadMaterial(materialId) {
-            if (!materialId) return;
-            this.downloadZip(materialId);
-        },
-        async downloadZip(materialId) {
-            // <a> 带不上 X-AETP-Token 头，走 fetch blob 下载（同 TasksPage 本地产物口径）
-            try {
-                const response = await fetch(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}/download`), {
-                    headers: authHeaders()
-                });
-                if (!response.ok) throw new Error(`下载失败 (${response.status})`);
-                const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `${materialId}.zip`;
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-                URL.revokeObjectURL(url);
-            } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
-            }
-        },
-        async copyText(text) {
-            try {
-                await navigator.clipboard.writeText(String(text || ''));
-                this.notice = `已复制：${text}`;
-            } catch {
-                this.error = '复制失败，请手动选择文本复制';
-            }
+        restartUpload() {
+            // 「继续上传」= 原「更换脚本」语义：回上传态处理下一个脚本（本材料保留）
+            this.phase = 'upload';
+            this.detail = null;
+            this.resetWizard();
+            this.error = '';
         },
         materialIdOf(material) {
             return String((material && (material.material_id || material.id)) || '');
@@ -490,20 +342,6 @@ export default {
         },
         stateSeverity(state) {
             return { uploaded: 'info', analyzing: 'warn', analyzed: 'success', failed: 'danger' }[state] || 'secondary';
-        },
-        inspectStateText(state) {
-            return { inspecting: '进行中', done: '完成', failed: '失败' }[state] || state || '—';
-        },
-        inspectStateSeverity(state) {
-            return { inspecting: 'warn', done: 'success', failed: 'danger' }[state] || 'secondary';
-        },
-        problemSeverity(severity) {
-            return { error: 'danger', warning: 'warn' }[severity] || 'info';
-        },
-        formatDuration(seconds) {
-            const value = Number(seconds);
-            if (!(value >= 0)) return '—';
-            return `${value.toFixed(1)}s`;
         },
         formatSize(size) {
             const value = Number(size);
@@ -560,18 +398,7 @@ export default {
     align-items: center;
     white-space: nowrap;
     flex-wrap: wrap;
-}
-
-.materials-panel__toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-}
-
-.materials-panel__filter {
-    min-width: 12rem;
+    margin-top: 0.5rem;
 }
 
 .materials-panel__form {
@@ -606,38 +433,41 @@ export default {
     word-break: break-all;
 }
 
-.materials-panel__problem {
+.materials-panel__progress {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    padding: 0.25rem 0;
-    font-size: 0.875rem;
+    gap: 0.625rem;
+    padding: 0.75rem 0 0.25rem;
+    font-size: 0.9375rem;
 }
 
-.materials-panel__list {
-    margin: 0.5rem 0 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 0.375rem;
+.materials-panel__spinner {
+    width: 1.125rem;
+    height: 1.125rem;
+    border: 2px solid var(--text-color-secondary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    flex: none;
+    animation: materials-panel-spin 0.9s linear infinite;
 }
 
-.materials-panel__list li {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+@keyframes materials-panel-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
-.materials-panel__check {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
+.materials-panel__result {
+    margin: 0.5rem 0 0.25rem;
+    font-size: 1.125rem;
+    font-weight: 600;
 }
 
-.materials-panel__tag {
-    margin-right: 0.25rem;
+.materials-panel__result--ok {
+    color: var(--green-600, #16a34a);
+}
+
+.materials-panel__result--fail {
+    color: var(--red-600, #dc2626);
 }
 </style>

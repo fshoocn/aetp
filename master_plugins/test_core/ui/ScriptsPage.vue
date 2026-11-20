@@ -64,9 +64,10 @@
                 <Column field="updated_ts" header="更新时间" sortable style="min-width: 10rem">
                     <template #body="{ data }">{{ formatTime(data.updated_ts) }}</template>
                 </Column>
-                <Column header="操作" style="min-width: 9rem">
+                <Column header="操作" style="min-width: 12rem">
                     <template #body="{ data }">
                         <div class="scripts-page__row-actions">
+                            <Button label="详情" icon="pi pi-info-circle" size="small" severity="secondary" text @click="openMaterialDetail(data)" />
                             <Button label="下载" icon="pi pi-download" size="small" severity="secondary" text @click="downloadMaterial(materialIdOf(data))" />
                             <Button label="删除" icon="pi pi-trash" size="small" severity="danger" text @click="deleteMaterial(materialIdOf(data))" />
                         </div>
@@ -90,6 +91,64 @@
                 <PluginUiOutlet :name="`scripts:${uploadTarget}`">
                     <span class="scripts-page__muted">该执行器未提供脚本管理面板</span>
                 </PluginUiOutlet>
+            </div>
+        </PvDialog>
+
+        <!-- 脚本详情：材料基本信息 + 用例 / 标签清单（分析产出的查看收口在本总表） -->
+        <PvDialog
+            v-model:visible="detailDialogVisible"
+            modal
+            :header="`脚本详情 · ${detailTitle}`"
+            :style="{ width: '80vw', maxWidth: '960px' }"
+        >
+            <div class="scripts-page__dialog-body">
+                <Message v-if="detailError" severity="error" :closable="false" role="alert">{{ detailError }}</Message>
+                <p v-if="detailLoading" class="scripts-page__muted">加载中…</p>
+                <template v-else>
+                    <p class="scripts-page__hint">
+                        <Tag :value="stateText(detailMaterial.state)" :severity="stateSeverity(detailMaterial.state)" />
+                        · <span class="scripts-page__mono">{{ materialIdOf(detailMaterial) }}</span>
+                        · {{ formatSize(detailMaterial.size) }}
+                        · 更新 {{ formatTime(detailMaterial.updated_ts) }}
+                        · sha256 <span class="scripts-page__mono">{{ shortSha(detailMaterial.sha256) }}</span>
+                    </p>
+
+                    <h4>用例（{{ detailCases.length }} 条）</h4>
+                    <DataTable
+                        v-if="detailCases.length"
+                        :value="detailCases"
+                        dataKey="case_id"
+                        :rowHover="true"
+                        scrollable
+                        size="small"
+                    >
+                        <Column field="case_id" header="case_id（nodeid）" style="min-width: 14rem">
+                            <template #body="{ data }">
+                                <span class="scripts-page__mono" :title="data.case_id">{{ data.case_id }}</span>
+                            </template>
+                        </Column>
+                        <Column field="name" header="名称" style="min-width: 10rem">
+                            <template #body="{ data }">{{ data.name || '—' }}</template>
+                        </Column>
+                        <Column field="path" header="文件" style="min-width: 8rem">
+                            <template #body="{ data }">{{ data.path || '—' }}</template>
+                        </Column>
+                        <Column field="markers" header="标签" style="min-width: 8rem">
+                            <template #body="{ data }">
+                                <template v-if="(data.markers || []).length">
+                                    <Tag v-for="marker in data.markers" :key="marker" :value="marker" severity="info" class="scripts-page__tag" />
+                                </template>
+                                <span v-else class="scripts-page__muted">—</span>
+                            </template>
+                        </Column>
+                        <Column v-if="detailHasParams" header="params" style="min-width: 8rem">
+                            <template #body="{ data }">
+                                <span class="scripts-page__mono">{{ formatParams(data.params) }}</span>
+                            </template>
+                        </Column>
+                    </DataTable>
+                    <p v-else class="scripts-page__muted">暂无用例（分析未产出或未通过）</p>
+                </template>
             </div>
         </PvDialog>
     </section>
@@ -154,6 +213,12 @@ export default {
             menuOpen: false,
             uploadDialogVisible: false,
             uploadTarget: '',
+            // 脚本详情弹窗（材料基本信息 + 用例 / 标签清单）
+            detailDialogVisible: false,
+            detailMaterial: null,
+            detailCases: [],
+            detailLoading: false,
+            detailError: '',
             error: '',
             loading: false
         };
@@ -189,6 +254,16 @@ export default {
         },
         executorFilterOptions() {
             return [{ label: '全部执行器', value: '' }, ...this.tabs.map((tab) => ({ label: tab.id, value: tab.id }))];
+        },
+        detailTitle() {
+            const name = String((this.detailMaterial && this.detailMaterial.name) || '').trim();
+            return name || this.materialIdOf(this.detailMaterial) || '—';
+        },
+        detailHasParams() {
+            // params 为可选列：任一用例带非空 params 才展示
+            return this.detailCases.some(
+                (item) => item && item.params && typeof item.params === 'object' && Object.keys(item.params).length
+            );
         }
     },
     mounted() {
@@ -262,6 +337,28 @@ export default {
         materialIdOf(row) {
             return String((row && (row.material_id || row.id)) || '');
         },
+        async openMaterialDetail(row) {
+            // 「详情」弹窗：材料基本信息 + 用例 / 标签清单（分析产出的查看收口在本总表）
+            const materialId = this.materialIdOf(row);
+            if (!materialId) return;
+            this.detailMaterial = { ...(row || {}) };
+            this.detailCases = [];
+            this.detailError = '';
+            this.detailLoading = true;
+            this.detailDialogVisible = true;
+            try {
+                const [detail, cases] = await Promise.all([
+                    fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`)),
+                    fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}/cases`))
+                ]);
+                this.detailMaterial = detail.material || this.detailMaterial;
+                this.detailCases = cases.cases || [];
+            } catch (reason) {
+                this.detailError = `详情加载失败：${this.reasonText(reason)}`;
+            } finally {
+                this.detailLoading = false;
+            }
+        },
         async downloadMaterial(materialId) {
             // 材料生命周期管理归 test_core 总表（§7.2 裁决）：<a> 带不上鉴权头，走 fetch blob
             if (!materialId) return;
@@ -320,6 +417,20 @@ export default {
         formatTime(value) {
             if (!value) return '—';
             return new Date(value * 1000).toLocaleString();
+        },
+        shortSha(value) {
+            const text = String(value || '');
+            return text ? `${text.slice(0, 12)}…` : '—';
+        },
+        formatParams(params) {
+            if (params && typeof params === 'object' && Object.keys(params).length) {
+                try {
+                    return JSON.stringify(params);
+                } catch {
+                    return String(params);
+                }
+            }
+            return '—';
         }
     }
 };
@@ -354,6 +465,16 @@ export default {
 .scripts-page__muted {
     color: var(--text-color-secondary);
     font-size: 0.875rem;
+}
+
+.scripts-page__mono {
+    font-family: monospace;
+    font-size: 0.8125rem;
+    word-break: break-all;
+}
+
+.scripts-page__tag {
+    margin-right: 0.25rem;
 }
 
 .scripts-page__row-actions {
