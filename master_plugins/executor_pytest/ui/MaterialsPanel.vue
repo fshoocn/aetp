@@ -27,6 +27,7 @@
                 ></textarea>
                 <div class="materials-panel__actions">
                     <Button label="上传" icon="pi pi-upload" size="small" :loading="uploading" :disabled="!file" @click="uploadMaterial" />
+                    <span v-if="!file" class="materials-panel__muted">请先点 Choose File 选择 zip 文件</span>
                 </div>
             </div>
             <p class="materials-panel__hint">

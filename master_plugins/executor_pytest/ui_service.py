@@ -56,10 +56,12 @@ class ExecPytestUiService(Service[None]):
         旧「测试材料」（``pytest-materials``，/pytest/materials）与「下发测试任务」
         （``pytest-submit``，/pytest/submit）两页已退役（W2-D）：与本 slot 同批
         注销、不再注册——材料能力整体迁入 ``ui/MaterialsPanel.vue``，面板挂脚本
-        管理页 slot ``scripts:executor-pytest``（脚本总览 tab=pytest）；任务下发
-        并入测试计划编辑器（「测试计划与下发」页，W3 交付）。contribution_id 用
-        新 id ``pytest-materials-panel``（旧 id 不可复用：同 owner 同 id 二次注册
-        抛 ValueError，新旧注册必须同批切换）。
+        管理页 slot ``scripts:pytest``（与能力信封的执行器 id 统一，脚本总览
+        tab=pytest）；任务下发并入测试计划编辑器（「测试计划与下发」页，W3 交付）。
+        contribution_id 用新 id ``pytest-materials-panel``（旧 id 不可复用：同
+        owner 同 id 二次注册抛 ValueError，新旧注册必须同批切换）。tab 并集 =
+        slot 后缀 ∪ 能力 id，两侧命名必须一致（用执行器 id 而非插件名），否则
+        裂成两个 tab。
 
         注册项绑定本 fiber：卸载自动移除清单与静态挂载，webui 卸载 / 重载
         触发的重新装载会自动重新注册（每次恰好一条，不重复）。
@@ -71,7 +73,7 @@ class ExecPytestUiService(Service[None]):
             format="vue",
             resource_root=ui_root,
             entry="MaterialsPanel.vue",
-            target="scripts:executor-pytest",
+            target="scripts:pytest",
             title="pytest 脚本",
             order=10,
         )
