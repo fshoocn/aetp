@@ -18,8 +18,30 @@ class AssembleError(Exception):
     """组装失败（zip 损坏 / 穿越），上层不重试。"""
 
 
-def extract_zip(zip_path: Path, dest: Path) -> None:
-    """把材料 zip 解压到 ``dest``（zip-slip + ``is_relative_to`` 双校验）。"""
+def package_root(extract_root: Path) -> Path:
+    """解包根 → 工程根（zip 顶层裹单层目录时逐层下沉，最多 3 层）。
+
+    覆盖 Compress-Archive / 资源管理器打包的常见形态（内容裹进同名目录）：
+    归一后 ``targets=["tests"]``、nodeid 与平铺包一致，分析与执行口径统一。
+    """
+    root = extract_root.resolve()
+    for _ in range(3):
+        entries = [item for item in root.iterdir() if item.name != "__MACOSX"]
+        dirs = [item for item in entries if item.is_dir()]
+        files = [item for item in entries if item.is_file()]
+        if len(dirs) == 1 and not files:
+            root = dirs[0]
+            continue
+        break
+    return root
+
+
+def extract_zip(zip_path: Path, dest: Path) -> Path:
+    """把材料 zip 解压到 ``dest``（zip-slip + ``is_relative_to`` 双校验）。
+
+    返回**归一化工程根**（:func:`package_root`）：调用方的 cwd / 收集目标 /
+    nodeid 口径统一以工程根为准。
+    """
     if not zip_path.is_file():
         raise AssembleError(f"材料包不存在：{zip_path}")
     dest.mkdir(parents=True, exist_ok=True)
@@ -30,6 +52,7 @@ def extract_zip(zip_path: Path, dest: Path) -> None:
                 _extract_member(package, member, root)
     except zipfile.BadZipFile as exc:
         raise AssembleError(f"材料包不是合法 zip：{exc}") from exc
+    return package_root(dest)
 
 
 def _extract_member(package: zipfile.ZipFile, member: zipfile.ZipInfo, root: Path) -> None:
@@ -55,4 +78,5 @@ def _extract_member(package: zipfile.ZipFile, member: zipfile.ZipInfo, root: Pat
 __all__: list[str] = [
     "AssembleError",
     "extract_zip",
+    "package_root",
 ]

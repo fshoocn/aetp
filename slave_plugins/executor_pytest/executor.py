@@ -469,9 +469,10 @@ async def run_job(
 ) -> RunResult:
     """组装 + 执行 + 解析 → :class:`RunResult`（含取消 / 超时路径）。"""
     started_ts = time.time()
+    project_root = request.project_dir
     try:
         if request.zip_path is not None:
-            extract_zip(request.zip_path, request.project_dir)
+            project_root = extract_zip(request.zip_path, request.project_dir)
         else:
             request.project_dir.mkdir(parents=True, exist_ok=True)
     except AssembleError as error:
@@ -496,7 +497,7 @@ async def run_job(
     try:
         python = request.config.python or sys.executable
         if request.shard is not None and request.shard.get("plan"):
-            result = await _run_plan(request, python, streamer, cancel_event, started_ts, log)
+            result = await _run_plan(request, python, streamer, cancel_event, started_ts, log, project_root)
         else:
             targets = resolve_targets(request.params, request.shard, request.material_dir)
             argv = build_argv(python, targets, request.params, request.config, junit_path)
@@ -512,7 +513,7 @@ async def run_job(
             else:
                 outcome = await run_process(
                     argv,
-                    cwd=request.project_dir,
+                    cwd=project_root,
                     env=env,
                     timeout_s=timeout_s,
                     streamer=streamer,
@@ -536,6 +537,7 @@ async def _run_plan(
     cancel_event: asyncio.Event,
     started_ts: float,
     log: Any,
+    project_root: Path,
 ) -> RunResult:
     """plan 型 job：只收集不执行，产出 ``summary.shards``（§9.3 文件级分片）。"""
     collect_out = request.artifact_dir / "collect.json"
@@ -552,7 +554,7 @@ async def _run_plan(
         return _bare_result("timeout", "deadline 已过期", started_ts)
     outcome = await run_process(
         argv,
-        cwd=request.project_dir,
+        cwd=project_root,
         env=env,
         timeout_s=timeout_s,
         streamer=streamer,
