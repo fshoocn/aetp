@@ -27,7 +27,6 @@ from typing import Any, ClassVar, Literal, cast
 
 from cordis_port import Context, EventDispatchError, Fiber, Service
 
-from common.capabilities import canonical_json
 from common.hook_chain import OnError
 from common.test_contracts import (
     CHAIN_ARTIFACT_SINK,
@@ -171,9 +170,13 @@ def _base_dir(ctx: Context) -> Path:
     return loaded.parent if loaded is not None else Path.cwd()
 
 
-def _recipe_fingerprint(recipe: Mapping[str, Any]) -> str:
-    """配方指纹 = sha256(canonical_json(recipe)) 截 16 hex（§4.3）。"""
-    return hashlib.sha256(canonical_json(recipe).encode("utf-8")).hexdigest()[:16]
+def _recipe_fingerprint(recipe: str) -> str:
+    """配方指纹 = sha256(recipe 的 utf-8 字节) 截 16 hex（§4.3）。
+
+    recipe 是执行器自定义不透明字符串（core 不解析），指纹只看字节序列；
+    空串合法，恒定指纹（sha256(b"")）。
+    """
+    return hashlib.sha256(recipe.encode("utf-8")).hexdigest()[:16]
 
 
 def _ingest_meta(meta: object, ctx: Context) -> Mapping[str, Any]:
@@ -646,7 +649,9 @@ class TestCorePlugin(Service[TestCoreConfig]):
 
     # ============================================================== 材料服务面
     # （executor_pytest DESIGN §3/§4：材料 / 用例清单 / 选择集归核心存储，内容
-    # 不透明；去重键 (sha256, recipe_fingerprint)，状态机 §3.1，引用约束 §3.2）
+    # 不透明；recipe 为执行器自定义不透明字符串——core 只存取、不解析、不校验；
+    # 去重键 (sha256, recipe_fingerprint)：同内容同字符串 = 同一材料（幂等复用），
+    # 同内容不同字符串 = 不同测试工程；状态机 §3.1，引用约束 §3.2）
 
     def _materials_dir(self) -> Path:
         """材料存储目录：config.materials_dir 空取 data/plugins/test_core/materials。"""
@@ -661,7 +666,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
         return self._materials_dir() / material_id / "bundle.zip"
 
     def _material_dict(self, row: TestMaterial) -> dict[str, Any]:
-        """材料行 → 对外 dict（recipe/problems/labels 解码，uri 指向 zip 本体）。"""
+        """材料行 → 对外 dict（recipe 原样字符串、problems/labels 解码，uri 指向 zip 本体）。"""
         return {
             "id": row.id,
             "material_id": row.id,
@@ -671,7 +676,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
             "size": row.size,
             "sha256": row.sha256,
             "recipe_fingerprint": row.recipe_fingerprint,
-            "recipe": _decode_dict(row.recipe),
+            "recipe": row.recipe,
             "state": row.state,
             "problems": _decode_list(row.problems),
             "source": row.source,
@@ -708,7 +713,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
         *,
         name: str,
         data: bytes,
-        recipe: Mapping[str, Any],
+        recipe: str = "",
         source: str = "api",
         created_by: str = "",
         labels: Mapping[str, str] | None = None,
@@ -716,13 +721,14 @@ class TestCorePlugin(Service[TestCoreConfig]):
     ) -> Mapping[str, Any]:
         """落盘+入库；(sha256, recipe_fingerprint) 命中返回既有材料 dict（幂等）。
 
+        ``recipe`` 为执行器自定义不透明字符串（core 不解析、不校验，原样存储）；
+        去重语义：同内容同字符串 = 同一材料，同内容不同字符串 = 不同测试工程。
         返回 dict 含 id/state/…，另带 ``deduplicated`` 标记是否命中去重（§4.3）。
         ``executor_id`` 为材料归属执行器（空 = 通用材料，§4.5）。
         """
         now = self._clock()
-        recipe_dict = dict(recipe or {})
         sha256 = hashlib.sha256(data).hexdigest()
-        fingerprint = _recipe_fingerprint(recipe_dict)
+        fingerprint = _recipe_fingerprint(recipe)
         repo = self._repo(TestMaterial)
         existing = await repo.list(
             where=(TestMaterial.sha256 == sha256)
@@ -750,7 +756,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
             size=len(data),
             sha256=sha256,
             recipe_fingerprint=fingerprint,
-            recipe=_json_dumps(recipe_dict),
+            recipe=recipe,
             state="uploaded",
             problems=_json_dumps([]),
             source=source,
@@ -812,18 +818,18 @@ class TestCorePlugin(Service[TestCoreConfig]):
         return path.read_bytes() if path.is_file() else None
 
     async def update_recipe(
-        self, material_id: str, recipe: Mapping[str, Any]
+        self, material_id: str, recipe: str
     ) -> Mapping[str, Any]:
-        """更新配方（指纹重算、状态回 uploaded 需重分析，§3.1）；不存在抛 MaterialNotFound。"""
+        """更新配方（执行器自定义不透明字符串，原样存储、指纹重算、状态回
+        uploaded 需重分析，§3.1）；不存在抛 MaterialNotFound。"""
         repo = self._repo(TestMaterial)
         row = await repo.get(material_id)
         if row is None:
             raise MaterialNotFound(f"材料不存在：{material_id}")
         now = self._clock()
-        recipe_dict = dict(recipe or {})
         from_state = row.state
-        row.recipe = _json_dumps(recipe_dict)
-        row.recipe_fingerprint = _recipe_fingerprint(recipe_dict)
+        row.recipe = recipe
+        row.recipe_fingerprint = _recipe_fingerprint(recipe)
         row.state = "uploaded"
         row.updated_ts = now
         await repo.update(

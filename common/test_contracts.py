@@ -332,7 +332,7 @@ class TestCoreInterface(Protocol):
         *,
         name: str,
         data: bytes,
-        recipe: Mapping[str, Any],
+        recipe: str = "",
         source: str = "api",
         created_by: str = "",
         labels: Mapping[str, str] | None = None,
@@ -340,6 +340,7 @@ class TestCoreInterface(Protocol):
     ) -> Mapping[str, Any]:
         """落盘+入库；(sha256, recipe_fingerprint) 命中返回既有材料 dict（幂等）；返回含 id/state/…。
 
+        ``recipe`` 为执行器自定义不透明字符串（core 不解析、不校验，原样存取）；
         ``executor_id`` 为材料归属执行器（空 = 通用材料，§4.5）。
         """
         ...
@@ -361,7 +362,7 @@ class TestCoreInterface(Protocol):
         ...
 
     async def get_material(self, material_id: str) -> Mapping[str, Any] | None:
-        """材料详情；不存在返回 None。"""
+        """材料详情（返回 dict 中 ``recipe`` 为执行器自定义不透明字符串）；不存在返回 None。"""
         ...
 
     async def get_material_bytes(self, material_id: str) -> bytes | None:
@@ -369,9 +370,10 @@ class TestCoreInterface(Protocol):
         ...
 
     async def update_recipe(
-        self, material_id: str, recipe: Mapping[str, Any]
+        self, material_id: str, recipe: str
     ) -> Mapping[str, Any]:
-        """更新配方，状态回 uploaded（需重分析）；不存在抛 MaterialNotFound。"""
+        """更新配方（执行器自定义不透明字符串，core 不解析、原样存取），状态回
+        uploaded（需重分析）；不存在抛 MaterialNotFound。"""
         ...
 
     async def put_problems(

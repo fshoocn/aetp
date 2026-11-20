@@ -174,14 +174,14 @@ class PlansStackTestCase(unittest.IsolatedAsyncioTestCase):
         *,
         name: str = "脚本包",
         data: bytes | None = None,
-        recipe: Mapping[str, Any] | None = None,
+        recipe: str = "",
         executor_id: str = "",
     ) -> dict[str, Any]:
         payload = data if data is not None else _zip_bytes(_MIN_ZIP)
         result = await self.core.upload_material(
             name=name,
             data=payload,
-            recipe=dict(recipe or {}),
+            recipe=recipe,
             executor_id=executor_id,
         )
         return dict(cast(Mapping[str, Any], result))

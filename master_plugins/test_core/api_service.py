@@ -579,10 +579,11 @@ class TestCoreApiService(Service[None]):
         """上传材料 zip：二进制 body（上限 config.material_max_bytes，超限 413）。
 
         ``X-Material-Name`` 头（或 query ``name``）必填；``X-Material-Recipe`` 头
-        （或 query ``recipe``）为配方 JSON 串，缺省 ``{}``；``X-Material-Executor``
-        头（可选）绑定执行器归属（空 = 通用材料，§4.5）。``(sha256,
-        recipe_fingerprint)`` 命中返回既有材料（``deduplicated`` = true，幂等，
-        §4.3）。
+        （或 query ``recipe``）为执行器自定义不透明字符串（core 不解析、原样透传，
+        缺省空串；含非 Latin-1 字符时同 X-Material-Name 的降级模式改走 query
+        ``recipe`` 参数）；``X-Material-Executor`` 头（可选）绑定执行器归属
+        （空 = 通用材料，§4.5）。``(sha256, recipe_fingerprint)`` 命中返回既有
+        材料（``deduplicated`` = true，幂等，§4.3）。
         """
         params = request.query_params
         name = (
@@ -591,11 +592,7 @@ class TestCoreApiService(Service[None]):
         )
         if not name:
             raise ValueError("缺少材料名（X-Material-Name 头或 name 查询参数）")
-        recipe_raw = (
-            request.headers.get("X-Material-Recipe", "").strip()
-            or params.get("recipe", "").strip()
-        )
-        recipe = _json_object(recipe_raw.encode("utf-8")) if recipe_raw else {}
+        recipe = request.headers.get("X-Material-Recipe", "") or params.get("recipe", "")
         data = await _read_body_capped(
             request, limit=self._core.config.material_max_bytes
         )

@@ -154,7 +154,8 @@ class TestTaskHistory(Model):
 class TestMaterial(Model):
     """材料（脚本包）主表（executor_pytest DESIGN §3；内容不透明，归核心存储）。
 
-    去重键 ``(sha256, recipe_fingerprint)``（§4.3）：同内容不同配方是不同材料；
+    去重键 ``(sha256, recipe_fingerprint)``（§4.3）：同内容同 recipe 字符串是
+    同一材料（幂等复用），同内容不同字符串是不同测试工程；
     材料文件本体在 ``data/plugins/test_core/materials/{id}/bundle.zip``，不建
     material_file 表（D13）。
     """
@@ -169,9 +170,9 @@ class TestMaterial(Model):
     kind: Mapped[str]
     size: Mapped[int]
     sha256: Mapped[str]
-    #: 配方指纹（sha256(canonical_json(recipe)) 截 16 hex，§4.3）
+    #: 配方指纹（sha256(recipe.encode("utf-8")) 截 16 hex，§4.3；空串恒定指纹）
     recipe_fingerprint: Mapped[str]
-    #: JSON 文本（组装配方，核心只存不解释）
+    #: 执行器自定义不透明字符串（核心只存取、不解析、不校验）
     recipe: Mapped[str]
     state: Mapped[str]
     #: JSON 文本（最近一次 inspect 问题列表 [{code, path, line?, message, severity}]）

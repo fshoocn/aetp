@@ -3,7 +3,8 @@
 覆盖（分组 TestCase，对齐任务清单 7 组）：
 
 1. 上传：zip 落盘 / 字节回读、``(sha256, recipe_fingerprint)`` 去重两态
-   （同内容同配方复用、同内容不同配方新建）、API 层 material_max_bytes 超限 413；
+   （同内容同 recipe 字符串复用、同内容不同字符串新建；recipe = 执行器自定义
+   不透明字符串，任意串合法、core 不解析）、API 层 material_max_bytes 超限 413；
 2. 状态机：update_recipe 回 uploaded + ``test/material-state`` 事件、
    put_problems(analyzed/failed)、并发 / 迟到迁移的行一致性（§3.1）；
 3. 用例：put_cases 全量替换幂等、list_material_cases、``material_id::case_id``
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import http.client
 import io
 import json
 import tempfile
@@ -35,7 +37,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 from unittest import mock
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from cordis_port import Context
 
@@ -236,14 +238,14 @@ class MaterialsStackTestCase(unittest.IsolatedAsyncioTestCase):
         *,
         name: str = "包A",
         data: bytes | None = None,
-        recipe: Mapping[str, Any] | None = None,
+        recipe: str = "",
         labels: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         payload = data if data is not None else _zip_bytes(_MIN_ZIP)
         result = await self.core.upload_material(
             name=name,
             data=payload,
-            recipe=dict(recipe or {}),
+            recipe=recipe,
             labels=dict(labels or {}),
         )
         return dict(cast(Mapping[str, Any], result))
@@ -292,7 +294,7 @@ class UploadTests(MaterialsStackTestCase):
     async def test_upload_stores_bundle_and_reads_back_bytes(self) -> None:
         await self.boot()
         data = _zip_bytes(_MIN_ZIP)
-        recipe = {"entry": "cases", "args": ["-q"]}
+        recipe = "--entry cases --args -q;{not json at all}"
         material = await self.upload(data=data, recipe=recipe)
         self.assertTrue(str(material["id"]).startswith("m-"))
         self.assertEqual(material["state"], "uploaded")
@@ -300,16 +302,21 @@ class UploadTests(MaterialsStackTestCase):
         self.assertEqual(material["sha256"], hashlib.sha256(data).hexdigest())
         fingerprint = str(material["recipe_fingerprint"])
         self.assertEqual(len(fingerprint), 16)
+        # 指纹 = sha256(串 utf-8 字节) 截 16 hex（不透明字符串只看字节）
+        self.assertEqual(
+            fingerprint, hashlib.sha256(recipe.encode("utf-8")).hexdigest()[:16]
+        )
         self.assertEqual(material["recipe"], recipe)
         # 落盘 + 字节回读（内容不透明，逐字节一致）
         bundle = self.core._bundle_path(str(material["id"]))
         self.assertTrue(bundle.is_file())
         self.assertEqual(bundle.read_bytes(), data)
         self.assertEqual(await self.core.get_material_bytes(str(material["id"])), data)
-        # 详情形态（uri 指向 zip 本体，local:/// 盘符形态）
+        # 详情形态（uri 指向 zip 本体，local:/// 盘符形态；recipe 原样字符串）
         detail = await self.core.get_material(str(material["id"]))
         assert detail is not None
         self.assertEqual(detail["uri"], f"local:///{bundle.resolve().as_posix()}")
+        self.assertEqual(detail["recipe"], recipe)
         self.assertEqual(detail["problems"], [])
         self.assertEqual(len(self.state_events()), 1)
         event = self.state_events()[0]
@@ -321,8 +328,8 @@ class UploadTests(MaterialsStackTestCase):
     async def test_dedup_same_content_same_recipe_reuses_material(self) -> None:
         await self.boot()
         data = _zip_bytes(_MIN_ZIP)
-        first = await self.upload(name="第一", data=data, recipe={"entry": "cases"})
-        second = await self.upload(name="第二", data=data, recipe={"entry": "cases"})
+        first = await self.upload(name="第一", data=data, recipe="entry=cases")
+        second = await self.upload(name="第二", data=data, recipe="entry=cases")
         self.assertEqual(second["id"], first["id"])
         self.assertFalse(first["deduplicated"])
         self.assertTrue(second["deduplicated"])
@@ -331,19 +338,28 @@ class UploadTests(MaterialsStackTestCase):
     async def test_same_content_different_recipe_creates_new_material(self) -> None:
         await self.boot()
         data = _zip_bytes(_MIN_ZIP)
-        first = await self.upload(data=data, recipe={"entry": "cases"})
-        second = await self.upload(data=data, recipe={"entry": "other"})
+        first = await self.upload(data=data, recipe="entry=cases")
+        second = await self.upload(data=data, recipe="entry=other")
         self.assertNotEqual(second["id"], first["id"])
         self.assertFalse(second["deduplicated"])
         self.assertEqual(len(await self.core.list_materials()), 2)
-        # 指纹不同 → 配方变体互不污染
+        # 指纹不同 → 配方变体互不污染（同内容不同字符串 = 不同测试工程）
         self.assertNotEqual(second["recipe_fingerprint"], first["recipe_fingerprint"])
 
     async def test_different_content_same_recipe_creates_new_material(self) -> None:
         await self.boot()
-        first = await self.upload(data=_zip_bytes(_MIN_ZIP), recipe={"entry": "cases"})
-        second = await self.upload(data=_zip_bytes({"cases/test_b.py": "x = 1\n"}), recipe={"entry": "cases"})
+        first = await self.upload(data=_zip_bytes(_MIN_ZIP), recipe="entry=cases")
+        second = await self.upload(data=_zip_bytes({"cases/test_b.py": "x = 1\n"}), recipe="entry=cases")
         self.assertNotEqual(second["id"], first["id"])
+
+    async def test_default_recipe_is_empty_string(self) -> None:
+        """recipe 缺省空串：任意字符串均合法的极端情形，指纹恒定（sha256(b"")）。"""
+        await self.boot()
+        material = await self.upload()
+        self.assertEqual(material["recipe"], "")
+        self.assertEqual(
+            material["recipe_fingerprint"], hashlib.sha256(b"").hexdigest()[:16]
+        )
 
     async def test_list_materials_filters(self) -> None:
         await self.boot()
@@ -363,12 +379,18 @@ class MaterialStateTests(MaterialsStackTestCase):
 
     async def test_update_recipe_resets_state_and_emits(self) -> None:
         await self.boot()
-        material = await self.upload(recipe={"entry": "cases"})
+        material = await self.upload(recipe="entry=cases")
         mid = str(material["id"])
         await self.core.put_problems(mid, [_problem()], state="analyzed")
         self.events[EVENT_MATERIAL_STATE].clear()
-        updated = dict(cast(Mapping[str, Any], await self.core.update_recipe(mid, {"entry": "cases2"})))
+        updated = dict(cast(Mapping[str, Any], await self.core.update_recipe(mid, "entry=cases2")))
         self.assertEqual(updated["state"], "uploaded")
+        self.assertEqual(updated["recipe"], "entry=cases2")
+        # 指纹 = sha256(新串) 截 16 hex，与旧指纹不同（字符串语义）
+        self.assertEqual(
+            updated["recipe_fingerprint"],
+            hashlib.sha256(b"entry=cases2").hexdigest()[:16],
+        )
         self.assertNotEqual(updated["recipe_fingerprint"], material["recipe_fingerprint"])
         events = self.state_events()
         self.assertEqual(len(events), 1)
@@ -404,15 +426,15 @@ class MaterialStateTests(MaterialsStackTestCase):
     async def test_update_recipe_requires_existing_material(self) -> None:
         await self.boot()
         with self.assertRaises(MaterialNotFound):
-            await self.core.update_recipe("m-nope", {"entry": "x"})
+            await self.core.update_recipe("m-nope", "entry=x")
 
     async def test_late_inspect_result_after_recipe_update_lands(self) -> None:
         """迟到应答口径（§3.1）：配方改后迟到的 inspect 结果照收、刷新状态。"""
         await self.boot()
-        material = await self.upload(recipe={"entry": "cases"})
+        material = await self.upload(recipe="entry=cases")
         mid = str(material["id"])
         await self.core.put_problems(mid, [_problem("old.error")], state="failed")
-        await self.core.update_recipe(mid, {"entry": "cases2"})
+        await self.core.update_recipe(mid, "entry=cases2")
         self.assertTrue(await self.core.put_problems(mid, [_problem("late.error")], state="failed"))
         detail = await self.core.get_material(mid)
         assert detail is not None
@@ -434,17 +456,17 @@ class MaterialStateTests(MaterialsStackTestCase):
     async def test_concurrent_updates_leave_consistent_row(self) -> None:
         """并发迁移语义：各行 UPDATE 原子，终态不撕裂（state 与 problems 同属一次写入）。"""
         await self.boot()
-        material = await self.upload(recipe={"entry": "cases"})
+        material = await self.upload(recipe="entry=cases")
         mid = str(material["id"])
         late_problem = _problem("race.error")
         await asyncio.gather(
-            self.core.update_recipe(mid, {"entry": "raced"}),
+            self.core.update_recipe(mid, "raced"),
             self.core.put_problems(mid, [late_problem], state="failed"),
         )
         detail = await self.core.get_material(mid)
         assert detail is not None
         self.assertIn(detail["state"], ("uploaded", "failed"))
-        self.assertEqual(detail["recipe"], {"entry": "raced"})  # 配方列恒为 update_recipe 的完整写入
+        self.assertEqual(detail["recipe"], "raced")  # 配方列恒为 update_recipe 的完整写入
         if detail["state"] == "failed":
             self.assertEqual(detail["problems"], [late_problem])
         events = self.state_events()
@@ -759,6 +781,23 @@ class GcListUnreferencedTests(MaterialsStackTestCase):
         self.assertEqual([row["id"] for row in rows], [free["id"]])
 
 
+def _raw_upload(
+    base_url: str, path: str, *, body: bytes, headers: Mapping[str, str]
+) -> tuple[int, bytes]:
+    """原样 HTTP POST（http.client）：可带 X-Material-Recipe 等自定义头。"""
+    parsed = urlparse(base_url)
+    connection = http.client.HTTPConnection(
+        cast(str, parsed.hostname), parsed.port, timeout=10
+    )
+    merged = {"X-AETP-Token": "test-token", **headers}
+    try:
+        connection.request("POST", path, body=body, headers=merged)
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
 # ================================================================ API 集成
 class MaterialApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
     """材料 API（api_service）：上传 / 去重 / 字节下载 / 超限 413（HTTP 集成组）。"""
@@ -805,18 +844,19 @@ class MaterialApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("TestCoreApiService 未在限时内挂载")
         self.base_url = f"http://127.0.0.1:{port}"
 
-    def _upload_path(self, *, name: str = "api 包", recipe: Mapping[str, Any] | None = None) -> str:
+    def _upload_path(self, *, name: str = "api 包", recipe: str | None = None) -> str:
         query = f"/api/test/materials?name={quote(name)}"
         if recipe is not None:
-            query += f"&recipe={quote(json.dumps(dict(recipe), ensure_ascii=False))}"
+            query += f"&recipe={quote(recipe)}"
         return query
 
     async def test_upload_dedup_and_download_roundtrip(self) -> None:
         await self.boot()
         data = _zip_bytes(_MIN_ZIP)
+        recipe = "--entry cases;{not json}"  # 不透明字符串：非 JSON 串也合法
         status, payload = await _arequest(
             self.base_url,
-            self._upload_path(recipe={"entry": "cases"}),
+            self._upload_path(recipe=recipe),
             method="POST",
             body=data,
             content_type="application/zip",
@@ -825,11 +865,12 @@ class MaterialApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         body = cast("dict[str, Any]", json.loads(payload))
         self.assertTrue(body["ok"])
         self.assertFalse(body["deduplicated"])
+        self.assertEqual(body["material"]["recipe"], recipe)  # 原样字符串透传
         mid = str(body["material"]["id"])
-        # 同内容同配方 → 去重复用
+        # 同内容同字符串 → 去重复用
         status, payload = await _arequest(
             self.base_url,
-            self._upload_path(name="再传一次", recipe={"entry": "cases"}),
+            self._upload_path(name="再传一次", recipe=recipe),
             method="POST",
             body=data,
             content_type="application/zip",
@@ -842,6 +883,43 @@ class MaterialApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload, data)
+
+    async def test_upload_recipe_header_and_query_are_opaque_strings(self) -> None:
+        """X-Material-Recipe 头 / query recipe 参数均为不透明字符串（core 不解析）。
+
+        头携带非 JSON 串合法、原样回读；非 Latin-1 串同 X-Material-Name 的降级
+        模式走 query ``recipe`` 参数兜底。
+        """
+        await self.boot()
+        header_recipe = "--entry cases;{not json}"
+        status, payload = await asyncio.to_thread(
+            _raw_upload,
+            self.base_url,
+            self._upload_path(name="头配方"),
+            body=_zip_bytes({"cases/h.py": "x = 1\n"}),
+            headers={
+                "Content-Type": "application/zip",
+                "X-Material-Recipe": header_recipe,
+            },
+        )
+        self.assertEqual(status, 200)
+        body = cast("dict[str, Any]", json.loads(payload))
+        self.assertEqual(body["material"]["recipe"], header_recipe)
+        self.assertEqual(
+            body["material"]["recipe_fingerprint"],
+            hashlib.sha256(header_recipe.encode("utf-8")).hexdigest()[:16],
+        )
+        query_recipe = "配方 中文 {也不是 json}"
+        status, payload = await _arequest(
+            self.base_url,
+            self._upload_path(name="query 配方", recipe=query_recipe),
+            method="POST",
+            body=_zip_bytes({"cases/q.py": "x = 2\n"}),
+            content_type="application/zip",
+        )
+        self.assertEqual(status, 200)
+        body = cast("dict[str, Any]", json.loads(payload))
+        self.assertEqual(body["material"]["recipe"], query_recipe)
 
     async def test_oversize_upload_rejected_413(self) -> None:
         await self.boot()
