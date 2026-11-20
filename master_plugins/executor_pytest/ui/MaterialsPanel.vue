@@ -1,142 +1,56 @@
-<!-- pytest 材料管理面板（W2-D）：脚本管理页 /scripts 的 slot 面板（target=scripts:executor-pytest）。
-     原整页 ui/MaterialsPage.vue（/pytest/materials）全部能力迁入本面板（上传自动带 X-Material-Executor: pytest）。
+<!-- pytest 脚本处理面板（W2-D）：脚本管理页 /scripts 的 slot 面板（target=scripts:executor-pytest）。
+     只处理「当前上传的脚本」：上传区 → 上传成功（含 deduplicated 复用 id）自动展开处理区
+     （状态 / inspect 分析·解析 / 用例清单 / 选择集 / 预推 / 下载 / 刷新）；
+     全量脚本清单归 test_core 跨执行器总表（ScriptsPage），本面板不列清单、无配方编辑。
      插件 SFC 自包含：不 import 宿主 / npm 模块，仅用全局共享组件 + 原生控件 + $confirm（Options API）。 -->
 <template>
     <section class="materials-panel">
         <header class="materials-panel__header">
             <div>
-                <h3>pytest 材料管理</h3>
-                <p class="materials-panel__hint">上传脚本包（zip）→ 编辑组装配方 → 分析 / 解析 → 选例 → 预推；材料内容对核心不透明，语义归 pytest 执行器族</p>
-            </div>
-            <div class="materials-panel__actions">
-                <Button label="刷新" icon="pi pi-refresh" size="small" :loading="loading" @click="load()" />
+                <h3>pytest 脚本处理</h3>
+                <p class="materials-panel__hint">上传脚本包（zip）→ 分析 / 解析 → 选例 → 预推；材料内容对核心不透明，语义归 pytest 执行器族</p>
             </div>
         </header>
 
         <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
         <Message v-if="notice" severity="info" :closable="true" @close="notice = ''">{{ notice }}</Message>
 
-        <Panel header="上传材料（zip）">
+        <!-- 上传态：未选中当前脚本时展示 -->
+        <Panel v-if="!detail" header="上传脚本（zip）">
             <div class="materials-panel__form">
                 <input ref="fileInput" type="file" accept=".zip,application/zip" class="materials-panel__file" @change="onFileChange" />
                 <div class="materials-panel__picker">
                     <Button label="选择 zip 文件" icon="pi pi-folder-open" size="small" severity="secondary" @click="pickFile" />
                     <span class="materials-panel__muted">{{ file ? '已选：' + file.name : '未选择 zip 文件' }}</span>
                 </div>
-                <InputText v-model="uploadName" placeholder="材料名（默认取文件名）" class="materials-panel__name" />
-                <textarea
-                    v-model="uploadRecipe"
-                    class="materials-panel__textarea"
-                    placeholder='配方 recipe（可选，JSON 对象，如 {"layout": [], "entry": "tests"}）'
-                ></textarea>
+                <InputText v-model="uploadName" placeholder="脚本名（默认取文件名）" class="materials-panel__name" />
                 <div class="materials-panel__actions">
                     <Button label="上传" icon="pi pi-upload" size="small" :loading="uploading" :disabled="!file" @click="uploadMaterial" />
                     <span v-if="!file" class="materials-panel__muted">请先点「选择 zip 文件」</span>
                 </div>
             </div>
             <p class="materials-panel__hint">
-                上传按 <code>(sha256, recipe_fingerprint)</code> 去重（§4.3）：同内容同配方命中既有材料并提示
-                <code>deduplicated</code>，同内容不同配方视为不同测试工程；归属执行器经
-                <code>X-Material-Executor: pytest</code> 头自动标记。
+                上传按内容指纹去重：命中既有材料会提示 <code>deduplicated</code> 并复用 id；归属执行器经
+                <code>X-Material-Executor: pytest</code> 头自动标记。上传成功后在下方直接处理当前脚本。
             </p>
         </Panel>
 
-        <div class="materials-panel__toolbar">
-            <Select
-                v-model="stateFilter"
-                :options="stateFilterOptions"
-                optionLabel="label"
-                optionValue="value"
-                placeholder="全部状态"
-                showClear
-                class="materials-panel__filter"
-                @change="onFilterChange"
-            />
-            <div class="materials-panel__actions">
-                <Button
-                    label="上一页"
-                    icon="pi pi-chevron-left"
-                    size="small"
-                    severity="secondary"
-                    outlined
-                    :disabled="offset <= 0 || loading"
-                    @click="prevPage"
-                />
-                <span class="materials-panel__muted">第 {{ offset + 1 }} 条起</span>
-                <Button
-                    label="下一页"
-                    icon="pi pi-chevron-right"
-                    size="small"
-                    severity="secondary"
-                    outlined
-                    :disabled="!hasMore || loading"
-                    @click="nextPage"
-                />
-            </div>
-        </div>
-
-        <DataTable
-            :value="materials"
-            dataKey="material_id"
-            :loading="loading"
-            :rowHover="true"
-            scrollable
-            selectionMode="single"
-            v-model:selection="selected"
-            @row-select="onRowSelect"
-        >
-            <Column field="name" header="名称" sortable style="min-width: 10rem">
-                <template #body="{ data }">{{ data.name || '—' }}</template>
-            </Column>
-            <Column field="state" header="状态" sortable style="min-width: 8rem">
-                <template #body="{ data }">
-                    <Tag :value="stateText(data.state)" :severity="stateSeverity(data.state)" />
-                </template>
-            </Column>
-            <Column field="size" header="大小" sortable style="min-width: 6rem">
-                <template #body="{ data }">{{ formatSize(data.size) }}</template>
-            </Column>
-            <Column field="updated_ts" header="更新时间" sortable style="min-width: 10rem">
-                <template #body="{ data }">{{ formatTime(data.updated_ts) }}</template>
-            </Column>
-            <Column header="操作" style="min-width: 12rem">
-                <template #body="{ data }">
-                    <div class="materials-panel__row-actions">
-                        <Button label="详情" icon="pi pi-search" size="small" severity="secondary" text @click="openDetail(materialIdOf(data))" />
-                        <Button label="下载" icon="pi pi-download" size="small" severity="secondary" text @click="downloadMaterial(materialIdOf(data))" />
-                        <Button label="删除" icon="pi pi-trash" size="small" severity="danger" text @click="deleteMaterial(materialIdOf(data))" />
-                    </div>
-                </template>
-            </Column>
-            <template #empty>
-                <span class="materials-panel__muted">暂无材料，先上传 zip 脚本包</span>
-            </template>
-        </DataTable>
-
-        <Panel v-if="detail" :header="`${detail.name || materialIdOf(detail)} · 详情`">
+        <!-- 处理态：上传成功（或复用既有 id）后自动展开 -->
+        <Panel v-if="detail" :header="`当前脚本：${detail.name || materialIdOf(detail)}`">
             <div class="materials-panel__actions">
                 <Button label="下载 zip" icon="pi pi-download" size="small" severity="secondary" outlined @click="downloadMaterial(materialIdOf(detail))" />
                 <Select v-model="inspectMode" :options="inspectModeOptions" optionLabel="label" optionValue="value" class="materials-panel__filter" />
                 <Button label="开始 inspect" icon="pi pi-search" size="small" :loading="inspecting" @click="runInspect" />
-                <Button label="删除" icon="pi pi-trash" size="small" severity="danger" text @click="deleteMaterial(materialIdOf(detail))" />
-                <Button label="关闭" icon="pi pi-times" size="small" severity="secondary" text @click="closeDetail" />
+                <Button label="刷新" icon="pi pi-refresh" size="small" severity="secondary" :loading="loading" @click="refreshDetail" />
+                <Button label="更换脚本" icon="pi pi-times" size="small" severity="secondary" text @click="closeDetail" />
             </div>
 
             <p class="materials-panel__hint">
-                <span class="materials-panel__mono">{{ materialIdOf(detail) }}</span>
+                <Tag :value="stateText(detail.state)" :severity="stateSeverity(detail.state)" />
+                · <span class="materials-panel__mono">{{ materialIdOf(detail) }}</span>
                 · {{ formatSize(detail.size) }} · 更新 {{ formatTime(detail.updated_ts) }}
                 · sha256 <span class="materials-panel__mono">{{ shortSha(detail.sha256) }}</span>
             </p>
-
-            <h4>组装配方（recipe）</h4>
-            <textarea v-model="recipeText" class="materials-panel__textarea materials-panel__textarea--tall"></textarea>
-            <p class="materials-panel__hint">
-                保存后状态回 <code>uploaded</code> 需重新分析（配方指纹变化即新指纹）。任务下发的
-                <code>recipe_override</code> 与本配方浅合并：<b>同名标量 / 对象替换，数组（含 layout）整体替换</b>。
-            </p>
-            <div class="materials-panel__actions">
-                <Button label="保存配方" icon="pi pi-save" size="small" :loading="savingRecipe" @click="saveRecipe" />
-            </div>
 
             <h4>分析 / 解析结果（inspect）</h4>
             <p v-if="inspectRecord" class="materials-panel__hint">
@@ -290,8 +204,8 @@ async function fetchJson(url, options) {
     return data;
 }
 
-// HTTP 头值是 Latin-1 字节串：材料名 / 配方含非 Latin-1 字符（如中文）时
-// fetch 会直接抛错，改走 API 既有的 name / recipe 查询参数兜底
+// HTTP 头值是 Latin-1 字节串：脚本名含非 Latin-1 字符（如中文）时
+// fetch 会直接抛错，改走 API 既有的 name 查询参数兜底
 function isLatin1(text) {
     for (let index = 0; index < text.length; index += 1) {
         if (text.charCodeAt(index) > 0xff) return false;
@@ -304,24 +218,15 @@ const STATE_TEXT = { uploaded: '待分析', analyzing: '分析中', analyzed: '�
 export default {
     data() {
         return {
-            materials: [],
+            // 当前脚本（处理区）；null = 上传态
             detail: null,
-            selected: null,
             error: '',
             notice: '',
             loading: false,
-            stateFilter: null,
-            offset: 0,
-            limit: 20,
-            stateFilterOptions: Object.entries(STATE_TEXT).map(([value, label]) => ({ label, value })),
             // 上传区
             file: null,
             uploadName: '',
-            uploadRecipe: '',
             uploading: false,
-            // 配方编辑
-            recipeText: '',
-            savingRecipe: false,
             // inspect
             inspectMode: 'analyze',
             inspectModeOptions: [
@@ -344,9 +249,6 @@ export default {
         };
     },
     computed: {
-        hasMore() {
-            return this.materials.length >= this.limit;
-        },
         problems() {
             if (this.inspectRecord && (this.inspectRecord.problems || []).length) {
                 return this.inspectRecord.problems;
@@ -365,58 +267,37 @@ export default {
             return this.cases.filter((item) => (item.markers || []).includes(this.markerFilter));
         }
     },
-    mounted() {
-        this.load();
-    },
     beforeUnmount() {
         this.disposed = true;
     },
     methods: {
-        async load(silent) {
-            if (!silent) this.loading = true;
+        async refreshDetail() {
+            // 刷新当前脚本的状态 / 问题 / 用例清单（处理区「刷新」）
+            const materialId = this.materialIdOf(this.detail);
+            if (!materialId) return;
+            this.loading = true;
             try {
-                const query = new URLSearchParams({ limit: String(this.limit), offset: String(this.offset) });
-                if (this.stateFilter) query.set('state', this.stateFilter);
-                const data = await fetchJson(apiUrl(`/api/test/materials?${query.toString()}`));
-                this.materials = (data.materials || []).map((item) => ({ ...item, material_id: this.materialIdOf(item) }));
-                this.error = '';
-                if (this.detail) await this.openDetail(this.materialIdOf(this.detail), true);
-            } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
+                await this.openDetail(materialId);
             } finally {
                 this.loading = false;
             }
         },
-        onFilterChange() {
-            this.offset = 0;
-            this.load();
-        },
-        prevPage() {
-            this.offset = Math.max(0, this.offset - this.limit);
-            this.load();
-        },
-        nextPage() {
-            this.offset += this.limit;
-            this.load();
-        },
-        onRowSelect(event) {
-            this.openDetail(this.materialIdOf(event.data));
-        },
         closeDetail() {
+            // 「更换脚本」：回上传态
             this.detail = null;
-            this.selected = null;
             this.inspectRecord = null;
             this.cases = [];
             this.selectedCases = [];
             this.markerFilter = null;
+            this.selections = [];
             this.pushResult = null;
+            this.error = '';
         },
         async openDetail(materialId, silent) {
             if (!materialId) return;
             try {
                 const data = await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`));
                 this.detail = data.material || null;
-                this.recipeText = JSON.stringify((this.detail && this.detail.recipe) || {}, null, 2);
                 await this.loadCases(materialId);
                 this.error = '';
             } catch (reason) {
@@ -446,61 +327,29 @@ export default {
             this.uploading = true;
             try {
                 const name = (this.uploadName || this.file.name || '').trim();
-                if (!name) throw new Error('材料名必填');
-                const recipeText = this.uploadRecipe.trim();
-                if (recipeText) {
-                    const parsed = JSON.parse(recipeText);
-                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                        throw new Error('配方需是 JSON 对象');
-                    }
-                }
+                if (!name) throw new Error('脚本名必填');
                 let path = '/api/test/materials';
                 // 归属执行器随上传头带上（§4.5）：pytest 族面板自动打 executor_id="pytest"
                 const headers = { 'Content-Type': 'application/zip', 'X-Material-Executor': 'pytest' };
-                if (isLatin1(name) && isLatin1(recipeText)) {
+                if (isLatin1(name)) {
                     headers['X-Material-Name'] = name;
-                    if (recipeText) headers['X-Material-Recipe'] = recipeText;
                 } else {
                     const query = new URLSearchParams({ name });
-                    if (recipeText) query.set('recipe', recipeText);
                     path = `/api/test/materials?${query.toString()}`;
                 }
                 const data = await fetchJson(apiUrl(path), { method: 'POST', headers, body: this.file });
                 const material = data.material || {};
                 const materialId = this.materialIdOf(material);
                 this.notice = data.deduplicated
-                    ? `内容 + 配方指纹命中既有材料（deduplicated），复用 id=${materialId}`
-                    : `材料已上传：${material.name || ''}（id=${materialId}）`;
+                    ? `内容指纹命中既有材料（deduplicated），复用 id=${materialId}`
+                    : `脚本已上传：${material.name || ''}（id=${materialId}）`;
                 this.file = null;
-                this.uploadRecipe = '';
-                await this.load();
+                // 上传成功自动展开「当前脚本」处理区（含 deduplicated 复用 id）
                 await this.openDetail(materialId);
             } catch (reason) {
                 this.error = String(reason && reason.message ? reason.message : reason);
             } finally {
                 this.uploading = false;
-            }
-        },
-        async saveRecipe() {
-            const materialId = this.materialIdOf(this.detail);
-            if (!materialId) return;
-            this.savingRecipe = true;
-            try {
-                const recipe = JSON.parse(this.recipeText || '{}');
-                if (!recipe || typeof recipe !== 'object' || Array.isArray(recipe)) {
-                    throw new Error('配方需是 JSON 对象');
-                }
-                await fetchJson(apiUrl(`/api/pytest/materials/${encodeURIComponent(materialId)}/recipe`), {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(recipe)
-                });
-                this.notice = '配方已保存；材料状态回 uploaded，需重新分析 / 解析';
-                await this.load(true);
-            } catch (reason) {
-                this.error = reason instanceof SyntaxError ? `配方不是合法 JSON：${reason.message}` : String(reason && reason.message ? reason.message : reason);
-            } finally {
-                this.savingRecipe = false;
             }
         },
         async runInspect() {
@@ -596,31 +445,6 @@ export default {
             } finally {
                 this.pushing = false;
             }
-        },
-        deleteMaterial(materialId) {
-            if (!materialId) return;
-            // 插件 SFC 拿不到 useConfirm，走宿主 app.use(ConfirmationService) 装的 $confirm
-            this.$confirm.require({
-                header: '删除材料',
-                message: `确认删除材料「${materialId}」？用例清单与选择集一并删除。`,
-                icon: 'pi pi-exclamation-triangle',
-                acceptLabel: '删除',
-                rejectLabel: '取消',
-                accept: async () => {
-                    try {
-                        await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`), { method: 'DELETE' });
-                        this.notice = `材料已删除：${materialId}`;
-                        if (this.detail && this.materialIdOf(this.detail) === materialId) this.closeDetail();
-                        await this.load();
-                    } catch (reason) {
-                        if (reason && (reason.code === 'material_in_use' || reason.status === 409)) {
-                            this.error = `引用冲突（material_in_use）：${reason.message}——被任务 params / 选择集引用的材料禁止删除，请先解除引用`;
-                        } else {
-                            this.error = String(reason && reason.message ? reason.message : reason);
-                        }
-                    }
-                }
-            });
         },
         downloadMaterial(materialId) {
             if (!materialId) return;
@@ -776,30 +600,6 @@ export default {
     flex-wrap: wrap;
 }
 
-.materials-panel__row-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.125rem;
-    flex-wrap: wrap;
-}
-
-.materials-panel__textarea {
-    width: 100%;
-    min-height: 5rem;
-    padding: 0.5rem;
-    border: 1px solid var(--surface-border);
-    border-radius: var(--content-border-radius);
-    background: var(--surface-card);
-    color: var(--text-color);
-    font-family: monospace;
-    font-size: 0.8125rem;
-    box-sizing: border-box;
-}
-
-.materials-panel__textarea--tall {
-    min-height: 10rem;
-}
-
 .materials-panel__mono {
     font-family: monospace;
     font-size: 0.8125rem;
@@ -808,8 +608,8 @@ export default {
 
 .materials-panel__problem {
     display: flex;
+    align-items: center;
     gap: 0.5rem;
-    align-items: baseline;
     flex-wrap: wrap;
     padding: 0.25rem 0;
     font-size: 0.875rem;
@@ -817,21 +617,24 @@ export default {
 
 .materials-panel__list {
     margin: 0.5rem 0 0;
-    padding-left: 1.25rem;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
 }
 
 .materials-panel__list li {
     display: flex;
-    gap: 0.5rem;
     align-items: center;
+    gap: 0.5rem;
     flex-wrap: wrap;
-    padding: 0.125rem 0;
 }
 
 .materials-panel__check {
-    display: inline-flex;
-    gap: 0.375rem;
+    display: flex;
     align-items: center;
+    gap: 0.375rem;
 }
 
 .materials-panel__tag {

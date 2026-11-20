@@ -5,9 +5,9 @@
   分片 ``unit_refs`` → ``params.targets`` → ``params.selection_id`` 展开
   （§20-Q1 定案 (a)：selection 清单随材料预推落
   ``{cache}/{material_id}/selections/{selection_id}.json``，执行端本地展开）→
-  ``recipe.entry`` 兜底；
+  兜底 ``["."]``（平铺工程目录直接跑）；recipe 是不透明字符串，不参与解释；
 * **执行**：``asyncio.create_subprocess_exec``；env = ``os.environ`` 增量 +
-  ``recipe.env`` + ``params.env``（**拒 ``AETP_*`` 保留前缀**，§15 纵深）+
+  ``params.env``（**拒 ``AETP_*`` 保留前缀**，§15 纵深）+
   ``PYTHONIOENCODING=utf-8`` / ``PYTHONUNBUFFERED=1``；超时 =
   ``min(deadline_ts 余量, config.timeout_s)``；取消优先于超时；杀**进程树**
   （D3：Windows ``taskkill /T /F``、POSIX 进程组 ``SIGKILL``）；
@@ -24,6 +24,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shlex
 import signal
 import sys
@@ -36,7 +37,7 @@ from typing import Any, Literal, Protocol, cast
 
 from common.test_contracts import ArtifactRef, CaseResult
 
-from .assemble import AssembleError, apply_layout, extract_zip
+from .assemble import AssembleError, extract_zip
 from .config import PytestExecutorConfig
 from .stream import LogStreamer
 
@@ -60,6 +61,10 @@ _DRAIN_TIMEOUT_S = 5.0
 
 #: marker 插件目录（随包分发；经 PYTHONPATH 注入子进程，``-p aetp_marker`` 启用）
 MARKER_DIR: Path = Path(__file__).resolve().parent / "marker_plugin"
+
+#: marker 哨兵片段（与 stream.py / aetp_marker 常量同源：``\x00AETP_CASE[_END] <nodeid>\x00``）；
+#: ``_END`` 由可选组覆盖，两个哨兵一次匹配
+_MARKER_PATTERN = re.compile(r"\x00AETP_CASE(?:_END)? [^\x00]*\x00")
 
 
 class JobRunError(Exception):
@@ -111,23 +116,20 @@ def file_digest(path: Path) -> tuple[str, int]:
 
 def build_env(
     base: Mapping[str, str],
-    recipe_env: object,
     params_env: object,
     *,
     marker_dir: Path = MARKER_DIR,
 ) -> tuple[dict[str, str], list[str]]:
     """组装子进程环境；``AETP_*`` 保留前缀的键拒绝应用（返回被拒清单）。
 
-    顺序：``os.environ`` 增量 → ``recipe.env`` → ``params.env``；``marker_dir``
+    顺序：``os.environ`` 增量 → ``params.env``；``marker_dir``
     前插 ``PYTHONPATH``（``-p aetp_marker`` 的导入来源）；补
     ``PYTHONIOENCODING=utf-8`` / ``PYTHONUNBUFFERED=1``。
     """
     env = dict(base)
     dropped: list[str] = []
-    for source in (recipe_env, params_env):
-        if not isinstance(source, Mapping):
-            continue
-        for raw_key, raw_value in cast(Mapping[object, object], source).items():
+    if isinstance(params_env, Mapping):
+        for raw_key, raw_value in cast(Mapping[object, object], params_env).items():
             key = str(raw_key)
             if key.startswith("AETP_"):
                 dropped.append(key)
@@ -142,11 +144,10 @@ def build_env(
 
 def resolve_targets(
     params: Mapping[str, Any],
-    recipe: Mapping[str, Any],
     shard: Mapping[str, Any] | None,
     material_dir: Path | None,
 ) -> list[str]:
-    """执行目标优先级（§10.3）：分片 unit_refs → targets → selection 展开 → entry。"""
+    """执行目标优先级：分片 unit_refs → targets → selection 展开 → 兜底 ``["."]``。"""
     if shard is not None and not shard.get("plan"):
         unit_refs = shard.get("unit_refs")
         if isinstance(unit_refs, (list, tuple)) and unit_refs:
@@ -157,10 +158,7 @@ def resolve_targets(
     selection_id = params.get("selection_id")
     if isinstance(selection_id, str) and selection_id:
         return expand_selection(selection_id, material_dir)
-    entry = recipe.get("entry")
-    if isinstance(entry, str) and entry.strip():
-        return [entry.strip()]
-    raise JobRunError("没有可执行目标：unit_refs / targets / selection_id / recipe.entry 均为空")
+    return ["."]
 
 
 def expand_selection(selection_id: str, material_dir: Path | None) -> list[str]:
@@ -193,16 +191,12 @@ def build_argv(
     python: str,
     targets: Sequence[str],
     params: Mapping[str, Any],
-    recipe: Mapping[str, Any],
     config: PytestExecutorConfig,
     junit_path: Path,
 ) -> list[str]:
-    """pytest argv（§10.3）：targets + 默认参数 + 配方参数 + 任务参数 + junit/marker。"""
+    """pytest argv（§10.3）：targets + 默认参数 + 任务参数 + junit/marker。"""
     argv = [python, "-m", "pytest", *targets]
     argv.extend(shlex.split(config.pytest_args))
-    recipe_args = recipe.get("args")
-    if isinstance(recipe_args, list):
-        argv.extend(str(item) for item in cast(list[object], recipe_args))
     extra_args = params.get("extra_args")
     if isinstance(extra_args, (list, tuple)) and extra_args:
         argv.extend(str(item) for item in cast(Sequence[object], extra_args))
@@ -290,7 +284,32 @@ async def _pump(
             return
         line = raw.decode("utf-8", errors="replace")
         if streamer is not None:
-            streamer.feed(stream, line)
+            _feed_line(streamer, stream, line)
+
+
+def _feed_line(streamer: LineSink, stream: Literal["stdout", "stderr"], raw_line: str) -> None:
+    """喂一行输出；marker 哨兵被 pytest 进度输出粘连时按哨兵边界拆开喂入。
+
+    pytest 的模块前缀 / 进度符无换行直写 stdout，会与 marker 哨兵（logstart /
+    logfinish 打印）粘在同一逻辑行（如 ``F\\x00AETP_CASE_END <nodeid>\\x00``），
+    streamer 的整行哨兵识别会漏识（首用例哨兵漏识 → junit case_id 错位）。
+    这里把纯文本段按普通行喂、哨兵段原样喂：哨兵恢复逐行识别（CASE 归属 /
+    CASE_END 归零），纯文本段归属切分前的当前用例。
+    """
+    line = raw_line.rstrip("\r\n")
+    if _MARKER_PATTERN.search(line) is None:
+        streamer.feed(stream, line)
+        return
+    cursor = 0
+    for match in _MARKER_PATTERN.finditer(line):
+        plain = line[cursor : match.start()].rstrip()
+        if plain:
+            streamer.feed(stream, plain)
+        streamer.feed(stream, match.group(0))
+        cursor = match.end()
+    tail = line[cursor:].rstrip()
+    if tail:
+        streamer.feed(stream, tail)
 
 
 async def _kill_tree(process: asyncio.subprocess.Process) -> None:
@@ -429,7 +448,6 @@ class JobRequest:
     attempt: int
     params: Mapping[str, Any]
     shard: Mapping[str, Any] | None
-    recipe: Mapping[str, Any]
     config: PytestExecutorConfig
     #: 材料 bundle.zip（组装来源）；无材料任务为 None（跳过组装）
     zip_path: Path | None
@@ -454,7 +472,6 @@ async def run_job(
     try:
         if request.zip_path is not None:
             extract_zip(request.zip_path, request.project_dir)
-            apply_layout(request.project_dir, request.recipe)
         else:
             request.project_dir.mkdir(parents=True, exist_ok=True)
     except AssembleError as error:
@@ -481,11 +498,10 @@ async def run_job(
         if request.shard is not None and request.shard.get("plan"):
             result = await _run_plan(request, python, streamer, cancel_event, started_ts, log)
         else:
-            targets = resolve_targets(request.params, request.recipe, request.shard, request.material_dir)
-            argv = build_argv(python, targets, request.params, request.recipe, request.config, junit_path)
+            targets = resolve_targets(request.params, request.shard, request.material_dir)
+            argv = build_argv(python, targets, request.params, request.config, junit_path)
             env, dropped = build_env(
                 os.environ,
-                request.recipe.get("env"),
                 request.params.get("env"),
             )
             for key in dropped:
@@ -526,7 +542,6 @@ async def _run_plan(
     argv = [python, "-m", "pytest", "--collect-only", "-q", "-p", "aetp_marker"]
     env, dropped = build_env(
         os.environ,
-        request.recipe.get("env"),
         request.params.get("env"),
     )
     env["AETP_MARKER_OUT"] = str(collect_out)

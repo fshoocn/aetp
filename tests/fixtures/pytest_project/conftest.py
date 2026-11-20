@@ -1,4 +1,4 @@
-"""根 conftest（组装时铺到工程根，验证非平铺布局的 fixture 接线）。"""
+"""根 conftest：``greeting`` fixture 接线（平铺工程根，收集与执行共用）。"""
 
 from __future__ import annotations
 

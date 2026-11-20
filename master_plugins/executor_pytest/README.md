@@ -1,6 +1,6 @@
 # pytest 执行器管理端（executor-pytest-master）
 
-pytest 执行器族的**管理端**：材料上传面板、组装配方编辑、脚本分析 / 用例解析编排、
+pytest 执行器族的**管理端**：脚本上传面板、脚本分析 / 用例解析编排、
 选例与材料预推。**主从分工**：本插件管「材料怎么进来、怎么分析 / 预推」（任务下发
 并入测试计划编辑器——「测试计划与下发」页，W3 交付）；执行端
 （`slave_plugins/executor_pytest`）管「活怎么干」（组装 / 分析 / 执行）；
@@ -11,12 +11,14 @@ pytest 执行器族的**管理端**：材料上传面板、组装配方编辑、
 
 ## 功能
 
-- **材料管理面板**（`ui/MaterialsPanel.vue`，脚本管理页 `/scripts` 的 slot
-  `scripts:executor-pytest`，tab「pytest 脚本」）：zip 上传（内容 + 配方联合
-  指纹去重，§4.3；自动带 `X-Material-Executor: pytest` 头标记归属）、配方编辑
-  （raw JSON，PUT 后状态回 `uploaded`）、分析 / 解析触发与结果展示（问题按
-  severity 着色、用例清单过滤勾选）、选择集保存 / 复制、预推、下载、删除
-  （有引用 409 明示）；
+- **脚本处理面板**（`ui/MaterialsPanel.vue`，脚本管理页 `/scripts` 的 slot
+  `scripts:executor-pytest`，tab「pytest 脚本」）：只处理**当前上传的脚本**
+  ——上传区（zip 上传，内容指纹去重，自动带 `X-Material-Executor: pytest` 头
+  标记归属）→ 上传成功（含 `deduplicated` 复用 id）自动展开处理区：状态、
+  分析 / 解析触发与结果展示（问题按 severity 着色、用例清单过滤勾选）、
+  选择集保存 / 复制、预推、下载、刷新，「更换脚本」回上传态；全量脚本清单归
+  test_core 跨执行器总表（ScriptsPage）；pytest 不使用 recipe（执行器自定义
+  不透明字符串，本面板无配方编辑）；
 - **任务下发**（并入测试计划编辑器——「测试计划与下发」页 `/plans`，W3 交付）：
   原 `ui/SubmitPage.vue` 下发页已退役；参数动态表单（按能力信封
   `detail.schema` 生成 params schema，§11.1，raw JSON 兜底、raw 优先）等逻辑
@@ -72,38 +74,35 @@ material_retain_days = 90.0   # 无引用材料保留天数（GC）
 
 | 方法与路径 | 说明 |
 |---|---|
-| `PUT /api/pytest/materials/{material_id}/recipe` | 更新配方（body = recipe JSON；状态回 `uploaded` 需重分析） |
 | `POST /api/pytest/materials/{material_id}/selections` | 保存选择集 `{"name", "case_ids"}` → `{"ok", "selection_id"}` |
 | `POST /api/pytest/materials/{material_id}/push` | 预推材料（`{"selection_ids": [...]}` 可选）→ pushed / failed 节点 |
 | `POST /api/pytest/materials/{material_id}/inspect` | 触发分析 / 解析 `{"mode": "analyze"\|"collect"}` → `{"ok", "request_id"}` |
 | `GET /api/pytest/inspects/{request_id}` | inspect 状态 / 结果（`inspecting → done / failed`） |
 | `GET /api/pytest/stats` | 运行统计（§14） |
 
-面板直连的核心端点（数据源 / API 路径与旧页一致）：`POST /api/test/materials`
-（二进制 body + `X-Material-Name` / `X-Material-Recipe` / `X-Material-Executor`
-头；名 / 配方含非 Latin-1 字符时改走 `name` / `recipe` 查询参数兜底）、
-`GET /api/test/materials`（`limit` / `offset` / `state`，`executor` 过滤）、
+面板直连的核心端点：`POST /api/test/materials`
+（二进制 body + `X-Material-Name` / `X-Material-Executor`
+头；名含非 Latin-1 字符时改走 `name` 查询参数兜底）、
 `GET /api/test/materials/{id}`、`GET /api/test/materials/{id}/cases`、
-`GET /api/test/materials/{id}/download`（下载 zip）、`DELETE /api/test/materials/{id}`
-（有引用 409 `material_in_use`）。任务下发 `POST /api/test/tasks` 由测试计划
-编辑器经 test_core 发起（W3）。
+`GET /api/test/materials/{id}/download`（下载 zip）。
+全量材料清单 / 删除由 test_core 总表（ScriptsPage 与
+[test_core README](../test_core/README.md) 的核心端点）承担。任务下发
+`POST /api/test/tasks` 由测试计划编辑器经 test_core 发起（W3）。
 
-## 使用流程（脚本管理页 → pytest 面板：上传 → 配方 → 分析 → 选例 → 预推）
+## 使用流程（脚本管理页 → pytest 面板：上传 → 分析 → 选例 → 预推）
 
-1. **上传**（脚本管理页 `/scripts` → tab「pytest 脚本」面板）：选 zip、填材料名
-   （可带配方 JSON）→ 上传（自动带 `X-Material-Executor: pytest`）；
-   `(sha256, recipe_fingerprint)` 命中既有材料会提示 `deduplicated`；
-2. **编辑配方**：详情面板 raw JSON 编辑 `layout/entry/args/env/requirements`
-   → 保存（状态回 `uploaded`，配方指纹变化即新指纹；`recipe_override` 合并时
-   **数组整体替换**）；
-3. **分析 / 解析**：选 mode 发起 inspect（定向单节点，面板轮询
+1. **上传**（脚本管理页 `/scripts` → tab「pytest 脚本」面板）：选 zip、填脚本名
+   → 上传（自动带 `X-Material-Executor: pytest`）；recipe 留空（pytest 不使用）；
+   内容指纹命中既有材料会提示 `deduplicated` 并复用 id；上传成功后自动展开
+   「当前脚本」处理区；
+2. **分析 / 解析**：选 mode 发起 inspect（定向单节点，面板轮询
    `/api/pytest/inspects/{request_id}` 至终结）——`analyze` 看问题列表
    （severity 着色），`collect` 产出用例清单；
-4. **选例**：用例清单按 marker 过滤、勾选 → 填名称「保存选择集」→ 复制
+3. **选例**：用例清单按 marker 过滤、勾选 → 填名称「保存选择集」→ 复制
    `selection_id`（Job 只带引用，载荷恒小）；
-5. **预推**：详情面板「预推到候选节点」→ 看 pushed / failed 节点（失败可重试
+4. **预推**：处理区「预推到候选节点」→ 看 pushed / failed 节点（失败可重试
    或走 missing 兜底）；
-6. **任务下发**：转「测试计划与下发」页的测试计划编辑器（W3 交付）——步骤
+5. **任务下发**：转「测试计划与下发」页的测试计划编辑器（W3 交付）——步骤
    引用 `material_id` / `selection_id`、params 按能力信封 `detail.schema`
    动态表单（raw JSON 兜底）→ 下发后跳「测试任务」页看进度。
 
@@ -129,7 +128,8 @@ material_retain_days = 90.0   # 无引用材料保留天数（GC）
   API、`submit()` 与任务状态机；本端经 `ctx.test_core` 服务面读写（不直连 db），
   `params.material_id/selection_id` 由核心透明透传；
 - **执行端（executor_pytest）**：`pytest.*` 族内 topic 的对端——接收材料分块、
-  应答 inspect、按配方组装并执行；参数语义（§11.2）归执行端解释；
+  应答 inspect、解压组装并执行（recipe 为不透明字符串，不解释）；参数语义
+  （§11.2）归执行端解释；
 - **心跳（heartbeat-server）**：能力信封查询（`GET /api/heartbeat/capabilities`）
   供测试计划编辑器生成 params 动态表单（W3），节点筛选供预推 / inspect 选节点。
 

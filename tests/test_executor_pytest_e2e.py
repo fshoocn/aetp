@@ -7,8 +7,8 @@
    清单）→ save_selection → 管理端预推（selections 随元包同步）→ submit（plan
    分片）→ plan/分片真 pytest 子进程执行 → get_result 计数聚合、job.log 入库
    （op = task_id）、产物落 core artifact 表；
-2. **非平铺组装**：配方 layout 铺排（fixtures 的 src/cases + conf 分离）后经
-   selection 展开执行成功（含依赖根 conftest greeting fixture 的用例）；
+2. **平铺直跑**：fixtures 平铺包（根 conftest + tests/case_*.py，无需任何组装
+   铺排）经 selection 展开执行成功（含依赖根 conftest greeting fixture 的用例）；
 3. **inspect 全链路**：上传 → analyze（deps.missing warning 不阻塞）→ collect
    （用例数 / markers / params）→ core cases 可查；
 4. **双节点跨机**（master Context + slave Context + 真实 HTTP comm，照
@@ -49,19 +49,11 @@ from master_plugins.executor_pytest.plugin import ExecPytestMasterPlugin
 from master_plugins.test_core import TestCorePlugin as CorePlugin
 from slave_plugins.executor_pytest.plugin import PytestExecutorPlugin
 
-#: 夹具工程（DESIGN §16.2 非平铺包：src/cases + conf 分离）
+#: 夹具工程（平铺包：根 conftest/pytest.ini + helpers/ + tests/case_*.py，解压即可跑）
 FIXTURE_DIR: Path = Path(__file__).resolve().parent / "fixtures" / "pytest_project"
 
-#: 夹具的组装配方：铺排后 cases/ + 根 conftest.py + 根 pytest.ini 才可跑
-FIXTURE_RECIPE: dict[str, Any] = {
-    "layout": [
-        {"src": "src/cases", "dst": "cases"},
-        {"src": "conf/conftest.py", "dst": "conftest.py"},
-        {"src": "conf/pytest.ini", "dst": "pytest.ini"},
-    ],
-    "entry": "cases",
-    "args": ["-q"],
-}
+#: 夹具的 recipe（不透明字符串，pytest 全链路不解析）
+FIXTURE_RECIPE: str = ""
 
 #: 任务终态（驱动循环出口）
 TASK_FINISHED: frozenset[str] = frozenset({"succeeded", "failed", "canceled", "error"})
@@ -80,7 +72,7 @@ def fixture_zip(*, include_slow: bool = True) -> bytes:
             if not path.is_file() or "__pycache__" in path.parts:
                 continue
             rel = path.relative_to(FIXTURE_DIR).as_posix()
-            if not include_slow and rel == "src/cases/case_slow.py":
+            if not include_slow and rel == "tests/case_slow.py":
                 continue
             package.write(path, rel)
     return buffer.getvalue()
@@ -261,7 +253,7 @@ class ExecutorChainTestCase(unittest.IsolatedAsyncioTestCase):
     ) -> dict[str, Any]:
         payload = data if data is not None else fixture_zip(include_slow=include_slow)
         result = await self.core.upload_material(
-            name=name, data=payload, recipe=dict(FIXTURE_RECIPE)
+            name=name, data=payload, recipe=FIXTURE_RECIPE
         )
         return dict(cast(Mapping[str, Any], result))
 
@@ -350,7 +342,7 @@ class SelfLoopFullChainTests(ExecutorChainTestCase):
         cases = await self.core.list_material_cases(material_id)
         self.assertEqual(len(cases), 11)
         case_ids = [str(row["case_id"]) for row in cases]
-        self.assertIn("cases/case_basic.py::test_pass", case_ids)
+        self.assertIn("tests/case_basic.py::test_pass", case_ids)
         # save_selection → 带 selections 再推（元包同步选择集到执行端）
         selection_id = await self.core.save_selection(material_id, "全部快用例", case_ids)
         pushed = await self.master.push_material(material_id, selection_ids=[selection_id])
@@ -411,8 +403,9 @@ class SelfLoopFullChainTests(ExecutorChainTestCase):
             self.assertGreater(int(row["size"]), 0)
             self.assertEqual(len(str(row["sha256"])), 64)
 
-    # ------------------------------------------------------------ 2. 非平铺组装
-    async def test_non_flat_layout_assembles_and_selection_runs_green(self) -> None:
+    # ------------------------------------------------------------ 2. 平铺直跑
+    async def test_flat_project_selection_runs_green(self) -> None:
+        """平铺包解压即跑（无 layout / 配方）：selection 展开执行全绿。"""
         await self.boot()
         material = await self.upload_material()
         material_id = str(material["id"])
@@ -422,13 +415,13 @@ class SelfLoopFullChainTests(ExecutorChainTestCase):
         await self.run_inspect(material_id, "collect")
         rows = await self.core.list_material_cases(material_id)
         by_id = {str(row["case_id"]) for row in rows}
-        # test_pass 依赖 conf/conftest.py 铺排接线的 greeting fixture；
+        # test_pass 依赖根 conftest.py 的 greeting fixture + helpers 跨包 import；
         # 参数化用例走 case_params——selection 展开为目标（§20-Q1 (a)）
         picked = sorted(
             case_id
             for case_id in by_id
-            if case_id == "cases/case_basic.py::test_pass"
-            or case_id.startswith("cases/case_params.py::")
+            if case_id == "tests/case_basic.py::test_pass"
+            or case_id.startswith("tests/case_params.py::")
         )
         self.assertEqual(len(picked), 6)
         selection_id = await self.core.save_selection(material_id, "绿用例", picked)
@@ -438,7 +431,7 @@ class SelfLoopFullChainTests(ExecutorChainTestCase):
             _spec({"material_id": material_id, "selection_id": selection_id})
         )
         state = await self.drive_task(task_id)
-        self.assertEqual(state, "succeeded")  # layout 铺排 + conftest 接线后全绿
+        self.assertEqual(state, "succeeded")  # 平铺直跑 + conftest 接线后全绿
         result = await self.core.get_result(task_id)
         assert result is not None
         self.assertEqual(
@@ -486,11 +479,11 @@ class SelfLoopFullChainTests(ExecutorChainTestCase):
         cases = await self.core.list_material_cases(material_id)
         self.assertEqual(len(cases), 13)
         by_id = {str(item["case_id"]): item for item in cases}
-        self.assertEqual(by_id["cases/case_basic.py::test_skip"]["markers"], ["skip"])
+        self.assertEqual(by_id["tests/case_basic.py::test_skip"]["markers"], ["skip"])
         self.assertEqual(
-            by_id["cases/case_params.py::test_tagged[t-smoke]"]["params"], {"id": "t-smoke"}
+            by_id["tests/case_params.py::test_tagged[t-smoke]"]["params"], {"id": "t-smoke"}
         )
-        self.assertEqual(by_id["cases/case_slow.py::test_sleep"]["params"], {})
+        self.assertEqual(by_id["tests/case_slow.py::test_sleep"]["params"], {})
 
 
 # ================================================================ 4-5. 双节点跨机
@@ -593,7 +586,7 @@ class CrossMachineTests(ExecutorChainTestCase):
         self.assertEqual(len(cases), 11)
         # submit → job 跨机派发 → 真 pytest 执行 → 结果 / 日志流跨机回传
         task_id = await self.core.submit(
-            _spec({"material_id": material_id, "targets": ["cases/case_params.py"]})
+            _spec({"material_id": material_id, "targets": ["tests/case_params.py"]})
         )
         state = await self.drive_task(task_id)
         self.assertEqual(state, "succeeded")
@@ -637,7 +630,7 @@ class CrossMachineTests(ExecutorChainTestCase):
             _spec(
                 {
                     "material_id": material_id,
-                    "targets": ["cases/case_slow.py::test_sleep_with_child"],
+                    "targets": ["tests/case_slow.py::test_sleep_with_child"],
                 },
                 timeout_s=120.0,
             )

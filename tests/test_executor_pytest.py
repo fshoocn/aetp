@@ -2,16 +2,17 @@
 
 覆盖（分组 TestCase，对齐任务清单 9 组）：
 
-1. 参数翻译：argv 组装优先级（unit_refs → targets → selection → recipe.entry）、
-   ``AETP_*`` env 过滤 + warning、``shell=False`` 断言（argv 化、拒 shell）；
-2. assemble：layout 铺排（fixtures 非平铺包）、recipe_override 浅合并（数组整体
-   替换）、zip-slip 拒绝、路径越界拒绝；
+1. 参数翻译：argv 组装优先级（unit_refs → targets → selection → 兜底
+   ``["."]``）、``AETP_*`` env 过滤 + warning、``shell=False`` 断言（argv 化、
+   拒 shell）；recipe 是不透明字符串，全链路不解释；
+2. assemble：平铺夹具工程解压即可跑、zip-slip 拒绝、路径越界拒绝、符号链接
+   拒绝（安全校验不依赖 recipe）；
 3. 材料接收：自描述分块乱序（含元包晚到）拼装 ready、sha 不符回 missing、
    幂等重块、selections 物化（pytest.material 元包带 selections）；
-4. inspect：analyze 五项问题码（deps.missing warning / syntax.error /
-   recipe.invalid / collect.error）、collect 清单结构（case_id/markers/params
-   近似）、request_id 幂等重发同应答；
-5. 执行集成（真子进程跑 tests/fixtures/pytest_project 组装后工程）：junit 六
+4. inspect：问题码（deps.missing warning——包内 requirements.txt 探测 /
+   syntax.error / collect.error；无 requirements.txt 跳过探测）、collect 清单
+   结构（case_id/markers/params 近似）、request_id 幂等重发同应答；
+5. 执行集成（真子进程跑 tests/fixtures/pytest_project 平铺工程）：junit 六
    status 映射与计数、succeeded 判定、产物（junit.xml/pytest.log、sha256/size、
    local:/// 盘符 uri）、组装目录清理；
 6. 日志流：LogChunk seq 从 0 连续、双写一致、哨兵 case 归属、节流 / 截断；
@@ -57,10 +58,7 @@ from common.test_contracts import (
 )
 from slave_plugins.executor_pytest.assemble import (
     AssembleError,
-    apply_layout,
     extract_zip,
-    merge_recipe,
-    validate_recipe,
 )
 from slave_plugins.executor_pytest.config import PytestExecutorConfig
 from slave_plugins.executor_pytest.executor import (
@@ -88,19 +86,11 @@ from slave_plugins.executor_pytest.stream import (
     LogStreamer,
 )
 
-#: 夹具工程（DESIGN §16.2 非平铺包：src/cases + conf 分离）
+#: 夹具工程（平铺包：根 conftest/pytest.ini + helpers/ + tests/case_*.py，解压即可跑）
 FIXTURE_DIR: Path = Path(__file__).resolve().parent / "fixtures" / "pytest_project"
 
-#: 夹具的组装配方：铺排后 cases/ + 根 conftest.py + 根 pytest.ini 才可跑
-FIXTURE_RECIPE: dict[str, Any] = {
-    "layout": [
-        {"src": "src/cases", "dst": "cases"},
-        {"src": "conf/conftest.py", "dst": "conftest.py"},
-        {"src": "conf/pytest.ini", "dst": "pytest.ini"},
-    ],
-    "entry": "cases",
-    "args": ["-q"],
-}
+#: 夹具的 recipe（不透明字符串，pytest 全链路不解析；只验透传）
+FIXTURE_RECIPE: str = ""
 
 
 # ================================================================ 纯函数辅助
@@ -253,7 +243,7 @@ class ExecutorStackTestCase(unittest.IsolatedAsyncioTestCase):
         self,
         material_id: str,
         data: bytes,
-        recipe: Mapping[str, Any],
+        recipe: str = "",
         *,
         chunk_size: int = 512,
         selections: Sequence[Mapping[str, Any]] = (),
@@ -282,7 +272,7 @@ class ExecutorStackTestCase(unittest.IsolatedAsyncioTestCase):
             "recipe_fingerprint": "fp-test",
             "total": total,
             "chunk_size": chunk_size,
-            "recipe": dict(recipe),
+            "recipe": recipe,
             "selections": [dict(item) for item in selections],
         }
         return chunks, meta
@@ -291,7 +281,7 @@ class ExecutorStackTestCase(unittest.IsolatedAsyncioTestCase):
         self,
         material_id: str,
         data: bytes,
-        recipe: Mapping[str, Any],
+        recipe: str = "",
         *,
         selections: Sequence[Mapping[str, Any]] = (),
         with_meta: bool = True,
@@ -395,14 +385,12 @@ class ArgvEnvTranslationTests(unittest.TestCase):
         )
         return material_dir
 
-    def test_targets_priority_unit_refs_then_targets_then_selection_then_entry(self) -> None:
+    def test_targets_priority_unit_refs_then_targets_then_selection_then_dot_fallback(self) -> None:
         material_dir = self._selection_dir()
-        recipe = {"entry": "cases"}
         # 1) 非 plan 分片的 unit_refs 最优先
         self.assertEqual(
             resolve_targets(
                 {"targets": ["x"], "selection_id": "sel-1"},
-                recipe,
                 {"index": 0, "total": 2, "unit_refs": ["u1", "u2"]},
                 material_dir,
             ),
@@ -410,92 +398,87 @@ class ArgvEnvTranslationTests(unittest.TestCase):
         )
         # 2) params.targets 压过 selection
         self.assertEqual(
-            resolve_targets({"targets": ["t1"], "selection_id": "sel-1"}, recipe, None, material_dir),
+            resolve_targets({"targets": ["t1"], "selection_id": "sel-1"}, None, material_dir),
             ["t1"],
         )
         # 3) selection 展开（§20-Q1 (a) 本地清单）
         self.assertEqual(
-            resolve_targets({"selection_id": "sel-1"}, recipe, None, material_dir),
+            resolve_targets({"selection_id": "sel-1"}, None, material_dir),
             ["cases/a.py::t1", "cases/b.py::t2"],
         )
-        # 4) recipe.entry 兜底
-        self.assertEqual(resolve_targets({}, recipe, None, material_dir), ["cases"])
+        # 4) 全空兜底 ["."]（平铺工程目录直接跑）
+        self.assertEqual(resolve_targets({}, None, material_dir), ["."])
+        self.assertEqual(resolve_targets({}, None, None), ["."])
         # plan 分片不走 unit_refs（plan 由 _run_plan 另行收集）
         self.assertEqual(
-            resolve_targets({"targets": ["t1"]}, recipe, {"plan": True, "unit_refs": ["u"]}, material_dir),
+            resolve_targets({"targets": ["t1"]}, {"plan": True, "unit_refs": ["u"]}, material_dir),
             ["t1"],
         )
         # 空 unit_refs 回落下一级
         self.assertEqual(
-            resolve_targets({"targets": ["t1"]}, recipe, {"unit_refs": []}, material_dir),
+            resolve_targets({"targets": ["t1"]}, {"unit_refs": []}, material_dir),
             ["t1"],
         )
 
-    def test_targets_raise_without_any_target(self) -> None:
+    def test_targets_selection_errors_still_raise(self) -> None:
+        """selection_id 给定但展开失败仍抛 JobRunError（与兜底 ["."] 无关）。"""
         material_dir = self._selection_dir()
         with self.assertRaises(JobRunError):
-            resolve_targets({}, {}, None, None)
+            resolve_targets({"selection_id": "sel-1"}, None, None)  # 材料缓存缺失
         with self.assertRaises(JobRunError):
-            resolve_targets({"selection_id": "sel-1"}, {}, None, None)  # 材料缓存缺失
-        with self.assertRaises(JobRunError):
-            resolve_targets({"selection_id": "sel-nope"}, {}, None, material_dir)
+            resolve_targets({"selection_id": "sel-nope"}, None, material_dir)
         (material_dir / "selections" / "sel-empty.json").write_text(
             json.dumps({"case_ids": []}), encoding="utf-8"
         )
         with self.assertRaises(JobRunError):
-            resolve_targets({"selection_id": "sel-empty"}, {}, None, material_dir)
+            resolve_targets({"selection_id": "sel-empty"}, None, material_dir)
         (material_dir / "selections" / "sel-bad.json").write_text("{oops", encoding="utf-8")
         with self.assertRaises(JobRunError):
-            resolve_targets({"selection_id": "sel-bad"}, {}, None, material_dir)
+            resolve_targets({"selection_id": "sel-bad"}, None, material_dir)
 
-    def test_build_argv_layout_and_keyword_precedence(self) -> None:
+    def test_build_argv_keyword_precedence(self) -> None:
         config = PytestExecutorConfig()
         junit = self.root / "junit.xml"
         argv = build_argv(
             "python-x",
-            ["cases/a.py"],
+            ["tests/case_basic.py"],
             {"extra_args": ["-x"], "keyword": "k9"},
-            {"args": ["-q"]},
             config,
             junit,
         )
         self.assertEqual(
             argv,
             [
-                "python-x", "-m", "pytest", "cases/a.py",
+                "python-x", "-m", "pytest", "tests/case_basic.py",
                 "-p", "no:cacheprovider",  # 默认参数
-                "-q",  # 配方参数
                 "-x",  # extra_args
                 "--junitxml", str(junit), "-p", "aetp_marker",
             ],
         )
         # extra_args 缺席时 keyword 折算 -k
-        argv = build_argv("python-x", ["cases"], {"keyword": "k9"}, {}, config, junit)
+        argv = build_argv("python-x", ["tests"], {"keyword": "k9"}, config, junit)
         self.assertIn("-k", argv)
         self.assertEqual(argv[argv.index("-k") + 1], "k9")
         # 并存时 extra_args 优先（§11.2）
-        argv = build_argv("python-x", ["cases"], {"keyword": "k9", "extra_args": ["-v"]}, {}, config, junit)
+        argv = build_argv("python-x", ["tests"], {"keyword": "k9", "extra_args": ["-v"]}, config, junit)
         self.assertNotIn("-k", argv)
         self.assertIn("-v", argv)
 
     def test_build_env_filters_aetp_prefixed_keys_with_drop_list(self) -> None:
         env, dropped = build_env(
             {"PATH": "p", "PYTHONPATH": "existing"},
-            {"AETP_R": "1", "R_K": "r"},
-            {"AETP_P": "2", "P_K": "p", "R_K": "p2"},
+            {"AETP_P": "2", "P_K": "p"},
             marker_dir=Path("M"),
         )
-        self.assertEqual(dropped, ["AETP_R", "AETP_P"])  # 回传给调用方逐个告警
-        self.assertNotIn("AETP_R", env)
+        self.assertEqual(dropped, ["AETP_P"])  # 回传给调用方逐个告警
         self.assertNotIn("AETP_P", env)
-        self.assertEqual(env["R_K"], "p2")  # params.env 覆盖 recipe.env
         self.assertEqual(env["P_K"], "p")
         self.assertEqual(env["PYTHONPATH"], f"M{os.pathsep}existing")
         self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
         self.assertEqual(env["PYTHONUNBUFFERED"], "1")
         self.assertEqual(env["PATH"], "p")
         # 非对象 env 静默忽略
-        env2, dropped2 = build_env({}, "junk", None)
+        env2, dropped2 = build_env({}, "junk")
         self.assertEqual(dropped2, [])
         self.assertIn("PYTHONPATH", env2)
 
@@ -561,7 +544,6 @@ class RunJobWarningTests(unittest.IsolatedAsyncioTestCase):
                     "env": {"AETP_SECRET": "x", "HONEST": "1"},
                 },
                 shard=None,
-                recipe={},
                 config=PytestExecutorConfig(),
                 zip_path=None,
                 project_dir=project_dir,
@@ -584,7 +566,7 @@ class RunJobWarningTests(unittest.IsolatedAsyncioTestCase):
 
 # ================================================================ 2. 组装
 class AssembleTests(unittest.TestCase):
-    """assemble：layout 铺排 / 配方浅合并 / zip-slip 与越界拒绝（§4.2 / §10.2 / §15）。"""
+    """assemble：安全解压（zip-slip / 越界 / 符号链接拒绝）+ 平铺工程即解即跑。"""
 
     def setUp(self) -> None:
         self._temp = tempfile.TemporaryDirectory()
@@ -593,48 +575,26 @@ class AssembleTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._temp.cleanup()
 
-    def test_layout_lays_out_non_flat_fixture_project(self) -> None:
+    def test_extract_flat_fixture_project_directly_runnable(self) -> None:
+        """平铺夹具解压即收集可跑（无任何配方 / 铺排）。"""
         zpath = self.root / "bundle.zip"
         zpath.write_bytes(fixture_zip())
         project = self.root / "proj"
         extract_zip(zpath, project)
-        self.assertTrue((project / "src" / "cases" / "case_basic.py").is_file())  # 平铺前不可跑
-        self.assertFalse((project / "cases").exists())
-        apply_layout(project, FIXTURE_RECIPE)
-        # 铺排后才可跑：cases/ + 根 conftest.py + 根 pytest.ini
-        self.assertTrue((project / "cases" / "case_basic.py").is_file())
+        self.assertTrue((project / "tests" / "case_basic.py").is_file())
         self.assertTrue((project / "conftest.py").is_file())
         self.assertTrue((project / "pytest.ini").is_file())
-        self.assertEqual((project / "requirements.txt").is_file(), True)
-        self.assertFalse((project / "src" / "cases").exists())
-        self.assertFalse((project / "conf" / "conftest.py").exists())
-        entry = str(FIXTURE_RECIPE["entry"])
-        self.assertTrue((project / entry).exists())
-
-    def test_recipe_override_shallow_merge_replaces_arrays_wholesale(self) -> None:
-        base: dict[str, Any] = {
-            "layout": [{"src": "a", "dst": "b"}],
-            "args": ["-q"],
-            "env": {"X": "1"},
-            "entry": "cases",
-            "requirements": ["r1"],
-        }
-        override: dict[str, Any] = {
-            "layout": [{"src": "p", "dst": "q"}],
-            "args": ["-v", "-x"],
-            "env": {"Y": "2"},
-            "extra": 1,
-        }
-        merged = merge_recipe(base, override)
-        self.assertEqual(merged["layout"], [{"src": "p", "dst": "q"}])  # 数组整体替换
-        self.assertEqual(merged["args"], ["-v", "-x"])
-        self.assertEqual(merged["env"], {"Y": "2"})  # 对象同名替换（浅合并不深合并）
-        self.assertEqual(merged["entry"], "cases")  # 未覆盖键保留
-        self.assertEqual(merged["requirements"], ["r1"])
-        self.assertEqual(merged["extra"], 1)
-        self.assertEqual(base["args"], ["-q"])  # 原字典不被就地改写
-        self.assertEqual(merge_recipe(base, None), base)
-        self.assertIsNot(merge_recipe(base, None), base)
+        self.assertTrue((project / "requirements.txt").is_file())
+        self.assertTrue((project / "helpers" / "util.py").is_file())
+        outcome = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "-q", "."],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(outcome.returncode, 0, outcome.stdout + outcome.stderr)
+        self.assertIn("13 tests collected", outcome.stdout)
 
     def test_extract_rejects_zip_slip(self) -> None:
         for name in ("../evil.txt", "..\\evil.txt", "/abs/evil.txt", "C:/evil.txt", "ok/../../evil.txt"):
@@ -666,48 +626,16 @@ class AssembleTests(unittest.TestCase):
         with self.assertRaises(AssembleError):
             extract_zip(self.root / "nope.zip", self.root / "out4")
 
-    def test_layout_rejects_path_escape(self) -> None:
-        project = self.root / "proj"
-        (project / "src" / "cases").mkdir(parents=True)
-        (project / "src" / "cases" / "a.py").write_text("x = 1\n", encoding="utf-8")
-        bad_entries: list[dict[str, Any]] = [
-            {"src": "../outside", "dst": "x"},
-            {"src": "src/cases", "dst": "../outside"},
-            {"src": "src/cases", "dst": "C:/x"},
-            {"src": "src/../src/cases", "dst": "x"},  # .. 段一律拒绝
-            {"src": "", "dst": "x"},
-            {"src": "src/cases", "dst": ""},
-        ]
-        for entry in bad_entries:
-            with self.subTest(entry=entry):
+    def test_extract_rejects_corrupt_zip_with_malicious_names(self) -> None:
+        """恶意手工 zip（越界 / 绝对路径 / 盘符）逐条拒绝，落点不越出工程目录。"""
+        for name in ("ok/../../evil.txt", "..\\..\\evil.txt", "/etc/evil.txt", "C:\\evil.txt"):
+            with self.subTest(name=name):
+                zpath = self.root / "evil.zip"
+                zpath.write_bytes(_zip_bytes({name: "x"}))
+                dest = self.root / "out-evil"
                 with self.assertRaises(AssembleError):
-                    apply_layout(project, {"layout": [entry]})
-        self.assertFalse((self.root / "outside").exists())
-        with self.assertRaises(AssembleError):
-            apply_layout(project, {"layout": [{"src": "missing", "dst": "x"}]})
-        with self.assertRaises(AssembleError):
-            apply_layout(project, {"layout": "bogus"})
-        with self.assertRaises(AssembleError):
-            apply_layout(project, {"layout": ["not-an-object"]})
-
-    def test_validate_recipe_reports_structure_problems(self) -> None:
-        self.assertEqual(validate_recipe({}), [])
-        self.assertEqual(validate_recipe(FIXTURE_RECIPE), [])
-        problems = validate_recipe(
-            {
-                "layout": [{"src": "", "dst": "x"}, "not-object"],
-                "entry": " ",
-                "args": ["ok", 1],
-                "env": {"AETP_X": "1", "K": 2},
-            }
-        )
-        text = "\n".join(problems)
-        self.assertIn("layout[0].src", text)
-        self.assertIn("layout[1]", text)
-        self.assertIn("entry", text)
-        self.assertIn("args", text)
-        self.assertIn("AETP_", text)
-        self.assertIn("env", text)
+                    extract_zip(zpath, dest)
+                self.assertFalse((self.root / "evil.txt").exists())
 
 
 # ================================================================ 3. 材料接收
@@ -717,24 +645,25 @@ class MaterialReceiveTests(ExecutorStackTestCase):
     async def test_out_of_order_chunks_with_late_meta_assemble_ready(self) -> None:
         await self.boot()
         data = _zip_bytes({"hello.txt": "hi" * 200})
-        chunks, meta = self.material_messages("m-recv-1", data, {"entry": "."}, chunk_size=64)
+        chunks, meta = self.material_messages("m-recv-1", data, "canary-recipe", chunk_size=64)
         self.assertGreaterEqual(len(chunks), 2)
         # 分块自描述：乱序到达（先 index 1 后 index 0）不需要元包先行
         self.plugin._on_material_chunk(chunks[1], None)
         self.plugin._on_material_chunk(chunks[0], None)
         for chunk in chunks[2:]:
             self.plugin._on_material_chunk(chunk, None)
-        self.assertFalse(self.plugin._materials.is_ready("m-recv-1"))  # 元包（recipe）未到
+        self.assertFalse(self.plugin._materials.is_ready("m-recv-1"))  # 元包未到
         self.plugin._on_material(meta, None)  # 元包晚到
         self.assertTrue(self.plugin._materials.is_ready("m-recv-1"))
-        self.assertEqual(self.plugin._materials.recipe_of("m-recv-1"), {"entry": "."})
+        # recipe 是不透明字符串：原样透传落盘、不解析
+        self.assertEqual(self.plugin._materials.recipe_of("m-recv-1"), "canary-recipe")
         ready_file = self.plugin._materials.ready_dir("m-recv-1") / "hello.txt"
         self.assertEqual(ready_file.read_text(encoding="utf-8"), "hi" * 200)
 
     async def test_sha_mismatch_reports_missing_then_retry_assembles(self) -> None:
         await self.boot()
         data = _zip_bytes({"hello.txt": "content"})
-        chunks, meta = self.material_messages("m-recv-2", data, {"entry": "."}, sha256="0" * 64)
+        chunks, meta = self.material_messages("m-recv-2", data, sha256="0" * 64)
         self.plugin._on_material(meta, None)
         for chunk in chunks:
             self.plugin._on_material_chunk(chunk, None)
@@ -746,22 +675,22 @@ class MaterialReceiveTests(ExecutorStackTestCase):
         self.assertEqual(missing[0]["missing"], list(range(len(chunks))))
         self.assertFalse(self.plugin._materials.is_ready("m-recv-2"))
         # 重拉一轮（正确 sha）→ 拼装就绪
-        self.push_material("m-recv-2", data, {"entry": "."})
+        self.push_material("m-recv-2", data)
         self.assertTrue(self.plugin._materials.is_ready("m-recv-2"))
 
     async def test_meta_late_after_assembly_still_becomes_ready(self) -> None:
         await self.boot()
         data = _zip_bytes({"hello.txt": "late"})
-        self.push_material("m-recv-3", data, {"entry": "."}, with_meta=False)
+        self.push_material("m-recv-3", data, with_meta=False)
         self.assertFalse(self.plugin._materials.is_ready("m-recv-3"))
-        _chunks, meta = self.material_messages("m-recv-3", data, {"entry": "."})
+        _chunks, meta = self.material_messages("m-recv-3", data)
         self.plugin._on_material(meta, None)  # 元包晚到
         self.assertTrue(self.plugin._materials.is_ready("m-recv-3"))
 
     async def test_duplicate_chunks_are_idempotent(self) -> None:
         await self.boot()
         data = _zip_bytes({"hello.txt": "dup"})
-        chunks, meta = self.material_messages("m-recv-4", data, {"entry": "."}, chunk_size=64)
+        chunks, meta = self.material_messages("m-recv-4", data, chunk_size=64)
         self.plugin._on_material_chunk(chunks[0], None)
         self.plugin._on_material_chunk(chunks[0], None)  # 重复块
         for chunk in chunks[1:]:
@@ -776,7 +705,7 @@ class MaterialReceiveTests(ExecutorStackTestCase):
         await self.boot()
         data = _zip_bytes({"hello.txt": "sel"})
         selections = [{"selection_id": "sel-1", "case_ids": ["cases/a.py::t1", "cases/b.py::t2"]}]
-        self.push_material("m-sel-1", data, {"entry": "."}, selections=selections)
+        self.push_material("m-sel-1", data, selections=selections)
         sel_path = self.plugin._materials.ready_dir("m-sel-1") / "selections" / "sel-1.json"
         self.assertTrue(sel_path.is_file())
         self.assertEqual(
@@ -784,8 +713,8 @@ class MaterialReceiveTests(ExecutorStackTestCase):
             {"selection_id": "sel-1", "case_ids": ["cases/a.py::t1", "cases/b.py::t2"]},
         )
         # 元包晚到（先拼装后元包）同样物化
-        self.push_material("m-sel-2", data, {"entry": "."}, with_meta=False, selections=selections)
-        _chunks, meta = self.material_messages("m-sel-2", data, {"entry": "."}, selections=selections)
+        self.push_material("m-sel-2", data, with_meta=False, selections=selections)
+        _chunks, meta = self.material_messages("m-sel-2", data, selections=selections)
         self.plugin._on_material(meta, None)
         self.assertTrue(
             (self.plugin._materials.ready_dir("m-sel-2") / "selections" / "sel-1.json").is_file()
@@ -804,7 +733,7 @@ class MaterialReceiveTests(ExecutorStackTestCase):
             recipe_fingerprint="fp",
             total=2,
             chunk_size=half,
-            recipe={"entry": "."},
+            recipe="opaque",
             selections=[],
         )
         self.assertEqual(store.add_chunk("m-store", 1, 2, good, part1), "stored")
@@ -816,7 +745,7 @@ class MaterialReceiveTests(ExecutorStackTestCase):
         self.assertTrue(store.is_ready("m-store"))
         self.assertEqual(store.add_chunk("m-store", 0, 2, good, part0), "duplicate")  # ready 后幂等
         # 两轮 sha 失败 → gave-up（重拉轮次封顶）
-        store.set_meta("m-bad", sha256="bad", recipe_fingerprint="fp", total=1, chunk_size=1, recipe={}, selections=[])
+        store.set_meta("m-bad", sha256="bad", recipe_fingerprint="fp", total=1, chunk_size=1, recipe="", selections=[])
         self.assertEqual(store.add_chunk("m-bad", 0, 1, "bad", b"X"), "mismatch")
         self.assertEqual(store.add_chunk("m-bad", 0, 1, "bad", b"X"), "gave-up")
         self.assertFalse(store.is_ready("m-bad"))
@@ -833,18 +762,32 @@ class InspectTests(ExecutorStackTestCase):
         outcome = await run_inspect(
             "analyze",
             zip_path=zpath,
-            recipe=FIXTURE_RECIPE,
             temp_dir=self.root / "work" / "inspect-deps",
             config=PytestExecutorConfig(),
         )
         problems = cast(list[dict[str, Any]], outcome["problems"])
         codes = [(str(p["code"]), str(p["severity"])) for p in problems]
-        self.assertIn(("deps.missing", "warning"), codes)  # 夹具故意声明缺失依赖
+        self.assertIn(("deps.missing", "warning"), codes)  # 夹具 requirements.txt 故意声明缺失依赖
         self.assertEqual([code for code, severity in codes if severity == "error"], [])
         self.assertTrue(outcome["ok"])  # warning 不阻塞
         dep = next(p for p in problems if p["code"] == "deps.missing")
         self.assertIn("aetp-missing-probe-dep", str(dep["message"]))
         self.assertEqual(dep["path"], "requirements.txt")
+
+    async def test_analyze_skips_deps_probe_without_requirements_file(self) -> None:
+        """包内无 requirements.txt：依赖探测跳过，不报 deps.missing。"""
+        await self.boot()
+        zpath = self.root / "no-req.zip"
+        zpath.write_bytes(_zip_bytes({"tests/test_x.py": "def test_x():\n    pass\n"}))
+        outcome = await run_inspect(
+            "analyze",
+            zip_path=zpath,
+            temp_dir=self.root / "work" / "inspect-no-req",
+            config=PytestExecutorConfig(),
+        )
+        problems = cast(list[dict[str, Any]], outcome["problems"])
+        self.assertNotIn("deps.missing", [str(p["code"]) for p in problems])
+        self.assertTrue(outcome["ok"])
 
     async def test_analyze_flags_syntax_error(self) -> None:
         await self.boot()
@@ -853,7 +796,6 @@ class InspectTests(ExecutorStackTestCase):
         outcome = await run_inspect(
             "analyze",
             zip_path=zpath,
-            recipe={},
             temp_dir=self.root / "work" / "inspect-syntax",
             config=PytestExecutorConfig(),
         )
@@ -864,25 +806,6 @@ class InspectTests(ExecutorStackTestCase):
         self.assertEqual(syntax[0]["path"], "bad.py")
         self.assertGreaterEqual(int(syntax[0]["line"]), 1)
         self.assertEqual(syntax[0]["severity"], "error")
-
-    async def test_analyze_flags_recipe_invalid(self) -> None:
-        await self.boot()
-        zpath = self.root / "bad-recipe.zip"
-        zpath.write_bytes(_zip_bytes({"a.py": "x = 1\n"}))
-        outcome = await run_inspect(
-            "analyze",
-            zip_path=zpath,
-            recipe={"layout": [{"src": "missing_dir", "dst": "x"}], "entry": "nope", "env": {"AETP_X": "1"}},
-            temp_dir=self.root / "work" / "inspect-recipe",
-            config=PytestExecutorConfig(),
-        )
-        self.assertFalse(outcome["ok"])
-        problems = cast(list[dict[str, Any]], outcome["problems"])
-        recipe_problems = [p for p in problems if p["code"] == "recipe.invalid"]
-        self.assertTrue(recipe_problems)
-        messages = "\n".join(str(p["message"]) for p in recipe_problems)
-        self.assertIn("AETP_", messages)  # 保留前缀纵深（§15）
-        self.assertIn("源不存在", messages)
 
     async def test_analyze_flags_collect_error(self) -> None:
         await self.boot()
@@ -898,7 +821,6 @@ class InspectTests(ExecutorStackTestCase):
         outcome = await run_inspect(
             "analyze",
             zip_path=zpath,
-            recipe={"entry": "cases"},
             temp_dir=self.root / "work" / "inspect-collect",
             config=PytestExecutorConfig(),
         )
@@ -913,7 +835,6 @@ class InspectTests(ExecutorStackTestCase):
         outcome = await run_inspect(
             "collect",
             zip_path=zpath,
-            recipe=FIXTURE_RECIPE,
             temp_dir=self.root / "work" / "inspect-collect-ok",
             config=PytestExecutorConfig(),
         )
@@ -922,12 +843,12 @@ class InspectTests(ExecutorStackTestCase):
         cases = cast(list[dict[str, Any]], outcome["cases"])
         by_id = {str(item["case_id"]): item for item in cases}
         self.assertEqual(len(cases), 13)  # 6 基础 + 5 参数化 + 2 慢用例
-        self.assertEqual(by_id["cases/case_basic.py::test_pass"]["path"], "cases/case_basic.py")
-        self.assertEqual(by_id["cases/case_basic.py::test_skip"]["markers"], ["skip"])
-        self.assertEqual(by_id["cases/case_params.py::test_tagged[t-smoke]"]["params"], {"id": "t-smoke"})
-        self.assertEqual(by_id["cases/case_params.py::test_square[1-1]"]["name"], "test_square[1-1]")
-        self.assertEqual(by_id["cases/case_params.py::test_square[1-1]"]["markers"], [])  # parametrize 隐藏
-        self.assertEqual(by_id["cases/case_slow.py::test_sleep"]["params"], {})
+        self.assertEqual(by_id["tests/case_basic.py::test_pass"]["path"], "tests/case_basic.py")
+        self.assertEqual(by_id["tests/case_basic.py::test_skip"]["markers"], ["skip"])
+        self.assertEqual(by_id["tests/case_params.py::test_tagged[t-smoke]"]["params"], {"id": "t-smoke"})
+        self.assertEqual(by_id["tests/case_params.py::test_square[1-1]"]["name"], "test_square[1-1]")
+        self.assertEqual(by_id["tests/case_params.py::test_square[1-1]"]["markers"], [])  # parametrize 隐藏
+        self.assertEqual(by_id["tests/case_slow.py::test_sleep"]["params"], {})
 
     async def test_request_id_idempotent_resends_same_response(self) -> None:
         await self.boot()
@@ -1051,14 +972,14 @@ class ExecutionIntegrationTests(ExecutorStackTestCase):
         self.plugin._on_job(
             self.job_payload(
                 "j-full",
-                params={"material_id": "m-run-1", "targets": ["cases/case_basic.py", "cases/case_params.py"]},
+                params={"material_id": "m-run-1", "targets": ["tests/case_basic.py", "tests/case_params.py"]},
             ),
             None,
         )
         self.plugin._on_job(
             self.job_payload(
                 "j-green",
-                params={"material_id": "m-run-1", "targets": ["cases/case_params.py"]},
+                params={"material_id": "m-run-1", "targets": ["tests/case_params.py"]},
             ),
             None,
         )
@@ -1072,19 +993,32 @@ class ExecutionIntegrationTests(ExecutorStackTestCase):
             {"total": 11, "passed": 7, "failed": 1, "errors": 0, "skipped": 1, "xfailed": 1, "xpassed": 1},
         )
         status_map = {str(c["case_id"]): str(c["status"]) for c in cast(list[Mapping[str, Any]], full["cases"])}
-        self.assertEqual(status_map["cases/case_basic.py::test_pass"], "passed")
-        self.assertEqual(status_map["cases/case_basic.py::test_fail"], "failed")
-        self.assertEqual(status_map["cases/case_basic.py::test_skip"], "skipped")
-        self.assertEqual(status_map["cases/case_basic.py::test_xfail"], "xfailed")
-        self.assertEqual(status_map["cases/case_basic.py::test_xpass"], "passed")  # 非严格 xpass 归 passed
-        self.assertEqual(status_map["cases/case_basic.py::test_xpass_strict"], "xpassed")
-        self.assertEqual(status_map["cases/case_params.py::test_square[1-1]"], "passed")
-        failed_case = next(c for c in cast(list[Mapping[str, Any]], full["cases"]) if c["case_id"] == "cases/case_basic.py::test_fail")
+        self.assertEqual(status_map["tests/case_basic.py::test_pass"], "passed")
+        self.assertEqual(status_map["tests/case_basic.py::test_fail"], "failed")
+        self.assertEqual(status_map["tests/case_basic.py::test_skip"], "skipped")
+        self.assertEqual(status_map["tests/case_basic.py::test_xfail"], "xfailed")
+        self.assertEqual(status_map["tests/case_basic.py::test_xpass"], "passed")  # 非严格 xpass 归 passed
+        self.assertEqual(status_map["tests/case_basic.py::test_xpass_strict"], "xpassed")
+        self.assertEqual(status_map["tests/case_params.py::test_square[1-1]"], "passed")
+        failed_case = next(c for c in cast(list[Mapping[str, Any]], full["cases"]) if c["case_id"] == "tests/case_basic.py::test_fail")
         self.assertIn("assert 1 == 2", str(failed_case["message"]))
         # succeeded 判定：failed+errors==0 且非取消/超时
         self.assertEqual(green["status"], "succeeded")
         self.assertEqual(green["error"], "")
         self.assertEqual(green["summary"]["passed"], 5)
+
+    async def test_targets_fallback_dot_runs_whole_project(self) -> None:
+        """params 无 targets / selection_id / unit_refs：兜底 ``["."]`` 跑整个工程。"""
+        await self.boot()
+        self.push_material(
+            "m-dot",
+            _zip_bytes({"tests/test_one.py": "def test_one():\n    assert True\n"}),
+        )
+        self.plugin._on_job(self.job_payload("j-dot", params={"material_id": "m-dot"}), None)
+        result = await self.wait_result()
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["summary"]["total"], 1)
+        self.assertEqual(result["summary"]["passed"], 1)
 
     async def test_artifacts_with_digest_uri_and_project_cleanup(self) -> None:
         await self.boot()
@@ -1092,7 +1026,7 @@ class ExecutionIntegrationTests(ExecutorStackTestCase):
         self.plugin._on_job(
             self.job_payload(
                 "j-art",
-                params={"material_id": "m-run-2", "targets": ["cases/case_params.py"]},
+                params={"material_id": "m-run-2", "targets": ["tests/case_params.py"]},
             ),
             None,
         )
@@ -1124,7 +1058,7 @@ class ExecutionIntegrationTests(ExecutorStackTestCase):
         self.plugin._on_job(
             self.job_payload(
                 "j-cancel",
-                params={"material_id": "m-slow", "targets": ["cases/case_slow.py::test_sleep_with_child"]},
+                params={"material_id": "m-slow", "targets": ["tests/case_slow.py::test_sleep_with_child"]},
                 deadline_ts=time.time() + 30.0,
             ),
             None,
@@ -1151,7 +1085,7 @@ class ExecutionIntegrationTests(ExecutorStackTestCase):
         self.plugin._on_job(
             self.job_payload(
                 "j-timeout",
-                params={"material_id": "m-slow-2", "targets": ["cases/case_slow.py::test_sleep"]},
+                params={"material_id": "m-slow-2", "targets": ["tests/case_slow.py::test_sleep"]},
                 deadline_ts=time.time() + 5.0,
             ),
             None,
@@ -1167,7 +1101,7 @@ class ExecutionIntegrationTests(ExecutorStackTestCase):
         self.plugin._on_job(
             self.job_payload(
                 "j-pri",
-                params={"material_id": "m-slow-3", "targets": ["cases/case_slow.py::test_sleep"]},
+                params={"material_id": "m-slow-3", "targets": ["tests/case_slow.py::test_sleep"]},
                 deadline_ts=time.time() + 20.0,
             ),
             None,
@@ -1281,7 +1215,7 @@ class LogStreamTests(ExecutorStackTestCase):
         self.plugin._on_job(
             self.job_payload(
                 "j-log-run",
-                params={"material_id": "m-log-run", "targets": ["cases/case_basic.py::test_fail"]},
+                params={"material_id": "m-log-run", "targets": ["tests/case_basic.py::test_fail"]},
             ),
             None,
         )
@@ -1295,14 +1229,22 @@ class LogStreamTests(ExecutorStackTestCase):
         for chunk in chunks:
             for line in cast(list[Mapping[str, Any]], chunk["lines"]):
                 self.assertIn(f"[{chunk['stream']}] {line['msg']}", text)  # 双写一致
-        # 哨兵 case 归属：失败输出挂到对应 nodeid
+        # 哨兵 case 归属（粘连哨兵拆分）：进度行挂对应 nodeid，CASE_END 归零后
+        # 会话级失败摘要不再挂 case（pytest 失败详情在会话末 FAILURES 段输出）
         fail_lines = [
             str(line["msg"])
             for chunk in chunks
-            if chunk["case_id"] == "cases/case_basic.py::test_fail"
+            if chunk["case_id"] == "tests/case_basic.py::test_fail"
             for line in cast(list[Mapping[str, Any]], chunk["lines"])
         ]
-        self.assertTrue(any("assert 1 == 2" in message for message in fail_lines))
+        self.assertTrue(any(message.strip() == "F" for message in fail_lines), fail_lines)
+        session_lines = [
+            str(line["msg"])
+            for chunk in chunks
+            if not chunk["case_id"]
+            for line in cast(list[Mapping[str, Any]], chunk["lines"])
+        ]
+        self.assertTrue(any("assert 1 == 2" in message for message in session_lines))
 
 
 # ================================================================ 7. 幂等 / proto
@@ -1313,7 +1255,7 @@ class IdempotencyTests(ExecutorStackTestCase):
         await self.boot()
         self.push_material("m-dup", fixture_zip(), FIXTURE_RECIPE)
         payload = self.job_payload(
-            "j-dup", params={"material_id": "m-dup", "targets": ["cases/case_params.py"]}
+            "j-dup", params={"material_id": "m-dup", "targets": ["tests/case_params.py"]}
         )
         self.plugin._on_job(dict(payload), None)
         self.plugin._on_job(dict(payload), None)  # 重复消息（执行前）

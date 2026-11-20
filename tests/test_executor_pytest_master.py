@@ -17,7 +17,8 @@
    无候选 :class:`NoCandidateNode`；
 5. 应答落库联动：analyze→``put_problems``（state 依 ok/severity）、
    collect→``put_cases``（真核心栈断言 material / material_case 行）；
-6. API 端点：6 端点成功 / 400 / 404 / 409 / 503 映射 + ``/healthz`` 挂载；
+6. API 端点：5 端点成功 / 400 / 404 / 503 映射 + ``/healthz`` 挂载；recipe
+   端点已随「pytest 不使用 recipe」移除（回落 404）；
 7. GC：``list_unreferenced`` → ``delete``（MaterialInUse / MaterialNotFound
    竞态跳过）。
 
@@ -228,25 +229,6 @@ class _RaceDeleteCore:
         return await self._real.delete_material(material_id)
 
 
-class _FaultyCore:
-    """test_core 代理：指定方法抛固定异常（API 错误映射测试）。"""
-
-    def __init__(self, real: Any, faults: Mapping[str, BaseException]) -> None:
-        self._real = real
-        self._faults = dict(faults)
-
-    def __getattr__(self, name: str) -> Any:
-        attr = getattr(self._real, name)
-        error = self._faults.get(name)
-        if error is None or not callable(attr):
-            return attr
-
-        async def faulted(*_args: Any, **_kwargs: Any) -> Any:
-            raise error
-
-        return faulted
-
-
 # ================================================================ 栈基类
 class MasterStackTestCase(unittest.IsolatedAsyncioTestCase):
     """管理端最小栈基类：``boot()`` 按用例装配（appconfig + db + comm 替身 +
@@ -316,13 +298,13 @@ class MasterStackTestCase(unittest.IsolatedAsyncioTestCase):
         *,
         name: str = "包A",
         data: bytes | None = None,
-        recipe: Mapping[str, Any] | None = None,
+        recipe: str = "",
     ) -> dict[str, Any]:
         payload = data if data is not None else _zip_bytes({"cases/test_a.py": "def test_a():\n    assert True\n"})
         result = await self.core.upload_material(
             name=name,
             data=payload,
-            recipe=dict(recipe or {}),
+            recipe=recipe,
         )
         return dict(cast(Mapping[str, Any], result))
 
@@ -363,7 +345,7 @@ class PushTests(MasterStackTestCase):
     async def test_meta_and_chunks_self_described_with_64k_split(self) -> None:
         await self.boot()
         data = os.urandom(150_000)  # 64KiB × 2 + 18928 → 3 块
-        material = await self.upload(data=data, recipe={"entry": "cases"})
+        material = await self.upload(data=data, recipe="canary-recipe")
         result = await self.master.push_material(str(material["id"]))
         self.assertEqual(result, {"pushed": ["node-a"], "failed": []})
         # 元包：自描述字段全（chunk 不等它，但预推按序先发）
@@ -377,7 +359,9 @@ class PushTests(MasterStackTestCase):
         self.assertEqual(meta["recipe_fingerprint"], material["recipe_fingerprint"])
         self.assertEqual(meta["total"], 3)
         self.assertEqual(meta["chunk_size"], DEFAULT_CHUNK)
-        self.assertEqual(meta["recipe"], {"entry": "cases"})
+        # recipe 是不透明字符串：原样透传，不解析
+        self.assertIsInstance(meta["recipe"], str)
+        self.assertEqual(meta["recipe"], "canary-recipe")
         self.assertNotIn("selections", meta)  # 未指定 selection_ids 不带字段
         # 分块：每条自描述（total / sha256 冗余进每条），b64 回拼 == 原文
         chunks = self.directed(TOPIC_MATERIAL_CHUNK)
@@ -562,7 +546,7 @@ class SelectionSyncTests(MasterStackTestCase):
             recipe_fingerprint=str(meta["recipe_fingerprint"]),
             total=int(meta["total"]),
             chunk_size=int(meta["chunk_size"]),
-            recipe=cast(Mapping[str, Any], meta["recipe"]),
+            recipe=str(meta["recipe"]),
             selections=meta["selections"],
         )
         selection_path = store.ready_dir(material_id) / "selections" / f"{selection_id}.json"
@@ -829,7 +813,7 @@ class ResultLandingTests(MasterStackTestCase):
 
 # ================================================================ 6. API 端点
 class ApiTests(unittest.IsolatedAsyncioTestCase):
-    """族内管理 API（DESIGN §8）：6 端点成功 / 400 / 404 / 409 / 503 + healthz。"""
+    """族内管理 API（DESIGN §8）：5 端点成功 / 400 / 404 / 503 + healthz（recipe 端点已移除）。"""
 
     context: Context | None
     core: Any
@@ -891,7 +875,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def upload(self, *, name: str = "API 包", data: bytes | None = None) -> str:
         payload = data if data is not None else _zip_bytes({"cases/a.py": "def test_a():\n    pass\n"})
-        result = await self.core.upload_material(name=name, data=payload, recipe={})
+        result = await self.core.upload_material(name=name, data=payload, recipe="")
         return str(cast(Mapping[str, Any], result)["id"])
 
     async def api(
@@ -902,8 +886,9 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         )
         return status, cast("dict[str, Any]", json.loads(payload))
 
-    # ------------------------------------------------------------ recipe
-    async def test_recipe_put_success_404_400_409(self) -> None:
+    # ------------------------------------------------------------ recipe 端点已移除
+    async def test_recipe_endpoint_removed(self) -> None:
+        """pytest 不使用 recipe：``PUT .../recipe`` 端点已删（回落 webapi JSON 404）。"""
         await self.boot()
         material_id = await self.upload()
         status, body = await self.api(
@@ -911,37 +896,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             method="PUT",
             body=json.dumps({"entry": "cases"}).encode("utf-8"),
         )
-        self.assertEqual(status, 200)
-        self.assertTrue(body["ok"])
-        self.assertEqual(cast("dict[str, Any]", body["material"])["recipe"], {"entry": "cases"})
-        self.assertEqual(cast("dict[str, Any]", body["material"])["state"], "uploaded")
-        # 404：材料不存在
-        status, body = await self.api(
-            "/api/pytest/materials/m-nope/recipe", method="PUT", body=b"{}"
-        )
         self.assertEqual(status, 404)
-        self.assertEqual(body["code"], "not_found")
-        # 400：非法 JSON / 非对象
-        status, body = await self.api(
-            f"/api/pytest/materials/{material_id}/recipe", method="PUT", body=b"{"
-        )
-        self.assertEqual(status, 400)
-        self.assertEqual(body["code"], "invalid_json")
-        status, body = await self.api(
-            f"/api/pytest/materials/{material_id}/recipe", method="PUT", body=b"[1]"
-        )
-        self.assertEqual(status, 400)
-        self.assertEqual(body["code"], "bad_request")
-        # 409：MaterialInUse 竞态映射
-        proxy = _FaultyCore(self.core, {"update_recipe": MaterialInUse("材料被引用")})
-        with mock.patch(
-            "master_plugins.executor_pytest.api_service.require_core", return_value=proxy
-        ):
-            status, body = await self.api(
-                f"/api/pytest/materials/{material_id}/recipe", method="PUT", body=b"{}"
-            )
-        self.assertEqual(status, 409)
-        self.assertEqual(body["code"], "material_in_use")
+        self.assertIsNone(body.get("ok"))  # 不是族内错误信封，是路由不存在
 
     # ------------------------------------------------------------ selections
     async def test_selection_save_success_400_404(self) -> None:

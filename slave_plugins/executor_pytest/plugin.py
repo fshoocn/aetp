@@ -15,8 +15,8 @@
 3. **材料接收**（§5）：``pytest.material.chunk`` 自描述分块（不依赖元包先行，
    跨 topic 乱序安全）——按 ``(material_id, index)`` 幂等落盘，齐块拼装校验
    sha256，一致解压置 ready；不一致删分片回 ``missing`` 重拉一轮，再败放弃；
-   ``pytest.material`` 元包缓存 recipe（组装依据，晚到无妨）+ selection 清单
-   （§20-Q1 (a)：落 ``{cache}/{material_id}/selections/``）；
+   ``pytest.material`` 元包缓存 recipe（**不透明字符串**，透传不解析）+ selection
+   清单（§20-Q1 (a)：落 ``{cache}/{material_id}/selections/``）；
 4. **inspect**（§6/§7）：``pytest.inspect`` 幂等 ``request_id``（应答缓存、
    重复请求重发同一应答），analyze 五项检查 / collect 结构化清单，
    应答 ``pytest.inspect.result``；
@@ -60,7 +60,7 @@ from common.test_contracts import (
     JobResult,
 )
 
-from .assemble import AssembleError, extract_zip, merge_recipe
+from .assemble import AssembleError, extract_zip
 from .config import PytestExecutorConfig
 from .executor import JobRequest, RunResult, run_job, zero_counts
 from .inspect import InspectMode, make_problem, run_inspect
@@ -101,7 +101,6 @@ CAP_DETAIL: dict[str, object] = {
             "extra_args": {"type": "array", "items": {"type": "string"}},
             "keyword": {"type": "string"},
             "env": {"type": "object"},
-            "recipe_override": {"type": "object"},
             "selection_id": {"type": "string"},
             "workdir": {"type": "string"}, "python": {"type": "string"},
         },
@@ -242,7 +241,7 @@ class MaterialStore:
 
     # -- 状态 ---------------------------------------------------------------
     def is_ready(self, material_id: str) -> bool:
-        """ready = 解压目录在 + 元包在（组装需要 recipe，§5.1）。"""
+        """ready = 解压目录在 + 元包在（§5.1）。"""
         return self.ready_dir(material_id).is_dir() and self._meta_path(material_id).is_file()
 
     def meta(self, material_id: str) -> dict[str, Any] | None:
@@ -252,12 +251,13 @@ class MaterialStore:
             return None
         return dict(cast(Mapping[str, Any], raw)) if isinstance(raw, Mapping) else None
 
-    def recipe_of(self, material_id: str) -> dict[str, Any] | None:
+    def recipe_of(self, material_id: str) -> str:
+        """元包 recipe 字段（**不透明字符串**，透传不解析；非字符串回空串）。"""
         meta = self.meta(material_id)
         if meta is None:
-            return None
+            return ""
         recipe = meta.get("recipe")
-        return dict(cast(Mapping[str, Any], recipe)) if isinstance(recipe, Mapping) else {}
+        return recipe if isinstance(recipe, str) else ""
 
     def total_of(self, material_id: str, fallback: int = 0) -> int:
         meta = self.meta(material_id)
@@ -275,7 +275,7 @@ class MaterialStore:
         parts = self._parts_dir(material_id)
         return [index for index in range(total) if not (parts / f"{index:06d}.part").is_file()]
 
-    # -- 元包（recipe / selections）-----------------------------------------
+    # -- 元包（recipe 不透明字符串 / selections）----------------------------
     def set_meta(
         self,
         material_id: str,
@@ -284,17 +284,20 @@ class MaterialStore:
         recipe_fingerprint: str,
         total: int,
         chunk_size: int,
-        recipe: Mapping[str, Any],
+        recipe: str,
         selections: object,
     ) -> None:
-        """缓存元包（晚到无妨）；ready 后立即物化 selection 清单。"""
+        """缓存元包（晚到无妨）；ready 后立即物化 selection 清单。
+
+        ``recipe`` 是执行器自定义不透明字符串，原样落盘、不解析。
+        """
         payload: dict[str, object] = {
             "material_id": material_id,
             "sha256": sha256,
             "recipe_fingerprint": recipe_fingerprint,
             "total": total,
             "chunk_size": chunk_size,
-            "recipe": dict(recipe),
+            "recipe": recipe,
             "selections": cast(list[object], selections) if isinstance(selections, list) else [],
         }
         path = self._meta_path(material_id)
@@ -826,21 +829,15 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
         self._gc_cache()
 
     def _build_request(self, item: _QueuedJob) -> tuple[JobRequest, Path]:
-        """解析 params / 配方 / 路径（§11.2 / §15）→ JobRequest。"""
+        """解析 params / 路径（§11.2 / §15）→ JobRequest。"""
         raw = item.raw
         raw_params = raw.get("params")
         typed_params: Mapping[str, Any] = cast("Mapping[str, Any]", raw_params) if isinstance(raw_params, Mapping) else {}
-        recipe_override = typed_params.get("recipe_override")
-        base_recipe: Mapping[str, Any] = {}
         material_dir: Path | None = None
         zip_path: Path | None = None
         if item.material_id:
             material_dir = self._materials.ready_dir(item.material_id)
-            recipe = self._materials.recipe_of(item.material_id)
-            base_recipe = recipe if recipe is not None else {}
             zip_path = self._materials.bundle_path(item.material_id)
-        override = cast(Mapping[str, Any], recipe_override) if isinstance(recipe_override, Mapping) else None
-        recipe = merge_recipe(base_recipe, override)
         work_raw = typed_params.get("workdir") or self.config.workdir
         base = self._anchor_node(str(work_raw)) if work_raw else self._node_dir
         base = self._inside_node(base, "workdir")
@@ -857,7 +854,6 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
             attempt=item.attempt,
             params=typed_params,
             shard=cast(Mapping[str, Any], shard) if shard is not None else None,
-            recipe=recipe,
             config=self._sub_config(typed_params),
             zip_path=zip_path,
             project_dir=project_dir,
@@ -996,7 +992,7 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
 
     # -- 材料接收（§5）-----------------------------------------------------
     def _on_material(self, payload: object, _meta: object) -> None:
-        """元包：缓存 recipe（组装依据）+ selection 清单；晚到无妨。"""
+        """元包：缓存 recipe（不透明字符串，透传不解析）+ selection 清单；晚到无妨。"""
         if not self._check_proto(payload, "pytest.material"):
             return
         raw = cast(Mapping[str, Any], payload)
@@ -1011,7 +1007,7 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
             recipe_fingerprint=str(raw.get("recipe_fingerprint") or ""),
             total=_int_or(raw.get("total"), 0),
             chunk_size=_int_or(raw.get("chunk_size"), 0),
-            recipe=cast(Mapping[str, Any], recipe) if isinstance(recipe, Mapping) else {},
+            recipe=recipe if isinstance(recipe, str) else "",
             selections=raw.get("selections"),
         )
         self.ctx.logger.info("材料 %s 元包已缓存", material_id)
@@ -1096,12 +1092,10 @@ class PytestExecutorPlugin(Service[PytestExecutorConfig]):
                     started,
                 )
             else:
-                recipe = self._materials.recipe_of(material_id) or {}
                 temp_dir = self._node_dir / "workdir" / _INSPECT_DIR / _safe_segment(request_id)
                 outcome = await run_inspect(
                     mode,
                     zip_path=self._materials.bundle_path(material_id),
-                    recipe=recipe,
                     temp_dir=temp_dir,
                     config=self.config,
                 )

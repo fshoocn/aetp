@@ -9,7 +9,6 @@
 族内端点（DESIGN §8；材料 CRUD 已由核心 ``/api/test/materials`` 承担，
 不重复实现）：
 
-* ``PUT /api/pytest/materials/{material_id}/recipe`` —— 更新配方；
 * ``POST /api/pytest/materials/{material_id}/selections`` —— 保存选择集；
 * ``POST /api/pytest/materials/{material_id}/push`` —— 预推材料（§5.2）；
 * ``POST /api/pytest/materials/{material_id}/inspect`` —— 触发分析 / 解析；
@@ -136,12 +135,6 @@ class ExecPytestMasterApiService(Service[None]):
         句柄作为清理函数返回，随 fiber 卸载注销。
         """
         api = self.ctx.webapi
-        api.put(
-            "/api/pytest/materials/{material_id}/recipe",
-            self._material_recipe,
-            kind="api",
-            name="pytest-master.material-recipe",
-        )
         api.post(
             "/api/pytest/materials/{material_id}/selections",
             self._selection_save,
@@ -182,15 +175,6 @@ class ExecPytestMasterApiService(Service[None]):
         return dict(self._master.stats())
 
     # -- 族内管理 API（DESIGN §8） -------------------------------------------
-    @_guarded
-    async def _material_recipe(
-        self, request: Request, material_id: str
-    ) -> dict[str, object] | JSONResponse:
-        """更新配方：body = recipe JSON；状态回 uploaded 需重分析；不存在 404。"""
-        recipe = _required_json_object(await request.body())
-        material = await self._core.update_recipe(material_id, recipe)
-        return {"ok": True, "material": dict(material)}
-
     @_guarded
     async def _selection_save(
         self, request: Request, material_id: str

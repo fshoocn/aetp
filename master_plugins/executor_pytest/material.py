@@ -5,7 +5,8 @@
   selections?}`` 与分块 ``pytest.material.chunk``
   ``{proto, material_id, sha256, total, index, data_b64}``——每条 chunk 原文
   ``chunk_size``（默认 64KiB，b64 后约 87KiB），元信息冗余进每条 chunk，
-  跨 topic 乱序安全（chunk 不等元包先行）；
+  跨 topic 乱序安全（chunk 不等元包先行）；``recipe`` 是执行器自定义
+  **不透明字符串**，透传不解析；
 * **selections 随预推同步**（§20-Q1 定案 (a)）：``[{selection_id, case_ids}]``
   进元包，执行端落 ``{cache}/{material_id}/selections/{selection_id}.json``；
 * **预推**（§5.2 主路径）：候选 = ``executor/pytest`` 能力节点，``push_concurrency``
@@ -96,7 +97,7 @@ class PushEntry:
     total: int
     chunk_size: int
     sha256: str
-    #: 元包载荷（整包补推复用；只含 recipe / selections，不是材料副本）
+    #: 元包载荷（整包补推复用；只含 recipe 不透明字符串 / selections，不是材料副本）
     meta: dict[str, Any] = field(default_factory=dict[str, Any])
     #: ``material_wait``（预推在途）/ ``pushed``（预推完成）
     state: str = MATERIAL_WAIT
@@ -201,7 +202,7 @@ class MaterialPusher:
             "recipe_fingerprint": str(material.get("recipe_fingerprint") or ""),
             "total": len(chunks),
             "chunk_size": chunk_size,
-            "recipe": dict(cast("Mapping[str, Any]", recipe)) if isinstance(recipe, Mapping) else {},
+            "recipe": _opaque_recipe(recipe),
         }
         if selections is not None:
             meta_payload["selections"] = selections
@@ -417,14 +418,11 @@ class MaterialPusher:
         if prior is not None:
             meta = dict(prior.meta)
         else:
-            recipe = material.get("recipe")
             meta = {
                 "proto": PROTO,
                 "material_id": material_id,
                 "recipe_fingerprint": str(material.get("recipe_fingerprint") or ""),
-                "recipe": dict(cast("Mapping[str, Any]", recipe))
-                if isinstance(recipe, Mapping)
-                else {},
+                "recipe": _opaque_recipe(material.get("recipe")),
             }
         chunk_size = max(1, int(self._chunk_size()))
         chunks = split_chunks(data, chunk_size)
@@ -439,6 +437,11 @@ class MaterialPusher:
             "材料 %s 未跟踪缺块请求自愈：%s 整包补推 %s 块", material_id, node_id, len(chunks)
         )
         return len(chunks)
+
+
+def _opaque_recipe(raw: object) -> str:
+    """recipe 字段 → 不透明字符串透传（非字符串回空串，不解析）。"""
+    return raw if isinstance(raw, str) else ""
 
 
 def _int_or(raw: object, fallback: int) -> int:

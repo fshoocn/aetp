@@ -1,17 +1,19 @@
-"""基础用例：pass / fail / skip / xfail / xpass（junit 六种 status 的覆盖靶）。
+"""基础用例：pass / fail / skip / xfail / xpass（junit 六 status 的覆盖靶）。
 
-非平铺夹具（DESIGN §16.2）：本文件住 ``src/cases/``，组装配方铺排到
-``cases/`` 后才可收集——验证 layout 铺排是「能跑」的前提。
+平铺夹具工程（与 examples/pytest_demo 同构）：根 conftest.py 的 ``greeting``
+fixture 与 ``helpers`` 跨包 import 均直连可跑，无需任何组装铺排。
 """
 
 from __future__ import annotations
 
 import pytest
+from helpers import add
 
 
 def test_pass(greeting: str) -> None:
-    """依赖根 conftest 的 fixture——验证 conf/conftest.py 铺排接线。"""
+    """依赖根 conftest 的 fixture + helpers 跨包 import。"""
     assert greeting == "hello aetp"
+    assert add(1, 2) == 3
 
 
 def test_fail() -> None:

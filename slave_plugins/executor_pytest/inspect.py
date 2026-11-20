@@ -2,16 +2,16 @@
 
 * **请求**：``{proto, request_id, material_id, mode: "analyze"|"collect", node_id?}``；
   ``request_id`` 幂等（应答缓存，重复请求重发同一应答——缓存由插件层持有）；
-* **analyze**：临时目录组装后跑 §6.2 五项检查——包完整性（``material.corrupt``）、
-  配方校验（``recipe.invalid``）、语法（``syntax.error``）、依赖声明
-  （``deps.missing``，warning）、可收集性（``collect.error``）；
-  问题模型 ``{code, path, line?, message, severity}``；
-* **collect**：组装后经 ``aetp_marker`` 插件导出结构化用例清单（§7，
+* **analyze**：临时目录解压后跑检查——包完整性（``material.corrupt``）、
+  语法（``syntax.error``）、依赖声明（``deps.missing``，warning——探测包内
+  ``requirements.txt``，逐行解析后 pip show，缺失报 warning；无该文件跳过）、
+  可收集性（``collect.error``）；问题模型 ``{code, path, line?, message, severity}``；
+  recipe 是不透明字符串，不参与检查；
+* **collect**：解压后经 ``aetp_marker`` 插件导出结构化用例清单（§7，
   ``AETP_MARKER_OUT``）；``params`` 为 nodeid 近似值；
 * 内部单项检查超时 120s（整体超时由主端管，本端不设限）。
 
-临时目录随检查结束清理；``setup`` 命令不执行（决策 D15），材料按内部可信
-处理（决策 D16）。
+临时目录随检查结束清理；材料按内部可信处理（决策 D16）。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from .assemble import AssembleError, apply_layout, extract_zip, validate_recipe
+from .assemble import AssembleError, extract_zip
 from .config import PytestExecutorConfig
 from .executor import MARKER_DIR, LineSink, run_process
 
@@ -71,11 +71,10 @@ async def run_inspect(
     mode: InspectMode,
     *,
     zip_path: Path,
-    recipe: Mapping[str, Any],
     temp_dir: Path,
     config: PytestExecutorConfig,
 ) -> dict[str, Any]:
-    """在临时目录组装后执行检查 / 解析；返回应答核心
+    """在临时目录解压后执行检查 / 解析；返回应答核心
     ``{ok, problems, cases, duration_s}``（调用方补 proto / request_id / node_id）。
     """
     started = time.time()
@@ -93,23 +92,13 @@ async def run_inspect(
             except AssembleError as error:
                 problems.append(make_problem("material.corrupt", f"材料解压失败：{error}"))
         if extract_ok:
-            problems.extend(_check_recipe(recipe, temp_dir))
-            layout_ok = not any(item["severity"] == "error" for item in problems)
-            if layout_ok:
-                try:
-                    apply_layout(temp_dir, recipe)
-                except AssembleError as error:
-                    problems.append(make_problem("recipe.invalid", f"配方铺排失败：{error}"))
-                    layout_ok = False
-            if layout_ok:
-                problems.extend(_check_entry(recipe, temp_dir))
-                if mode == "analyze":
-                    problems.extend(await _check_syntax(temp_dir, config.python))
-                    problems.extend(await _check_deps(temp_dir, recipe, config.python))
-                collected, collect_problems = await _check_collect(temp_dir, recipe, config.python, export=(mode == "collect"))
-                problems.extend(collect_problems)
-                if mode == "collect" and not collect_problems:
-                    cases = collected
+            if mode == "analyze":
+                problems.extend(await _check_syntax(temp_dir, config.python))
+                problems.extend(await _check_deps(temp_dir, config.python))
+            collected, collect_problems = await _check_collect(temp_dir, config.python, export=(mode == "collect"))
+            problems.extend(collect_problems)
+            if mode == "collect" and not collect_problems:
+                cases = collected
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
     ok = not any(item["severity"] == "error" for item in problems)
@@ -138,39 +127,7 @@ def _check_package(zip_path: Path) -> list[dict[str, Any]]:
     return []
 
 
-# -- 2. 配方校验 -------------------------------------------------------------
-
-
-def _check_recipe(recipe: Mapping[str, Any], root: Path) -> list[dict[str, Any]]:
-    """检查项 2（``recipe.invalid``）：结构合法 + layout src 存在 + env 合法。"""
-    problems = [
-        make_problem("recipe.invalid", message) for message in validate_recipe(recipe)
-    ]
-    layout = recipe.get("layout")
-    if isinstance(layout, list):
-        for index, entry in enumerate(cast(list[object], layout)):
-            if not isinstance(entry, Mapping):
-                continue
-            src = cast(Mapping[object, object], entry).get("src")
-            if isinstance(src, str) and src.strip():
-                source = (root / src).resolve()
-                if not source.is_relative_to(root.resolve()) or not source.exists():
-                    problems.append(make_problem("recipe.invalid", f"layout[{index}] 源不存在或越界：{src}"))
-    return problems
-
-
-def _check_entry(recipe: Mapping[str, Any], root: Path) -> list[dict[str, Any]]:
-    """检查项 2 续（``recipe.invalid``）：entry 铺排后可达。"""
-    entry = recipe.get("entry")
-    if not isinstance(entry, str) or not entry.strip():
-        return []  # 无 entry 时执行端兜底 targets，不算问题
-    target = (root / entry.strip()).resolve()
-    if not target.is_relative_to(root.resolve()) or not target.exists():
-        return [make_problem("recipe.invalid", f"entry 不可达：{entry}")]
-    return []
-
-
-# -- 3. 语法 -----------------------------------------------------------------
+# -- 2. 语法 -----------------------------------------------------------------
 
 #: 逐 .py 编译的探针脚本（真实解释器执行，版本敏感的语法如实暴露）；
 #: 内置 ``compile()`` 与 ``py_compile`` 同源同检，但不落字节码（不污染材料目录）
@@ -254,15 +211,15 @@ def _relative(path: str, root: Path) -> str:
         return path
 
 
-# -- 4. 依赖声明 -------------------------------------------------------------
+# -- 3. 依赖声明 -------------------------------------------------------------
 
 
-async def _check_deps(root: Path, recipe: Mapping[str, Any], python: str) -> list[dict[str, Any]]:
-    """检查项 4（``deps.missing``，warning）：requirements 与环境探测（pip show）。"""
-    requirements: list[str] = []
-    for source in (recipe.get("requirements"), _root_requirements(root)):
-        if isinstance(source, list):
-            requirements.extend(str(item).strip() for item in cast(list[object], source))
+async def _check_deps(root: Path, python: str) -> list[dict[str, Any]]:
+    """检查项（``deps.missing``，warning）：包内 ``requirements.txt`` 逐行探测（pip show）。
+
+    不存在 ``requirements.txt`` 则跳过（不报问题）。
+    """
+    requirements = _root_requirements(root)
     problems: list[dict[str, Any]] = []
     checked: set[str] = set()
     for requirement in requirements:
@@ -290,7 +247,7 @@ async def _check_deps(root: Path, recipe: Mapping[str, Any], python: str) -> lis
 
 
 def _root_requirements(root: Path) -> list[str]:
-    """工程根的 requirements.txt（材料自带声明，与 recipe.requirements 并检）。"""
+    """包内 ``requirements.txt``（缺失返回空 → 依赖探测跳过）。"""
     path = root / "requirements.txt"
     if not path.is_file():
         return []
@@ -305,19 +262,19 @@ def _dist_name(requirement: str) -> str:
     return head.strip()
 
 
-# -- 5. 可收集性 / 用例解析 ---------------------------------------------------
+# -- 4. 可收集性 / 用例解析 ---------------------------------------------------
 
 
 async def _check_collect(
     root: Path,
-    recipe: Mapping[str, Any],
     python: str,
     *,
     export: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """检查项 5（``collect.error``）：``--collect-only`` 经 marker 插件；export 时带清单。"""
-    entry = recipe.get("entry")
-    target = entry.strip() if isinstance(entry, str) and entry.strip() else "."
+    """检查项（``collect.error``）：``--collect-only`` 经 marker 插件；export 时带清单。
+
+    收集目标固定工程根 ``.``（平铺工程）。
+    """
     collect_out = root / _COLLECT_OUT
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
@@ -325,7 +282,7 @@ async def _check_collect(
     if export:
         env["AETP_MARKER_OUT"] = str(collect_out)
     capture = _Capture()
-    argv = [python or sys.executable, "-m", "pytest", "--collect-only", "-q", target, "-p", "aetp_marker"]
+    argv = [python or sys.executable, "-m", "pytest", "--collect-only", "-q", ".", "-p", "aetp_marker"]
     outcome = await run_process(argv, cwd=root, env=env, timeout_s=CHECK_TIMEOUT_S, streamer=capture)
     problems: list[dict[str, Any]] = []
     if outcome.timed_out:

@@ -1,4 +1,4 @@
-"""参数化用例：parametrize 展开为多条 nodeid（DESIGN §7 params 近似口径靶）。"""
+"""参数化用例：parametrize 展开为多条 nodeid（params 近似口径靶）。"""
 
 from __future__ import annotations
 
