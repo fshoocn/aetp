@@ -1,9 +1,11 @@
 import Button from 'primevue/button';
 import Column from 'primevue/column';
 import DataTable from 'primevue/datatable';
+import Dialog from 'primevue/dialog';
 import IconField from 'primevue/iconfield';
 import InputIcon from 'primevue/inputicon';
 import InputText from 'primevue/inputtext';
+import Menu from 'primevue/menu';
 import Message from 'primevue/message';
 import Panel from 'primevue/panel';
 import Select from 'primevue/select';
@@ -23,9 +25,13 @@ const SHARED_COMPONENTS = {
     Button,
     Column,
     DataTable,
+    // Dialog/Menu 是 HTML 同名原生标签，插件 SFC 运行时编译会解析成原生元素
+    // （实测 <menu model="...">）——用 Pv 前缀别名注册规避
+    PvDialog: Dialog,
     IconField,
     InputIcon,
     InputText,
+    PvMenu: Menu,
     Message,
     Panel,
     Select,

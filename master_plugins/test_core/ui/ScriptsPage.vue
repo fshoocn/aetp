@@ -8,6 +8,14 @@
                 </p>
             </div>
             <div class="scripts-page__actions">
+                <Button
+                    label="上传脚本"
+                    icon="pi pi-upload"
+                    size="small"
+                    @mouseenter="showUploadMenu"
+                    @click="toggleUploadMenu"
+                />
+                <PvMenu ref="uploadMenu" :model="uploadMenuItems" popup @show="menuOpen = true" @hide="menuOpen = false" />
                 <Button label="刷新" icon="pi pi-refresh" size="small" :loading="loading" @click="reloadAll" />
             </div>
         </header>
@@ -56,50 +64,34 @@
                 <Column field="updated_ts" header="更新时间" sortable style="min-width: 10rem">
                     <template #body="{ data }">{{ formatTime(data.updated_ts) }}</template>
                 </Column>
+                <Column header="操作" style="min-width: 9rem">
+                    <template #body="{ data }">
+                        <div class="scripts-page__row-actions">
+                            <Button label="下载" icon="pi pi-download" size="small" severity="secondary" text @click="downloadMaterial(materialIdOf(data))" />
+                            <Button label="删除" icon="pi pi-trash" size="small" severity="danger" text @click="deleteMaterial(materialIdOf(data))" />
+                        </div>
+                    </template>
+                </Column>
                 <template #empty>
                     <span class="scripts-page__muted">暂无材料</span>
                 </template>
             </DataTable>
         </Panel>
 
-        <Panel header="执行器脚本面板">
-            <p v-if="loadingTabs" class="scripts-page__hint">页签加载中……</p>
-            <p v-else-if="!tabs.length" class="scripts-page__hint">
-                暂无执行器：能力信封与已注册脚本管理面板均为空（执行器上线或挂载面板后自动出现）
-            </p>
-            <template v-else>
-                <div class="scripts-page__tabs" role="tablist" aria-label="执行器">
-                    <Button
-                        v-for="tab in tabs"
-                        :key="tab.id"
-                        :label="tab.id"
-                        role="tab"
-                        :aria-selected="activeId === tab.id"
-                        :severity="activeId === tab.id ? 'primary' : 'secondary'"
-                        :outlined="activeId !== tab.id"
-                        size="small"
-                        @click="activeId = tab.id"
-                    />
-                </div>
-                <p v-if="activeInfo && (activeInfo.summary || activeInfo.version)" class="scripts-page__hint">
-                    {{ activeInfo.summary || activeInfo.id }}
-                    <template v-if="activeInfo.version"> · v{{ activeInfo.version }}</template>
-                </p>
-                <div
-                    v-for="tab in tabs"
-                    v-show="tab.id === activeId"
-                    :key="`outlet-${tab.id}`"
-                    class="scripts-page__tab-body"
-                    role="tabpanel"
-                >
-                    <!-- tab = slot 贡献 ∪ 能力信封（M2）：每个执行器 id 都开槽，
-                         空槽由 PluginUiOutlet 的 <slot/> 兜底占位 -->
-                    <PluginUiOutlet :name="`scripts:${tab.id}`">
-                        <span class="scripts-page__muted">该执行器未提供脚本管理面板</span>
-                    </PluginUiOutlet>
-                </div>
-            </template>
-        </Panel>
+        <!-- 执行器上传 UI 按需弹出（需求：上传脚本按钮 → 悬浮菜单选执行器 → 弹窗）；
+             内容仍经 slot 挂载各执行器面板（scripts:<id>），空槽兜底占位 -->
+        <PvDialog
+            v-model:visible="uploadDialogVisible"
+            modal
+            :header="`上传脚本 · ${uploadTarget}`"
+            :style="{ width: '90vw', maxWidth: '1200px' }"
+        >
+            <div v-if="uploadTarget" :key="uploadTarget" class="scripts-page__dialog-body">
+                <PluginUiOutlet :name="`scripts:${uploadTarget}`">
+                    <span class="scripts-page__muted">该执行器未提供脚本管理面板</span>
+                </PluginUiOutlet>
+            </div>
+        </PvDialog>
     </section>
 </template>
 
@@ -159,7 +151,9 @@ export default {
             capabilities: [],
             loadingTabs: false,
             tabNotice: '',
-            activeId: '',
+            menuOpen: false,
+            uploadDialogVisible: false,
+            uploadTarget: '',
             error: '',
             loading: false
         };
@@ -184,22 +178,17 @@ export default {
             }
             return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
         },
-        activeInfo() {
-            return this.tabs.find((tab) => tab.id === this.activeId) || null;
+        // 「上传脚本」悬浮菜单：执行器类型 = slot 贡献 ∪ 能力信封（与原页签同源）
+        uploadMenuItems() {
+            if (!this.tabs.length) return [{ label: '暂无执行器', disabled: true }];
+            return this.tabs.map((tab) => ({
+                label: tab.summary ? `${tab.id} — ${tab.summary}` : tab.id,
+                icon: 'pi pi-box',
+                command: () => this.openUploadDialog(tab.id)
+            }));
         },
         executorFilterOptions() {
             return [{ label: '全部执行器', value: '' }, ...this.tabs.map((tab) => ({ label: tab.id, value: tab.id }))];
-        }
-    },
-    watch: {
-        tabs: {
-            immediate: true,
-            handler(list) {
-                if (list.length && !list.some((tab) => tab.id === this.activeId)) {
-                    this.activeId = list[0].id;
-                }
-                if (!list.length) this.activeId = '';
-            }
         }
     },
     mounted() {
@@ -256,6 +245,65 @@ export default {
         reasonText(reason) {
             return String((reason && reason.message) || reason);
         },
+        showUploadMenu(event) {
+            // 悬浮即弹出执行器类型菜单（PrimeVue Menu popup 仅暴露 toggle）
+            if (this.menuOpen) return;
+            this.$refs.uploadMenu && this.$refs.uploadMenu.toggle(event);
+            this.menuOpen = true;
+        },
+        toggleUploadMenu(event) {
+            this.$refs.uploadMenu && this.$refs.uploadMenu.toggle(event);
+            this.menuOpen = !this.menuOpen;
+        },
+        openUploadDialog(executorId) {
+            this.uploadTarget = String(executorId || '');
+            if (this.uploadTarget) this.uploadDialogVisible = true;
+        },
+        materialIdOf(row) {
+            return String((row && (row.material_id || row.id)) || '');
+        },
+        async downloadMaterial(materialId) {
+            // 材料生命周期管理归 test_core 总表（§7.2 裁决）：<a> 带不上鉴权头，走 fetch blob
+            if (!materialId) return;
+            try {
+                const response = await fetch(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}/download`), {
+                    headers: authHeaders()
+                });
+                if (!response.ok) throw new Error(`下载失败 (${response.status})`);
+                const blob = await response.blob();
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `${materialId}.zip`;
+                link.click();
+                URL.revokeObjectURL(link.href);
+            } catch (reason) {
+                this.error = `下载失败：${this.reasonText(reason)}`;
+            }
+        },
+        deleteMaterial(materialId) {
+            // 删除是材料生命周期语义（引用保护 / 级联清理在 core 服务面）：
+            // 统一收口到本总表，执行器面板不放删除入口
+            if (!materialId) return;
+            this.$confirm.require({
+                header: '删除材料',
+                message: `确认删除材料「${materialId}」？用例清单与选择集一并删除。`,
+                icon: 'pi pi-exclamation-triangle',
+                acceptLabel: '删除',
+                rejectLabel: '取消',
+                accept: async () => {
+                    try {
+                        await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(materialId)}`), { method: 'DELETE' });
+                        this.error = '';
+                        await this.loadMaterials();
+                    } catch (reason) {
+                        const text = this.reasonText(reason);
+                        this.error = text.includes('material_in_use') || text.includes('引用')
+                            ? `引用冲突：${text}——被任务 / 计划 / 选择集引用的材料禁止删除，请先解除引用`
+                            : `删除失败：${text}`;
+                    }
+                }
+            });
+        },
         stateText(state) {
             return MATERIAL_STATE_TEXT[state] || state || '—';
         },
@@ -306,6 +354,19 @@ export default {
 .scripts-page__muted {
     color: var(--text-color-secondary);
     font-size: 0.875rem;
+}
+
+.scripts-page__row-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+    flex-wrap: wrap;
+}
+
+.scripts-page__dialog-body {
+    min-width: 0;
+    max-height: 75vh;
+    overflow: auto;
 }
 
 .scripts-page__actions {
