@@ -18,7 +18,11 @@
 
         <Panel header="上传材料（zip）">
             <div class="materials-panel__form">
-                <input type="file" accept=".zip,application/zip" class="materials-panel__file" @change="onFileChange" />
+                <input ref="fileInput" type="file" accept=".zip,application/zip" class="materials-panel__file" @change="onFileChange" />
+                <div class="materials-panel__picker">
+                    <Button label="选择 zip 文件" icon="pi pi-folder-open" size="small" severity="secondary" @click="pickFile" />
+                    <span class="materials-panel__muted">{{ file ? '已选：' + file.name : '未选择 zip 文件' }}</span>
+                </div>
                 <InputText v-model="uploadName" placeholder="材料名（默认取文件名）" class="materials-panel__name" />
                 <textarea
                     v-model="uploadRecipe"
@@ -27,7 +31,7 @@
                 ></textarea>
                 <div class="materials-panel__actions">
                     <Button label="上传" icon="pi pi-upload" size="small" :loading="uploading" :disabled="!file" @click="uploadMaterial" />
-                    <span v-if="!file" class="materials-panel__muted">请先点 Choose File 选择 zip 文件</span>
+                    <span v-if="!file" class="materials-panel__muted">请先点「选择 zip 文件」</span>
                 </div>
             </div>
             <p class="materials-panel__hint">
@@ -418,6 +422,11 @@ export default {
                 this.cases = [];
             }
         },
+        pickFile() {
+            // 原生 input 被面板样式拉伸后按钮在部分浏览器/DPI 下不可见：
+            // 隐藏原生 input、以显式按钮触发文件选择（跨浏览器稳定）
+            this.$refs.fileInput && this.$refs.fileInput.click();
+        },
         onFileChange(event) {
             const files = event.target && event.target.files;
             this.file = files && files.length ? files[0] : null;
@@ -745,7 +754,19 @@ export default {
 }
 
 .materials-panel__file {
-    font-size: 0.875rem;
+    /* 视觉隐藏（保留键盘/无障碍可达）：选择动作走「选择 zip 文件」按钮 */
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    overflow: hidden;
+}
+
+.materials-panel__picker {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .materials-panel__textarea {
