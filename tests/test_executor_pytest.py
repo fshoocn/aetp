@@ -10,8 +10,9 @@
 3. 材料接收：自描述分块乱序（含元包晚到）拼装 ready、sha 不符回 missing、
    幂等重块、selections 物化（pytest.material 元包带 selections）；
 4. inspect：问题码（deps.missing warning——包内 requirements.txt 探测 /
-   syntax.error / collect.error；无 requirements.txt 跳过探测）、collect 清单
-   结构（case_id/markers/params 近似）、request_id 幂等重发同应答；
+   syntax.error / collect.error；无 requirements.txt 跳过探测）、analyze 应答
+   同带用例清单（case_id/markers/params 近似，与 collect 同构）、collect 清单
+   结构、request_id 幂等重发同应答；
 5. 执行集成（真子进程跑 tests/fixtures/pytest_project 平铺工程）：junit 六
    status 映射与计数、succeeded 判定、产物（junit.xml/pytest.log、sha256/size、
    local:/// 盘符 uri）、组装目录清理；
@@ -773,6 +774,12 @@ class InspectTests(ExecutorStackTestCase):
         dep = next(p for p in problems if p["code"] == "deps.missing")
         self.assertIn("aetp-missing-probe-dep", str(dep["message"]))
         self.assertEqual(dep["path"], "requirements.txt")
+        # analyze 应答同带用例清单（fixtures 平铺包）：含 markers / params
+        cases = cast(list[dict[str, Any]], outcome["cases"])
+        self.assertEqual(len(cases), 13)  # 与 collect 清单同构：6 基础 + 5 参数化 + 2 慢用例
+        by_id = {str(item["case_id"]): item for item in cases}
+        self.assertEqual(by_id["tests/case_basic.py::test_skip"]["markers"], ["skip"])
+        self.assertEqual(by_id["tests/case_params.py::test_tagged[t-smoke]"]["params"], {"id": "t-smoke"})
 
     async def test_analyze_skips_deps_probe_without_requirements_file(self) -> None:
         """包内无 requirements.txt：依赖探测跳过，不报 deps.missing。"""
@@ -806,6 +813,7 @@ class InspectTests(ExecutorStackTestCase):
         self.assertEqual(syntax[0]["path"], "bad.py")
         self.assertGreaterEqual(int(syntax[0]["line"]), 1)
         self.assertEqual(syntax[0]["severity"], "error")
+        self.assertEqual(outcome["cases"], [])  # ok=false（编译失败）；bad.py 非用例文件，清单为空
 
     async def test_analyze_flags_collect_error(self) -> None:
         await self.boot()
@@ -827,6 +835,7 @@ class InspectTests(ExecutorStackTestCase):
         self.assertFalse(outcome["ok"])
         codes = [str(p["code"]) for p in cast(list[dict[str, Any]], outcome["problems"])]
         self.assertIn("collect.error", codes)
+        self.assertEqual(outcome["cases"], [])  # 可收集失败 → 不给清单
 
     async def test_collect_exports_structured_manifest(self) -> None:
         await self.boot()

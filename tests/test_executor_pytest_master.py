@@ -15,8 +15,9 @@
    request_id 幂等首个应答胜出、同材料并发合并复用 request_id、超时扫尾
    （``inspect_timeout_s`` 拨钟）、迟到应答刷新 + ``late_results_total``、
    无候选 :class:`NoCandidateNode`；
-5. 应答落库联动：analyze→``put_problems``（state 依 ok/severity）、
-   collect→``put_cases``（真核心栈断言 material / material_case 行）；
+5. 应答落库联动：``put_problems``（state 依 ok/severity）、cases 非空即
+   ``put_cases``（不限 mode=collect：analyze 应答同入库用例；真核心栈断言
+   material / material_case 行）；
 6. API 端点：5 端点成功 / 400 / 404 / 503 映射 + ``/healthz`` 挂载；recipe
    端点已随「pytest 不使用 recipe」移除（回落 404）；
 7. GC：``list_unreferenced`` → ``delete``（MaterialInUse / MaterialNotFound
@@ -724,6 +725,7 @@ class ResultLandingTests(MasterStackTestCase):
         self.assertEqual(len(problems), 1)
         self.assertEqual(problems[0]["code"], "deps.missing")
         self.assertEqual(problems[0]["severity"], "warning")
+        self.assertEqual(await self.core.list_material_cases(material_id), [])  # cases 空 → 不触 put_cases
 
     async def test_analyze_error_severity_marks_failed(self) -> None:
         await self.boot()
@@ -789,6 +791,33 @@ class ResultLandingTests(MasterStackTestCase):
         self.assertEqual(rows[0]["params"], {"id": "1"})
         self.assertEqual(rows[0]["path"], "cases/a.py")
         self.assertEqual(rows[0]["status"], "ok")
+
+    async def test_analyze_lands_cases_when_non_empty(self) -> None:
+        """cases 非空即 put_cases（不限 mode=collect）：analyze 路径同入库用例。"""
+        await self.boot()
+        material = await self.upload()
+        material_id = str(material["id"])
+        request_id = await self.master.inspect(material_id, "analyze")
+        self.comm.deliver(
+            TOPIC_INSPECT_RESULT,
+            _inspect_result(
+                request_id,
+                material_id,
+                cases=[
+                    {
+                        "case_id": "cases/a.py::test_x",
+                        "name": "test_x",
+                        "path": "cases/a.py",
+                        "markers": ["smoke"],
+                        "params": {},
+                    }
+                ],
+            ),
+        )
+        await self.wait_inspect_state(request_id, "done")
+        rows = await self.core.list_material_cases(material_id)
+        self.assertEqual([str(row["case_id"]) for row in rows], ["cases/a.py::test_x"])
+        self.assertEqual(rows[0]["markers"], ["smoke"])
 
     async def test_landing_survives_missing_material(self) -> None:
         """落库时材料已被删（put_cases 抛 MaterialNotFound）：记录保留、不抛。"""

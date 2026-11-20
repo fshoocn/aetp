@@ -5,10 +5,14 @@
 * **analyze**：临时目录解压后跑检查——包完整性（``material.corrupt``）、
   语法（``syntax.error``）、依赖声明（``deps.missing``，warning——探测包内
   ``requirements.txt``，逐行解析后 pip show，缺失报 warning；无该文件跳过）、
-  可收集性（``collect.error``）；问题模型 ``{code, path, line?, message, severity}``；
+  可收集性（``collect.error``），**应答同带结构化用例清单** ``cases``（复用
+  collect 的 ``aetp_marker`` 导出：case_id/name/path/markers/params——一次
+  分析即出「编译 + 用例清单」）；ok = 编译通过（无 ``syntax.error``）且可
+  收集通过（无 ``collect.error``），deps.missing 为 warning 不影响 ok；
+  问题模型 ``{code, path, line?, message, severity}``；
   recipe 是不透明字符串，不参与检查；
 * **collect**：解压后经 ``aetp_marker`` 插件导出结构化用例清单（§7，
-  ``AETP_MARKER_OUT``）；``params`` 为 nodeid 近似值；
+  ``AETP_MARKER_OUT``，向后兼容保留）；``params`` 为 nodeid 近似值；
 * 内部单项检查超时 120s（整体超时由主端管，本端不设限）。
 
 临时目录随检查结束清理；材料按内部可信处理（决策 D16）。
@@ -76,6 +80,9 @@ async def run_inspect(
 ) -> dict[str, Any]:
     """在临时目录解压后执行检查 / 解析；返回应答核心
     ``{ok, problems, cases, duration_s}``（调用方补 proto / request_id / node_id）。
+
+    analyze / collect 均带 ``cases``（可收集干净时给出，结构同 marker 清单）；
+    ok = 编译通过且可收集通过（error 级问题即硬失败，deps.missing 不阻塞）。
     """
     started = time.time()
     problems: list[dict[str, Any]] = []
@@ -85,22 +92,25 @@ async def run_inspect(
     try:
         problems.extend(_check_package(zip_path))
         extract_ok = False
+        project_root = temp_dir
         if not any(item["severity"] == "error" for item in problems):
             try:
-                extract_zip(zip_path, temp_dir)
+                project_root = extract_zip(zip_path, temp_dir)
                 extract_ok = True
             except AssembleError as error:
                 problems.append(make_problem("material.corrupt", f"材料解压失败：{error}"))
         if extract_ok:
             if mode == "analyze":
-                problems.extend(await _check_syntax(temp_dir, config.python))
-                problems.extend(await _check_deps(temp_dir, config.python))
-            collected, collect_problems = await _check_collect(temp_dir, config.python, export=(mode == "collect"))
+                problems.extend(await _check_syntax(project_root, config.python))
+                problems.extend(await _check_deps(project_root, config.python))
+            collected, collect_problems = await _check_collect(project_root, config.python)
             problems.extend(collect_problems)
-            if mode == "collect" and not collect_problems:
+            if not collect_problems:
                 cases = collected
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+    # ok 口径：编译通过（无 syntax.error）且可收集通过（无 collect.error）；
+    # material.corrupt 同为硬错误。deps.missing 是 warning，不阻塞 ok。
     ok = not any(item["severity"] == "error" for item in problems)
     return {
         "ok": ok,
@@ -268,19 +278,17 @@ def _dist_name(requirement: str) -> str:
 async def _check_collect(
     root: Path,
     python: str,
-    *,
-    export: bool,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """检查项（``collect.error``）：``--collect-only`` 经 marker 插件；export 时带清单。
+    """检查项（``collect.error``）：``--collect-only`` 经 marker 插件导出结构化清单。
 
-    收集目标固定工程根 ``.``（平铺工程）。
+    analyze / collect 同路（analyze 应答同带 ``cases``）；收集目标固定工程根
+    ``.``（平铺工程）。
     """
     collect_out = root / _COLLECT_OUT
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONPATH"] = f"{MARKER_DIR}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
-    if export:
-        env["AETP_MARKER_OUT"] = str(collect_out)
+    env["AETP_MARKER_OUT"] = str(collect_out)
     capture = _Capture()
     argv = [python or sys.executable, "-m", "pytest", "--collect-only", "-q", ".", "-p", "aetp_marker"]
     outcome = await run_process(argv, cwd=root, env=env, timeout_s=CHECK_TIMEOUT_S, streamer=capture)
@@ -291,7 +299,7 @@ async def _check_collect(
         tail = " / ".join(capture.tail[-5:])
         problems.append(make_problem("collect.error", f"收集失败：退出码 {outcome.exit_code}；{tail}"))
     cases: list[dict[str, Any]] = []
-    if export and not problems:
+    if not problems:
         cases = _read_cases(collect_out)
         if not cases:
             problems.append(make_problem("collect.error", "收集清单为空"))

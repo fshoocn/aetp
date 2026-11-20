@@ -10,7 +10,8 @@
    ``request_id`` 幂等（首个应答胜出）、同 material 并发合并（§3.1）、
    ``inspect_timeout_s`` 超时扫尾（state failed、error="inspect timeout"）、
    迟到应答收下刷新并记 ``late_results_total``；应答 ``pytest.inspect.result``
-   经 ``ctx.test_core.put_problems / put_cases`` 落核心；
+   经 ``ctx.test_core.put_problems / put_cases`` 落核心（cases 非空即落库，
+   不限 mode——analyze 一次应答同时落 problems + cases）；
 3. **主端 GC**（§3.2）：``material_retain_days`` 定时清理无引用超期材料
    （MaterialInUse 竞态跳过）。
 
@@ -339,7 +340,11 @@ class ExecPytestMasterPlugin(Service[ExecPytestMasterConfig]):
     async def _apply_inspect_result(
         self, record: InspectRecord, raw: Mapping[str, Any]
     ) -> None:
-        """应答落核心（put_problems / put_cases）并刷新记录（含迟到刷新）。"""
+        """应答落核心（put_problems / put_cases）并刷新记录（含迟到刷新）。
+
+        cases 非空即 put_cases（不限 mode=collect：analyze 一次应答同落
+        problems + cases）；空清单不触库（保留既有清单）。
+        """
         ok = bool(raw.get("ok"))
         problems = _dict_rows(raw.get("problems"))
         cases = _dict_rows(raw.get("cases"))
@@ -349,7 +354,7 @@ class ExecPytestMasterPlugin(Service[ExecPytestMasterConfig]):
             await core.put_problems(
                 record.material_id, problems, state="analyzed" if ok and not has_error else "failed"
             )
-            if record.mode == "collect":
+            if cases:
                 await core.put_cases(record.material_id, cases)
         except MaterialNotFound:
             self.ctx.logger.warning("inspect 应答落库时材料已不存在：%s", record.material_id)
@@ -367,12 +372,13 @@ class ExecPytestMasterPlugin(Service[ExecPytestMasterConfig]):
         if not ok and was_inflight:
             self._stats["inspect_failed"] += 1
         self.ctx.logger.info(
-            "inspect 应答已落库：%s（%s %s → %s，%s 问题）",
+            "inspect 应答已落库：%s（%s %s → %s，%s 问题 / %s 用例）",
             record.request_id,
             record.material_id,
             record.mode,
             record.state,
             len(problems),
+            len(cases),
         )
 
     # ============================================================ inspect 看门狗
