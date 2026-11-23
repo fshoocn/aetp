@@ -1,9 +1,15 @@
 <!--
-  测试计划（/plans，测试计划设计 §5.3）：列表 ⇄ 编辑器 ⇄ 下发面板单页。
-  视图切换 query 驱动（?edit=<plan_id|new>，M1 裁决），不注册独立菜单页。
-  动态参数表单迁移自已退役的 executor_pytest/ui/SubmitPage.vue（能力信封
-  detail.schema 生成、表单 ⇄ raw JSON 双向同步、raw 优先），并按 M3/S5 裁决
-  补 number/boolean/enum 分支；未知类型提示走 raw JSON。
+  测试计划（/plans）：列表 ⇄ 编辑器单页，视图切换 query 驱动（?edit=<plan_id|new>）。
+  编辑器 v2（docs/测试计划编辑器v2设计.md §7）：脚本卡片流「① 脚本与用例 → ② 任务参数
+  → ③ 执行设置」，选例是一等公民（cases.case_ids 快照），任务参数挂执行器「下发任务
+  UI」slot（plans:dispatch:<能力 id>，§6 契约：payload={executorId,material,cases,params}
+  → update=完整 params 整替），无注册面板回落能力信封 detail.schema 动态表单 ⇄ raw JSON
+  （raw 优先，原逻辑保留为回落路径）。步骤 material 必填 + 指纹版本绑定（§3 换脚本走
+  case diff，消失用例红字不静默丢）；台架定向（§4）：自动 / 指定台架（executor.nodes）/
+  按能力标签（executor.labels + 随机）；触发 / 通知为预留接口（§5，照存照显）。旧格式
+  步骤（顶层 material_id / 无 cases）载入归一 v2 并提示「请重新确认用例」，保存恒出 v2。
+  插件 SFC 自包含：不 import 宿主 / npm 模块，Options API + 全局共享组件（PvDialog/
+  PvMenu/PvTextarea 别名规避 HTML 同名标签坑），样式走 scoped css + PrimeVue 语义变量。
 -->
 <template>
     <section class="plans-page">
@@ -35,6 +41,11 @@
                 <Column header="执行器组合" style="min-width: 8rem">
                     <template #body="{ data }">{{ data.executors_text || '—' }}</template>
                 </Column>
+                <Column header="脚本信息" style="min-width: 12rem">
+                    <template #body="{ data }">
+                        <span class="plans-page__mono" :title="data.scripts_text">{{ data.scripts_text || '—' }}</span>
+                    </template>
+                </Column>
                 <Column header="标签" style="min-width: 8rem">
                     <template #body="{ data }">
                         <span class="plans-page__muted">{{ data.labels_text || '—' }}</span>
@@ -61,201 +72,26 @@
 
         <!-- ============================== 编辑器视图 ============================== -->
         <template v-else>
-            <header class="plans-page__header">
-                <div>
-                    <h2>{{ editorTitle }}</h2>
-                    <p class="plans-page__hint">
-                        步骤按序线性执行（Stage 屏障）；参数表单随执行器能力信封 detail.schema 自动切换，raw JSON 双向同步、冲突 <b>raw 优先</b>
-                    </p>
-                </div>
-                <div class="plans-page__actions">
+            <!-- 顶部栏：返回 / 标题 / 保存类操作 -->
+            <header class="plans-page__topbar">
+                <div class="plans-page__topbar-title">
                     <Button label="返回列表" icon="pi pi-arrow-left" size="small" severity="secondary" outlined @click="goList" />
-                </div>
-            </header>
-
-            <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
-            <Message v-if="notice" severity="info" :closable="true" @close="notice = ''">{{ notice }}</Message>
-
-            <!-- 基本信息 -->
-            <Panel header="基本信息">
-                <div class="plans-page__grid">
-                    <label class="plans-page__field">
-                        <span class="plans-page__label">名称（必填）</span>
-                        <InputText v-model="editor.name" placeholder="计划名称" class="plans-page__input" />
-                    </label>
-                    <label class="plans-page__field">
-                        <span class="plans-page__label">默认优先级（大者先出队）</span>
-                        <input v-model.number="editor.priority" type="number" class="plans-page__native" />
-                    </label>
-                    <label class="plans-page__field">
-                        <span class="plans-page__label">失败策略</span>
-                        <Select v-model="editor.failurePolicy" :options="failurePolicyOptions" optionLabel="label" optionValue="value" />
-                    </label>
-                    <label class="plans-page__field">
-                        <span class="plans-page__label">默认超时（秒，0 = 不限）</span>
-                        <input v-model.number="editor.timeoutS" type="number" min="0" class="plans-page__native" />
-                    </label>
-                </div>
-                <label class="plans-page__field">
-                    <span class="plans-page__label">说明</span>
-                    <textarea v-model="editor.description" class="plans-page__textarea" placeholder="计划用途、适用场景……"></textarea>
-                </label>
-                <h4>标签（labels，随下发注入任务）</h4>
-                <div v-for="(row, index) in editor.labelsRows" :key="index" class="plans-page__kv">
-                    <InputText v-model="row.key" placeholder="键" />
-                    <InputText v-model="row.value" placeholder="值" />
-                    <Button icon="pi pi-times" size="small" severity="danger" text @click="removeKv(editor.labelsRows, index)" />
-                </div>
-                <Button label="添加标签" icon="pi pi-plus" size="small" severity="secondary" text @click="addKv(editor.labelsRows)" />
-            </Panel>
-
-            <!-- 步骤列表 -->
-            <Panel header="步骤列表（自上而下顺序执行）">
-                <div v-for="(step, index) in editor.steps" :key="index" class="plans-page__step">
-                    <div class="plans-page__step-head">
-                        <Tag :value="`#${index + 1}`" severity="secondary" />
-                        <InputText v-model="step.name" placeholder="步骤名（必填，stage_params 按此名覆盖）" class="plans-page__step-name" />
-                        <div class="plans-page__actions">
-                            <Button icon="pi pi-arrow-up" size="small" severity="secondary" text :disabled="index === 0" @click="moveStep(index, -1)" />
-                            <Button icon="pi pi-arrow-down" size="small" severity="secondary" text :disabled="index === editor.steps.length - 1" @click="moveStep(index, 1)" />
-                            <Button icon="pi pi-times" size="small" severity="danger" text @click="removeStep(index)" />
-                        </div>
-                    </div>
-
-                    <div class="plans-page__grid">
-                        <label class="plans-page__field">
-                            <span class="plans-page__label">执行器（能力信封 ∪ 已知 id，可手输）</span>
-                            <input
-                                v-model="step.executorId"
-                                list="plans-executor-ids"
-                                class="plans-page__native"
-                                placeholder="如 pytest"
-                                @change="onStepExecutorChange(step)"
-                            />
-                        </label>
-                        <label class="plans-page__field">
-                            <span class="plans-page__label">脚本材料（含通用材料）</span>
-                            <Select
-                                v-model="step.materialId"
-                                :options="materialOptionsOf(step)"
-                                optionLabel="label"
-                                optionValue="value"
-                                placeholder="无（不指定材料）"
-                                class="plans-page__input"
-                            />
-                        </label>
-                        <label class="plans-page__field">
-                            <span class="plans-page__label">分片模式</span>
-                            <Select v-model="step.shardMode" :options="shardModeOptions" optionLabel="label" optionValue="value" />
-                        </label>
-                        <label class="plans-page__field">
-                            <span class="plans-page__label">分片数 hint（0 = 执行器自定）</span>
-                            <input v-model.number="step.shardHint" type="number" min="0" class="plans-page__native" />
-                        </label>
-                        <label class="plans-page__field">
-                            <span class="plans-page__label">步骤超时（秒，0 = 不限）</span>
-                            <input v-model.number="step.timeoutS" type="number" min="0" class="plans-page__native" />
-                        </label>
-                    </div>
-
-                    <h5>参数（按能力信封 detail.schema 动态生成）</h5>
-                    <p v-if="!schemaReadyOf(step)" class="plans-page__hint">能力信封 schema 加载中……可先编辑 raw JSON。</p>
-                    <template v-else>
-                        <p v-if="!schemaPropsOf(step).length" class="plans-page__hint">
-                            {{ schemaHintOf(step) }}
+                    <div>
+                        <h2>{{ editorTitle }}</h2>
+                        <p class="plans-page__hint">
+                            流程：① 选脚本 → ② 勾选用例 → ③ 填参数；步骤自上而下线性执行（Stage 屏障）
                         </p>
-                        <div v-for="prop in schemaPropsOf(step)" :key="prop.key" class="plans-page__field">
-                            <span class="plans-page__label">
-                                {{ prop.key }}<span v-if="prop.title" class="plans-page__muted"> — {{ prop.title }}</span>
-                            </span>
-                            <InputText
-                                v-if="prop.type === 'string'"
-                                v-model="step.form.values[prop.key]"
-                                class="plans-page__input"
-                                @input="syncStepFormToRaw(step)"
-                            />
-                            <input
-                                v-else-if="prop.type === 'number'"
-                                v-model.number="step.form.values[prop.key]"
-                                type="number"
-                                class="plans-page__native"
-                                @input="syncStepFormToRaw(step)"
-                            />
-                            <select
-                                v-else-if="prop.type === 'boolean'"
-                                v-model="step.form.values[prop.key]"
-                                class="plans-page__native"
-                                @change="syncStepFormToRaw(step)"
-                            >
-                                <option :value="null">（未设）</option>
-                                <option :value="true">true</option>
-                                <option :value="false">false</option>
-                            </select>
-                            <select
-                                v-else-if="prop.type === 'enum'"
-                                v-model="step.form.values[prop.key]"
-                                class="plans-page__native"
-                                @change="syncStepFormToRaw(step)"
-                            >
-                                <option value="">（未设）</option>
-                                <option v-for="opt in prop.options" :key="String(opt)" :value="opt">{{ opt }}</option>
-                            </select>
-                            <textarea
-                                v-else-if="prop.type === 'array'"
-                                v-model="step.form.arrayText[prop.key]"
-                                class="plans-page__textarea"
-                                placeholder="每行一条"
-                                @input="syncStepFormToRaw(step)"
-                            ></textarea>
-                            <template v-else-if="prop.type === 'object'">
-                                <div v-for="(row, rowIndex) in step.form.objectRows[prop.key] || []" :key="rowIndex" class="plans-page__kv">
-                                    <InputText v-model="row.key" placeholder="键" @input="syncStepFormToRaw(step)" />
-                                    <InputText v-model="row.value" placeholder="值" @input="syncStepFormToRaw(step)" />
-                                    <Button
-                                        icon="pi pi-times"
-                                        size="small"
-                                        severity="danger"
-                                        text
-                                        @click="removeKv(step.form.objectRows[prop.key], rowIndex); syncStepFormToRaw(step)"
-                                    />
-                                </div>
-                                <Button
-                                    label="添加"
-                                    icon="pi pi-plus"
-                                    size="small"
-                                    severity="secondary"
-                                    text
-                                    @click="addKv(step.form.objectRows[prop.key]); syncStepFormToRaw(step)"
-                                />
-                            </template>
-                            <p v-else class="plans-page__hint">
-                                未知类型（{{ prop.rawType || '—' }}）：请用下方 raw JSON 编辑此参数。
-                            </p>
-                        </div>
-                    </template>
-                    <h5>raw JSON（params 兜底 ⇄ 表单双向同步，冲突 raw 优先）</h5>
-                    <textarea
-                        v-model="step.paramsRaw"
-                        class="plans-page__textarea plans-page__textarea--tall"
-                        placeholder="{}"
-                        @input="syncStepRawToForm(step)"
-                    ></textarea>
-                    <p v-if="step.paramsRawError" class="plans-page__error-text">{{ step.paramsRawError }}</p>
+                    </div>
                 </div>
-                <Button label="添加步骤" icon="pi pi-plus" size="small" severity="secondary" outlined @click="addStep" />
-            </Panel>
-
-            <!-- 底栏 -->
-            <div class="plans-page__footer">
                 <div class="plans-page__actions">
                     <Button label="保存" icon="pi pi-save" size="small" :loading="saving" @click="savePlan" />
                     <Button
-                        label="另存为（副本）"
+                        label="另存为"
                         icon="pi pi-clone"
                         size="small"
                         severity="secondary"
                         outlined
-                        :disabled="!editor.planId"
+                        :disabled="!editor || !editor.planId"
                         @click="saveAsCopy"
                     />
                     <Button
@@ -269,19 +105,503 @@
                     />
                     <Button label="取消" icon="pi pi-times" size="small" severity="secondary" text @click="goList" />
                 </div>
-                <template v-if="validationErrors.length">
-                    <Message v-for="(item, index) in validationErrors" :key="index" severity="error" :closable="false">
-                        {{ item }}
-                    </Message>
-                </template>
-            </div>
+            </header>
 
-            <!-- 下发面板（§5.5：计划下发保存后可用；字段同时供「直接下发（不保存）」用） -->
+            <Message v-if="error" severity="error" :closable="false" role="alert">{{ error }}</Message>
+            <Message v-if="notice" severity="info" :closable="true" @close="notice = ''">{{ notice }}</Message>
+            <Message v-if="legacyStepExists" severity="warn" :closable="false">
+                旧版计划（步骤缺材料绑定 / 用例快照），已归一为新版结构，请重新确认用例后再保存
+            </Message>
+            <template v-if="validationErrors.length">
+                <Message v-for="(item, index) in validationErrors" :key="index" severity="error" :closable="false">
+                    {{ item }}
+                </Message>
+            </template>
+
+            <!-- ============================== 基本信息 ============================== -->
+            <Panel header="基本信息">
+                <div class="plans-page__grid">
+                    <label class="plans-page__field">
+                        <span class="plans-page__label">名称（必填）</span>
+                        <InputText v-model="editor.name" placeholder="计划名称" class="plans-page__input" />
+                    </label>
+                    <label class="plans-page__field">
+                        <span class="plans-page__label">默认优先级（大者先出队）</span>
+                        <InputNumber v-model="editor.priority" :maxFractionDigits="0" class="plans-page__input" />
+                    </label>
+                    <label class="plans-page__field">
+                        <span class="plans-page__label">失败策略</span>
+                        <Select v-model="editor.failurePolicy" :options="failurePolicyOptions" optionLabel="label" optionValue="value" />
+                    </label>
+                    <label class="plans-page__field">
+                        <span class="plans-page__label">默认超时（秒，0 = 不限）</span>
+                        <InputNumber v-model="editor.timeoutS" :min="0" class="plans-page__input" />
+                    </label>
+                </div>
+                <label class="plans-page__field">
+                    <span class="plans-page__label">说明</span>
+                    <PvTextarea v-model="editor.description" rows="3" class="plans-page__textarea" placeholder="计划用途、适用场景……" />
+                </label>
+                <h4>标签（labels，随下发注入任务）</h4>
+                <div v-for="(row, index) in editor.labelsRows" :key="index" class="plans-page__kv">
+                    <InputText v-model="row.key" placeholder="键" />
+                    <InputText v-model="row.value" placeholder="值" />
+                    <Button icon="pi pi-times" size="small" severity="danger" text @click="removeKv(editor.labelsRows, index)" />
+                </div>
+                <Button label="添加标签" icon="pi pi-plus" size="small" severity="secondary" text @click="addKv(editor.labelsRows)" />
+            </Panel>
+
+            <!-- ============================== 测试脚本（主体） ============================== -->
+            <Panel header="测试脚本（自上而下 = 执行顺序）">
+                <template #header>
+                    <div class="plans-page__panel-head">
+                        <span>测试脚本（自上而下 = 执行顺序）</span>
+                        <Button label="添加脚本" icon="pi pi-plus" size="small" @click="addStep" />
+                    </div>
+                </template>
+
+                <div v-for="(step, index) in editor.steps" :key="step.uid" class="plans-page__card">
+                    <!-- 卡片头 -->
+                    <div class="plans-page__card-head">
+                        <Tag :value="`#${index + 1}`" severity="secondary" />
+                        <Tag :value="step.executorId || '未选执行器'" severity="info" />
+                        <span class="plans-page__card-title">{{ materialTitleOf(step) }}</span>
+                        <Tag v-if="materialShortShaOf(step) !== '—'" :value="`v${materialShortShaOf(step)}`" severity="secondary" />
+                        <Tag
+                            :value="step.casesMode === 'selected' ? `已选 ${step.caseIds.length} 用例` : '全部用例'"
+                            :severity="step.casesMode === 'selected' && !step.caseIds.length ? 'warn' : 'success'"
+                        />
+                        <Tag v-if="step.legacy" value="旧版" severity="warn" />
+                        <div class="plans-page__actions">
+                            <Button icon="pi pi-arrow-up" size="small" severity="secondary" text :disabled="index === 0" @click="moveStep(index, -1)" />
+                            <Button icon="pi pi-arrow-down" size="small" severity="secondary" text :disabled="index === editor.steps.length - 1" @click="moveStep(index, 1)" />
+                            <Button icon="pi pi-times" size="small" severity="danger" text @click="removeStep(index)" />
+                        </div>
+                    </div>
+
+                    <div class="plans-page__card-body">
+                        <!-- ① 脚本与用例 -->
+                        <div class="plans-page__section">
+                            <h5>① 脚本与用例</h5>
+                            <div class="plans-page__grid">
+                                <label class="plans-page__field">
+                                    <span class="plans-page__label">步骤名（必填，全计划唯一）</span>
+                                    <InputText v-model="step.name" placeholder="如：功能回归" class="plans-page__input" />
+                                </label>
+                                <label class="plans-page__field">
+                                    <span class="plans-page__label">执行器（能力信封 ∪ 已知 id，可手输）</span>
+                                    <input
+                                        v-model="step.executorId"
+                                        list="plans-executor-ids"
+                                        class="plans-page__native"
+                                        placeholder="如 pytest"
+                                        @change="onStepExecutorChange(step)"
+                                    />
+                                </label>
+                                <label class="plans-page__field">
+                                    <span class="plans-page__label">脚本（材料，按名称 · 版本 · 用例数 · 状态选）</span>
+                                    <span :id="'plans-matsel-' + step.uid" class="plans-page__input">
+                                        <Select
+                                            v-model="step.materialId"
+                                            :options="materialOptionsOf(step)"
+                                            optionLabel="label"
+                                            optionValue="value"
+                                            placeholder="选择脚本材料"
+                                            showClear
+                                            class="plans-page__input"
+                                            @change="onMaterialChange(step)"
+                                        />
+                                    </span>
+                                </label>
+                            </div>
+
+                            <!-- 版本行：短指纹 · 上传时间 · 绑定 Tag -->
+                            <p class="plans-page__hint">
+                                <template v-if="step.materialId">
+                                    sha256 <span class="plans-page__mono">{{ materialShortShaOf(step) }}</span>
+                                    · 上传 {{ formatTime(materialTimeOf(step)) }}
+                                    <Tag v-if="materialBoundOf(step)" value="已绑定版本" severity="success" class="plans-page__tag" />
+                                    <Tag v-else value="未绑定指纹" severity="warn" class="plans-page__tag" />
+                                </template>
+                                <span v-else class="plans-page__muted">尚未选择脚本</span>
+                            </p>
+                            <Message v-if="step.legacy" severity="warn" :closable="false">
+                                旧版步骤：绑定 / 用例快照缺失，已按「全部用例」归一，请重新确认用例
+                            </Message>
+                            <Message v-if="step.caseDiffRemoved.length" severity="error" :closable="true" @close="step.caseDiffRemoved = []">
+                                {{ step.caseDiffRemoved.length }} 个用例在新脚本中不存在，已从勾选中剔除：
+                                <span v-for="cid in step.caseDiffRemoved" :key="cid" class="plans-page__removed">{{ cid }}</span>
+                            </Message>
+
+                            <!-- 用例模式 -->
+                            <div class="plans-page__radios">
+                                <span class="plans-page__label">用例模式：</span>
+                                <div class="plans-page__radio">
+                                    <RadioButton
+                                        v-model="step.casesMode"
+                                        :inputId="'plans-casemode-all-' + step.uid"
+                                        value="all"
+                                        @change="onCaseModeChange(step)"
+                                    />
+                                    <label :for="'plans-casemode-all-' + step.uid">全部用例</label>
+                                </div>
+                                <div class="plans-page__radio">
+                                    <RadioButton
+                                        v-model="step.casesMode"
+                                        :inputId="'plans-casemode-selected-' + step.uid"
+                                        value="selected"
+                                        @change="onCaseModeChange(step)"
+                                    />
+                                    <label :for="'plans-casemode-selected-' + step.uid">指定用例</label>
+                                </div>
+                            </div>
+
+                            <template v-if="step.casesMode === 'selected'">
+                                <!-- 筛选栏 -->
+                                <div class="plans-page__filters">
+                                    <IconField class="plans-page__filter">
+                                        <InputIcon class="pi pi-search" />
+                                        <InputText v-model="step.filters.keyword" placeholder="关键字（case_id / 名称）" class="plans-page__input" />
+                                    </IconField>
+                                    <Select
+                                        v-model="step.filters.module"
+                                        :options="moduleOptionsOf(step)"
+                                        optionLabel="label"
+                                        optionValue="value"
+                                        placeholder="全部模块"
+                                        showClear
+                                        class="plans-page__filter"
+                                    />
+                                    <MultiSelect
+                                        v-model="step.filters.markers"
+                                        :options="markerOptionsOf(step)"
+                                        optionLabel="label"
+                                        optionValue="value"
+                                        placeholder="全部标签"
+                                        showClear
+                                        class="plans-page__filter"
+                                    />
+                                    <Button label="更换脚本" icon="pi pi-refresh" size="small" severity="secondary" text @click="focusMaterialSelect(step)" />
+                                </div>
+
+                                <!-- 用例表（多选） -->
+                                <DataTable
+                                    :value="filteredCasesOf(step)"
+                                    dataKey="case_id"
+                                    :loading="caseLoadingOf(step)"
+                                    :rowHover="true"
+                                    scrollable
+                                    scrollHeight="22rem"
+                                    size="small"
+                                >
+                                    <Column style="width: 3rem">
+                                        <template #header>
+                                            <Checkbox
+                                                :modelValue="allFilteredCheckedOf(step)"
+                                                binary
+                                                :disabled="!filteredCasesOf(step).length"
+                                                @update:modelValue="toggleAllFiltered(step, $event)"
+                                            />
+                                        </template>
+                                        <template #body="{ data }">
+                                            <Checkbox
+                                                :modelValue="isCaseChecked(step, data.case_id)"
+                                                binary
+                                                @update:modelValue="toggleCase(step, data.case_id, $event)"
+                                            />
+                                        </template>
+                                    </Column>
+                                    <Column field="case_id" header="case_id" style="min-width: 14rem">
+                                        <template #body="{ data }">
+                                            <span class="plans-page__mono" :title="data.case_id">{{ data.case_id }}</span>
+                                        </template>
+                                    </Column>
+                                    <Column field="name" header="名称" style="min-width: 10rem">
+                                        <template #body="{ data }">{{ data.name || '—' }}</template>
+                                    </Column>
+                                    <Column field="path" header="模块" style="min-width: 8rem">
+                                        <template #body="{ data }">{{ data.path || '—' }}</template>
+                                    </Column>
+                                    <Column header="标签" style="min-width: 8rem">
+                                        <template #body="{ data }">
+                                            <template v-if="(data.markers || []).length">
+                                                <Tag v-for="marker in data.markers" :key="marker" :value="marker" severity="info" class="plans-page__tag" />
+                                            </template>
+                                            <span v-else class="plans-page__muted">—</span>
+                                        </template>
+                                    </Column>
+                                    <template #empty>
+                                        <span class="plans-page__muted">
+                                            {{ caseEmptyTextOf(step) }}
+                                        </span>
+                                    </template>
+                                </DataTable>
+
+                                <!-- 底部：已选计数 + 批量操作 -->
+                                <div class="plans-page__case-foot">
+                                    <span class="plans-page__label">已选 {{ step.caseIds.length }} / {{ totalCasesOf(step) }}</span>
+                                    <Button label="全选筛选结果" icon="pi pi-check-square" size="small" severity="secondary" outlined @click="selectAllFiltered(step)" />
+                                    <Button label="清空" icon="pi pi-eraser" size="small" severity="secondary" outlined @click="clearCases(step)" />
+                                    <Button label="反选" icon="pi pi-sync" size="small" severity="secondary" outlined @click="invertCases(step)" />
+                                </div>
+                                <p v-if="step.casesMode === 'selected' && !step.caseIds.length" class="plans-page__error-text">
+                                    指定用例模式下至少勾选 1 条用例
+                                </p>
+                            </template>
+                            <p v-else class="plans-page__hint">跟随脚本全部用例（执行端按脚本清单全量执行，脚本更新自动生效）</p>
+                        </div>
+
+                        <!-- ② 任务参数：执行器「下发任务 UI」slot，无面板回落 schema 表单 -->
+                        <div class="plans-page__section">
+                            <h5>② 任务参数</h5>
+                            <p v-if="!step.executorId" class="plans-page__hint">请先选择 / 输入执行器 id。</p>
+                            <PluginUiOutlet
+                                v-else
+                                :name="`plans:dispatch:${step.executorId}`"
+                                :payload="dispatchPayload(step)"
+                                @update="onPanelParams(step, $event)"
+                            >
+                                <!-- 空槽回落（§6）：清单判定无专属面板 → 通用 schema 表单 -->
+                                <div v-if="slotModeOf(step) !== 'panel'" class="plans-page__fallback">
+                                    <p class="plans-page__hint">
+                                        该执行器暂无「下发任务 UI」面板，使用通用参数表单（按能力信封 detail.schema
+                                        动态生成，raw JSON 双向同步、冲突 <b>raw 优先</b>）
+                                    </p>
+                                    <p v-if="!schemaReadyOf(step)" class="plans-page__hint">能力信封 schema 加载中……可先编辑 raw JSON。</p>
+                                    <template v-else>
+                                        <p v-if="!schemaPropsOf(step).length" class="plans-page__hint">
+                                            {{ schemaHintOf(step) }}
+                                        </p>
+                                        <div v-for="prop in schemaPropsOf(step)" :key="prop.key" class="plans-page__field">
+                                            <span class="plans-page__label">
+                                                {{ prop.key }}<span v-if="prop.title" class="plans-page__muted"> — {{ prop.title }}</span>
+                                            </span>
+                                            <InputText
+                                                v-if="prop.type === 'string'"
+                                                v-model="step.form.values[prop.key]"
+                                                class="plans-page__input"
+                                                @input="syncStepFormToRaw(step)"
+                                            />
+                                            <input
+                                                v-else-if="prop.type === 'number'"
+                                                v-model.number="step.form.values[prop.key]"
+                                                type="number"
+                                                class="plans-page__native"
+                                                @input="syncStepFormToRaw(step)"
+                                            />
+                                            <select
+                                                v-else-if="prop.type === 'boolean'"
+                                                v-model="step.form.values[prop.key]"
+                                                class="plans-page__native"
+                                                @change="syncStepFormToRaw(step)"
+                                            >
+                                                <option :value="null">（未设）</option>
+                                                <option :value="true">true</option>
+                                                <option :value="false">false</option>
+                                            </select>
+                                            <select
+                                                v-else-if="prop.type === 'enum'"
+                                                v-model="step.form.values[prop.key]"
+                                                class="plans-page__native"
+                                                @change="syncStepFormToRaw(step)"
+                                            >
+                                                <option value="">（未设）</option>
+                                                <option v-for="opt in prop.options" :key="String(opt)" :value="opt">{{ opt }}</option>
+                                            </select>
+                                            <PvTextarea
+                                                v-else-if="prop.type === 'array'"
+                                                v-model="step.form.arrayText[prop.key]"
+                                                rows="3"
+                                                class="plans-page__textarea"
+                                                placeholder="每行一条"
+                                                @input="syncStepFormToRaw(step)"
+                                            />
+                                            <template v-else-if="prop.type === 'object'">
+                                                <div v-for="(row, rowIndex) in step.form.objectRows[prop.key] || []" :key="rowIndex" class="plans-page__kv">
+                                                    <InputText v-model="row.key" placeholder="键" @input="syncStepFormToRaw(step)" />
+                                                    <InputText v-model="row.value" placeholder="值" @input="syncStepFormToRaw(step)" />
+                                                    <Button
+                                                        icon="pi pi-times"
+                                                        size="small"
+                                                        severity="danger"
+                                                        text
+                                                        @click="removeKv(step.form.objectRows[prop.key], rowIndex); syncStepFormToRaw(step)"
+                                                    />
+                                                </div>
+                                                <Button
+                                                    label="添加"
+                                                    icon="pi pi-plus"
+                                                    size="small"
+                                                    severity="secondary"
+                                                    text
+                                                    @click="addKv(step.form.objectRows[prop.key]); syncStepFormToRaw(step)"
+                                                />
+                                            </template>
+                                            <p v-else class="plans-page__hint">
+                                                未知类型（{{ prop.rawType || '—' }}）：请用下方 raw JSON 编辑此参数。
+                                            </p>
+                                        </div>
+                                    </template>
+                                    <h6>raw JSON（params 兜底 ⇄ 表单双向同步，冲突 raw 优先）</h6>
+                                    <PvTextarea
+                                        v-model="step.paramsRaw"
+                                        rows="6"
+                                        class="plans-page__textarea plans-page__textarea--tall"
+                                        placeholder="{}"
+                                        @input="syncStepRawToForm(step)"
+                                    />
+                                    <p v-if="step.paramsRawError" class="plans-page__error-text">{{ step.paramsRawError }}</p>
+                                </div>
+                            </PluginUiOutlet>
+                        </div>
+
+                        <!-- ③ 执行设置 -->
+                        <div class="plans-page__section">
+                            <h5>③ 执行设置</h5>
+                            <div class="plans-page__grid">
+                                <label class="plans-page__field">
+                                    <span class="plans-page__label">分片模式</span>
+                                    <Select v-model="step.shardMode" :options="shardModeOptions" optionLabel="label" optionValue="value" />
+                                </label>
+                                <label class="plans-page__field">
+                                    <span class="plans-page__label">分片数 hint（0 = 执行器自定）</span>
+                                    <InputNumber
+                                        v-model="step.shardHint"
+                                        :min="0"
+                                        :maxFractionDigits="0"
+                                        :disabled="step.shardMode !== 'plan'"
+                                        class="plans-page__input"
+                                    />
+                                </label>
+                                <label class="plans-page__field">
+                                    <span class="plans-page__label">步骤超时（秒，0 = 不限）</span>
+                                    <InputNumber v-model="step.timeoutS" :min="0" class="plans-page__input" />
+                                </label>
+                            </div>
+
+                            <h6>台架定向</h6>
+                            <div class="plans-page__radios">
+                                <div v-for="opt in targetModeOptions" :key="opt.value" class="plans-page__radio">
+                                    <RadioButton
+                                        v-model="step.targetMode"
+                                        :inputId="'plans-target-' + step.uid + '-' + opt.value"
+                                        :value="opt.value"
+                                        @change="onTargetModeChange(step)"
+                                    />
+                                    <label :for="'plans-target-' + step.uid + '-' + opt.value">{{ opt.label }}</label>
+                                </div>
+                            </div>
+
+                            <template v-if="step.targetMode === 'nodes'">
+                                <div class="plans-page__grid">
+                                    <label class="plans-page__field">
+                                        <span class="plans-page__label">指定台架（不限数量，数据源：节点心跳）</span>
+                                        <MultiSelect
+                                            v-model="step.nodes"
+                                            :options="nodeOptions"
+                                            optionLabel="label"
+                                            optionValue="value"
+                                            placeholder="选择台架"
+                                            showClear
+                                            class="plans-page__input"
+                                        />
+                                    </label>
+                                    <label class="plans-page__field">
+                                        <span class="plans-page__label">派发策略</span>
+                                        <Select v-model="step.strategy" :options="strategyOptions" optionLabel="label" optionValue="value" />
+                                    </label>
+                                </div>
+                            </template>
+                            <template v-else-if="step.targetMode === 'labels'">
+                                <h6>能力 / 标签筛选（executor.labels）</h6>
+                                <div v-for="(row, rowIndex) in step.labelRows" :key="rowIndex" class="plans-page__kv">
+                                    <InputText v-model="row.key" placeholder="键（如 lang）" />
+                                    <InputText v-model="row.value" placeholder="值（如 python）" />
+                                    <Button icon="pi pi-times" size="small" severity="danger" text @click="removeKv(step.labelRows, rowIndex)" />
+                                </div>
+                                <div class="plans-page__case-foot">
+                                    <Button label="添加标签" icon="pi pi-plus" size="small" severity="secondary" text @click="addKv(step.labelRows)" />
+                                    <label class="plans-page__field plans-page__field--inline">
+                                        <span class="plans-page__label">派发策略</span>
+                                        <Select v-model="step.strategy" :options="strategyOptions" optionLabel="label" optionValue="value" />
+                                    </label>
+                                </div>
+                            </template>
+                            <p v-else class="plans-page__hint">按能力信封自动匹配（strategy=balanced，最少在飞优先）</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="!editor.steps.length" class="plans-page__muted">暂无步骤，点「添加脚本」开始</div>
+                <Button label="添加脚本" icon="pi pi-plus" size="small" severity="secondary" outlined @click="addStep" />
+            </Panel>
+
+            <!-- ============================== 触发方式（预留） ============================== -->
+            <Panel header="触发方式（预留）">
+                <div class="plans-page__grid">
+                    <label class="plans-page__field">
+                        <span class="plans-page__label">触发类型</span>
+                        <span class="plans-page__inline">
+                            <Select v-model="editor.triggerType" :options="triggerTypeOptions" optionLabel="label" optionValue="value" />
+                            <Tag v-if="editor.triggerType !== 'manual'" value="预留" severity="warn" />
+                        </span>
+                    </label>
+                </div>
+                <Button
+                    :label="editor.triggerConfigOpen ? '收起配置（config）' : '展开配置（config）'"
+                    :icon="editor.triggerConfigOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                    size="small"
+                    severity="secondary"
+                    text
+                    @click="editor.triggerConfigOpen = !editor.triggerConfigOpen"
+                />
+                <template v-if="editor.triggerConfigOpen">
+                    <div v-for="(row, index) in editor.triggerConfigRows" :key="index" class="plans-page__kv">
+                        <InputText v-model="row.key" placeholder="键" />
+                        <InputText v-model="row.value" placeholder="值" />
+                        <Button icon="pi pi-times" size="small" severity="danger" text @click="removeKv(editor.triggerConfigRows, index)" />
+                    </div>
+                    <Button label="添加配置项" icon="pi pi-plus" size="small" severity="secondary" text @click="addKv(editor.triggerConfigRows)" />
+                    <p class="plans-page__hint">当前仅 manual 实际执行；cron / event 照存照显（预留接口，触发插件读取 plan.trigger 后调下发）。</p>
+                </template>
+            </Panel>
+
+            <!-- ============================== 结果通知（预留） ============================== -->
+            <Panel header="结果通知（预留）">
+                <div class="plans-page__grid">
+                    <label class="plans-page__field">
+                        <span class="plans-page__label">通知类型</span>
+                        <span class="plans-page__inline">
+                            <Select v-model="editor.notifyType" :options="notifyTypeOptions" optionLabel="label" optionValue="value" />
+                            <Tag v-if="editor.notifyType !== 'none'" value="预留" severity="warn" />
+                        </span>
+                    </label>
+                </div>
+                <Button
+                    :label="editor.notifyConfigOpen ? '收起配置（config）' : '展开配置（config）'"
+                    :icon="editor.notifyConfigOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+                    size="small"
+                    severity="secondary"
+                    text
+                    @click="editor.notifyConfigOpen = !editor.notifyConfigOpen"
+                />
+                <template v-if="editor.notifyConfigOpen">
+                    <div v-for="(row, index) in editor.notifyConfigRows" :key="index" class="plans-page__kv">
+                        <InputText v-model="row.key" placeholder="键" />
+                        <InputText v-model="row.value" placeholder="值" />
+                        <Button icon="pi pi-times" size="small" severity="danger" text @click="removeKv(editor.notifyConfigRows, index)" />
+                    </div>
+                    <Button label="添加配置项" icon="pi pi-plus" size="small" severity="secondary" text @click="addKv(editor.notifyConfigRows)" />
+                    <p class="plans-page__hint">当前仅 none 不通知；其余类型照存照显（预留接口，通知插件监听 EVENT_TASK_FINISHED 后读 plan.notify 分发）。</p>
+                </template>
+            </Panel>
+
+            <!-- ============================== 下发（运行时覆盖） ============================== -->
             <div ref="dispatchPanel">
                 <Panel header="下发（运行时覆盖 overrides）">
                     <p class="plans-page__hint">
-                        「② 下发」按计划实例化任务（labels 自动注入 plan_id / plan_name）；「直接下发（不保存）」组装临时任务（无 plan_id 标签，幂等键 UI 生成）。
-                        覆盖次序：stage_params[步骤] 浅合并 → env 增量注入每步 params.env（后者胜）。
+                        「② 下发」按计划实例化任务（labels 自动注入 plan_id / plan_name）；「直接下发（不保存）」组装临时任务（无 plan_id
+                        标签，幂等键 UI 生成）。覆盖次序：env 增量注入每步 params.env（后者胜）；选例是步骤一等公民（① 内勾选），此处不再覆盖。
                     </p>
                     <div class="plans-page__grid">
                         <label class="plans-page__field">
@@ -290,7 +610,7 @@
                         </label>
                         <label class="plans-page__field">
                             <span class="plans-page__label">优先级（空/0 = 计划默认）</span>
-                            <input v-model.number="dispatch.priority" type="number" class="plans-page__native" />
+                            <InputNumber v-model="dispatch.priority" :maxFractionDigits="0" class="plans-page__input" />
                         </label>
                         <label class="plans-page__field">
                             <span class="plans-page__label">幂等键（空 = 每次新建；头优先于 body）</span>
@@ -317,25 +637,6 @@
                     <p class="plans-page__hint">
                         保留前缀 <code>AETP_*</code> 禁止注入（UI 拦截，执行端纵深再校验）。
                     </p>
-
-                    <h4>选例（stage_params[步骤名] 覆盖：selection_id 或 targets 二选一/可并存）</h4>
-                    <div v-for="(step, index) in editor.steps" :key="index" class="plans-page__step-override">
-                        <span class="plans-page__label">{{ step.name || `步骤 ${index + 1}` }}</span>
-                        <div class="plans-page__grid">
-                            <label class="plans-page__field">
-                                <span class="plans-page__label">selection_id（可选）</span>
-                                <InputText v-model="step.override.selectionId" placeholder="sel-…" class="plans-page__input" />
-                            </label>
-                            <label class="plans-page__field">
-                                <span class="plans-page__label">targets（可选，逐行 nodeid / 文件 / 目录）</span>
-                                <textarea
-                                    v-model="step.override.targetsText"
-                                    class="plans-page__textarea"
-                                    placeholder="tests/test_a.py::TestX::test_y"
-                                ></textarea>
-                            </label>
-                        </div>
-                    </div>
 
                     <div class="plans-page__actions">
                         <Button
@@ -431,10 +732,12 @@ async function fetchJson(url, options) {
     return data;
 }
 
-// 动态表单不重复渲染的保留键（专用区块装配 / raw JSON 直改，同 SubmitPage 口径）
+// 动态表单不重复渲染的保留键（核心管理键 material_id/selection_id/targets 属
+// material/cases 同名语义，表单排除、校验冲突；env 由专用区块 / 下发 UI 管理）
 const RESERVED_PARAMS = ['material_id', 'selection_id', 'targets', 'env'];
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SCALAR_TYPES = ['string', 'number', 'boolean', 'enum'];
+const MATERIAL_STATE_TEXT = { uploaded: '待分析', analyzing: '分析中', analyzed: '已分析', failed: '失败' };
 
 function newIdempotencyKey() {
     // 临时任务幂等键 UI 生成（裁决 G）：uuid，重复触发保护
@@ -446,6 +749,18 @@ function newIdempotencyKey() {
         // 继续走兜底
     }
     return `tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isPlainObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sameStrList(left, right) {
+    // 同名冲突比较（服务端 _same_str_list 同口径）：同为字符串数组且同集（顺序无关）
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    const a = left.map((item) => String(item)).sort();
+    const b = right.map((item) => String(item)).sort();
+    return a.length === b.length && a.every((item, index) => item === b[index]);
 }
 
 export default {
@@ -465,11 +780,16 @@ export default {
             saving: false,
             tempSubmitting: false,
             focusDispatch: false,
-            // 能力信封 / 材料
+            stepUid: 0,
+            // 能力信封 / 材料 / 用例 / 台架 / slot 清单
             executors: [],
             schemas: {},
-            materialsByExecutor: {},
             capabilitiesFailed: false,
+            materialsByExecutor: {},
+            casesByMaterial: {},
+            nodes: [],
+            dispatchSlotIds: [],
+            uiManifestLoaded: false,
             // 下发面板
             dispatch: {
                 name: '',
@@ -490,6 +810,26 @@ export default {
             shardModeOptions: [
                 { label: 'none（不分片）', value: 'none' },
                 { label: 'plan（执行器规划分片）', value: 'plan' }
+            ],
+            strategyOptions: [
+                { label: 'balanced（最少在飞优先）', value: 'balanced' },
+                { label: 'random（匹配集合内随机）', value: 'random' }
+            ],
+            targetModeOptions: [
+                { label: '自动', value: 'auto' },
+                { label: '指定台架', value: 'nodes' },
+                { label: '按能力标签', value: 'labels' }
+            ],
+            triggerTypeOptions: [
+                { label: 'manual（手动）', value: 'manual' },
+                { label: 'cron（定时）', value: 'cron' },
+                { label: 'event（事件）', value: 'event' }
+            ],
+            notifyTypeOptions: [
+                { label: 'none（不通知）', value: 'none' },
+                { label: 'jira', value: 'jira' },
+                { label: 'webhook', value: 'webhook' },
+                { label: 'email', value: 'email' }
             ]
         };
     },
@@ -510,20 +850,33 @@ export default {
             if (!this.editor) return '测试计划';
             return this.editor.planId ? `编辑计划 · ${this.editor.name || this.editor.planId}` : '新建计划';
         },
+        legacyStepExists() {
+            return Boolean(this.editor && this.editor.steps.some((step) => step.legacy));
+        },
+        nodeOptions() {
+            return (this.nodes || []).map((node) => {
+                const id = String((node && node.node_id) || '');
+                const status = String((node && node.status) || '—');
+                return { value: id, label: `${id} · ${status}` };
+            });
+        },
         rows() {
             return this.plans.map((plan) => {
                 const steps = Array.isArray(plan.steps) ? plan.steps : [];
                 const executors = [];
+                const scripts = [];
                 for (const step of steps) {
-                    const executor = step && typeof step.executor === 'object' ? step.executor : {};
-                    const id = String((executor && executor.id) || '');
+                    const executor = isPlainObject(step && step.executor) ? step.executor : {};
+                    const id = String(executor.id || '');
                     if (id && !executors.includes(id)) executors.push(id);
+                    scripts.push(this.scriptTextOf(step));
                 }
                 return {
                     ...plan,
                     plan_id: String(plan.plan_id || plan.id || ''),
                     step_count: steps.length,
                     executors_text: executors.join(' + '),
+                    scripts_text: scripts.join('，'),
                     labels_text: this.formatLabels(plan.labels)
                 };
             });
@@ -549,6 +902,8 @@ export default {
     mounted() {
         this.loadPlans();
         this.loadCapabilities();
+        this.loadNodes();
+        this.loadUiManifest();
     },
     methods: {
         // ============================ 视图切换（query 驱动） ============================
@@ -611,7 +966,7 @@ export default {
                 this.plans = data.plans || [];
                 this.error = '';
             } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
+                this.error = this.reasonText(reason);
             } finally {
                 this.loadingPlans = false;
             }
@@ -637,7 +992,7 @@ export default {
                         await this.loadPlans(true);
                     } catch (reason) {
                         // 409 / 404 等错误明示，不静默
-                        this.error = `删除失败：${String(reason && reason.message ? reason.message : reason)}`;
+                        this.error = `删除失败：${this.reasonText(reason)}`;
                     }
                 }
             });
@@ -655,37 +1010,59 @@ export default {
                 this.error = '';
                 await this.loadPlans(true);
             } catch (reason) {
-                this.error = `复制失败：${String(reason && reason.message ? reason.message : reason)}`;
+                this.error = `复制失败：${this.reasonText(reason)}`;
             }
         },
         // ================================ 编辑器 =================================
-        makeStep(raw) {
-            const step = raw && typeof raw === 'object' ? raw : {};
-            const executor = step.executor && typeof step.executor === 'object' ? step.executor : {};
-            const shard = step.shard && typeof step.shard === 'object' ? step.shard : {};
-            const params =
-                step.params && typeof step.params === 'object' && !Array.isArray(step.params) ? step.params : {};
+        makeStep(raw, fromSaved) {
+            const step = isPlainObject(raw) ? raw : {};
+            const executor = isPlainObject(step.executor) ? step.executor : {};
+            const shard = isPlainObject(step.shard) ? step.shard : {};
+            const params = isPlainObject(step.params) ? step.params : {};
+            const materialRaw = isPlainObject(step.material) ? step.material : null;
+            const topMaterialId = typeof step.material_id === 'string' ? step.material_id : '';
+            const materialId = materialRaw ? String(materialRaw.material_id || '') : topMaterialId;
+            const casesRaw = isPlainObject(step.cases) ? step.cases : null;
+            const casesMode = casesRaw && casesRaw.mode === 'selected' ? 'selected' : 'all';
+            const caseIds = casesRaw && Array.isArray(casesRaw.case_ids) ? casesRaw.case_ids.map((id) => String(id)) : [];
+            const nodes = Array.isArray(executor.nodes) ? executor.nodes.map((id) => String(id)) : [];
+            const strategy = executor.strategy === 'random' ? 'random' : 'balanced';
+            const executorLabels = isPlainObject(executor.labels) ? executor.labels : {};
+            const materialMeta = materialRaw
+                ? {
+                      material_id: materialId,
+                      sha256: String(materialRaw.sha256 || ''),
+                      recipe_fingerprint: String(materialRaw.recipe_fingerprint || ''),
+                      name: String(materialRaw.name || '')
+                  }
+                : topMaterialId
+                  ? { material_id: topMaterialId, sha256: '', recipe_fingerprint: '', name: '' }
+                  : null;
+            this.stepUid += 1;
             return {
+                uid: this.stepUid,
                 name: String(step.name || ''),
-                executorId: String((executor && executor.id) || ''),
-                executorKind: String((executor && executor.kind) || 'executor'),
-                executorLabels:
-                    executor.labels && typeof executor.labels === 'object' && !Array.isArray(executor.labels)
-                        ? { ...executor.labels }
-                        : {},
-                materialId: String(step.material_id || ''),
-                requires:
-                    step.requires && typeof step.requires === 'object' && !Array.isArray(step.requires)
-                        ? { ...step.requires }
-                        : {},
+                executorId: String(executor.id || ''),
+                executorKind: String(executor.kind || 'executor'),
+                labelRows: this.kvRowsOf(executorLabels),
+                nodes,
+                strategy,
+                targetMode: nodes.length ? 'nodes' : Object.keys(executorLabels).length ? 'labels' : 'auto',
+                materialId,
+                materialMeta,
+                // 旧格式（顶层 material_id / 无 cases）归一 v2 后显式提示（§7 兼容）
+                legacy: Boolean(fromSaved) && (!materialRaw || !casesRaw),
+                casesMode,
+                caseIds,
+                caseDiffRemoved: [],
+                filters: { keyword: '', module: '', markers: [] },
+                requires: isPlainObject(step.requires) ? { ...step.requires } : {},
                 paramsRaw: JSON.stringify(params, null, 2),
                 paramsRawError: '',
                 form: { values: {}, arrayText: {}, objectRows: {} },
-                shardMode: String(shard.mode || 'none'),
-                shardHint: Number(shard.hint || 0),
-                timeoutS: Number(step.timeout_s || 0),
-                // 下发覆盖（stage_params）：selection_id 或 targets 文本（不入计划存储）
-                override: { selectionId: '', targetsText: '' }
+                shardMode: String(shard.mode || 'none') === 'plan' ? 'plan' : 'none',
+                shardHint: Number(shard.hint) || 0,
+                timeoutS: Number(step.timeout_s) || 0
             };
         },
         openNewEditor() {
@@ -697,7 +1074,13 @@ export default {
                 priority: 0,
                 failurePolicy: 'fail_fast',
                 timeoutS: 0,
-                steps: [this.makeStep({ name: '步骤 1', executor: { id: '' } })]
+                triggerType: 'manual',
+                triggerConfigRows: [],
+                triggerConfigOpen: false,
+                notifyType: 'none',
+                notifyConfigRows: [],
+                notifyConfigOpen: false,
+                steps: [this.makeStep({ name: '步骤 1' }, false)]
             };
             this.validationErrors = [];
             this.resetDispatch();
@@ -709,29 +1092,39 @@ export default {
                 this.applyPlanToEditor(data.plan || {});
                 this.error = '';
             } catch (reason) {
-                this.error = String(reason && reason.message ? reason.message : reason);
+                this.error = this.reasonText(reason);
                 this.navigateEdit('', true);
             }
         },
         applyPlanToEditor(plan) {
-            const defaults =
-                plan.defaults && typeof plan.defaults === 'object' && !Array.isArray(plan.defaults) ? plan.defaults : {};
+            const defaults = isPlainObject(plan.defaults) ? plan.defaults : {};
+            const trigger = isPlainObject(plan.trigger) ? plan.trigger : {};
+            const notify = isPlainObject(plan.notify) ? plan.notify : {};
             const steps = Array.isArray(plan.steps) ? plan.steps : [];
+            const triggerType = String(trigger.type || 'manual');
+            const notifyType = String(notify.type || 'none');
             this.editor = {
                 planId: String(plan.plan_id || plan.id || ''),
                 name: String(plan.name || ''),
                 description: String(plan.description || ''),
                 labelsRows: this.kvRowsOf(plan.labels),
-                priority: Number(defaults.priority || 0),
+                priority: Number(defaults.priority) || 0,
                 failurePolicy: String(defaults.failure_policy || 'fail_fast'),
-                timeoutS: Number(defaults.timeout_s || 0),
-                steps: steps.length ? steps.map((step) => this.makeStep(step)) : [this.makeStep({ name: '步骤 1' })]
+                timeoutS: Number(defaults.timeout_s) || 0,
+                triggerType: this.triggerTypeOptions.some((option) => option.value === triggerType) ? triggerType : 'manual',
+                triggerConfigRows: this.kvRowsOf(trigger.config),
+                triggerConfigOpen: false,
+                notifyType: this.notifyTypeOptions.some((option) => option.value === notifyType) ? notifyType : 'none',
+                notifyConfigRows: this.kvRowsOf(notify.config),
+                notifyConfigOpen: false,
+                steps: steps.length ? steps.map((step) => this.makeStep(step, true)) : [this.makeStep({ name: '步骤 1' }, false)]
             };
             this.validationErrors = [];
             this.resetDispatch();
             for (const step of this.editor.steps) {
                 this.ensureSchema(step);
                 this.ensureMaterials(step);
+                if (step.materialId) this.ensureCases(step.materialId);
             }
             if (this.focusDispatch) {
                 this.focusDispatch = false;
@@ -752,11 +1145,11 @@ export default {
                     obj = {};
                 }
             }
-            if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];
+            if (!isPlainObject(obj)) return [];
             return Object.entries(obj).map(([key, value]) => ({ key, value: String(value ?? '') }));
         },
         addStep() {
-            const step = this.makeStep({ name: `步骤 ${this.editor.steps.length + 1}` });
+            const step = this.makeStep({ name: `步骤 ${this.editor.steps.length + 1}` }, false);
             this.editor.steps.push(step);
             this.ensureSchema(step);
         },
@@ -772,14 +1165,18 @@ export default {
         },
         onStepExecutorChange(step) {
             step.executorId = String(step.executorId || '').trim();
-            step.materialId = ''; // 材料归属随执行器，切换即清空避免归属不符
+            // 材料归属随执行器，切换即清空避免归属不符
+            step.materialId = '';
+            step.materialMeta = null;
+            step.caseIds = [];
+            step.caseDiffRemoved = [];
             this.ensureSchema(step);
             this.ensureMaterials(step);
             this.syncStepRawToForm(step); // raw 优先：按新 schema 回填表单
         },
-        // ======================= 能力信封 / 材料 / 动态表单 =======================
+        // ======================= 能力信封 / 材料 / 用例 / slot 清单 =======================
         async loadCapabilities() {
-            // 能力信封（SubmitPage.vue:387-394 解析法）：executor 条目 → 执行器候选 + schema
+            // 能力信封：executor 条目 → 执行器候选 + detail.schema（回落表单用）
             try {
                 const data = await fetchJson(apiUrl('/api/heartbeat/capabilities?kind=executor'));
                 const seen = {};
@@ -799,7 +1196,31 @@ export default {
                 for (const step of (this.editor && this.editor.steps) || []) this.syncStepRawToForm(step);
             } catch (reason) {
                 this.capabilitiesFailed = true;
-                this.notice = `能力信封加载失败（${reason && reason.message ? reason.message : reason}），执行器可手输 id、参数走 raw JSON。`;
+                this.notice = `能力信封加载失败（${this.reasonText(reason)}），执行器可手输 id、参数走 raw JSON。`;
+            }
+        },
+        async loadUiManifest() {
+            // UI 清单（§6 回落判定）：plans:dispatch:<能力 id> 槽位存在 → 挂执行器面板，
+            // 不存在 → 通用 schema 表单；清单不可用时走 PluginUiOutlet 空槽 fallback 兜底
+            try {
+                const manifest = await fetchJson(apiUrl('/api/web/ui'));
+                this.dispatchSlotIds = (Array.isArray(manifest) ? manifest : [])
+                    .filter((item) => item && item.kind === 'slot' && String(item.target || '').startsWith('plans:dispatch:'))
+                    .map((item) => String(item.target).slice('plans:dispatch:'.length))
+                    .filter(Boolean);
+                this.uiManifestLoaded = true;
+            } catch {
+                this.dispatchSlotIds = [];
+                this.uiManifestLoaded = false;
+            }
+        },
+        async loadNodes() {
+            // 台架多选数据源（§4：指定台架）
+            try {
+                const data = await fetchJson(apiUrl('/api/heartbeat/nodes'));
+                this.nodes = Array.isArray(data.nodes) ? data.nodes : [];
+            } catch {
+                this.nodes = [];
             }
         },
         ensureSchema(step) {
@@ -816,32 +1237,309 @@ export default {
             this.$nextTick(() => this.syncStepRawToForm(step));
         },
         async ensureMaterials(step) {
-            // 脚本下拉（§4.5 过滤谓词 ==id OR ='' 通用可见）
-            const id = String(step.executorId || '').trim();
-            if (!id || id in this.materialsByExecutor) return;
-            try {
-                const data = await fetchJson(
-                    apiUrl(`/api/test/materials?executor=${encodeURIComponent(id)}&limit=200`)
-                );
-                this.materialsByExecutor[id] = data.materials || [];
-            } catch {
-                this.materialsByExecutor[id] = [];
+            // 脚本下拉数据源：executor 过滤谓词 ==X OR =''（通用材料恒可见）；空执行器列全部
+            const key = String(step.executorId || '').trim();
+            const cached = this.materialsByExecutor[key];
+            if (cached && (cached.loading || cached.done)) return cached.promise;
+            const entry = { loading: true, done: false, rows: [], error: '', promise: null };
+            entry.promise = (async () => {
+                try {
+                    const query = new URLSearchParams({ limit: '200' });
+                    if (key) query.set('executor', key);
+                    const data = await fetchJson(apiUrl(`/api/test/materials?${query.toString()}`));
+                    entry.rows = Array.isArray(data.materials) ? data.materials : [];
+                    this.prefetchCaseCounts(entry.rows);
+                } catch (reason) {
+                    entry.error = this.reasonText(reason);
+                } finally {
+                    entry.loading = false;
+                    entry.done = true;
+                }
+            })();
+            this.materialsByExecutor[key] = entry;
+            return entry.promise;
+        },
+        prefetchCaseCounts(rows) {
+            // 用例数进选项标签：后台预取前 N 个材料的用例清单（缓存复用，换脚本 diff 即时）
+            for (const row of (rows || []).slice(0, 20)) {
+                const id = this.materialIdOfRow(row);
+                if (id) this.ensureCases(id);
             }
         },
+        async ensureCases(materialId) {
+            const id = String(materialId || '').trim();
+            if (!id) return;
+            const cached = this.casesByMaterial[id];
+            if (cached && (cached.loading || cached.loaded)) return cached.promise;
+            const entry = { loading: true, loaded: false, rows: [], error: '', promise: null };
+            entry.promise = (async () => {
+                try {
+                    const data = await fetchJson(apiUrl(`/api/test/materials/${encodeURIComponent(id)}/cases`));
+                    entry.rows = (Array.isArray(data.cases) ? data.cases : []).map((item) => ({
+                        case_id: String((item && item.case_id) || ''),
+                        name: String((item && item.name) || ''),
+                        path: String((item && item.path) || ''),
+                        markers: Array.isArray(item && item.markers) ? item.markers.map((m) => String(m)) : [],
+                        status: String((item && item.status) || '')
+                    }));
+                    entry.error = '';
+                } catch (reason) {
+                    entry.error = this.reasonText(reason);
+                } finally {
+                    entry.loading = false;
+                    entry.loaded = true;
+                }
+            })();
+            this.casesByMaterial[id] = entry;
+            return entry.promise;
+        },
+        materialsOf(step) {
+            const key = String(step.executorId || '').trim();
+            const entry = this.materialsByExecutor[key];
+            return entry && entry.rows ? entry.rows : [];
+        },
+        materialIdOfRow(row) {
+            return String((row && (row.material_id || row.id)) || '');
+        },
+        materialRowOf(step) {
+            const id = String(step.materialId || '').trim();
+            if (!id) return null;
+            for (const row of this.materialsOf(step)) {
+                if (this.materialIdOfRow(row) === id) return row;
+            }
+            for (const key of Object.keys(this.materialsByExecutor)) {
+                const entry = this.materialsByExecutor[key];
+                for (const row of (entry && entry.rows) || []) {
+                    if (this.materialIdOfRow(row) === id) return row;
+                }
+            }
+            return null;
+        },
         materialOptionsOf(step) {
-            const list = this.materialsByExecutor[String(step.executorId || '').trim()] || [];
-            const options = [{ label: '无（不指定材料）', value: '' }];
-            for (const item of list) {
-                const id = String((item && (item.material_id || item.id)) || '');
+            const options = [];
+            for (const row of this.materialsOf(step)) {
+                const id = this.materialIdOfRow(row);
                 if (!id) continue;
-                const generic = String(item.executor_id || '') === '' ? '·通用' : '';
-                options.push({ label: `${item.name || id}${generic}（${item.state || '—'}）`, value: id });
+                const caseEntry = this.casesByMaterial[id];
+                const count = caseEntry && caseEntry.loaded && !caseEntry.error ? `${caseEntry.rows.length} 用例` : '用例 …';
+                options.push({
+                    value: id,
+                    label: `${row.name || id} · ${this.shortSha8(row.sha256)} · ${count} · ${this.stateText(row.state)}`
+                });
             }
             if (step.materialId && !options.some((option) => option.value === step.materialId)) {
-                options.push({ label: `${step.materialId}（不在当前列表）`, value: step.materialId });
+                options.push({ value: step.materialId, label: `${step.materialId}（不在当前列表）` });
             }
             return options;
         },
+        async onMaterialChange(step) {
+            // 更换脚本（§3）：case diff——交集保持勾选、消失项红字列出并剔除
+            const oldIds = step.caseIds.slice();
+            const row = this.materialRowOf(step);
+            if (row) {
+                step.materialMeta = {
+                    material_id: this.materialIdOfRow(row),
+                    sha256: String(row.sha256 || ''),
+                    recipe_fingerprint: String(row.recipe_fingerprint || ''),
+                    name: String(row.name || '')
+                };
+                // executor 自动推导（可手改）
+                const owner = String(row.executor_id || '');
+                if (!String(step.executorId || '').trim() && owner) {
+                    step.executorId = owner;
+                    this.ensureSchema(step);
+                    this.ensureMaterials(step);
+                }
+            } else if (step.materialId) {
+                step.materialMeta = { material_id: String(step.materialId), sha256: '', recipe_fingerprint: '', name: '' };
+            } else {
+                step.materialMeta = null;
+            }
+            await this.ensureCases(step.materialId);
+            const rows = this.casesOf(step);
+            const idSet = new Set(rows.map((item) => item.case_id));
+            const kept = oldIds.filter((id) => idSet.has(id));
+            const removed = oldIds.filter((id) => !idSet.has(id));
+            step.caseDiffRemoved = removed;
+            if (step.casesMode === 'selected') {
+                step.caseIds = oldIds.length ? kept : rows.map((item) => item.case_id);
+            } else {
+                step.caseIds = rows.map((item) => item.case_id);
+            }
+            step.filters = { keyword: '', module: '', markers: [] };
+            if (step.materialId) step.legacy = false;
+            if (removed.length) {
+                this.notice = `${removed.length} 个用例在新脚本中不存在，已从勾选中剔除（红字列出）`;
+            }
+        },
+        // ============================ 用例筛选 / 勾选 ============================
+        casesOf(step) {
+            const entry = this.casesByMaterial[String(step.materialId || '').trim()];
+            return entry && entry.rows ? entry.rows : [];
+        },
+        caseLoadingOf(step) {
+            const entry = this.casesByMaterial[String(step.materialId || '').trim()];
+            return Boolean(entry && entry.loading);
+        },
+        caseEmptyTextOf(step) {
+            const entry = this.casesByMaterial[String(step.materialId || '').trim()];
+            if (!step.materialId) return '请先选择脚本';
+            if (entry && entry.loading) return '用例清单加载中……';
+            if (entry && entry.error) return `用例清单加载失败：${entry.error}`;
+            if (!this.casesOf(step).length) return '该脚本尚无用例清单（分析未产出）';
+            return '无匹配用例（试试放宽筛选）';
+        },
+        filteredCasesOf(step) {
+            const rows = this.casesOf(step);
+            const filters = step.filters || {};
+            const keyword = String(filters.keyword || '').trim().toLowerCase();
+            const module = String(filters.module || '');
+            const markers = Array.isArray(filters.markers) ? filters.markers : [];
+            return rows.filter((item) => {
+                if (
+                    keyword &&
+                    !String(item.case_id || '').toLowerCase().includes(keyword) &&
+                    !String(item.name || '').toLowerCase().includes(keyword)
+                ) {
+                    return false;
+                }
+                if (module && String(item.path || '') !== module) return false;
+                if (markers.length && !markers.some((marker) => item.markers.includes(String(marker)))) return false;
+                return true;
+            });
+        },
+        moduleOptionsOf(step) {
+            // 模块 = path 去重集合
+            const set = new Set();
+            for (const item of this.casesOf(step)) {
+                const path = String(item.path || '');
+                if (path) set.add(path);
+            }
+            return [...set].sort().map((path) => ({ label: path, value: path }));
+        },
+        markerOptionsOf(step) {
+            // 标签 = markers 并集
+            const set = new Set();
+            for (const item of this.casesOf(step)) {
+                for (const marker of item.markers) set.add(String(marker));
+            }
+            return [...set].sort().map((marker) => ({ label: marker, value: marker }));
+        },
+        isCaseChecked(step, caseId) {
+            return step.caseIds.includes(String(caseId));
+        },
+        toggleCase(step, caseId, on) {
+            const id = String(caseId);
+            const set = new Set(step.caseIds);
+            if (on) set.add(id);
+            else set.delete(id);
+            step.caseIds = [...set];
+            step.legacy = false;
+        },
+        toggleAllFiltered(step, on) {
+            const set = new Set(step.caseIds);
+            for (const item of this.filteredCasesOf(step)) {
+                if (on) set.add(item.case_id);
+                else set.delete(item.case_id);
+            }
+            step.caseIds = [...set];
+            step.legacy = false;
+        },
+        allFilteredCheckedOf(step) {
+            const rows = this.filteredCasesOf(step);
+            if (!rows.length) return false;
+            return rows.every((item) => step.caseIds.includes(item.case_id));
+        },
+        selectAllFiltered(step) {
+            const set = new Set(step.caseIds);
+            for (const item of this.filteredCasesOf(step)) set.add(item.case_id);
+            step.caseIds = [...set];
+            step.legacy = false;
+        },
+        clearCases(step) {
+            step.caseIds = [];
+            step.legacy = false;
+        },
+        invertCases(step) {
+            const selected = new Set(step.caseIds);
+            step.caseIds = this.casesOf(step)
+                .map((item) => item.case_id)
+                .filter((id) => !selected.has(id));
+            step.legacy = false;
+        },
+        totalCasesOf(step) {
+            return this.casesOf(step).length;
+        },
+        onCaseModeChange(step) {
+            // 默认「指定用例且全选」：切到指定用例时空选集自动全选
+            if (step.casesMode === 'selected' && !step.caseIds.length) {
+                step.caseIds = this.casesOf(step).map((item) => item.case_id);
+            }
+            step.legacy = false;
+        },
+        onTargetModeChange(step) {
+            if (step.targetMode === 'labels') step.strategy = 'random';
+            else if (step.targetMode === 'nodes' && step.strategy !== 'random') step.strategy = 'balanced';
+        },
+        focusMaterialSelect(step) {
+            // 「更换脚本」定位到脚本下拉（更换动作即下拉改选，diff 随改选触发）
+            const target = document.getElementById(`plans-matsel-${step.uid}`);
+            if (!target) return;
+            if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const input = target.querySelector('input');
+            if (input && typeof input.focus === 'function') input.focus();
+        },
+        // ======================= 参数：slot 面板 ⇄ schema 表单 =======================
+        slotModeOf(step) {
+            // §6 回落判定：清单已加载按注册情况分流；清单不可用 → hybrid（挂面板 + 空槽兜底表单）
+            const id = String(step.executorId || '').trim();
+            if (!id) return 'form';
+            if (!this.uiManifestLoaded) return 'hybrid';
+            return this.dispatchSlotIds.includes(id) ? 'panel' : 'form';
+        },
+        dispatchPayload(step) {
+            // payload（宿主 → 面板，设计 §6）：{ executorId, material, cases, params }
+            return {
+                executorId: String(step.executorId || ''),
+                material: this.materialMetaOf(step),
+                cases: { mode: step.casesMode, case_ids: step.caseIds.slice() },
+                params: this.finalStepParams(step)
+            };
+        },
+        onPanelParams(step, params) {
+            // update（面板 → 宿主）：完整 params 对象整替（核心管理键不产出，raw 镜像同步）
+            const obj = isPlainObject(params) ? params : {};
+            step.paramsRaw = JSON.stringify(obj, null, 2);
+            step.paramsRawError = '';
+        },
+        materialMetaOf(step) {
+            const id = String(step.materialId || '').trim();
+            if (!id) return null;
+            const meta = isPlainObject(step.materialMeta) ? step.materialMeta : {};
+            return {
+                material_id: id,
+                name: String(meta.name || ''),
+                sha256: String(meta.sha256 || ''),
+                recipe_fingerprint: String(meta.recipe_fingerprint || '')
+            };
+        },
+        materialTitleOf(step) {
+            const meta = isPlainObject(step.materialMeta) ? step.materialMeta : {};
+            return String(meta.name || step.materialId || '未选脚本');
+        },
+        materialShortShaOf(step) {
+            const meta = isPlainObject(step.materialMeta) ? step.materialMeta : {};
+            return meta.sha256 ? String(meta.sha256).slice(0, 8) : '—';
+        },
+        materialBoundOf(step) {
+            const meta = isPlainObject(step.materialMeta) ? step.materialMeta : {};
+            return Boolean(meta.sha256 && meta.recipe_fingerprint);
+        },
+        materialTimeOf(step) {
+            const row = this.materialRowOf(step);
+            return row ? row.updated_ts : 0;
+        },
+        // ====================== schema 动态表单（回落路径，raw 优先） ======================
         schemaOf(step) {
             const id = String(step.executorId || '').trim();
             return id ? this.schemas[id] : null;
@@ -857,7 +1555,7 @@ export default {
             return Object.entries(props)
                 .filter(([key]) => !reserved.has(key))
                 .map(([key, def]) => {
-                    const raw = def && typeof def === 'object' ? def : {};
+                    const raw = isPlainObject(def) ? def : {};
                     const options = Array.isArray(raw.enum) ? raw.enum : Array.isArray(raw.options) ? raw.options : null;
                     let type = raw.type || (options ? 'enum' : 'string');
                     if (options && type !== 'array' && type !== 'object') type = 'enum';
@@ -895,7 +1593,7 @@ export default {
             if (!text) return null;
             try {
                 const parsed = JSON.parse(text);
-                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+                if (!isPlainObject(parsed)) return null;
                 return parsed;
             } catch {
                 return null;
@@ -965,7 +1663,7 @@ export default {
                 step.paramsRawError = `raw 参数不是合法 JSON：${reason.message}`;
                 return;
             }
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            if (!isPlainObject(parsed)) {
                 step.paramsRawError = 'raw 参数需是 JSON 对象';
                 return;
             }
@@ -977,7 +1675,7 @@ export default {
                 if (prop.type === 'array') {
                     step.form.arrayText[prop.key] = Array.isArray(value) ? value.join('\n') : String(value);
                 } else if (prop.type === 'object') {
-                    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+                    const source = isPlainObject(value) ? value : {};
                     step.form.objectRows[prop.key] = Object.entries(source).map(([key, item]) => ({
                         key,
                         value: String(item ?? '')
@@ -1039,12 +1737,18 @@ export default {
             this.dispatch.envError = '';
             return true;
         },
-        // ============================ 校验 / 组装 ============================
+        // ============================ 校验 / 组装（前端预检，§8 同口径） ============================
         validateEditor() {
             const problems = [];
             const editor = this.editor;
             if (!editor) return ['编辑器未就绪'];
             if (!String(editor.name || '').trim()) problems.push('基本信息：名称必填');
+            const priority = Number(editor.priority);
+            if (!Number.isInteger(priority)) problems.push('defaults.priority 需是整数');
+            const defaultTimeout = Number(editor.timeoutS);
+            if (!Number.isFinite(defaultTimeout) || defaultTimeout < 0) {
+                problems.push('defaults.timeout_s 需是有限非负数（0=不限）');
+            }
             if (!editor.steps.length) problems.push('steps 不能为空');
             const names = new Set();
             editor.steps.forEach((step, index) => {
@@ -1053,39 +1757,93 @@ export default {
                 if (!name) problems.push(`${where}.name 步骤名必填`);
                 else if (names.has(name)) problems.push(`${where}.name 步骤名重复：${name}`);
                 else names.add(name);
-                if (!String(step.executorId || '').trim()) problems.push(`${where}.executor.id 执行器 id 必填`);
+                if (!String(step.executorId || '').trim()) problems.push(`${where}.executor.id 需是非空字符串`);
+                // material 必填（§2.1/§8.2）
+                if (!String(step.materialId || '').trim()) {
+                    problems.push(`${where}.material.material_id 必填（计划步骤必须绑定脚本）`);
+                }
+                // cases（§8.3）
+                if (step.casesMode !== 'all' && step.casesMode !== 'selected') {
+                    problems.push(`${where}.cases.mode 非法（可选：all / selected）`);
+                }
+                if (step.casesMode === 'selected' && !step.caseIds.length) {
+                    problems.push(`${where}.cases.mode=selected 时 case_ids 不能为空`);
+                }
+                // params raw + 核心管理键同名冲突（§8.4）
                 const rawText = String(step.paramsRaw || '').trim();
                 if (rawText && !this.parseStepRaw(step)) {
                     problems.push(`${where}.params raw JSON 不是合法对象：${step.paramsRawError || '无法解析'}`);
                 }
                 const params = this.finalStepParams(step);
-                const inner = params.material_id;
+                const innerMaterial = params.material_id;
                 if (
+                    typeof innerMaterial === 'string' &&
+                    innerMaterial &&
                     step.materialId &&
-                    typeof inner === 'string' &&
-                    inner &&
-                    inner !== step.materialId
+                    innerMaterial !== step.materialId
                 ) {
+                    problems.push(`${where}.material_id 与 params.material_id 同名冲突：${step.materialId} ≠ ${innerMaterial}`);
+                }
+                const targets = params.targets;
+                if (step.casesMode === 'selected' && targets !== undefined && targets !== null) {
+                    if (!sameStrList(targets, step.caseIds)) {
+                        problems.push(`${where}.cases.case_ids 与 params.targets 同名冲突：${step.caseIds.join(', ')} ≠ ${JSON.stringify(targets)}`);
+                    }
+                }
+                if (step.casesMode === 'selected' && params.selection_id) {
                     problems.push(
-                        `${where}.material_id 与 params.material_id 同名冲突：${step.materialId} ≠ ${inner}`
+                        `${where}.params.selection_id 与 cases 选例同名冲突（计划选例走 cases.case_ids，请移除 selection_id）`
                     );
+                }
+                // 台架定向（§8.5）
+                if (step.targetMode === 'nodes') {
+                    if (!step.nodes.length) problems.push(`${where}.executor.nodes 指定台架模式下不能为空`);
+                    for (const node of step.nodes) {
+                        if (!String(node || '').trim()) problems.push(`${where}.executor.nodes 含空串（台架名需非空）`);
+                    }
+                }
+                if (step.targetMode !== 'auto' && step.strategy !== 'balanced' && step.strategy !== 'random') {
+                    problems.push(`${where}.executor.strategy 非法（可选：balanced / random）`);
+                }
+                // shard / timeout（§8.6）
+                const hint = Number(step.shardHint);
+                if (!Number.isInteger(hint) || hint < 0) problems.push(`${where}.shard.hint 需是非负整数`);
+                const timeout = Number(step.timeoutS);
+                if (!Number.isFinite(timeout) || timeout < 0) {
+                    problems.push(`${where}.timeout_s 需是有限非负数（0=不限）`);
                 }
             });
             return problems;
         },
+        materialOut(step) {
+            const meta = this.materialMetaOf(step);
+            return meta
+                ? {
+                      material_id: meta.material_id,
+                      sha256: meta.sha256,
+                      recipe_fingerprint: meta.recipe_fingerprint,
+                      name: meta.name
+                  }
+                : { material_id: '', sha256: '', recipe_fingerprint: '', name: '' };
+        },
         stepToSpec(step) {
-            const name = String(step.name || '').trim();
-            const executorId = String(step.executorId || '').trim();
+            // 步骤 v2（设计 §2.1）：保存 / 临时任务组装共用
             return {
-                name,
+                name: String(step.name || '').trim(),
                 executor: {
-                    id: executorId,
+                    id: String(step.executorId || '').trim(),
                     kind: String(step.executorKind || 'executor'),
-                    labels: step.executorLabels || {}
+                    labels: step.targetMode === 'labels' ? this.collectKv(step.labelRows) : {},
+                    nodes: step.targetMode === 'nodes' ? step.nodes.map((node) => String(node)).filter(Boolean) : [],
+                    strategy: step.targetMode === 'auto' ? 'balanced' : step.strategy
                 },
-                material_id: String(step.materialId || '').trim(),
+                material: this.materialOut(step),
+                cases: {
+                    mode: step.casesMode === 'selected' ? 'selected' : 'all',
+                    case_ids: step.casesMode === 'selected' ? step.caseIds.slice() : []
+                },
                 params: this.finalStepParams(step),
-                shard: { mode: step.shardMode || 'none', hint: Number(step.shardHint) || 0 },
+                shard: { mode: step.shardMode === 'plan' ? 'plan' : 'none', hint: Number(step.shardHint) || 0 },
                 requires: step.requires || {},
                 timeout_s: Number(step.timeoutS) || 0
             };
@@ -1094,11 +1852,11 @@ export default {
             this.validationErrors = problems;
         },
         handleSaveError(reason) {
-            const message = String(reason && reason.message ? reason.message : reason);
+            const message = this.reasonText(reason);
             if (reason && reason.status === 400) {
-                // 校验错误逐条展示（400 的 error 消息按「；」拆行）
+                // 校验错误逐条展示（400 的 InvalidSpec 消息按「；」拆行）
                 const lines = message
-                    .replace(/^计划规格无效：/, '')
+                    .replace(/^(计划|任务)规格无效：/, '')
                     .split('；')
                     .map((line) => line.trim())
                     .filter(Boolean);
@@ -1108,6 +1866,28 @@ export default {
             }
         },
         // ============================ 保存 / 另存为 ============================
+        planBody() {
+            const editor = this.editor;
+            return {
+                name: String(editor.name || '').trim(),
+                description: String(editor.description || ''),
+                labels: this.collectKv(editor.labelsRows),
+                defaults: {
+                    priority: Number(editor.priority) || 0,
+                    failure_policy: editor.failurePolicy,
+                    timeout_s: Number(editor.timeoutS) || 0
+                },
+                trigger: {
+                    type: editor.triggerType,
+                    config: this.collectKv(editor.triggerConfigRows)
+                },
+                notify: {
+                    type: editor.notifyType,
+                    config: this.collectKv(editor.notifyConfigRows)
+                },
+                steps: editor.steps.map((step) => this.stepToSpec(step))
+            };
+        },
         async savePlan() {
             this.error = '';
             this.notice = '';
@@ -1118,17 +1898,7 @@ export default {
                 return;
             }
             const editor = this.editor;
-            const body = {
-                name: String(editor.name || '').trim(),
-                description: String(editor.description || ''),
-                labels: this.collectKv(editor.labelsRows),
-                defaults: {
-                    priority: Number(editor.priority) || 0,
-                    failure_policy: editor.failurePolicy,
-                    timeout_s: Number(editor.timeoutS) || 0
-                },
-                steps: editor.steps.map((step) => this.stepToSpec(step))
-            };
+            const body = this.planBody();
             const isNew = !editor.planId;
             this.saving = true;
             try {
@@ -1155,10 +1925,11 @@ export default {
             await this.savePlan();
             if (this.validationErrors.length) return;
             try {
-                const data = await fetchJson(
-                    apiUrl(`/api/test/plans/${encodeURIComponent(this.editor.planId)}/clone`),
-                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
-                );
+                const data = await fetchJson(apiUrl(`/api/test/plans/${encodeURIComponent(this.editor.planId)}/clone`), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
                 const copy = data.plan || {};
                 this.applyPlanToEditor(copy);
                 this.editorKey = this.planIdOf(copy);
@@ -1166,7 +1937,7 @@ export default {
                 this.notice = `已另存为副本：${copy.name || this.editorKey}`;
                 await this.loadPlans(true);
             } catch (reason) {
-                this.error = `另存为失败：${String(reason && reason.message ? reason.message : reason)}`;
+                this.error = `另存为失败：${this.reasonText(reason)}`;
             }
         },
         // ============================ 下发（§5.5） ============================
@@ -1188,24 +1959,19 @@ export default {
             // ① 预推材料（best-effort）：对每个 material 调 pytest 族 push 口，
             // 404 = 族未提供推送端点跳过提示；其余错误收集不阻断（评审 #16）
             const notes = [];
-            const byMaterial = {};
+            const materialIds = [];
             for (const step of this.editor.steps) {
                 const materialId = String(step.materialId || '').trim();
-                if (!materialId) continue;
-                if (!byMaterial[materialId]) byMaterial[materialId] = [];
-                const selectionId = String((step.override && step.override.selectionId) || '').trim();
-                if (selectionId) byMaterial[materialId].push(selectionId);
+                if (materialId && !materialIds.includes(materialId)) materialIds.push(materialId);
             }
             this.dispatch.pushing = true;
             try {
-                for (const materialId of Object.keys(byMaterial)) {
-                    const selectionIds = byMaterial[materialId];
-                    const payload = selectionIds.length ? { selection_ids: selectionIds } : {};
+                for (const materialId of materialIds) {
                     try {
                         const data = await fetchJson(apiUrl(`/api/pytest/materials/${encodeURIComponent(materialId)}/push`), {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
+                            body: '{}'
                         });
                         const pushed = (data.pushed || []).length;
                         const failed = (data.failed || []).length;
@@ -1221,7 +1987,7 @@ export default {
                             });
                         } else {
                             notes.push({
-                                text: `${materialId}：预推失败（${reason && reason.message ? reason.message : reason}），不阻断下发`,
+                                text: `${materialId}：预推失败（${this.reasonText(reason)}），不阻断下发`,
                                 severity: 'danger'
                             });
                         }
@@ -1236,7 +2002,8 @@ export default {
             }
         },
         buildOverrides() {
-            // overrides 按 §5.5：name / priority / labels / env / stage_params / idempotency_key
+            // overrides 按 §5.5：name / priority / labels / env / idempotency_key
+            // （选例已是步骤一等公民，stage_params 覆盖区已从 UI 移除）
             const overrides = {};
             const name = String(this.dispatch.name || '').trim();
             if (name) overrides.name = name;
@@ -1246,21 +2013,6 @@ export default {
             if (Object.keys(labels).length) overrides.labels = labels;
             const env = this.collectKv(this.dispatch.envRows);
             if (Object.keys(env).length) overrides.env = env;
-            const stageParams = {};
-            for (const step of this.editor.steps) {
-                const stepName = String(step.name || '').trim();
-                if (!stepName) continue;
-                const entry = {};
-                const selectionId = String((step.override && step.override.selectionId) || '').trim();
-                if (selectionId) entry.selection_id = selectionId;
-                const targets = String((step.override && step.override.targetsText) || '')
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter(Boolean);
-                if (targets.length) entry.targets = targets;
-                if (Object.keys(entry).length) stageParams[stepName] = entry;
-            }
-            if (Object.keys(stageParams).length) overrides.stage_params = stageParams;
             const idempotencyKey = String(this.dispatch.idempotencyKey || '').trim();
             if (idempotencyKey) overrides.idempotency_key = idempotencyKey;
             return overrides;
@@ -1298,8 +2050,32 @@ export default {
                 this.dispatch.submitting = false;
             }
         },
+        tempStageOf(step, envOverride) {
+            // 临时任务阶段：镜像 _plan_stage_specs 注入（§2.3）——params.material_id ←
+            // material.material_id、selected 且未显式给 targets/selection_id 时注入
+            // params.targets = cases.case_ids；env 覆盖增量合并（后者胜）
+            const spec = this.stepToSpec(step);
+            const params = { ...spec.params };
+            if (!params.material_id && spec.material.material_id) {
+                params.material_id = spec.material.material_id;
+            }
+            if (spec.cases.mode === 'selected' && !('targets' in params) && !('selection_id' in params)) {
+                params.targets = [...spec.cases.case_ids];
+            }
+            if (Object.keys(envOverride).length) {
+                params.env = { ...(isPlainObject(params.env) ? params.env : {}), ...envOverride };
+            }
+            return {
+                name: spec.name,
+                executor: spec.executor,
+                params,
+                shard: spec.shard,
+                requires: spec.requires,
+                timeout_s: spec.timeout_s
+            };
+        },
         async submitTempTask() {
-            // 临时任务（裁决 G）：不保存直接下发 = 组装 TaskSpec 直接 POST /api/test/tasks
+            // 直接下发（不保存）：组装 TaskSpec 直接 POST /api/test/tasks
             // （labels 不带 plan_id、幂等键 UI 生成 uuid），同样走预推流程
             this.error = '';
             this.notice = '';
@@ -1313,30 +2089,7 @@ export default {
             if (!this.validateEnv()) return;
             const editor = this.editor;
             const envOverride = this.collectKv(this.dispatch.envRows);
-            const stages = editor.steps.map((step) => {
-                const params = this.finalStepParams(step);
-                const stage = this.stepToSpec(step);
-                const entry = {};
-                const selectionId = String((step.override && step.override.selectionId) || '').trim();
-                if (selectionId) entry.selection_id = selectionId;
-                const targets = String((step.override && step.override.targetsText) || '')
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter(Boolean);
-                if (targets.length) entry.targets = targets;
-                const merged = { ...params, ...entry };
-                if (Object.keys(envOverride).length) {
-                    merged.env = { ...(merged.env && typeof merged.env === 'object' ? merged.env : {}), ...envOverride };
-                }
-                return {
-                    name: stage.name,
-                    executor: stage.executor,
-                    params: merged,
-                    shard: stage.shard,
-                    requires: stage.requires,
-                    timeout_s: stage.timeout_s
-                };
-            });
+            const stages = editor.steps.map((step) => this.tempStageOf(step, envOverride));
             const name = String(this.dispatch.name || '').trim() || String(editor.name || '').trim();
             const priority = Number(this.dispatch.priority);
             const spec = {
@@ -1376,6 +2129,16 @@ export default {
             }
         },
         // ============================ 展示辅助 ============================
+        scriptTextOf(rawStep) {
+            // 列表「脚本信息」列：各步骤「脚本名@短sha」逗号串（旧格式归一显示）
+            const step = isPlainObject(rawStep) ? rawStep : {};
+            const material = isPlainObject(step.material) ? step.material : null;
+            const topMaterialId = typeof step.material_id === 'string' ? step.material_id : '';
+            const materialId = material ? String(material.material_id || '') : topMaterialId;
+            const name = String((material && material.name) || materialId || '未选脚本');
+            const sha = String((material && material.sha256) || '');
+            return `${name}@${sha ? sha.slice(0, 8) : '未绑定'}`;
+        },
         formatLabels(labels) {
             let source = labels;
             if (typeof labels === 'string') {
@@ -1385,7 +2148,7 @@ export default {
                     return labels;
                 }
             }
-            if (!source || typeof source !== 'object' || Array.isArray(source)) return '';
+            if (!isPlainObject(source)) return '';
             return Object.entries(source)
                 .map(([key, value]) => `${key}=${value}`)
                 .join(', ');
@@ -1393,6 +2156,16 @@ export default {
         formatTime(value) {
             if (!value) return '—';
             return new Date(value * 1000).toLocaleString();
+        },
+        shortSha8(value) {
+            const text = String(value || '');
+            return text ? text.slice(0, 8) : '—';
+        },
+        stateText(state) {
+            return MATERIAL_STATE_TEXT[state] || state || '—';
+        },
+        reasonText(reason) {
+            return String((reason && reason.message) || reason);
         }
     }
 };
@@ -1418,6 +2191,24 @@ export default {
     margin: 0;
 }
 
+.plans-page__topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.plans-page__topbar-title {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.plans-page__topbar-title h2 {
+    margin: 0;
+}
+
 .plans-page__hint {
     margin: 0.25rem 0 0;
     color: var(--text-color-secondary);
@@ -1432,6 +2223,14 @@ export default {
     margin: 0.25rem 0 0;
     color: var(--red-500);
     font-size: 0.875rem;
+}
+
+.plans-page__removed {
+    display: block;
+    font-family: monospace;
+    font-size: 0.8125rem;
+    color: var(--red-500);
+    word-break: break-all;
 }
 
 .plans-page__actions {
@@ -1452,6 +2251,13 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-width: 0;
+}
+
+.plans-page__field--inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .plans-page__label {
@@ -1461,6 +2267,14 @@ export default {
 
 .plans-page__input {
     width: 100%;
+    min-width: 0;
+}
+
+.plans-page__inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .plans-page__native {
@@ -1476,13 +2290,6 @@ export default {
 .plans-page__textarea {
     width: 100%;
     min-height: 4.5rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--surface-border);
-    border-radius: var(--content-border-radius);
-    background: var(--surface-card);
-    color: var(--text-color);
-    font: inherit;
-    resize: vertical;
 }
 
 .plans-page__textarea--tall {
@@ -1502,49 +2309,113 @@ export default {
     flex: 1;
 }
 
-.plans-page__step {
+/* 测试脚本卡片（§7：卡片头 + ①②③ 三段） */
+.plans-page__panel-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.plans-page__card {
     margin-bottom: 1rem;
-    padding: 1rem;
     border: 1px solid var(--surface-border);
     border-radius: var(--content-border-radius);
     background: var(--surface-card);
+    overflow: hidden;
 }
 
-.plans-page__step-head {
+.plans-page__card-head {
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.625rem 1rem;
+    border-bottom: 1px solid var(--surface-border);
 }
 
-.plans-page__step-name {
-    flex: 1;
+.plans-page__card-title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 20rem;
 }
 
-.plans-page__step h5 {
-    margin: 0.75rem 0 0.25rem;
+.plans-page__card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 1rem;
 }
 
-.plans-page__step-override {
-    margin-bottom: 0.75rem;
-    padding: 0.75rem;
-    border: 1px dashed var(--surface-border);
-    border-radius: var(--content-border-radius);
-}
-
-.plans-page__footer {
+.plans-page__section {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    padding: 1rem;
-    border: 1px solid var(--surface-border);
-    border-radius: var(--content-border-radius);
-    background: var(--surface-card);
+    min-width: 0;
+}
+
+.plans-page__section h5 {
+    margin: 0;
+    font-size: 0.9375rem;
+}
+
+.plans-page__section h6 {
+    margin: 0.5rem 0 0;
+    font-size: 0.875rem;
+    color: var(--text-color-secondary);
+}
+
+.plans-page__section + .plans-page__section {
+    border-top: 1px dashed var(--surface-border);
+    padding-top: 1rem;
+}
+
+.plans-page__radios {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.plans-page__radio {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.plans-page__filters {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.plans-page__filter {
+    flex: 1 1 12rem;
+    min-width: 10rem;
+}
+
+.plans-page__case-foot {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.25rem;
+}
+
+.plans-page__fallback {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
 }
 
 .plans-page__mono {
     font-family: monospace;
     font-size: 0.8125rem;
+    word-break: break-all;
 }
 
 .plans-page__tag {
