@@ -5,8 +5,9 @@
 **是**：Task / Stage / Job / Result 状态机的唯一写者、调度与租约的持有者、
 公共契约 [common/test_contracts.py](../../common/test_contracts.py) 的服务实现。
 **不是**：测试执行器（跑测试在 `slave_plugins/executor_*`）、上报 / 转存消费方
-（Jira 回填、OSS 转存、产物 GC 都是独立消费插件）、cron 调度器与用例仓库管理
-（独立插件，经 `submit()` 触发）。协议、状态机与扩展点细节见 [DESIGN.md](DESIGN.md)。
+（Jira 回填、OSS 转存、产物 GC 都是独立消费插件）、通用 cron 调度器与用例仓库
+管理（独立插件，经 `submit()` 触发；**计划级 cron 定时触发已内置**）。协议、
+状态机与扩展点细节见 [DESIGN.md](DESIGN.md)。
 
 ## 功能
 
@@ -16,6 +17,9 @@
   规划分片）、租约超时与失联重派、取消 / 重跑失败 Job（attempt+1）；
 - **结果聚合**：Job / attempt 明细、用例结果（超 `case_results_limit` 截断）、
   产物引用（`local://` → `oss://` 由消费插件回填）；
+- **测试计划与 cron 定时触发**：计划（步骤 schema v2）保存 / 复用 / 下发实例化；
+  `trigger.type=cron` 按 5 段表达式定时下发（分钟槽幂等键去重、错过即跳过，
+  表达式保存校验，见 [测试计划编辑器 v2 设计](../../../docs/测试计划编辑器v2设计.md) §5.1）；
 - **扩展点**：`test/*` 事件广播（parallel，载荷 = 引用 + 摘要）、三条 HookChain
   数据改写链、任务详情 `extensions` 收集槽；
 - **管理界面**：管理 API `/api/test/*`（`TestCoreApiService`）+ webui 页面
@@ -83,7 +87,7 @@ history_size = 200          # task_history 单任务保留条数
 | `DELETE /api/test/materials/{id}` | 材料删除（被任务/计划/选择集引用 → 409） |
 | `GET /api/test/materials/{id}/download` | 材料 zip 下载 |
 | `GET /api/test/selections/{sid}` | 选择集详情 |
-| `GET /POST /api/test/plans` | 测试计划列表 / 创建（可保存复用的任务模板；步骤 schema v2：`material` 必填版本绑定 + `cases` 选例快照 + `executor.nodes/strategy` 台架定向，兼容旧顶层 `material_id`；`trigger`/`notify` 预留接口，见 [测试计划编辑器 v2 设计](../../../docs/测试计划编辑器v2设计.md)） |
+| `GET /POST /api/test/plans` | 测试计划列表 / 创建（可保存复用的任务模板；步骤 schema v2：`material` 必填版本绑定 + `cases` 选例快照 + `executor.nodes/strategy` 台架定向，兼容旧顶层 `material_id`；`trigger` cron 定时触发已实现（保存校验表达式、计划 dict 附 `next_run_ts`）/`notify` 预留接口，见 [测试计划编辑器 v2 设计](../../../docs/测试计划编辑器v2设计.md)） |
 | `GET /PUT /DELETE /api/test/plans/{plan_id}` | 计划详情 / 更新 / 删除 |
 | `POST /api/test/plans/{plan_id}/clone` | 计划另存为 |
 | `POST /api/test/plans/{plan_id}/dispatch` | 计划下发（overrides 运行时覆盖；保存/下发共用校验链：版本漂移与用例消失显式报错；返回 `{task_id, deduplicated}`） |

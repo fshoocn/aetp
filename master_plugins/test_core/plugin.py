@@ -22,6 +22,7 @@ import shutil
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
@@ -59,6 +60,7 @@ from common.test_contracts import (
 
 from .api_service import TestCoreApiService
 from .config import TestCoreConfig
+from .cron_parse import CronExpr, parse_cron
 from .hooks import HookCtx, TestHooks
 from .models import (
     TestArtifact,
@@ -103,6 +105,8 @@ _NODE_STATUS_EVENT = "heartbeat/node-status"
 
 #: 调度循环周期（秒）：派发窗口是轻量 DB 查询，1s 粒度足够
 _DISPATCH_INTERVAL: float = 1.0
+#: cron 触发扫描周期（秒，测试计划编辑器 v2 设计 §5.1：tick ≈ 15s，错过即跳过）
+_TRIGGER_INTERVAL: float = 15.0
 #: case-finished 事件里失败明细的载荷上限（载荷 = 引用 + 摘要，禁止大对象）
 _CASE_EVENT_LIMIT: int = 200
 #: test/job-log 转发事件里 lines 的行数上限（载荷恒小，§10.4）
@@ -257,7 +261,7 @@ def _plan_step_params(step: Mapping[str, Any]) -> dict[str, Any]:
 
 #: 计划步骤 cases.mode 枚举（编辑器 v2 设计 §2.1）
 _PLAN_CASE_MODES: tuple[str, ...] = ("all", "selected")
-#: trigger.type / notify.type 枚举（编辑器 v2 设计 §5 预留接口）
+#: trigger.type / notify.type 枚举（编辑器 v2 设计 §5：cron 已实现，event 预留）
 _TRIGGER_TYPES: tuple[str, ...] = ("manual", "cron", "event")
 _NOTIFY_TYPES: tuple[str, ...] = ("none", "jira", "webhook", "email")
 
@@ -348,6 +352,32 @@ def _trigger_dict(value: Mapping[str, Any] | None, default_type: str) -> dict[st
         "type": str(data.get("type") or default_type),
         "config": _as_mapping(data.get("config")),
     }
+
+
+def _check_cron_expr(trigger: Any) -> list[str]:
+    """cron 表达式可解析校验（编辑器 v2 设计 §5.1，保存时；纯函数）。
+
+    ``type=="cron"`` 时校验 ``config.expr`` 可被 :func:`parse_cron` 解析，
+    非法 → 逐条「trigger.config.expr 非法：<原因>」；event / manual 不校验
+    expr（照存照显）；形状问题（trigger 非对象 / config 非对象）由
+    :func:`_check_trigger_notify` 报，此处不重复。
+    """
+    if not _is_mapping(trigger):
+        return []
+    data = _as_mapping(trigger)
+    if str(data.get("type") or "manual") != "cron":
+        return []
+    config_raw: Any = data.get("config", {})
+    if not _is_mapping(config_raw):
+        return []
+    expr_raw: Any = _as_mapping(config_raw).get("expr")
+    if not isinstance(expr_raw, str):
+        return [f"trigger.config.expr 非法：需是字符串，收到 {expr_raw!r}"]
+    try:
+        parse_cron(expr_raw)
+    except ValueError as exc:
+        return [f"trigger.config.expr 非法：{exc}"]
+    return []
 
 
 def _plan_stage_specs(steps: Sequence[Mapping[str, Any]]) -> list[StageSpec]:
@@ -560,10 +590,18 @@ class TestCorePlugin(Service[TestCoreConfig]):
         self._node_events: deque[str] = deque(maxlen=256)
         self._dispatch_task: asyncio.Task[None] | None = None
         self._sweep_task: asyncio.Task[None] | None = None
+        self._trigger_task: asyncio.Task[None] | None = None
         self._api_fiber: Fiber | None = None
         self._ui_fiber: Fiber | None = None
         self._results_duplicate_total: int = 0
         self._late_results_total: int = 0
+        #: cron 表达式内存缓存：plan_id → (updated_ts, 解析结果|None, 错误|""）；
+        #: updated_ts 变即失效（编辑器 v2 设计 §5.1），解析错误只告警一次（防刷屏）
+        self._cron_cache: dict[str, tuple[float, CronExpr | None, str]] = {}
+        #: cron 触发游标：plan_id → 最近已派发分钟槽（epoch 秒，只进不退）
+        self._cron_cursors: dict[str, int] = {}
+        #: cron 触发累计派发次数（含幂等去重命中，/healthz 可观测性）
+        self._cron_dispatch_total: int = 0
         #: test.job.log 幂等游标：(job_id, attempt) → 已收最大 seq（重复/乱序旧包丢弃）
         self._log_cursors: dict[tuple[str, int], int] = {}
         self._logs_lost_total: int = 0
@@ -606,6 +644,8 @@ class TestCorePlugin(Service[TestCoreConfig]):
         self._dispatch_task.add_done_callback(self._log_task_exit)
         self._sweep_task = asyncio.create_task(self._sweep_loop())
         self._sweep_task.add_done_callback(self._log_task_exit)
+        self._trigger_task = asyncio.create_task(self._trigger_loop())
+        self._trigger_task.add_done_callback(self._log_task_exit)
         # 附属服务不 await：webapi / webui 缺席时 fiber 停在 PENDING，晚到自动挂载
         self._api_fiber = self.ctx.plugin(TestCoreApiService)
         self._ui_fiber = self.ctx.plugin(TestCoreUiService)
@@ -619,10 +659,15 @@ class TestCorePlugin(Service[TestCoreConfig]):
         return self._stop
 
     async def _stop(self) -> None:
-        """卸载清理：取消调度 / 租约循环并等待退出（gather 吸收自身取消）。"""
-        tasks = [task for task in (self._dispatch_task, self._sweep_task) if task is not None]
+        """卸载清理：取消调度 / 租约 / cron 触发循环并等待退出（gather 吸收自身取消）。"""
+        tasks = [
+            task
+            for task in (self._dispatch_task, self._sweep_task, self._trigger_task)
+            if task is not None
+        ]
         self._dispatch_task = None
         self._sweep_task = None
+        self._trigger_task = None
         for task in tasks:
             task.cancel()
         if tasks:
@@ -1219,7 +1264,12 @@ class TestCorePlugin(Service[TestCoreConfig]):
     def _plan_dict(self, row: TestPlan) -> dict[str, Any]:
         """计划行 → 对外 dict（labels / defaults / steps 解码，trigger / notify
         归一回显；缺省 manual / none，§5）。steps 原样返回（旧格式读取归一在
-        校验链 / 下发注入内做，编辑器载入时自行归一，§2.1）。"""
+        校验链 / 下发注入内做，编辑器载入时自行归一，§2.1）。
+
+        ``next_run_ts`` 为纯增量键（§5.1 可观测性）：cron 型给下一命中分钟槽
+        的 epoch 秒（本地时区，非法表达式 / 无命中为 None），其余类型恒 None。
+        """
+        trigger = _trigger_dict(_decode_dict(row.trigger_cfg), "manual")
         return {
             "id": row.id,
             "plan_id": row.id,
@@ -1228,12 +1278,28 @@ class TestCorePlugin(Service[TestCoreConfig]):
             "labels": _decode_dict(row.labels),
             "defaults": _decode_dict(row.defaults),
             "steps": _decode_list(row.steps),
-            "trigger": _trigger_dict(_decode_dict(row.trigger_cfg), "manual"),
+            "trigger": trigger,
             "notify": _trigger_dict(_decode_dict(row.notify_cfg), "none"),
+            "next_run_ts": self._cron_next_run(trigger),
             "created_by": row.created_by,
             "created_ts": row.created_ts,
             "updated_ts": row.updated_ts,
         }
+
+    def _cron_next_run(self, trigger: Mapping[str, Any]) -> float | None:
+        """cron 型计划下一命中槽 epoch 秒（非 cron / 非法表达式 / 无命中返回 None）。"""
+        if str(trigger.get("type") or "manual") != "cron":
+            return None
+        raw = _as_mapping(trigger.get("config")).get("expr")
+        if not isinstance(raw, str):
+            return None
+        try:
+            expr = parse_cron(raw)
+        except ValueError:
+            return None
+        moment = datetime.fromtimestamp(self._clock())
+        nxt = expr.next_after(moment)
+        return nxt.timestamp() if nxt is not None else None
 
     async def _check_plan_materials(self, steps: Sequence[Mapping[str, Any]]) -> list[str]:
         """计划步骤材料引用校验（编辑器 v2 设计 §3/§8）：悬空 / 版本漂移 /
@@ -1341,7 +1407,8 @@ class TestCorePlugin(Service[TestCoreConfig]):
 
         校验链与 :meth:`dispatch_plan` 共用（编辑器 v2 设计 §8），失败抛
         InvalidSpec（逐条）；``trigger`` / ``notify`` 为预留接口（§5），
-        ``{type, config}`` 归一落 JSON 文本列，缺省 manual / none。
+        ``{type, config}`` 归一落 JSON 文本列，缺省 manual / none；cron 型
+        另校验 ``config.expr`` 可解析（§5.1，「trigger.config.expr 非法」）。
         """
         repo = self._repo(TestPlan)
         row = await repo.get(plan_id) if plan_id else None
@@ -1354,6 +1421,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
         problems += _check_plan_steps(step_list)
         problems += await self._check_plan_materials(step_list)
         problems += _check_trigger_notify(trigger, notify)
+        problems += _check_cron_expr(trigger)
         if problems:
             raise InvalidSpec("计划规格无效：" + "；".join(problems))
         now = self._clock()
@@ -1862,6 +1930,95 @@ class TestCorePlugin(Service[TestCoreConfig]):
                 self._enqueue(job, task, created_ts=now, avoid_node=job.node_id)
             return
         await self._finish_job(job, "failed", summary={}, error=reason, now=now)
+
+    # ============================================================== cron 触发
+    async def _trigger_loop(self) -> None:
+        """cron 触发循环（编辑器 v2 设计 §5.1）：每 tick 扫描 cron 计划并对命中的
+        当前分钟槽派发；错过即跳过（不做 backlog 补派），异常隔离不退出循环。"""
+        while True:
+            await asyncio.sleep(_TRIGGER_INTERVAL)
+            try:
+                await self._trigger_tick()
+            except Exception as error:  # noqa: BLE001
+                self.ctx.logger.error("cron 触发循环出错：%s", error)
+
+    async def _trigger_tick(self) -> None:
+        """一轮触发扫描：当前分钟槽命中且大于游标 → dispatch_plan 并推进游标。
+
+        * 表达式解析结果缓存于 ``_cron_cache``，按计划 ``updated_ts`` 失效；
+          解析失败（老库坏行）记一次 warning 跳过（防刷屏）；
+        * 幂等键 ``cron:<plan_id>:<slot>``：master 同分钟内重启重派同 slot 由
+          submit 的 (source="plan-dispatch", idempotency_key) 去重兜底；
+        * 游标只进不退（命中即先推进）：派发抛异常（如材料漂移校验失败）仅记
+          日志不重试本槽（防刷屏），错过的历史槽不补派。
+        """
+        now = self._clock()
+        slot = int(now // 60) * 60
+        moment = datetime.fromtimestamp(slot)
+        seen: set[str] = set()
+        for plan in await self._repo(TestPlan).list():
+            seen.add(plan.id)
+            trigger = _decode_dict(plan.trigger_cfg)
+            if str(trigger.get("type") or "manual") != "cron":
+                continue
+            expr = self._cron_expr_cached(plan.id, plan.updated_ts, trigger)
+            if expr is None:
+                continue
+            cursor = self._cron_cursors.get(plan.id)
+            if cursor is not None and slot <= cursor:
+                continue
+            if not expr.matches(moment):
+                continue
+            self._cron_cursors[plan.id] = slot
+            try:
+                result = await self.dispatch_plan(
+                    plan.id, {"idempotency_key": f"cron:{plan.id}:{slot}"}
+                )
+            except Exception as error:  # noqa: BLE001
+                self.ctx.logger.error(
+                    "cron 触发派发失败（本槽跳过）：plan=%s slot=%s：%s", plan.id, slot, error
+                )
+                continue
+            self._cron_dispatch_total += 1
+            self.ctx.logger.info(
+                "cron 触发派发：plan=%s slot=%s task=%s deduplicated=%s",
+                plan.id,
+                slot,
+                result.get("task_id"),
+                result.get("deduplicated"),
+            )
+        self._prune_cron_state(seen)
+
+    def _cron_expr_cached(
+        self, plan_id: str, updated_ts: float, trigger: Mapping[str, Any]
+    ) -> CronExpr | None:
+        """计划 cron 表达式解析（缓存按 ``updated_ts`` 失效，§5.1）。
+
+        解析失败缓存错误并记一次 warning（同一 ``updated_ts`` 只报一次，
+        防刷屏），返回 None 表示该计划本周期不可触发。
+        """
+        cached = self._cron_cache.get(plan_id)
+        if cached is not None and cached[0] == updated_ts:
+            return cached[1]
+        expr: CronExpr | None = None
+        error = ""
+        raw = _as_mapping(trigger.get("config")).get("expr")
+        try:
+            if not isinstance(raw, str):
+                raise ValueError(f"trigger.config.expr 需是字符串，收到 {raw!r}")
+            expr = parse_cron(raw)
+        except ValueError as exc:
+            error = str(exc)
+        self._cron_cache[plan_id] = (updated_ts, expr, error)
+        if expr is None:
+            self._warn(f"计划 {plan_id} cron 表达式非法，已跳过触发：{error}")
+        return expr
+
+    def _prune_cron_state(self, seen: set[str]) -> None:
+        """裁剪已删计划的 cron 缓存 / 游标（防内存无界增长）。"""
+        for store in (self._cron_cache, self._cron_cursors):
+            for plan_id in [key for key in list(store) if key not in seen]:
+                del store[plan_id]
 
     # ============================================================== 结果接收
     async def _on_job_result(self, payload: object, _meta: object) -> None:
@@ -2776,6 +2933,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
             "late_results_total": self._late_results_total,
             "logs_lost_total": self._logs_lost_total,
             "logs_duplicate_total": self._logs_duplicate_total,
+            "cron_dispatch_total": self._cron_dispatch_total,
             "hooks": self._hooks.stats(),
         }
 

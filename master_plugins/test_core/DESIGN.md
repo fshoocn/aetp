@@ -26,7 +26,8 @@
 - 阶段 DAG（v1 线性阶段 + 屏障，`depends_on` 字段预留）；
 - 运行中暂停/恢复（只支持队列中暂停语义的取消）；
 - 测试用例仓库管理、变更影响分析（独立插件，经 submit() 触发）；
-- 内置 cron 调度（独立 scheduler 插件，经 submit() 触发）；
+- 通用 cron 调度器（任意任务级调度，独立 scheduler 插件，经 submit() 触发；
+  **计划级 cron 触发已内置**，见 §9.5 / [测试计划编辑器 v2 设计](../../docs/测试计划编辑器v2设计.md) §5.1）；
 - 外部系统上报（Jira/回填/OSS 均为**消费插件**，不在核心内）。
 
 ## 2. 总体架构
@@ -317,6 +318,7 @@ master_plugins/test_core/
 ├── plugin.py              # TestCorePlugin：状态机 + 编排（不沾 web）
 ├── models.py              # Model DSL 表（§4）
 ├── scheduler.py           # 队列、选节点、派发窗口、租约扫描
+├── cron_parse.py          # cron 表达式解析（5 段子集，§9.5 触发循环共用）
 ├── hooks.py               # HookChain 宿主（三条链）+ HookCtx
 ├── registry.py            # 状态机转移表 + TestCoreError
 ├── api_service.py         # TestCoreApiService（inject=["test_core","webapi"]）
@@ -438,6 +440,30 @@ plan 型 Job 的 `shard = {"plan": true, "hint": N}`（`hint` = `ShardSpec.hint`
 - comm 在途超限已有保护（丢最旧并告警），核心以窗口兜住，正常不应触发；
 - `max_attempts`、租约时长等见 §13 配置。
 
+### 9.5 cron 定时触发（编辑器 v2 设计 §5.1）
+
+计划 `trigger.type == "cron"` 时由 test-core 内 `_trigger_loop` 定时下发（解析器
+[`cron_parse.py`](cron_parse.py)）：
+
+- **表达式**：标准 **5 段**（分 时 日 月 周；`*`、`*/n`、`a`、`a-b`、`a-b/n`、
+  逗号列表；周 0-6、7 亦作周日；月 1-12、日 1-31、时 0-23、分 0-59）。日
+  （第 3 段）与周（第 5 段）**双双限定**（均非 `*`）按标准 cron **OR** 语义
+  （任一命中即算），否则 AND。保存时校验可解析，非法 → InvalidSpec
+  「trigger.config.expr 非法：<原因>」（event / manual 不校验 expr，照存照显）；
+- **触发循环**：tick ≈ 15s（`_TRIGGER_INTERVAL`，与 `_dispatch_loop` 同款
+  asyncio 循环）；每 tick 把当前时间截到分钟得 slot，表达式命中
+  （`matches(datetime.fromtimestamp(slot))`）且 `slot > 内存游标` →
+  `dispatch_plan(plan_id, {"idempotency_key": f"cron:{plan_id}:{slot}"})` 并推进
+  游标；表达式解析缓存按计划 `updated_ts` 失效；
+- **漏派语义 = 错过即跳过**（v1 简化，不做 backlog 补派）；派发抛异常（如材料
+  漂移校验失败）仅记日志仍推进游标（防刷屏）；表达式解析失败记一次 warning
+  跳过；时区 = 服务器本地时间（`datetime.fromtimestamp`）；
+- **幂等**：幂等键含 slot，master 同分钟内重启重派同 slot 由 submit 的
+  `(source="plan-dispatch", idempotency_key)` 去重（§10 幂等机制复用）；
+- **可观测性**：派发成功记 `ctx.logger.info`（plan_id / slot / task_id）；
+  计划 dict 纯增量键 `next_run_ts`（下一命中分钟槽 epoch 秒，仅 cron 型）；
+  `/healthz` 指标 `cron_dispatch_total`（触发派发尝试累计）。
+
 ## 10. 可靠性：租约、重试、幂等
 
 | 机制 | 设计 |
@@ -445,7 +471,7 @@ plan 型 Job 的 `shard = {"plan": true, "hint": N}`（`hint` = `ShardSpec.hint`
 | 租约 | Job 发出时记 `lease_ts`；租约扫描循环（同 heartbeat `_sweep_loop` 模式）发现超时 → `lost` |
 | 节点失联 | 订阅 `heartbeat/node-status`（emit，**同步监听器**，只投递内部队列）：节点 `offline/lost` → 其在途 Job 提前判 `lost` |
 | 重试 | `lost` 且 `attempt < max_attempts` → `attempt+1` 重新入队（换节点优先）；超限 → `failed` |
-| 幂等 | 结果按 `(job_id, attempt)` 幂等提交；重复 `test.job` 由执行器去重 |
+| 幂等 | 结果按 `(job_id, attempt)` 幂等提交；重复 `test.job` 由执行器去重；计划 cron 触发幂等键 `cron:<plan_id>:<slot>` 含分钟槽（§9.5） |
 | 时钟基准 | 一律以**核心接收时刻**记账（`sent_at`/`deadline_ts` 仅参考），沿用心跳先例 |
 | 重启恢复 | 启动时扫 `job` 表：`leased/running` 超租约按超时处理，`queued` 回内存队列 |
 
@@ -521,7 +547,7 @@ class ReporterJiraPlugin(Service[...]):
 | DELETE | `/api/test/materials/{id}` | 删除（被任务/计划/选择集引用 → 409） |
 | GET | `/api/test/materials/{id}/download` | 材料 zip 下载 |
 | GET | `/api/test/selections/{sid}` | 选择集详情 |
-| GET/POST | `/api/test/plans` | 计划列表（keyword/labels/分页）/ 创建（body 含 steps v2、`trigger`/`notify` 预留接口，编辑器 v2 设计 §2/§5） |
+| GET/POST | `/api/test/plans` | 计划列表（keyword/labels/分页）/ 创建（body 含 steps v2、`trigger`（cron 定时触发已实现，保存校验表达式，§9.5）/`notify` 预留接口，编辑器 v2 设计 §2/§5） |
 | GET/PUT/DELETE | `/api/test/plans/{plan_id}` | 详情 / 更新 / 删除（缺失 404/False 语义见 §6） |
 | POST | `/api/test/plans/{plan_id}/clone` | 另存为 |
 | POST | `/api/test/plans/{plan_id}/dispatch` | 下发（overrides；`Idempotency-Key` 头优先；返回 `{task_id, deduplicated}`） |
@@ -552,7 +578,8 @@ class ReporterJiraPlugin(Service[...]):
 - 运行日志走 `ctx.logger`（log 插件），敏感字段经 [log_op](../../common/log_op.py) 脱敏；
 - 状态迁移全部进 `task_history` 并记审计（提交/取消/重跑/改优先级）；
 - `health_metrics()` 挂 `api.add_health_provider("test_core", ...)`：
-  队列深度、在途 Job 数、租约超时累计、重试累计、各 HookChain 自带计数
+  队列深度、在途 Job 数、租约超时累计、重试累计、cron 触发派发累计
+  （`cron_dispatch_total`，§9.5）、各 HookChain 自带计数
   （[hook_chain.py](../../common/hook_chain.py) 的调用/出错/自身耗时）；
 - 事件全部 `parallel` 派发（异常隔离），**禁止把核心路径搭在消费插件的健康上**。
 
