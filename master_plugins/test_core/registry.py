@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from common.test_contracts import (
@@ -120,9 +121,26 @@ def validate_task_spec(spec: TaskSpec) -> list[str]:
             problems.append(f"{where}.name 重复：{stage_name!r}")
         else:
             seen.add(stage_name)
-        executor_id = getattr(getattr(stage, "executor", None), "id", None)
+        executor = getattr(stage, "executor", None)
+        executor_id = getattr(executor, "id", None)
         if not isinstance(executor_id, str) or not executor_id.strip():
             problems.append(f"{where}.executor.id 需是非空字符串")
+        # 台架定向（编辑器 v2 设计 §4/§8.5）：getattr 宽松——缺席按「不指定」放行
+        nodes = getattr(executor, "nodes", None)
+        if nodes is not None:
+            if isinstance(nodes, (str, bytes)) or not isinstance(nodes, Sequence):
+                problems.append(f"{where}.executor.nodes 需是字符串数组，收到 {nodes!r}")
+            else:
+                for item in nodes:
+                    if not isinstance(item, str):
+                        problems.append(f"{where}.executor.nodes 含非字符串项：{item!r}")
+                    elif not item:
+                        problems.append(f"{where}.executor.nodes 含空串（台架名需非空）")
+        strategy = getattr(executor, "strategy", None)
+        if strategy is not None and strategy not in ("balanced", "random"):
+            problems.append(
+                f"{where}.executor.strategy 非法，收到 {strategy!r}（可选：balanced / random）"
+            )
         problem = _timeout_problem(f"{where}.timeout_s", getattr(stage, "timeout_s", None))
         if problem is not None:
             problems.append(problem)

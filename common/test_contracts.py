@@ -93,11 +93,19 @@ LABEL_PLAN_NAME = "plan_name"
 
 @dataclass(frozen=True)
 class ExecutorSelector:
-    """执行器选择器：按能力信封匹配（common/capabilities.py 的 kind/id/labels）。"""
+    """执行器选择器：按能力信封匹配（common/capabilities.py 的 kind/id/labels）。
+
+    台架定向语义（测试计划编辑器 v2 设计 §4）：``nodes`` 非空 = 台架 allowlist，
+    候选节点取交集（仍需该台架具备本执行器能力），空 = 不指定（自动匹配）；
+    ``strategy``：``balanced`` = 最少在飞优先（默认），``random`` = 匹配集合内
+    随机派发（避开上次执行节点仍优先）。
+    """
 
     id: str  # 能力 id，如 "pytest"
     kind: str = "executor"  # 固定大类
     labels: Mapping[str, str] = field(default_factory=dict[str, str])  # 可选筛选轴，如 {"lang": "python"}
+    nodes: Sequence[str] = ()  # 指定台架 allowlist（空 = 不指定，设计 §4）
+    strategy: Literal["balanced", "random"] = "balanced"  # 派发策略（设计 §4）
 
 
 @dataclass(frozen=True)
@@ -421,9 +429,16 @@ class TestCoreInterface(Protocol):
         labels: Mapping[str, str] | None = None,
         defaults: Mapping[str, Any] | None = None,
         steps: Sequence[Mapping[str, Any]] | None = None,
+        trigger: Mapping[str, Any] | None = None,
+        notify: Mapping[str, Any] | None = None,
         created_by: str = "",
     ) -> Mapping[str, Any]:
-        """新建或更新计划；plan_id 空 = 新建。更新不存在抛 PlanNotFound，校验失败抛 InvalidSpec。"""
+        """新建或更新计划；plan_id 空 = 新建。更新不存在抛 PlanNotFound，校验失败抛 InvalidSpec。
+
+        ``trigger`` / ``notify`` 为预留接口（设计 §5）：``{type, config}`` 对象，
+        缺省 ``manual`` / ``none``；枚举校验在核心（trigger.type ∈ manual/cron/event，
+        notify.type ∈ none/jira/webhook/email），其余类型照存照显。
+        """
         ...
 
     async def list_plans(

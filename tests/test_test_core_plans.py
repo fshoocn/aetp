@@ -16,7 +16,12 @@
 5. 幂等：同 key 两次 dispatch 同 task_id 且 deduplicated=True、空 key 每次新建、
    幂等域 (source="plan-dispatch") 与 api 提交隔离（评审 #13）；
 6. 材料删除引用闭环：plan.steps 扫描拦截（评审 #12）；
-7. 材料 executor_id 落库与过滤谓词（== X OR == ''，通用可见，§4.5）。
+7. 材料 executor_id 落库与过滤谓词（== X OR == ''，通用可见，§4.5）；
+8. 编辑器 v2 步骤 schema（编辑器 v2 设计 §2/§3/§4/§5）：material 保存必填与
+   旧顶层 material_id 读取兼容、cases 注入 targets（selected）/ 不注入（all）、
+   指纹漂移与用例消失逐条报错、同名冲突（targets / selection_id / 顶层
+   material_id）、executor.nodes allowlist 交集与 random 派发策略（Scheduler
+   单测）、trigger / notify 落库与枚举校验。
 
 测试引导：IsolatedAsyncioTestCase + 临时 config.ini 起最小栈（appconfig + db +
 comm + test_core，手法同 tests/test_test_core_materials.py）；派发循环挂起
@@ -52,8 +57,9 @@ from common.test_contracts import (
     TaskSpec,
 )
 from master_plugins.test_core import TestCorePlugin as CorePlugin
+from master_plugins.test_core.config import TestCoreConfig as CoreConfig
 from master_plugins.test_core.models import TestTask as TaskRow
-from master_plugins.test_core.scheduler import TASK_TIMEOUT_KEY
+from master_plugins.test_core.scheduler import TASK_TIMEOUT_KEY, InflightStats, Scheduler
 
 #: 最小可用材料内容（zip 内容对核心不透明，一条文本即可）
 _MIN_ZIP: dict[str, str] = {"cases/test_a.py": "def test_a():\n    assert True\n"}
@@ -75,15 +81,28 @@ def _step(
     executor_id: str = "pytest",
     kind: str | None = None,
     material_id: str | None = None,
+    material: Mapping[str, Any] | None = None,
+    cases: Mapping[str, Any] | None = None,
+    nodes: Any = None,
+    strategy: str | None = None,
     params: Mapping[str, Any] | None = None,
     shard: Mapping[str, Any] | None = None,
     requires: Mapping[str, Any] | None = None,
     timeout_s: float = 0.0,
 ) -> dict[str, Any]:
-    """构造计划步骤（§4.2 形状：StageSpec + material_id）。"""
+    """构造计划步骤（编辑器 v2 设计 §2.1：material / cases / executor.nodes+strategy）。
+
+    ``material_id`` 为旧顶层格式（读取兼容）；``material`` 为 v2 绑定快照。
+    """
     executor: dict[str, Any] = {"id": executor_id, "labels": {}}
     if kind is not None:
         executor["kind"] = kind
+    if nodes is not None:
+        executor["nodes"] = (
+            list(cast("Sequence[Any]", nodes)) if isinstance(nodes, (list, tuple)) else nodes
+        )
+    if strategy is not None:
+        executor["strategy"] = strategy
     step: dict[str, Any] = {
         "name": name,
         "executor": executor,
@@ -92,8 +111,12 @@ def _step(
         "requires": dict(requires or {}),
         "timeout_s": timeout_s,
     }
+    if material is not None:
+        step["material"] = dict(material)
     if material_id is not None:
         step["material_id"] = material_id
+    if cases is not None:
+        step["cases"] = dict(cases)
     return step
 
 
@@ -137,6 +160,7 @@ class PlansStackTestCase(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self._temp.name)
         self.context: Context | None = None
         self.core: Any = None
+        self._default_material: dict[str, Any] | None = None
 
     async def asyncTearDown(self) -> None:
         if self.context is not None:
@@ -169,6 +193,24 @@ class PlansStackTestCase(unittest.IsolatedAsyncioTestCase):
         self.core = context.test_core
 
     # ------------------------------------------------------------ 驱动辅助
+    async def default_material(self) -> dict[str, Any]:
+        """默认通用材料（懒建缓存）：未显式绑材料的步骤统一补它（v2 保存必填）。"""
+        if self._default_material is None:
+            self._default_material = await self.upload(
+                name="默认包",
+                data=_zip_bytes({"cases/default.py": "def test_d():\n    assert True\n"}),
+            )
+        return self._default_material
+
+    def binding(self, material: Mapping[str, Any]) -> dict[str, Any]:
+        """v2 material 绑定快照（指纹取材料行现值，编辑器 v2 设计 §2.1）。"""
+        return {
+            "material_id": str(material["id"]),
+            "sha256": str(material["sha256"]),
+            "recipe_fingerprint": str(material["recipe_fingerprint"]),
+            "name": str(material["name"]),
+        }
+
     async def upload(
         self,
         *,
@@ -195,15 +237,28 @@ class PlansStackTestCase(unittest.IsolatedAsyncioTestCase):
         labels: Mapping[str, str] | None = None,
         defaults: Mapping[str, Any] | None = None,
         steps: Sequence[Mapping[str, Any]] | None = None,
+        trigger: Mapping[str, Any] | None = None,
+        notify: Mapping[str, Any] | None = None,
         created_by: str = "tester",
     ) -> dict[str, Any]:
+        step_list = list(steps) if steps is not None else [_step()]
+        # v2 保存必填 material：未绑材料的步骤补默认材料（既有用例统一口径）
+        filled: list[Mapping[str, Any]] = []
+        for step in step_list:
+            if "material" not in step and not step.get("material_id"):
+                material = await self.default_material()
+                filled.append({**step, "material": self.binding(material)})
+            else:
+                filled.append(step)
         result = await self.core.save_plan(
             plan_id=plan_id,
             name=name,
             description=description,
             labels=dict(labels or {}),
             defaults=dict(defaults or {}),
-            steps=list(steps) if steps is not None else [_step()],
+            steps=filled,
+            trigger=dict(trigger) if trigger is not None else None,
+            notify=dict(notify) if notify is not None else None,
             created_by=created_by,
         )
         return dict(cast(Mapping[str, Any], result))
@@ -400,7 +455,8 @@ class PlanStepValidationTests(PlansStackTestCase):
                 name="悬空材料计划", steps=[_step(material_id="m-nope")]
             )
         )
-        self.assertIn("steps[0] 引用的 material_id 不存在：m-nope", message)
+        # 编辑器 v2 设计 §3：悬空 = 脚本版本已删除
+        self.assertIn("steps[0] 脚本版本已删除，请重新选择脚本", message)
 
     async def test_dangling_selection_id_rejected(self) -> None:
         await self.boot()
@@ -565,6 +621,9 @@ class DispatchAssemblyTests(PlansStackTestCase):
     async def test_dispatch_assembles_task_with_merge_order(self) -> None:
         await self.boot()
         mid = str((await self.upload(name="pytest 包", executor_id="pytest"))["id"])
+        mid2 = str(
+            (await self.upload(name="canoe 包", data=_zip_bytes({"c.py": "z = 3\n"}), executor_id="canoe"))["id"]
+        )
         plan = await self.save(
             name="回归计划",
             labels={"team": "qa"},
@@ -579,7 +638,7 @@ class DispatchAssemblyTests(PlansStackTestCase):
                     requires={"canoe": 1},
                     timeout_s=7200,
                 ),
-                _step("总线回归", executor_id="canoe", kind="executor", params={}),
+                _step("总线回归", executor_id="canoe", kind="executor", material_id=mid2, params={}),
             ],
         )
         plan_id = str(plan["plan_id"])
@@ -622,8 +681,17 @@ class DispatchAssemblyTests(PlansStackTestCase):
         stages = cast(list[Mapping[str, Any]], detail["stages"])
         self.assertEqual([stage["name"] for stage in stages], ["单测", "总线回归"])
         first = stages[0]
-        # executor.kind 缺省补 "executor"（§4.2 转换）
-        self.assertEqual(first["executor"], {"id": "pytest", "kind": "executor", "labels": {}})
+        # executor.kind 缺省补 "executor"（§4.2 转换）；nodes/strategy 随 JSON 持久化（编辑器 v2 §4）
+        self.assertEqual(
+            first["executor"],
+            {
+                "id": "pytest",
+                "kind": "executor",
+                "labels": {},
+                "nodes": [],
+                "strategy": "balanced",
+            },
+        )
         self.assertEqual(first["shard_mode"], "plan")
         self.assertEqual(first["shard_hint"], 4)
         self.assertEqual(first["requires"], {"canoe": 1})
@@ -637,8 +705,11 @@ class DispatchAssemblyTests(PlansStackTestCase):
         # env 合并次序（评审 #8）：stage_params.env 整体替换 → env 增量注入后者胜
         self.assertEqual(first_params["env"], {"TAG": "ov", "D": "4", "C": "3"})
         self.assertNotIn("A", first_params["env"])  # stage_params.env 同名替换掉原 env
-        # env 注入每步 params.env（含未被 stage_params 命中的步骤）
-        self.assertEqual(cast(dict[str, Any], stages[1]["params"]), {"env": {"TAG": "ov", "C": "3"}})
+        # env 注入每步 params.env（含未被 stage_params 命中的步骤）；material_id 注入（§2.3）
+        self.assertEqual(
+            cast(dict[str, Any], stages[1]["params"]),
+            {"env": {"TAG": "ov", "C": "3"}, "material_id": mid2},
+        )
 
     async def test_dispatch_defaults_fill_top_level_without_overrides(self) -> None:
         await self.boot()
@@ -734,7 +805,8 @@ class MaterialDeleteClosureTests(PlansStackTestCase):
     async def test_delete_blocked_by_plan_params_material(self) -> None:
         await self.boot()
         mid = str((await self.upload())["id"])
-        await self.save(steps=[_step(params={"material_id": mid})])
+        # params.material_id 与 material 同值 = 无害重复（沿冲突先例），steps 扫描照拦删除
+        await self.save(steps=[_step(material_id=mid, params={"material_id": mid})])
         with self.assertRaises(MaterialInUse):
             await self.core.delete_material(mid)
 
@@ -788,3 +860,456 @@ class MaterialExecutorFilterTests(PlansStackTestCase):
             names(await self.core.list_materials()),
             {"通用包", "pytest 包", "canoe 包"},
         )
+
+
+# ================================================================ 8. 编辑器 v2 步骤 schema
+class PlanStepV2SchemaTests(PlansStackTestCase):
+    """步骤 schema v2（编辑器 v2 设计 §2.1/§2.3）：material 必填 / cases 注入。"""
+
+    async def test_material_required_on_save(self) -> None:
+        await self.boot()
+        message = await self.invalid_message(
+            self.core.save_plan(name="无材料计划", steps=[_step()])
+        )
+        self.assertIn("steps[0].material 必填", message)
+
+    async def test_material_shape_and_id_required(self) -> None:
+        await self.boot()
+        bad_shape = _step()
+        bad_shape["material"] = "bad"
+        message = await self.invalid_message(
+            self.core.save_plan(name="坏形状计划", steps=[bad_shape])
+        )
+        self.assertIn("steps[0].material 需是对象", message)
+        missing_id = _step()
+        missing_id["material"] = {}
+        message = await self.invalid_message(
+            self.core.save_plan(name="缺 id 计划", steps=[missing_id])
+        )
+        self.assertIn("steps[0].material.material_id 必填", message)
+
+    async def test_cases_mode_enum_and_selected_non_empty(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        binding = self.binding(material)
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="坏 mode", steps=[_step(material=binding, cases={"mode": "bogus"})]
+            )
+        )
+        self.assertIn("steps[0].cases.mode 非法", message)
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="空选例", steps=[_step(material=binding, cases={"mode": "selected"})]
+            )
+        )
+        self.assertIn("steps[0].cases.mode=selected 时 case_ids 不能为空", message)
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="空串选例",
+                steps=[_step(material=binding, cases={"mode": "selected", "case_ids": [""]})],
+            )
+        )
+        self.assertIn("steps[0].cases.case_ids 需是非空字符串", message)
+
+    async def test_selected_cases_injects_targets_on_dispatch(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        await self.core.put_cases(str(material["id"]), [{"case_id": "a::t1"}, {"case_id": "a::t2"}])
+        plan = await self.save(
+            steps=[
+                _step(
+                    "单测",
+                    material=self.binding(material),
+                    cases={"mode": "selected", "case_ids": ["a::t1"]},
+                )
+            ]
+        )
+        result = await self.core.dispatch_plan(str(plan["plan_id"]))
+        detail = await self.core.get_task(str(result["task_id"]))
+        assert detail is not None
+        params = cast(dict[str, Any], detail["stages"][0]["params"])
+        self.assertEqual(params["targets"], ["a::t1"])
+        self.assertEqual(params["material_id"], str(material["id"]))
+
+    async def test_all_mode_does_not_inject_targets(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        plan = await self.save(
+            steps=[_step("单测", material=self.binding(material), cases={"mode": "all"})]
+        )
+        result = await self.core.dispatch_plan(str(plan["plan_id"]))
+        detail = await self.core.get_task(str(result["task_id"]))
+        assert detail is not None
+        params = cast(dict[str, Any], detail["stages"][0]["params"])
+        self.assertNotIn("targets", params)
+
+    async def test_no_targets_injection_when_params_carry_selection(self) -> None:
+        """params 显式给 selection_id 通道时不注入 targets（§2.3 缺才注入）。"""
+        await self.boot()
+        material = await self.upload()
+        await self.core.put_cases(str(material["id"]), [{"case_id": "a::t1"}])
+        sid = await self.core.save_selection(str(material["id"]), "勾选", ["a::t1"])
+        plan = await self.save(
+            steps=[
+                _step(
+                    "单测",
+                    material=self.binding(material),
+                    cases={"mode": "selected", "case_ids": ["a::t1"]},
+                    params={"selection_id": sid},
+                )
+            ]
+        )
+        result = await self.core.dispatch_plan(str(plan["plan_id"]))
+        detail = await self.core.get_task(str(result["task_id"]))
+        assert detail is not None
+        params = cast(dict[str, Any], detail["stages"][0]["params"])
+        self.assertNotIn("targets", params)
+        self.assertEqual(params["selection_id"], sid)
+
+    async def test_legacy_step_read_compat(self) -> None:
+        """旧格式步骤（顶层 material_id、无 cases、遗留 params 键）读取不炸（§2.1）。"""
+        await self.boot()
+        material = await self.upload()
+        await self.core.put_cases(str(material["id"]), [{"case_id": "a::t1"}])
+        sid = await self.core.save_selection(str(material["id"]), "勾选", ["a::t1"])
+        step = _step(
+            "单测",
+            material_id=str(material["id"]),
+            params={"targets": ["a::t1"], "selection_id": sid},
+        )
+        plan = await self.save(steps=[step])
+        detail = await self.core.get_plan(str(plan["plan_id"]))
+        assert detail is not None
+        self.assertEqual(detail["steps"], [step])  # 原样存储、读取兼容
+        result = await self.core.dispatch_plan(str(plan["plan_id"]))
+        task = await self.core.get_task(str(result["task_id"]))
+        assert task is not None
+        params = cast(dict[str, Any], task["stages"][0]["params"])
+        self.assertEqual(params["targets"], ["a::t1"])  # mode=all 不注入不改写
+        self.assertEqual(params["selection_id"], sid)
+        self.assertEqual(params["material_id"], str(material["id"]))
+
+
+# ================================================================ 9. 脚本版本绑定（§3）
+class PlanVersionBindingTests(PlansStackTestCase):
+    """版本漂移 / 用例消失（编辑器 v2 设计 §3 表逐条）。"""
+
+    async def test_tampered_fingerprint_rejected(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        binding = self.binding(material)
+        binding["sha256"] = "0" * 64
+        message = await self.invalid_message(
+            self.core.save_plan(name="漂移计划", steps=[_step(material=binding)])
+        )
+        self.assertIn("脚本已变更（指纹不符），请重新确认用例", message)
+
+    async def test_recipe_update_marks_saved_binding_stale(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        stale = self.binding(material)  # update 前的指纹快照
+        plan = await self.save(steps=[_step(material=stale)])
+        await self.core.update_recipe(str(material["id"]), "新配方")
+        message = await self.invalid_message(
+            self.core.save_plan(
+                plan_id=str(plan["plan_id"]), name="重存", steps=[_step(material=stale)]
+            )
+        )
+        self.assertIn("脚本已变更（指纹不符），请重新确认用例", message)
+        message = await self.invalid_message(self.core.dispatch_plan(str(plan["plan_id"])))
+        self.assertIn("脚本已变更（指纹不符），请重新确认用例", message)
+
+    async def test_missing_case_reported_one_by_one(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        await self.core.put_cases(str(material["id"]), [{"case_id": "a::t1"}, {"case_id": "a::t2"}])
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="用例消失",
+                steps=[
+                    _step(
+                        material=self.binding(material),
+                        cases={"mode": "selected", "case_ids": ["a::t1", "gone-1", "gone-2"]},
+                    )
+                ],
+            )
+        )
+        self.assertIn("用例已不存在：gone-1", message)
+        self.assertIn("用例已不存在：gone-2", message)
+        self.assertNotIn("用例已不存在：a::t1", message)  # 存在的用例不误报
+
+    async def test_selected_without_case_list_rejected(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="未分析",
+                steps=[
+                    _step(
+                        material=self.binding(material),
+                        cases={"mode": "selected", "case_ids": ["a::t1"]},
+                    )
+                ],
+            )
+        )
+        self.assertIn("脚本尚无用例清单", message)
+
+    async def test_missing_material_reports_deleted(self) -> None:
+        await self.boot()
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="悬空 v2", steps=[_step(material={"material_id": "m-nope"})]
+            )
+        )
+        self.assertIn("steps[0] 脚本版本已删除，请重新选择脚本", message)
+
+
+# ================================================================ 10. 同名冲突（§2.1）
+class PlanNameConflictTests(PlansStackTestCase):
+    """params 保留键与 material / cases 的同名语义冲突（沿 material_id 先例）。"""
+
+    async def test_params_targets_conflicts_with_selected_cases(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        await self.core.put_cases(str(material["id"]), [{"case_id": "a::t1"}, {"case_id": "a::t2"}])
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="targets 冲突",
+                steps=[
+                    _step(
+                        material=self.binding(material),
+                        cases={"mode": "selected", "case_ids": ["a::t1"]},
+                        params={"targets": ["a::t2"]},
+                    )
+                ],
+            )
+        )
+        self.assertIn("steps[0].cases.case_ids 与 params.targets 同名冲突", message)
+
+    async def test_equal_targets_is_harmless_duplicate(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        await self.core.put_cases(str(material["id"]), [{"case_id": "a::t1"}])
+        plan = await self.save(
+            steps=[
+                _step(
+                    material=self.binding(material),
+                    cases={"mode": "selected", "case_ids": ["a::t1"]},
+                    params={"targets": ["a::t1"]},
+                )
+            ]
+        )
+        self.assertTrue(str(plan["plan_id"]).startswith("p-"))
+
+    async def test_params_selection_conflicts_with_selected_cases(self) -> None:
+        await self.boot()
+        material = await self.upload()
+        await self.core.put_cases(str(material["id"]), [{"case_id": "a::t1"}, {"case_id": "a::t2"}])
+        sid = await self.core.save_selection(str(material["id"]), "勾选", ["a::t2"])
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="selection 冲突",
+                steps=[
+                    _step(
+                        material=self.binding(material),
+                        cases={"mode": "selected", "case_ids": ["a::t1"]},
+                        params={"selection_id": sid},
+                    )
+                ],
+            )
+        )
+        self.assertIn("steps[0].cases.case_ids 与 params.selection_id 同名冲突", message)
+
+    async def test_top_material_id_conflicts_with_material(self) -> None:
+        await self.boot()
+        mid_a = str((await self.upload(name="包A", data=_zip_bytes({"a.py": "x = 1\n"})))["id"])
+        mid_b = str((await self.upload(name="包B", data=_zip_bytes({"b.py": "y = 2\n"})))["id"])
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="双写材料",
+                steps=[_step(material={"material_id": mid_a}, material_id=mid_b)],
+            )
+        )
+        self.assertIn("steps[0].material_id 与 material.material_id 同名冲突", message)
+        self.assertIn(f"{mid_b!r} ≠ {mid_a!r}", message)
+
+    async def test_legacy_targets_with_mode_all_tolerated(self) -> None:
+        """无 cases 的遗留 params.targets 不误伤（读取不炸，§2.1）。"""
+        await self.boot()
+        material = await self.upload()
+        plan = await self.save(
+            steps=[_step(material=self.binding(material), params={"targets": ["a::t1"]})]
+        )
+        self.assertTrue(str(plan["plan_id"]).startswith("p-"))
+
+
+# ================================================================ 11. 台架定向调度（§4）
+class SchedulerTargetingTests(unittest.TestCase):
+    """_candidate_nodes allowlist 交集 + pick_node random 策略（编辑器 v2 设计 §4.2）。"""
+
+    def _entry(self, node_id: str) -> dict[str, Any]:
+        return {"kind": "executor", "id": "pytest", "node_id": node_id, "labels": {"lang": "python"}}
+
+    def _scheduler(
+        self,
+        *,
+        entries: Sequence[Mapping[str, Any]] | None = None,
+        comm_nodes: Sequence[str] = (),
+    ) -> Any:
+        class _NodesStub:
+            def select(
+                self, kinds: object = None, labels: object = None
+            ) -> list[Mapping[str, Any]]:
+                return [dict(entry) for entry in (entries or ())]
+
+        class _CommStub:
+            def nodes(self) -> list[str]:
+                return list(comm_nodes)
+
+        return Scheduler(
+            db=None,
+            comm=_CommStub(),
+            config=CoreConfig(),
+            log=lambda _message: None,
+            nodes=(lambda: _NodesStub()) if entries is not None else (lambda: None),
+            self_name=lambda: "master",
+        )
+
+    @staticmethod
+    def _first(pool: Sequence[str]) -> str:
+        """随机策略打桩：取池首元素（保持可断言）。"""
+        return pool[0]
+
+    def test_nodes_allowlist_intersects_candidates(self) -> None:
+        service = self._scheduler(
+            entries=[self._entry("bench-a"), self._entry("bench-b"), self._entry("bench-c")]
+        )
+        executor = ExecutorSelector(id="pytest", nodes=("bench-a", "bench-c", "ghost"))
+        self.assertEqual(service._candidate_nodes(executor), ["bench-a", "bench-c"])
+        # 空 allowlist = 不指定（能力匹配全量候选）
+        self.assertEqual(len(service._candidate_nodes(ExecutorSelector(id="pytest"))), 3)
+
+    def test_allowlist_applies_to_comm_fallback(self) -> None:
+        service = self._scheduler(comm_nodes=["master", "bench-a", "bench-b"])
+        executor = ExecutorSelector(id="pytest", nodes=("bench-b",))
+        self.assertEqual(service._candidate_nodes(executor), ["bench-b"])
+
+    def test_random_strategy_draws_from_usable_excluding_avoid(self) -> None:
+        service = self._scheduler(
+            entries=[self._entry("bench-a"), self._entry("bench-b"), self._entry("bench-c")]
+        )
+        executor = ExecutorSelector(id="pytest", strategy="random")
+        with mock.patch(
+            "master_plugins.test_core.scheduler.random.choice",
+            side_effect=self._first,
+        ) as choice:
+            node = service.pick_node(executor, inflight=InflightStats(), avoid="bench-c")
+        self.assertEqual(node, "bench-a")
+        # 有非 avoid 候选时先剔 avoid 再随机
+        self.assertEqual(list(choice.call_args[0][0]), ["bench-a", "bench-b"])
+
+    def test_random_strategy_falls_back_to_avoid_when_alone(self) -> None:
+        service = self._scheduler(entries=[self._entry("bench-c")])
+        executor = ExecutorSelector(id="pytest", strategy="random")
+        with mock.patch(
+            "master_plugins.test_core.scheduler.random.choice",
+            side_effect=self._first,
+        ) as choice:
+            node = service.pick_node(executor, inflight=InflightStats(), avoid="bench-c")
+        self.assertEqual(node, "bench-c")
+        self.assertEqual(list(choice.call_args[0][0]), ["bench-c"])
+
+    def test_balanced_keeps_least_inflight_first(self) -> None:
+        service = self._scheduler(entries=[self._entry("bench-a"), self._entry("bench-b")])
+        inflight = InflightStats()
+        inflight.per_node["bench-a"] = 2
+        node = service.pick_node(ExecutorSelector(id="pytest"), inflight=inflight)
+        self.assertEqual(node, "bench-b")
+
+
+# ================================================================ 12. trigger / notify（§5）
+class TriggerNotifyTests(PlansStackTestCase):
+    """trigger / notify 预留接口：落库回显 + 枚举校验（编辑器 v2 设计 §5）。"""
+
+    async def test_defaults_to_manual_and_none(self) -> None:
+        await self.boot()
+        plan = await self.save()
+        self.assertEqual(plan["trigger"], {"type": "manual", "config": {}})
+        self.assertEqual(plan["notify"], {"type": "none", "config": {}})
+
+    async def test_stored_and_returned_still_dispatchable(self) -> None:
+        await self.boot()
+        trigger = {"type": "cron", "config": {"expr": "0 0 * * *"}}
+        notify = {"type": "webhook", "config": {"url": "http://x"}}
+        plan = await self.save(trigger=trigger, notify=notify)
+        self.assertEqual(plan["trigger"], trigger)
+        self.assertEqual(plan["notify"], notify)
+        result = await self.core.dispatch_plan(str(plan["plan_id"]))  # 照存照显、仍可下发
+        self.assertTrue(str(result["task_id"]))
+
+    async def test_enum_and_shape_validated(self) -> None:
+        await self.boot()
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="坏触发", steps=[_step()], trigger={"type": "bogus", "config": {}}
+            )
+        )
+        self.assertIn("trigger.type 非法", message)
+        message = await self.invalid_message(
+            self.core.save_plan(name="坏通知", steps=[_step()], notify={"type": "sms", "config": {}})
+        )
+        self.assertIn("notify.type 非法", message)
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="坏配置", steps=[_step()], trigger={"type": "cron", "config": "x"}
+            )
+        )
+        self.assertIn("trigger.config 需是对象", message)
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="坏形状", steps=[_step()], trigger="bad"  # type: ignore[arg-type]
+            )
+        )
+        self.assertIn("trigger 需是对象", message)
+
+
+# ================================================================ 13. executor.nodes / strategy 校验
+class ExecutorTargetingSpecTests(PlansStackTestCase):
+    """步骤 executor 台架定向字段校验与落库（编辑器 v2 设计 §8.5）。"""
+
+    async def test_nodes_and_strategy_validated(self) -> None:
+        await self.boot()
+        binding = self.binding(await self.upload())
+        message = await self.invalid_message(
+            self.core.save_plan(name="坏 nodes", steps=[_step(material=binding, nodes="x")])
+        )
+        self.assertIn("steps[0].executor.nodes 需是字符串数组", message)
+        message = await self.invalid_message(
+            self.core.save_plan(
+                name="空串台架", steps=[_step(material=binding, nodes=["bench-a", ""])]
+            )
+        )
+        self.assertIn("steps[0].executor.nodes 含空串", message)
+        message = await self.invalid_message(
+            self.core.save_plan(name="坏策略", steps=[_step(material=binding, strategy="bogus")])
+        )
+        self.assertIn("steps[0].executor.strategy 非法", message)
+
+    async def test_nodes_deduped_and_strategy_staged(self) -> None:
+        await self.boot()
+        plan = await self.save(
+            steps=[
+                _step(
+                    material=self.binding(await self.upload()),
+                    nodes=["bench-a", "bench-a", "bench-b"],
+                    strategy="random",
+                )
+            ]
+        )
+        result = await self.core.dispatch_plan(str(plan["plan_id"]))
+        detail = await self.core.get_task(str(result["task_id"]))
+        assert detail is not None
+        executor = cast(dict[str, Any], detail["stages"][0]["executor"])
+        self.assertEqual(executor["nodes"], ["bench-a", "bench-b"])
+        self.assertEqual(executor["strategy"], "random")

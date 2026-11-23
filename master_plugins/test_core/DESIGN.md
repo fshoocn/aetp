@@ -109,6 +109,8 @@ class ExecutorSelector:
     id: str                                         # 能力 id，如 "pytest"
     kind: str = "executor"                          # 固定大类
     labels: Mapping[str, str] = ...                 # 可选筛选轴，如 {"lang": "python"}
+    nodes: Sequence[str] = ()                       # 台架 allowlist（空=不指定；编辑器 v2 设计 §4）
+    strategy: Literal["balanced", "random"] = "balanced"  # 派发策略（balanced=最少在飞 / random=随机）
 
 @dataclass(frozen=True)
 class ShardSpec:
@@ -204,6 +206,7 @@ class JobResult:
 | `case_result` | `id`, `job_id`, `attempt`, `case_id`, `status`, `duration_s`, `message`, `detail_ref` | 用例结果（超限时截断存） |
 | `artifact` | `id`, `job_id`, `task_id`, `kind`, `name`, `uri`, `size`, `sha256`, `state`(local/uploaded/removed), `created_ts` | 产物引用表（URI 可变） |
 | `task_history` | `id`, `task_id`, `from_state`, `to_state`, `reason`, `ts` | 状态迁移审计（管理页时间线） |
+| `plan` | `id`, `name`, `description`, `labels`(JSON), `defaults`(JSON), `steps`(JSON), `trigger_cfg`(JSON), `notify_cfg`(JSON), `created_by`, `created_ts`, `updated_ts` | 测试计划（steps schema v2 与 trigger/notify 见 [测试计划编辑器 v2 设计](../../docs/测试计划编辑器v2设计.md) §2/§5；`trigger_cfg`/`notify_cfg` 带 server_default 自动加列） |
 
 幂等键 `idempotency_key`：非空时 `(source, idempotency_key)` 唯一，重复提交返回
 已存在的 task_id（CI 场景防重复建任务）。
@@ -405,8 +408,10 @@ capability("executor", "pytest", "executor-pytest",
 
 1. `ctx.nodes.list(online_only=True)`（[NodesInterface](../../common/contracts.py)，heartbeat 提供）；
 2. 按能力信封匹配 Stage 的 `ExecutorSelector`（`select_capabilities`，同 id + labels 超集）；
-3. 候选节点中选「在途 Job 数最少」者；节点在途数达 `max_inflight_per_node` 跳过；
-4. 选中即写 `job.node_id / attempt / lease_ts`，`ctx.comm.send_to(node, "test.job", ...)`。
+3. `executor.nodes` 非空 = 台架 allowlist，候选取交集（仍需该台架具备该执行器能力，编辑器 v2 设计 §4）；
+4. 候选节点中选「在途 Job 数最少」者；节点在途数达 `max_inflight_per_node` 跳过；
+   `executor.strategy == "random"` 时改为可用集合内随机（有非 avoid 候选先剔上次执行节点）；
+5. 选中即写 `job.node_id / attempt / lease_ts`，`ctx.comm.send_to(node, "test.job", ...)`。
 
 ### 9.3 分片流程（ShardSpec.mode = "plan"）
 
@@ -516,7 +521,7 @@ class ReporterJiraPlugin(Service[...]):
 | DELETE | `/api/test/materials/{id}` | 删除（被任务/计划/选择集引用 → 409） |
 | GET | `/api/test/materials/{id}/download` | 材料 zip 下载 |
 | GET | `/api/test/selections/{sid}` | 选择集详情 |
-| GET/POST | `/api/test/plans` | 计划列表（keyword/labels/分页）/ 创建 |
+| GET/POST | `/api/test/plans` | 计划列表（keyword/labels/分页）/ 创建（body 含 steps v2、`trigger`/`notify` 预留接口，编辑器 v2 设计 §2/§5） |
 | GET/PUT/DELETE | `/api/test/plans/{plan_id}` | 详情 / 更新 / 删除（缺失 404/False 语义见 §6） |
 | POST | `/api/test/plans/{plan_id}/clone` | 另存为 |
 | POST | `/api/test/plans/{plan_id}/dispatch` | 下发（overrides；`Idempotency-Key` 头优先；返回 `{task_id, deduplicated}`） |

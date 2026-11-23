@@ -268,6 +268,46 @@ class SpecFromDictTests(unittest.TestCase):
         self.assertEqual(dict(stage.requires), {})
         self.assertEqual(stage.timeout_s, 0.0)
 
+    def test_executor_nodes_and_strategy_parse(self) -> None:
+        spec = spec_from_dict(
+            {
+                "name": "台架定向",
+                "stages": [
+                    {
+                        "name": "s",
+                        "executor": {
+                            "id": "e",
+                            "nodes": ["bench-a", "bench-a", "bench-b"],
+                            "strategy": "random",
+                        },
+                        "params": {},
+                    }
+                ],
+            }
+        )
+        executor = spec.stages[0].executor
+        self.assertEqual(executor.nodes, ("bench-a", "bench-b"))  # 去重保序（§8.5）
+        self.assertEqual(executor.strategy, "random")
+        minimal = spec_from_dict(
+            {"name": "m", "stages": [{"name": "s", "executor": {"id": "e"}, "params": {}}]}
+        )
+        self.assertEqual(minimal.stages[0].executor.nodes, ())
+        self.assertEqual(minimal.stages[0].executor.strategy, "balanced")
+
+    def test_bad_executor_nodes_raise(self) -> None:
+        def stage(executor: dict[str, object]) -> dict[str, object]:
+            return {"name": "x", "stages": [{"name": "s", "executor": executor, "params": {}}]}
+
+        cases: tuple[dict[str, object], ...] = (
+            {"id": "e", "nodes": "bench-a"},  # 字符串不是字符串数组
+            {"id": "e", "nodes": [""]},  # 空串台架
+            {"id": "e", "nodes": [1]},  # 非字符串项
+        )
+        for executor in cases:
+            with self.subTest(executor=executor):
+                with self.assertRaisesRegex(ValueError, "nodes"):
+                    spec_from_dict(stage(executor))
+
     def test_unknown_fields_are_ignored(self) -> None:
         spec = spec_from_dict(
             {

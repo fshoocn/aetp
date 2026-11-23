@@ -457,7 +457,16 @@ class JobLogsApiTests(_MasterStack, unittest.IsolatedAsyncioTestCase):
 class PlansApiTests(_MasterStack, unittest.IsolatedAsyncioTestCase):
     """/api/test/plans：CRUD / 错误映射 / clone 命名 / dispatch 幂等（§4.4 / §6）。"""
 
-    def _plan_payload(self, name: str = "回归计划", **extra: object) -> dict[str, object]:
+    async def _material_id(self) -> str:
+        """上传（幂等复用）计划步骤绑定的材料 id（v2 保存必填 material）。"""
+        assert self.context is not None
+        core = self.context.get("test_core")
+        result = await core.upload_material(name="脚本包", data=_zip_bytes(_MIN_ZIP))
+        return str(result["id"])
+
+    def _plan_payload(
+        self, name: str = "回归计划", *, material_id: str = "", **extra: object
+    ) -> dict[str, object]:
         body: dict[str, object] = {
             "name": name,
             "description": "说明",
@@ -467,6 +476,7 @@ class PlansApiTests(_MasterStack, unittest.IsolatedAsyncioTestCase):
                 {
                     "name": "单测",
                     "executor": {"kind": "executor", "id": "pytest", "labels": {}},
+                    "material": {"material_id": material_id},
                     "params": {"targets": ["tests/"]},
                 }
             ],
@@ -475,7 +485,8 @@ class PlansApiTests(_MasterStack, unittest.IsolatedAsyncioTestCase):
         return body
 
     async def _create(self, name: str = "回归计划") -> dict[str, Any]:
-        status, body = await self._call("/api/test/plans", method="POST", body=self._plan_payload(name))
+        payload = self._plan_payload(name, material_id=await self._material_id())
+        status, body = await self._call("/api/test/plans", method="POST", body=payload)
         self.assertEqual(status, 200)
         self.assertIs(body["ok"], True)
         return cast("dict[str, Any]", body["plan"])
@@ -503,7 +514,9 @@ class PlansApiTests(_MasterStack, unittest.IsolatedAsyncioTestCase):
         status, body = await self._call(
             f"/api/test/plans/{quote(plan_id)}",
             method="PUT",
-            body=self._plan_payload(description="新说明"),
+            body=self._plan_payload(
+                description="新说明", material_id=await self._material_id()
+            ),
         )
         self.assertEqual(status, 200)
         status, body = await self._call(f"/api/test/plans/{quote(plan_id)}")
@@ -542,6 +555,8 @@ class PlansApiTests(_MasterStack, unittest.IsolatedAsyncioTestCase):
             ({"name": "x", "steps": "bad"}, "steps"),
             ({"name": "x", "steps": [1]}, "steps"),
             ({"name": "x", "labels": {"a": 1}}, "labels"),
+            ({"name": "x", "trigger": 5}, "trigger"),  # trigger 需是对象或缺省（§5）
+            ({"name": "x", "notify": "bad"}, "notify"),
         )
         for body, pattern in cases:
             with self.subTest(body=body, pattern=pattern):
@@ -613,6 +628,27 @@ class PlansApiTests(_MasterStack, unittest.IsolatedAsyncioTestCase):
         third = await asyncio.to_thread(dispatch, "k2", "b1")
         self.assertNotEqual(third["task_id"], first["task_id"])
         self.assertIs(third["deduplicated"], False)
+
+    async def test_plan_trigger_notify_roundtrip_and_enum(self) -> None:
+        """trigger / notify 经 API 落库回显；枚举归核心校验（编辑器 v2 设计 §5）。"""
+        await self.boot()
+        mid = await self._material_id()
+        payload = self._plan_payload(
+            "触发计划",
+            material_id=mid,
+            trigger={"type": "cron", "config": {"expr": "0 0 * * *"}},
+            notify={"type": "webhook", "config": {}},
+        )
+        status, body = await self._call("/api/test/plans", method="POST", body=payload)
+        self.assertEqual(status, 200)
+        plan = cast("dict[str, Any]", body["plan"])
+        self.assertEqual(plan["trigger"], {"type": "cron", "config": {"expr": "0 0 * * *"}})
+        self.assertEqual(plan["notify"], {"type": "webhook", "config": {}})
+        bad = self._plan_payload("坏触发", material_id=mid, trigger={"type": "bogus"})
+        status, body = await self._call("/api/test/plans", method="POST", body=bad)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["code"], "invalid_spec")
+        self.assertIn("trigger.type", str(body["error"]))
 
     async def test_dispatch_overrides_errors_map_400(self) -> None:
         await self.boot()

@@ -255,18 +255,129 @@ def _plan_step_params(step: Mapping[str, Any]) -> dict[str, Any]:
     return _as_mapping(step.get("params"))
 
 
-def _plan_stage_specs(steps: Sequence[Mapping[str, Any]]) -> list[StageSpec]:
-    """计划步骤 → StageSpec（§4.2 转换，调用方先过 :func:`_check_plan_steps`）。
+#: 计划步骤 cases.mode 枚举（编辑器 v2 设计 §2.1）
+_PLAN_CASE_MODES: tuple[str, ...] = ("all", "selected")
+#: trigger.type / notify.type 枚举（编辑器 v2 设计 §5 预留接口）
+_TRIGGER_TYPES: tuple[str, ...] = ("manual", "cron", "event")
+_NOTIFY_TYPES: tuple[str, ...] = ("none", "jira", "webhook", "email")
 
-    ``executor.kind`` 缺省补 ``"executor"``；``material_id`` 仅顶层有 →
-    并入 ``params.material_id``（同名冲突在校验链已拒，评审 #5）。
+
+def _plan_material_of(step: Mapping[str, Any]) -> dict[str, Any]:
+    """步骤材料视图（读取归一，编辑器 v2 设计 §2.1）。
+
+    ``material`` 对象优先；旧顶层 ``material_id`` 归一为 ``{"material_id": …}``
+    （无绑定指纹 → 仅做存在性校验，编辑器提示「请重新确认用例」）；
+    都缺返回空对象（必填问题由校验链报）。
+    """
+    raw = step.get("material")
+    if _is_mapping(raw):
+        return _as_mapping(raw)
+    top = step.get("material_id")
+    if isinstance(top, str) and top:
+        return {"material_id": top}
+    return {}
+
+
+def _plan_cases_of(step: Mapping[str, Any]) -> dict[str, Any]:
+    """步骤用例视图（读取归一，编辑器 v2 设计 §2.1）：缺失 ``cases`` 归一为
+    ``{"mode": "all", "case_ids": []}``（跟随脚本全部用例）；坏形原样保留，
+    由校验链逐条报。
+    """
+    raw = step.get("cases")
+    cases = _as_mapping(raw) if _is_mapping(raw) else {}
+    mode = cases.get("mode", "all")
+    case_ids = cases.get("case_ids", [])
+    return {
+        "mode": mode,
+        "case_ids": list(case_ids) if isinstance(case_ids, list) else case_ids,
+    }
+
+
+def _dedupe_keep_order(items: Any) -> Any:
+    """字符串数组去重保序（executor.nodes 归一，§8.5）；非数组原样返回交校验链报。"""
+    if isinstance(items, (str, bytes)) or not isinstance(items, list):
+        return items
+    out: list[Any] = []
+    for item in items:
+        if item not in out:
+            out.append(item)
+    return out
+
+
+def _same_str_list(left: Any, right: Any) -> bool:
+    """两个列表是否同为字符串数组且同集（顺序无关；同名冲突比较用）。"""
+    if isinstance(left, (str, bytes)) or not isinstance(left, list):
+        return False
+    if isinstance(right, (str, bytes)) or not isinstance(right, list):
+        return False
+    return sorted(str(item) for item in left) == sorted(str(item) for item in right)
+
+
+def _check_trigger_notify(trigger: Any, notify: Any) -> list[str]:
+    """trigger / notify 形状与枚举校验（编辑器 v2 设计 §5/§8.7，纯函数）。
+
+    缺省（None）放行；``type`` 缺省补 ``manual`` / ``none``，其余类型照存照显
+    （UI 标「预留」）；返回问题清单（空 = 合法）。
+    """
+    problems: list[str] = []
+    for key, value, allowed, fallback in (
+        ("trigger", trigger, _TRIGGER_TYPES, "manual"),
+        ("notify", notify, _NOTIFY_TYPES, "none"),
+    ):
+        if value is None:
+            continue
+        if not _is_mapping(value):
+            problems.append(f"{key} 需是对象，收到 {value!r}")
+            continue
+        data = _as_mapping(value)
+        type_raw: Any = data.get("type", fallback)
+        if not isinstance(type_raw, str) or type_raw not in allowed:
+            problems.append(
+                f"{key}.type 非法，收到 {type_raw!r}（可选：{' / '.join(allowed)}）"
+            )
+        config_raw: Any = data.get("config", {})
+        if not _is_mapping(config_raw):
+            problems.append(f"{key}.config 需是对象，收到 {config_raw!r}")
+    return problems
+
+
+def _trigger_dict(value: Mapping[str, Any] | None, default_type: str) -> dict[str, Any]:
+    """trigger / notify 归一形态（落库与对外 dict 共用）：``{type, config}``。"""
+    data = _as_mapping(value) if value is not None else {}
+    return {
+        "type": str(data.get("type") or default_type),
+        "config": _as_mapping(data.get("config")),
+    }
+
+
+def _plan_stage_specs(steps: Sequence[Mapping[str, Any]]) -> list[StageSpec]:
+    """计划步骤 → StageSpec（编辑器 v2 设计 §2.1/§2.3 转换，调用方先过
+    :func:`_check_plan_steps`）。
+
+    * ``executor.kind`` 缺省补 ``"executor"``；``executor.nodes`` 去重保序、
+      ``strategy`` 缺省 ``"balanced"``（台架定向，设计 §4）；
+    * ``material.material_id``（旧顶层 ``material_id`` 归一同值）缺省并入
+      ``params.material_id``（同名冲突在校验链已拒，评审 #5）；
+    * ``cases.mode == "selected"`` 且 params 未显式给 targets/selection_id 时
+      注入 ``params.targets = cases.case_ids``（§2.3）；``mode == "all"`` 不注入
+      （执行端回落全量）。
     """
     stages: list[StageSpec] = []
     for step in steps:
         params = _plan_step_params(step)
-        top_material: Any = step.get("material_id")
-        if isinstance(top_material, str) and top_material and not params.get("material_id"):
-            params["material_id"] = top_material
+        material = _plan_material_of(step)
+        material_id: Any = material.get("material_id")
+        if isinstance(material_id, str) and material_id and not params.get("material_id"):
+            params["material_id"] = material_id
+        cases = _plan_cases_of(step)
+        if (
+            cases.get("mode") == "selected"
+            and "targets" not in params
+            and "selection_id" not in params
+        ):
+            case_ids = cases.get("case_ids")
+            if isinstance(case_ids, list):
+                params["targets"] = list(case_ids)
         executor = _as_mapping(step.get("executor"))
         shard = _as_mapping(step.get("shard"))
         raw_name: Any = step.get("name")
@@ -280,6 +391,8 @@ def _plan_stage_specs(steps: Sequence[Mapping[str, Any]]) -> list[StageSpec]:
                     id=raw_executor_id,
                     kind=str(raw_kind or "executor"),
                     labels=_as_mapping(executor.get("labels")),
+                    nodes=_dedupe_keep_order(executor.get("nodes", ())),
+                    strategy=executor.get("strategy", "balanced"),
                 ),
                 params=params,
                 shard=ShardSpec(mode=shard.get("mode", "none"), hint=shard.get("hint", 0)),
@@ -291,13 +404,20 @@ def _plan_stage_specs(steps: Sequence[Mapping[str, Any]]) -> list[StageSpec]:
 
 
 def _check_plan_steps(steps: Sequence[Mapping[str, Any]]) -> list[str]:
-    """计划步骤静态校验（§4.2/§4.3，纯函数）：返回问题清单（空 = 合法）。
+    """计划步骤静态校验（编辑器 v2 设计 §2.1/§8，纯函数）：返回问题清单（空 = 合法）。
 
     口径复用 :func:`registry.validate_task_spec`（归一化为 TaskSpec 后整体校验
-    步骤 name 非空且唯一 / executor.id / shard / timeout_s，消息路径改写
-    ``steps[i]``）；另加 shape 与 ``material_id`` ↔ ``params.material_id``
-    同名冲突检查（评审 #5）。材料悬空 / 归属 / selection 交叉是异步查询，
-    在 :meth:`TestCorePlugin._check_plan_materials` 内联，问题口径相同。
+    步骤 name 非空且唯一 / executor.id / executor.nodes / strategy / shard /
+    timeout_s，消息路径改写 ``steps[i]``）；另加 shape 与同名语义冲突检查：
+
+    * ``material`` 保存必填（旧顶层 ``material_id`` 等价，读取兼容 §2.1）；
+    * ``cases.mode`` 枚举、``selected`` 时 case_ids 非空字符串数组；
+    * 同名语义冲突（§2.1，沿 material_id 冲突先例逐条报）：``params.material_id``
+      ↔ ``material``、顶层 ``material_id`` ↔ ``material`` 值不等即冲突；
+      ``params.targets`` ↔ ``cases.case_ids`` 仅 ``mode=selected`` 且值不等冲突
+      （``mode=all`` 容忍遗留 targets/selection_id，读取不炸）。
+    材料悬空 / 指纹漂移 / 用例消失 / selection 交叉是异步查询，在
+    :meth:`TestCorePlugin._check_plan_materials` 内联，问题口径相同。
     """
     items = list(steps)
     if not items:
@@ -305,6 +425,7 @@ def _check_plan_steps(steps: Sequence[Mapping[str, Any]]) -> list[str]:
     problems: list[str] = []
     for index, step in enumerate(items):
         where = f"steps[{index}]"
+        params = _plan_step_params(step)
         params_raw: Any = step.get("params")
         if params_raw is not None and not _is_mapping(params_raw):
             problems.append(f"{where}.params 需是对象，收到 {params_raw!r}")
@@ -321,18 +442,79 @@ def _check_plan_steps(steps: Sequence[Mapping[str, Any]]) -> list[str]:
         requires_raw: Any = step.get("requires")
         if requires_raw is not None and not _is_mapping(requires_raw):
             problems.append(f"{where}.requires 需是对象，收到 {requires_raw!r}")
+
+        # -- material（§2.1 保存必填；旧顶层 material_id 等价归一）
+        material_raw: Any = step.get("material")
+        if material_raw is not None and not _is_mapping(material_raw):
+            problems.append(f"{where}.material 需是对象，收到 {material_raw!r}")
+        material = _plan_material_of(step)
+        material_id_raw: Any = material.get("material_id")
+        material_id = material_id_raw if isinstance(material_id_raw, str) else ""
         top_material: Any = step.get("material_id")
-        inner_material: Any = _plan_step_params(step).get("material_id")
+        if top_material is not None and top_material != "" and not isinstance(top_material, str):
+            problems.append(f"{where}.material_id 需是字符串，收到 {top_material!r}")
+        if material_id_raw is not None and material_id_raw != "" and not isinstance(material_id_raw, str):
+            problems.append(f"{where}.material.material_id 需是字符串，收到 {material_id_raw!r}")
         if (
             isinstance(top_material, str)
             and top_material
+            and isinstance(material_id_raw, str)
+            and material_id_raw
+            and top_material != material_id_raw
+        ):
+            problems.append(
+                f"{where}.material_id 与 material.material_id 同名冲突："
+                f"{top_material!r} ≠ {material_id_raw!r}"
+            )
+        if not material_id:
+            if material_raw is None and not top_material:
+                problems.append(f"{where}.material 必填（计划步骤必须绑定脚本）")
+            else:
+                problems.append(f"{where}.material.material_id 必填")
+        inner_material: Any = params.get("material_id")
+        if (
+            material_id
             and isinstance(inner_material, str)
             and inner_material
-            and top_material != inner_material
+            and material_id != inner_material
         ):
             problems.append(
                 f"{where}.material_id 与 params.material_id 同名冲突："
-                f"{top_material!r} ≠ {inner_material!r}"
+                f"{material_id!r} ≠ {inner_material!r}"
+            )
+
+        # -- cases（§2.1：缺省 {mode: all}；selected 时 case_ids 非空字符串数组）
+        cases_raw: Any = step.get("cases")
+        if cases_raw is not None and not _is_mapping(cases_raw):
+            problems.append(f"{where}.cases 需是对象，收到 {cases_raw!r}")
+        cases = _plan_cases_of(step)
+        mode: Any = cases.get("mode")
+        case_ids_raw: Any = cases.get("case_ids")
+        if mode not in _PLAN_CASE_MODES:
+            problems.append(
+                f"{where}.cases.mode 非法，收到 {mode!r}（可选：all / selected）"
+            )
+        if isinstance(case_ids_raw, (str, bytes)) or not isinstance(case_ids_raw, list):
+            problems.append(f"{where}.cases.case_ids 需是字符串数组，收到 {case_ids_raw!r}")
+        else:
+            for item in case_ids_raw:
+                if not isinstance(item, str) or not item:
+                    problems.append(f"{where}.cases.case_ids 需是非空字符串，收到 {item!r}")
+        if mode == "selected" and (not isinstance(case_ids_raw, list) or not case_ids_raw):
+            problems.append(f"{where}.cases.mode=selected 时 case_ids 不能为空")
+
+        # -- params.targets ↔ cases.case_ids 同名冲突（显式 cases + selected 且值不等）
+        targets_raw: Any = params.get("targets")
+        if (
+            cases_raw is not None
+            and mode == "selected"
+            and targets_raw is not None
+            and isinstance(case_ids_raw, list)
+            and not _same_str_list(targets_raw, case_ids_raw)
+        ):
+            problems.append(
+                f"{where}.cases.case_ids 与 params.targets 同名冲突："
+                f"{case_ids_raw!r} ≠ {targets_raw!r}"
             )
     spec = TaskSpec(name="plan", stages=_plan_stage_specs(items))
     for problem in validate_task_spec(spec):
@@ -559,6 +741,8 @@ class TestCorePlugin(Service[TestCoreConfig]):
                             "id": stage_spec.executor.id,
                             "kind": stage_spec.executor.kind,
                             "labels": dict(stage_spec.executor.labels or {}),
+                            "nodes": list(stage_spec.executor.nodes or ()),
+                            "strategy": stage_spec.executor.strategy,
                         }
                     ),
                     params=_json_dumps(dict(stage_spec.params or {})),
@@ -1033,7 +1217,9 @@ class TestCorePlugin(Service[TestCoreConfig]):
     # 悬空 / 归属 / selection 交叉的异步查询内联在 _check_plan_materials）
 
     def _plan_dict(self, row: TestPlan) -> dict[str, Any]:
-        """计划行 → 对外 dict（labels / defaults / steps 解码）。"""
+        """计划行 → 对外 dict（labels / defaults / steps 解码，trigger / notify
+        归一回显；缺省 manual / none，§5）。steps 原样返回（旧格式读取归一在
+        校验链 / 下发注入内做，编辑器载入时自行归一，§2.1）。"""
         return {
             "id": row.id,
             "plan_id": row.id,
@@ -1042,43 +1228,77 @@ class TestCorePlugin(Service[TestCoreConfig]):
             "labels": _decode_dict(row.labels),
             "defaults": _decode_dict(row.defaults),
             "steps": _decode_list(row.steps),
+            "trigger": _trigger_dict(_decode_dict(row.trigger_cfg), "manual"),
+            "notify": _trigger_dict(_decode_dict(row.notify_cfg), "none"),
             "created_by": row.created_by,
             "created_ts": row.created_ts,
             "updated_ts": row.updated_ts,
         }
 
     async def _check_plan_materials(self, steps: Sequence[Mapping[str, Any]]) -> list[str]:
-        """计划步骤材料引用校验（§4.3）：悬空 + selection 交叉一致 + 材料归属匹配。
+        """计划步骤材料引用校验（编辑器 v2 设计 §3/§8）：悬空 / 版本漂移 /
+        用例消失 + selection 交叉一致 + 材料归属匹配。
 
-        异步查询内联（悬空消息口径同 :meth:`_check_material_refs`），问题逐条
-        收集，调用方统一抛 :class:`InvalidSpec`。
+        异步查询内联，问题逐条收集，调用方统一抛 :class:`InvalidSpec`：
+
+        * material_id 不存在 → 「脚本版本已删除，请重新选择脚本」（§3）；
+        * ``material.sha256 / recipe_fingerprint`` 与落盘不符 → 版本漂移
+          「脚本已变更（指纹不符），请重新确认用例」（无指纹的旧绑定只做
+          存在性校验）；
+        * ``cases.mode=selected`` 且材料无用例清单 → 「脚本尚无用例清单」；
+          有清单而 case_id 缺失 → 逐条「用例已不存在：<case_id>」；
+        * ``params.selection_id`` 与显式 ``cases`` 选例并存且清单不等 →
+          同名语义冲突（沿 material_id 冲突先例）。
         """
         problems: list[str] = []
         for index, step in enumerate(steps):
             where = f"steps[{index}]"
             params = _plan_step_params(step)
-            top_material: Any = step.get("material_id")
-            if top_material is not None and top_material != "" and not isinstance(top_material, str):
-                problems.append(f"{where}.material_id 需是字符串，收到 {top_material!r}")
+            material = _plan_material_of(step)
+            material_id_raw: Any = material.get("material_id")
+            material_id = material_id_raw if isinstance(material_id_raw, str) else ""
             inner_material: Any = params.get("material_id")
             if inner_material is not None and inner_material != "" and not isinstance(inner_material, str):
                 problems.append(f"{where}.params.material_id 需是字符串，收到 {inner_material!r}")
-            material_id = (
-                top_material
-                if isinstance(top_material, str) and top_material
-                else inner_material if isinstance(inner_material, str) else ""
-            )
             if material_id:
-                material = await self._repo(TestMaterial).get(material_id)
-                if material is None:
-                    problems.append(f"{where} 引用的 material_id 不存在：{material_id}")
+                material_row = await self._repo(TestMaterial).get(material_id)
+                if material_row is None:
+                    problems.append(
+                        f"{where} 脚本版本已删除，请重新选择脚本（material_id={material_id}）"
+                    )
                 else:
                     executor_id = str(_as_mapping(step.get("executor")).get("id") or "")
-                    if material.executor_id not in ("", executor_id):
+                    if material_row.executor_id not in ("", executor_id):
                         problems.append(
-                            f"{where} 引用的材料归属不符：材料 executor_id={material.executor_id!r}，"
+                            f"{where} 引用的材料归属不符：材料 executor_id={material_row.executor_id!r}，"
                             f"步骤 executor.id={executor_id!r}"
                         )
+                    drift: list[str] = []
+                    sha256 = str(material.get("sha256") or "")
+                    if sha256 and sha256 != material_row.sha256:
+                        drift.append("sha256")
+                    recipe_fingerprint = str(material.get("recipe_fingerprint") or "")
+                    if recipe_fingerprint and recipe_fingerprint != material_row.recipe_fingerprint:
+                        drift.append("recipe_fingerprint")
+                    if drift:
+                        problems.append(
+                            f"{where} 脚本已变更（指纹不符），请重新确认用例"
+                            f"（{'、'.join(drift)}，material_id={material_id}）"
+                        )
+                    cases = _plan_cases_of(step)
+                    if cases.get("mode") == "selected":
+                        case_rows = await self._repo(TestMaterialCase).list(
+                            where=TestMaterialCase.material_id == material_id
+                        )
+                        if not case_rows:
+                            problems.append(f"{where} 脚本尚无用例清单（material_id={material_id}）")
+                        else:
+                            existing = {row.case_id for row in case_rows}
+                            case_ids = cases.get("case_ids")
+                            if isinstance(case_ids, list):
+                                for case_id in case_ids:
+                                    if isinstance(case_id, str) and case_id and case_id not in existing:
+                                        problems.append(f"{where} 用例已不存在：{case_id}")
             selection_id: Any = params.get("selection_id")
             if selection_id is not None and selection_id != "" and not isinstance(selection_id, str):
                 problems.append(f"{where}.params.selection_id 需是字符串，收到 {selection_id!r}")
@@ -1086,11 +1306,22 @@ class TestCorePlugin(Service[TestCoreConfig]):
                 selection = await self._repo(TestMaterialSelection).get(selection_id)
                 if selection is None:
                     problems.append(f"{where} 引用的 selection_id 不存在：{selection_id}")
-                elif material_id and selection.material_id != material_id:
-                    problems.append(
-                        f"{where} 的 selection 归属不符：selection.material_id={selection.material_id!r}，"
-                        f"步骤 material_id={material_id!r}"
-                    )
+                else:
+                    if material_id and selection.material_id != material_id:
+                        problems.append(
+                            f"{where} 的 selection 归属不符：selection.material_id={selection.material_id!r}，"
+                            f"步骤 material_id={material_id!r}"
+                        )
+                    cases_raw: Any = step.get("cases")
+                    cases = _plan_cases_of(step)
+                    wanted = cases.get("case_ids")
+                    if cases_raw is not None and cases.get("mode") == "selected":
+                        picked = _decode_list(selection.case_ids)
+                        if isinstance(wanted, list) and not _same_str_list(wanted, picked):
+                            problems.append(
+                                f"{where}.cases.case_ids 与 params.selection_id 同名冲突："
+                                f"{wanted!r} ≠ {picked!r}"
+                            )
         return problems
 
     async def save_plan(
@@ -1102,11 +1333,15 @@ class TestCorePlugin(Service[TestCoreConfig]):
         labels: Mapping[str, str] | None = None,
         defaults: Mapping[str, Any] | None = None,
         steps: Sequence[Mapping[str, Any]] | None = None,
+        trigger: Mapping[str, Any] | None = None,
+        notify: Mapping[str, Any] | None = None,
         created_by: str = "",
     ) -> Mapping[str, Any]:
         """新建或更新计划（§4.4）：plan_id 空 = 新建；更新不存在抛 PlanNotFound。
 
-        校验链与 :meth:`dispatch_plan` 共用（§4.3），失败抛 InvalidSpec（逐条）。
+        校验链与 :meth:`dispatch_plan` 共用（编辑器 v2 设计 §8），失败抛
+        InvalidSpec（逐条）；``trigger`` / ``notify`` 为预留接口（§5），
+        ``{type, config}`` 归一落 JSON 文本列，缺省 manual / none。
         """
         repo = self._repo(TestPlan)
         row = await repo.get(plan_id) if plan_id else None
@@ -1118,6 +1353,7 @@ class TestCorePlugin(Service[TestCoreConfig]):
             problems.append(f"name 需是非空字符串，收到 {name!r}")
         problems += _check_plan_steps(step_list)
         problems += await self._check_plan_materials(step_list)
+        problems += _check_trigger_notify(trigger, notify)
         if problems:
             raise InvalidSpec("计划规格无效：" + "；".join(problems))
         now = self._clock()
@@ -1127,6 +1363,8 @@ class TestCorePlugin(Service[TestCoreConfig]):
             "labels": _json_dumps(dict(labels or {})),
             "defaults": _json_dumps(dict(defaults or {})),
             "steps": _json_dumps(step_list),
+            "trigger_cfg": _json_dumps(_trigger_dict(trigger, "manual")),
+            "notify_cfg": _json_dumps(_trigger_dict(notify, "none")),
         }
         if row is not None:
             await repo.update(plan_id, {**fields, "updated_ts": now})
@@ -1265,10 +1503,14 @@ class TestCorePlugin(Service[TestCoreConfig]):
             merged["params"] = params
             merged_steps.append(merged)
 
-        # 校验链（与保存共用，§4.3）：steps 非空 / name 唯一 / executor.id /
-        # material_id 冲突 / 悬空 / selection 交叉 / 材料归属
+        # 校验链（与保存共用，编辑器 v2 设计 §8）：steps 非空 / name 唯一 /
+        # executor.id / material 绑定与指纹 / cases / 同名冲突 / 悬空 / selection
+        # 交叉 / 材料归属；计划级 trigger/notify 枚举复验（老库坏行兜底，§8.7）
         problems += _check_plan_steps(merged_steps)
         problems += await self._check_plan_materials(merged_steps)
+        problems += _check_trigger_notify(
+            _decode_dict(plan.trigger_cfg), _decode_dict(plan.notify_cfg)
+        )
         if problems:
             raise InvalidSpec("计划规格无效：" + "；".join(problems))
 
@@ -2543,13 +2785,31 @@ class TestCorePlugin(Service[TestCoreConfig]):
 
 # ============================================================== 载荷解析辅助
 def _executor_of(stage: TestStage) -> ExecutorSelector:
-    """stage.executor JSON → ExecutorSelector（坏行降级空选择器）。"""
+    """stage.executor JSON → ExecutorSelector（坏行 / 旧行降级默认值，§3.2 缺省口径）。
+
+    ``nodes`` 取出去重保序的非空台架名（空 = 不指定）；``strategy`` 只认
+    ``"random"``，其余（含旧行缺失）按 ``"balanced"``（设计 §4）。
+    """
     data = _decode_dict(stage.executor)
     labels = data.get("labels")
+    nodes: tuple[str, ...] = ()
+    nodes_raw = data.get("nodes")
+    if isinstance(nodes_raw, list):
+        kept: list[str] = []
+        for item in nodes_raw:
+            text = str(item or "")
+            if text and text not in kept:
+                kept.append(text)
+        nodes = tuple(kept)
+    strategy: Literal["balanced", "random"] = (
+        "random" if data.get("strategy") == "random" else "balanced"
+    )
     return ExecutorSelector(
         id=str(data.get("id") or ""),
         kind=str(data.get("kind") or "executor"),
         labels=dict(labels) if isinstance(labels, dict) else {},
+        nodes=nodes,
+        strategy=strategy,
     )
 
 

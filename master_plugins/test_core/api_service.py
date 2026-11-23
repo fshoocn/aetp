@@ -451,7 +451,8 @@ class TestCoreApiService(Service[None]):
 
     @_guarded
     async def _plan_create(self, request: Request) -> dict[str, object] | JSONResponse:
-        """新建计划：body = name / description / labels / defaults / steps（§4.1）。"""
+        """新建计划：body = name / description / labels / defaults / steps /
+        trigger / notify（编辑器 v2 设计 §2.2）。"""
         fields = _plan_body(_required_json_object(await request.body()))
         plan = await self._core.save_plan(
             name=fields.name,
@@ -459,6 +460,8 @@ class TestCoreApiService(Service[None]):
             labels=fields.labels,
             defaults=fields.defaults,
             steps=fields.steps,
+            trigger=fields.trigger,
+            notify=fields.notify,
             created_by=fields.created_by,
         )
         return {"ok": True, "plan": dict(plan)}
@@ -486,6 +489,8 @@ class TestCoreApiService(Service[None]):
             labels=fields.labels,
             defaults=fields.defaults,
             steps=fields.steps,
+            trigger=fields.trigger,
+            notify=fields.notify,
             created_by=fields.created_by,
         )
         return {"ok": True, "plan": dict(plan)}
@@ -517,6 +522,8 @@ class TestCoreApiService(Service[None]):
             labels=source.get("labels"),
             defaults=source.get("defaults"),
             steps=source.get("steps"),
+            trigger=source.get("trigger"),
+            notify=source.get("notify"),
             created_by=created_by,
         )
         return {"ok": True, "plan": dict(plan)}
@@ -755,6 +762,11 @@ def _executor_from(value: object, path: str) -> ExecutorSelector:
         id=_as_str(_require(data, "id", path), f"{path}.id", allow_empty=False),
         kind=_as_str(data.get("kind", "executor"), f"{path}.kind", allow_empty=False),
         labels=_as_str_map(data.get("labels", {}), f"{path}.labels"),
+        nodes=_as_str_tuple(data.get("nodes", ()), f"{path}.nodes"),
+        strategy=cast(
+            "Literal['balanced', 'random']",
+            _as_str(data.get("strategy", "balanced"), f"{path}.strategy", allow_empty=False),
+        ),
     )
 
 
@@ -828,6 +840,18 @@ def _as_str_map(value: object, path: str) -> dict[str, str]:
     return out
 
 
+def _as_str_tuple(value: object, path: str) -> tuple[str, ...]:
+    """字符串数组（executor.nodes 等）：去重保序、空项拒绝（设计 §8.5）。"""
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError(f"{path} 需是字符串数组，收到 {type(value).__name__}")
+    out: list[str] = []
+    for item in value:
+        text = _as_str(item, path, allow_empty=False)
+        if text not in out:
+            out.append(text)
+    return tuple(out)
+
+
 def _as_any_map(value: object, path: str) -> dict[str, Any]:
     out = dict(_as_mapping(value, path))
     for key in out:
@@ -856,14 +880,17 @@ class _PlanFields(NamedTuple):
     labels: dict[str, str] | None
     defaults: dict[str, Any] | None
     steps: list[dict[str, Any]] | None
+    trigger: dict[str, Any] | None
+    notify: dict[str, Any] | None
     created_by: str
 
 
 def _plan_body(data: Mapping[str, Any]) -> _PlanFields:
     """计划 body → save_plan 入参；形状 / 类型问题统一 InvalidSpec（400）。
 
-    语义校验（步骤 name 唯一、material_id 悬空 / 归属匹配等）在核心 save_plan
-    逐条抛 InvalidSpec，本层只做传输形状解析；缺省字段给 None 交核心落空值。
+    语义校验（步骤 name 唯一、material 绑定 / 指纹 / cases、trigger / notify
+    枚举等）在核心 save_plan 逐条抛 InvalidSpec，本层只做传输形状解析
+    （trigger / notify 对象或缺省）；缺省字段给 None 交核心落空值。
     """
     try:
         name = _as_str(_require(data, "name"), "name", allow_empty=False)
@@ -871,12 +898,16 @@ def _plan_body(data: Mapping[str, Any]) -> _PlanFields:
         labels_raw = data.get("labels")
         defaults_raw = data.get("defaults")
         steps_raw = data.get("steps")
+        trigger_raw = data.get("trigger")
+        notify_raw = data.get("notify")
         return _PlanFields(
             name=name,
             description=description,
             labels=_as_str_map(labels_raw, "labels") if labels_raw is not None else None,
             defaults=_as_any_map(defaults_raw, "defaults") if defaults_raw is not None else None,
             steps=_plan_steps(steps_raw) if steps_raw is not None else None,
+            trigger=_as_any_map(trigger_raw, "trigger") if trigger_raw is not None else None,
+            notify=_as_any_map(notify_raw, "notify") if notify_raw is not None else None,
             created_by=_as_str(data.get("created_by", ""), "created_by"),
         )
     except ValueError as exc:

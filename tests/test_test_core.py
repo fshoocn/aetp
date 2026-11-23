@@ -147,6 +147,8 @@ def _stage(
     *,
     executor_id: str = "pytest",
     labels: Mapping[str, str] | None = None,
+    nodes: Any = (),
+    strategy: Any = "balanced",
     params: Mapping[str, Any] | None = None,
     shard_mode: str = "none",
     shard_hint: int = 0,
@@ -154,7 +156,12 @@ def _stage(
 ) -> StageSpec:
     return StageSpec(
         name=name,
-        executor=ExecutorSelector(id=executor_id, labels=dict(labels or {})),
+        executor=ExecutorSelector(
+            id=executor_id,
+            labels=dict(labels or {}),
+            nodes=nodes,
+            strategy=strategy,
+        ),
         params=dict(params or {}),
         shard=ShardSpec(mode=shard_mode, hint=shard_hint),  # type: ignore[arg-type]
         timeout_s=timeout_s,
@@ -549,6 +556,11 @@ class ValidateSpecTests(unittest.TestCase):
             ),
             [],
         )
+        # 台架定向（编辑器 v2 设计 §4）：合法 nodes / strategy 不报
+        self.assertEqual(
+            validate_task_spec(_spec([_stage("s", nodes=("bench-a", "bench-b"), strategy="random")])),
+            [],
+        )
 
     def test_problem_list(self) -> None:
         cases: list[tuple[TaskSpec, str]] = [
@@ -563,6 +575,11 @@ class ValidateSpecTests(unittest.TestCase):
             (_spec([], name=""), "name"),
             (_spec([], priority=True), "priority"),  # type: ignore[arg-type]
             (_spec([], failure_policy="maybe"), "failure_policy"),  # type: ignore[arg-type]
+            # 台架定向（编辑器 v2 设计 §8.5）：nodes 字符串数组 / 非空项、strategy 枚举
+            (_spec([_stage("s", nodes="abc")]), "executor.nodes 需是字符串数组"),
+            (_spec([_stage("s", nodes=[1, 2])]), "executor.nodes 含非字符串项"),
+            (_spec([_stage("s", nodes=["a", ""])]), "executor.nodes 含空串"),
+            (_spec([_stage("s", strategy="bogus")]), "executor.strategy 非法"),
         ]
         for spec, keyword in cases:
             with self.subTest(keyword=keyword):
@@ -631,6 +648,26 @@ class SubmitTests(TestCoreStackTestCase):
                 "labels": {"project": "p1"},
                 "source": "api",
                 "priority": 7,
+            },
+        )
+
+    async def test_stage_executor_carries_nodes_and_strategy(self) -> None:
+        """stage.executor JSON 携带台架定向（编辑器 v2 设计 §4）并随 JobDescriptor 透传。"""
+        await self.boot()
+        task_id = await self.submit_spec(
+            _spec([_stage("unit", nodes=("bench-a", "bench-b"), strategy="random")])
+        )
+        detail = await self.core.get_task(task_id)
+        assert detail is not None
+        stages = detail["stages"]
+        self.assertEqual(
+            stages[0]["executor"],
+            {
+                "id": "pytest",
+                "kind": "executor",
+                "labels": {},
+                "nodes": ["bench-a", "bench-b"],
+                "strategy": "random",
             },
         )
 

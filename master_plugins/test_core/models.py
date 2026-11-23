@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy import text
+
 from common.models import Mapped, Model, mapped_column
 
 
@@ -236,6 +238,10 @@ class TestPlan(Model):
     defaults: Mapped[str]
     #: JSON 文本（步骤数组，§4.2：StageSpec + material_id）
     steps: Mapped[str]
+    #: JSON 文本（触发方式 {type, config}，编辑器 v2 设计 §5 预留接口）
+    trigger_cfg: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    #: JSON 文本（结果通知 {type, config}，编辑器 v2 设计 §5 预留接口）
+    notify_cfg: Mapped[str] = mapped_column(default="", server_default=text("''"))
     created_by: Mapped[str]
     created_ts: Mapped[float]
     updated_ts: Mapped[float]

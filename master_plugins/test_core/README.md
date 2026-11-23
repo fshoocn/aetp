@@ -83,10 +83,10 @@ history_size = 200          # task_history 单任务保留条数
 | `DELETE /api/test/materials/{id}` | 材料删除（被任务/计划/选择集引用 → 409） |
 | `GET /api/test/materials/{id}/download` | 材料 zip 下载 |
 | `GET /api/test/selections/{sid}` | 选择集详情 |
-| `GET /POST /api/test/plans` | 测试计划列表 / 创建（可保存复用的任务模板） |
+| `GET /POST /api/test/plans` | 测试计划列表 / 创建（可保存复用的任务模板；步骤 schema v2：`material` 必填版本绑定 + `cases` 选例快照 + `executor.nodes/strategy` 台架定向，兼容旧顶层 `material_id`；`trigger`/`notify` 预留接口，见 [测试计划编辑器 v2 设计](../../../docs/测试计划编辑器v2设计.md)） |
 | `GET /PUT /DELETE /api/test/plans/{plan_id}` | 计划详情 / 更新 / 删除 |
 | `POST /api/test/plans/{plan_id}/clone` | 计划另存为 |
-| `POST /api/test/plans/{plan_id}/dispatch` | 计划下发（overrides 运行时覆盖；返回 `{task_id, deduplicated}`） |
+| `POST /api/test/plans/{plan_id}/dispatch` | 计划下发（overrides 运行时覆盖；保存/下发共用校验链：版本漂移与用例消失显式报错；返回 `{task_id, deduplicated}`） |
 | `GET /api/test/jobs/{job_id}/logs` | 测试输出流 tail（`since_id` / `limit` 游标） |
 
 管理页「测试任务」（`/tasks`）：任务列表（状态过滤 / 分页）、任务详情

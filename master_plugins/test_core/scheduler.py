@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
@@ -221,13 +222,17 @@ class Scheduler:
         inflight: InflightStats,
         avoid: str = "",
     ) -> str | None:
-        """为执行器选一个在途最少的节点；无可用节点返回 None。
+        """为执行器选一个可用节点；无可用节点返回 None。
 
         * 有 ``ctx.nodes``：``nodes.select(kinds=[executor.kind], labels=None)``
           后按条目 ``kind == executor.kind and id == executor.id`` 且**标签超集**
           （条目 labels 覆盖选择器 labels，§9.2）匹配能力信封；
         * 无 ``ctx.nodes``：降级为 ``ctx.comm.nodes()`` 去掉本节点名，不做能力
-          过滤，仅记一次 warning（可选依赖缺席不阻塞核心）。
+          过滤，仅记一次 warning（可选依赖缺席不阻塞核心）；
+        * ``executor.nodes`` 非空 = 台架 allowlist，候选取交集（设计 §4.1，
+          仍需该台架具备该执行器能力）；
+        * ``executor.strategy``：``balanced``（缺省）= 在途少者优先、换节点优先；
+          ``random`` = 可用集合内随机（有非 avoid 候选先剔 avoid，设计 §4.2）。
         """
         candidates = self._candidate_nodes(executor)
         usable = [
@@ -237,12 +242,16 @@ class Scheduler:
         ]
         if not usable:
             return None
+        if executor.strategy == "random":
+            pool = [node_id for node_id in usable if node_id != avoid] or usable
+            return random.choice(pool)  # noqa: S311 — 派发随机非密码学用途（设计 §4.2）
         # 在途少者优先；「换节点优先」：上次执行节点同负载时排后
         usable.sort(key=lambda node: (node == avoid, inflight.per_node.get(node, 0), node))
         return usable[0]
 
     def _candidate_nodes(self, executor: ExecutorSelector) -> list[str]:
-        """能力匹配的候选节点（保序去重）。"""
+        """能力匹配的候选节点（保序去重）；``executor.nodes`` 非空时再取
+        台架 allowlist 交集（设计 §4.1）。"""
         service = self._nodes()
         if service is None:
             if not self._no_nodes_warned:
@@ -254,24 +263,27 @@ class Scheduler:
                 text = str(name or "")
                 if text and text != self_name and text not in names:
                     names.append(text)
-            return names
-        names = []
-        wanted = dict(executor.labels or {})
-        for entry in service.select(kinds=[executor.kind], labels=None):
-            entry_labels = entry.get("labels")
-            if (
-                entry.get("kind") == executor.kind
-                and entry.get("id") == executor.id
-                and entry.get("node_id")
-                and all(
-                    isinstance(entry_labels, Mapping)
-                    and entry_labels.get(key) == value
-                    for key, value in wanted.items()
-                )
-            ):
-                node_id = str(entry["node_id"])
-                if node_id not in names:
-                    names.append(node_id)
+        else:
+            names = []
+            wanted = dict(executor.labels or {})
+            for entry in service.select(kinds=[executor.kind], labels=None):
+                entry_labels = entry.get("labels")
+                if (
+                    entry.get("kind") == executor.kind
+                    and entry.get("id") == executor.id
+                    and entry.get("node_id")
+                    and all(
+                        isinstance(entry_labels, Mapping)
+                        and entry_labels.get(key) == value
+                        for key, value in wanted.items()
+                    )
+                ):
+                    node_id = str(entry["node_id"])
+                    if node_id not in names:
+                        names.append(node_id)
+        allow = [str(item) for item in (executor.nodes or ()) if str(item)]
+        if allow:
+            names = [name for name in names if name in allow]
         return names
 
     # ------------------------------------------------------------ comm 收发
