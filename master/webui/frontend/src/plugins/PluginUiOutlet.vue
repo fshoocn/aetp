@@ -5,8 +5,14 @@ import { pluginUiState } from './ui-state';
 import { resolveUrl } from '@/service/backend';
 
 const props = defineProps({
-    name: { type: String, required: true }
+    name: { type: String, required: true },
+    // payload 任意类型（设计 §6：宿主 → 面板的下发上下文，如计划编辑器步骤的
+    // { executorId, material, cases, params }），不设 type 免校验拦截任意形状；
+    // 不传 = undefined，运行时层不会把它传给面板（防污染旧面板根元素）
+    payload: { default: undefined }
 });
+
+const emit = defineEmits(['update']);
 
 const contributions = computed(() =>
     [...pluginUiState.contributions, ...pluginUiState.runtimeSlots].filter((item) => item.kind === 'slot' && item.target === props.name).sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
@@ -58,7 +64,7 @@ watch(contributions, onContributionChange, { immediate: true });
     <div class="plugin-ui-outlet" :data-outlet="name">
         <template v-for="item in contributions" :key="item.id">
             <div v-if="item.format === 'html' && html[item.id] !== undefined" class="plugin-ui-html" :data-plugin="item.owner" v-html="html[item.id]" />
-            <PluginLoadedSfc v-else-if="item.format === 'vue'" :contribution="item" />
+            <PluginLoadedSfc v-else-if="item.format === 'vue'" :contribution="item" :payload="payload" @update="emit('update', $event)" />
             <div v-else-if="htmlErrors[item.id]" class="plugin-ui-error">插件内容加载失败</div>
         </template>
         <div v-for="item in scriptValues" :key="item.contributionId + item.target" class="plugin-ui-script-value" :data-plugin="item.contributionId">

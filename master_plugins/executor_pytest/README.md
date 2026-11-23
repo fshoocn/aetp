@@ -20,9 +20,10 @@ pytest 执行器族的**管理端**：脚本上传面板、脚本分析 / 用例
   test_core 跨执行器总表（ScriptsPage）；pytest 不使用 recipe（执行器自定义
   不透明字符串，本面板无配方编辑）；
 - **任务下发**（并入测试计划编辑器——「测试计划与下发」页 `/plans`，W3 交付）：
-  原 `ui/SubmitPage.vue` 下发页已退役；参数动态表单（按能力信封
-  `detail.schema` 生成 params schema，§11.1，raw JSON 兜底、raw 优先）等逻辑
-  随 W3 迁入编辑器，旧文件保留供迁移参考；
+  原 `ui/SubmitPage.vue` 下发页已退役；下发参数编辑由「下发任务 UI」slot 面板
+  `ui/DispatchPanel.vue`（`plans:dispatch:pytest`，契约见上「UI 挂载」一节）承担，
+  无注册面板时编辑器回落能力信封 `detail.schema` 动态表单（§11.1，raw JSON
+  兜底），旧文件保留供迁移参考；
 - **材料分发**（`material.py`）：自描述分块预推（`push_chunk_bytes` /
   `push_concurrency` 控流）、就绪跟踪、`missing` 缺块补发（§5.2）；
 - **inspect 编排**（`plugin.py`）：定向单节点（首个应答胜出）、并发合并、
@@ -38,13 +39,24 @@ webapi / webui 卡住）：
 | 服务 | 依赖集 | 职责 |
 | --- | --- | --- |
 | `ExecPytestMasterApiService` | `inject = ["executor_pytest_master", "webapi"]` | 族内管理 API `/api/pytest/*` + 健康指标 |
-| `ExecPytestUiService` | `inject = ["executor_pytest_master", "webui"]` | 脚本管理页 pytest 材料 slot 面板（`scripts:executor-pytest`） |
+| `ExecPytestUiService` | `inject = ["executor_pytest_master", "webui"]` | slot 面板 ×2：脚本管理页材料面板（`scripts:pytest`）+ 计划编辑器下发任务 UI（`plans:dispatch:pytest`） |
 
-UI 挂载（W2-D）：`ui_service` 注册 slot `pytest-materials-panel`
-（`target="scripts:executor-pytest"`，title「pytest 脚本」，面板
-`ui/MaterialsPanel.vue`）；旧两页 contribution `pytest-materials` /
-`pytest-submit` 已**同批退役注销**（旧路由 `/pytest/materials`、
-`/pytest/submit` 不再注册，文件保留供参考）。
+UI 挂载（W2-D + W3 前端基建）：`ui_service` 注册 slot `pytest-materials-panel`
+（`target="scripts:pytest"`，title「pytest 脚本」，面板
+`ui/MaterialsPanel.vue`）与 `pytest-dispatch-panel`（`target="plans:dispatch:pytest"`
+——target 用**能力 id** 而非插件名，沿 scripts:pytest 教训；title「pytest 任务参数」，
+面板 `ui/DispatchPanel.vue`，order 20 与材料面板 10 错开）；旧两页 contribution
+`pytest-materials` / `pytest-submit` 已**同批退役注销**（旧路由
+`/pytest/materials`、`/pytest/submit` 不再注册，文件保留供参考）。
+
+「下发任务 UI」slot 契约（设计 §6）：计划编辑器每步骤按执行器能力 id 挂
+`<PluginUiOutlet name="plans:dispatch:…" :payload="…" @update="…">`；payload
+（宿主 → 面板）`{ executorId, material: {...}|null, cases: {mode, case_ids},
+params: {...} }`；update（面板 → 宿主）完整 params 对象——本面板托管 5 字段
+`extra_args`（逐行）/ `keyword` / `env`（k/v 行编辑，键校验与 PlansPage 同口径：
+`[A-Za-z_][A-Za-z0-9_]*`、拒绝 `AETP_*` 保留前缀）/ `workdir` / `python`，空值
+省略、**一律不产出核心管理键** `material_id` / `selection_id` / `targets`，宿主
+整替 `step.params`；cases 摘要（「已选 N 用例」）与脚本名只读展示。
 
 ## 快速开始
 

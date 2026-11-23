@@ -1,4 +1,5 @@
-"""executor_pytest 管理端的页面服务（``ctx.executor_pytest_master_ui``）：脚本管理页 pytest 材料 slot 面板。
+"""executor_pytest 管理端的页面服务（``ctx.executor_pytest_master_ui``）：脚本管理页
+pytest 材料 slot 面板 + 测试计划编辑器「下发任务 UI」slot 面板（设计 §6）。
 
 页面层与核心解耦（与 heartbeat / test_core 的页面服务同模式）：核心
 ``ExecPytestMasterPlugin`` **不再** ``inject = ["webui"]``、不在 ``init`` 里直接
@@ -30,7 +31,7 @@ from cordis_port import Context, Service
 
 
 class ExecPytestUiService(Service[None]):
-    """executor_pytest 管理端页面服务：注册脚本管理页的 pytest 材料 slot 面板。"""
+    """executor_pytest 管理端页面服务：注册脚本管理页材料面板与计划编辑器下发任务 UI 面板。"""
 
     #: 附属服务标记：本类是 ``executor-pytest-master`` 插件的界面层载体，不是独立
     #: 插件——插件清单（builtin_specs）据此不单列，随宿主插件一起呈现
@@ -51,7 +52,8 @@ class ExecPytestUiService(Service[None]):
         self.ctx: Context = ctx
 
     def init(self) -> None:
-        """注册脚本管理页的 pytest 材料 slot 面板（依赖集由 fiber 保证就绪，无需轮询）。
+        """注册脚本管理页材料面板 + 测试计划编辑器「下发任务 UI」面板（依赖集由 fiber
+        保证就绪，无需轮询）。
 
         旧「测试材料」（``pytest-materials``，/pytest/materials）与「下发测试任务」
         （``pytest-submit``，/pytest/submit）两页已退役（W2-D）：与本 slot 同批
@@ -62,6 +64,13 @@ class ExecPytestUiService(Service[None]):
         owner 同 id 二次注册抛 ValueError，新旧注册必须同批切换）。tab 并集 =
         slot 后缀 ∪ 能力 id，两侧命名必须一致（用执行器 id 而非插件名），否则
         裂成两个 tab。
+
+        下发任务 UI（设计 §6）：``ui/DispatchPanel.vue`` 挂计划编辑器步骤卡片的
+        「下发任务 UI」slot ``plans:dispatch:pytest``（target 用**能力 id** 而非
+        插件名，沿 scripts:pytest 教训）；payload/update 契约见面板头注释，面板
+        只编辑执行器参数（extra_args/keyword/env/workdir/python），核心管理键
+        material_id/selection_id/targets 不出现。contribution_id ``pytest-
+        dispatch-panel`` 与材料面板错开 order（10 / 20），同样不可与其他贡献撞键。
 
         注册项绑定本 fiber：卸载自动移除清单与静态挂载，webui 卸载 / 重载
         触发的重新装载会自动重新注册（每次恰好一条，不重复）。
@@ -76,6 +85,16 @@ class ExecPytestUiService(Service[None]):
             target="scripts:pytest",
             title="pytest 脚本",
             order=10,
+        )
+        self.ctx.webui.register_ui(
+            "pytest-dispatch-panel",
+            kind="slot",
+            format="vue",
+            resource_root=ui_root,
+            entry="DispatchPanel.vue",
+            target="plans:dispatch:pytest",
+            title="pytest 任务参数",
+            order=20,
         )
 
 

@@ -163,8 +163,14 @@ function mountRuntimeSlot(contribution, target, format, value) {
 
 export function createLoadedSfc() {
     return {
-        props: { contribution: { type: Object, required: true } },
-        setup(props) {
+        props: {
+            contribution: { type: Object, required: true },
+            // payload 任意类型（设计 §6 转发契约：宿主 → 面板的下发上下文），不设
+            // type 免 Vue 类型校验拦截任意形状；undefined = 未携带
+            payload: { default: undefined }
+        },
+        emits: ['update'],
+        setup(props, { emit }) {
             const component = shallowRef(null);
             const error = shallowRef(null);
             const styles = [];
@@ -191,7 +197,15 @@ export function createLoadedSfc() {
             });
 
             return () => {
-                if (component.value) return h(component.value);
+                if (component.value) {
+                    // payload/update 显式转发（设计 §6）：仅当 payload !== undefined
+                    // 时随 props 下传，防止 payload 以 attrs 形式落到旧面板根元素成为
+                    // 污染属性；onUpdate 是事件监听器不占 attrs，恒传让无 payload 的
+                    // 面板也能回传（emit 未被监听时 Vue 静默忽略）
+                    const forwarded = { onUpdate: (value) => emit('update', value) };
+                    if (props.payload !== undefined) forwarded.payload = props.payload;
+                    return h(component.value, forwarded);
+                }
                 if (error.value) return h('div', { class: 'plugin-ui-error' }, '插件界面加载失败');
                 return h('div', { class: 'plugin-ui-loading', role: 'status' }, '正在加载插件界面…');
             };

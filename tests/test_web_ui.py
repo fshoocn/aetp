@@ -526,6 +526,42 @@ class SlotRegistrationContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(slots[0]["title"], "pytest 脚本")
         self.assertEqual(slots[0]["format"], "vue")
 
+    async def test_dispatch_slot_contract_target_plans_dispatch_pytest(self) -> None:
+        """下发任务 UI slot 契约（设计 §6）：target 用能力 id ``plans:dispatch:pytest``。
+
+        计划编辑器按执行器能力 id 挂 ``<PluginUiOutlet name="plans:dispatch:…">``，
+        target 写能力 id 而非插件名（scripts:pytest 教训）；kind/entry 随清单序列化。
+        """
+        item = self.context.webui.register_ui(
+            "pytest-dispatch-panel",
+            kind="slot",
+            format="vue",
+            resource_root=str(self.resource_root),
+            entry="Panel.vue",
+            target="plans:dispatch:pytest",
+            title="pytest 任务参数",
+            order=20,
+        )
+        self.assertEqual(item.kind, "slot")
+        self.assertEqual(item.target, "plans:dispatch:pytest")
+        self.assertTrue(item.entry.endswith("/Panel.vue"), item.entry)
+
+        status, _, body = await asyncio.to_thread(
+            _request, f"http://127.0.0.1:{self.port}", "/api/web/ui"
+        )
+        self.assertEqual(status, 200)
+        manifest = json.loads(body)
+        slots = [
+            entry
+            for entry in manifest
+            if entry["kind"] == "slot" and entry["target"] == "plans:dispatch:pytest"
+        ]
+        self.assertEqual(len(slots), 1)
+        self.assertEqual(slots[0]["format"], "vue")
+        self.assertTrue(slots[0]["entry"].endswith("/Panel.vue"), slots[0]["entry"])
+        self.assertEqual(slots[0]["title"], "pytest 任务参数")
+        self.assertEqual(slots[0]["order"], 20)
+
     async def test_slot_rejects_js_format(self) -> None:
         """slot + js 是非法组合：accepted_formats 之外一律拒绝。"""
         with self.assertRaisesRegex(ValueError, "不支持的 UI 类型与资源格式组合"):

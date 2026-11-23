@@ -21,7 +21,9 @@
 6. API 端点：5 端点成功 / 400 / 404 / 503 映射 + ``/healthz`` 挂载；recipe
    端点已随「pytest 不使用 recipe」移除（回落 404）；
 7. GC：``list_unreferenced`` → ``delete``（MaterialInUse / MaterialNotFound
-   竞态跳过）。
+   竞态跳过）；
+8. UI 注册：``ui_service`` 下发任务 UI slot ``plans:dispatch:pytest`` 与材料面板
+   双贡献注册契约（设计 §6 前端基建）。
 
 测试引导：IsolatedAsyncioTestCase + 临时 config.ini 起最小栈（appconfig + db +
 comm 替身（记录 send_to / report、可注入收件）+ test_core + FakeNodes +
@@ -63,6 +65,7 @@ from master_plugins.executor_pytest.material import (
     NoCandidateNode,
 )
 from master_plugins.executor_pytest.plugin import ExecPytestMasterPlugin
+from master_plugins.executor_pytest.ui_service import ExecPytestUiService
 from master_plugins.test_core import TestCorePlugin as CorePlugin
 from slave_plugins.executor_pytest.plugin import MaterialStore
 
@@ -228,6 +231,16 @@ class _RaceDeleteCore:
         if error is not None:
             raise error
         return await self._real.delete_material(material_id)
+
+
+class _StubWebUi:
+    """最小 webui 服务桩：只记录 register_ui（真实契约由 test_web_ui 覆盖）。"""
+
+    def __init__(self) -> None:
+        self.registrations: list[dict[str, object]] = []
+
+    def register_ui(self, contribution_id: str, **options: object) -> None:
+        self.registrations.append({"id": contribution_id, **options})
 
 
 # ================================================================ 栈基类
@@ -1053,6 +1066,55 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("executor_pytest_master", metrics)
         self.assertIn(
             "late_results_total", cast("dict[str, Any]", metrics["executor_pytest_master"])
+        )
+
+
+# ================================================================ 8. UI 注册
+class UiServiceTests(MasterStackTestCase):
+    """页面服务注册（设计 §6 前端基建）：下发任务 UI slot ``plans:dispatch:pytest``。
+
+    ui_service 双面板注册契约：``pytest-dispatch-panel``（计划编辑器「下发任务
+    UI」，target=plans:dispatch:pytest——能力 id 而非插件名）与既有
+    ``pytest-materials-panel`` 共存，contribution id / order 错开不撞键。
+    """
+
+    async def test_dispatch_panel_registered_with_plans_dispatch_target(self) -> None:
+        await self.boot()
+        context = self.context
+        assert context is not None, "boot 后 context 必须就绪"
+        self.assertEqual(ExecPytestUiService.inject, ["executor_pytest_master", "webui"])
+        self.assertIsNone(context.get("executor_pytest_master_ui"))  # webui 缺席 → PENDING
+        webui = _StubWebUi()
+        context.provide("webui", webui)  # 迟到依赖唤醒 PENDING fiber（注入式挂载）
+        ready = await wait_until(
+            lambda: context.get("executor_pytest_master_ui") is not None,
+            timeout=10.0,
+            interval=0.05,
+        )
+        self.assertTrue(ready, "ExecPytestUiService 未随 webui 就位挂载")
+        self.assertIsInstance(context.get("executor_pytest_master_ui"), ExecPytestUiService)
+
+        dispatch = [item for item in webui.registrations if item["id"] == "pytest-dispatch-panel"]
+        self.assertEqual(len(dispatch), 1)
+        item = dispatch[0]
+        self.assertEqual(item["kind"], "slot")
+        self.assertEqual(item["format"], "vue")
+        self.assertEqual(item["target"], "plans:dispatch:pytest")
+        self.assertEqual(item["entry"], "DispatchPanel.vue")
+        self.assertEqual(item["title"], "pytest 任务参数")
+        self.assertEqual(item["order"], 20)
+        self.assertTrue((Path(str(item["resource_root"])) / str(item["entry"])).is_file())
+
+        materials = [item for item in webui.registrations if item["id"] == "pytest-materials-panel"]
+        self.assertEqual(len(materials), 1)
+        self.assertEqual(materials[0]["target"], "scripts:pytest")
+        self.assertEqual(materials[0]["entry"], "MaterialsPanel.vue")
+        # 双面板 order 错开；pytest 族贡献 id 全集即两条（同 owner 同 id 撞键护栏；
+        # 迟到 webui 同时唤醒 db / test_core 页面服务，全集断言只圈 pytest 族）
+        self.assertNotEqual(materials[0]["order"], item["order"])
+        self.assertEqual(
+            {str(entry["id"]) for entry in webui.registrations if str(entry["id"]).startswith("pytest-")},
+            {"pytest-materials-panel", "pytest-dispatch-panel"},
         )
 
 
