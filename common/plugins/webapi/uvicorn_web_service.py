@@ -29,7 +29,7 @@ uvicorn 完全可以直接跑在它上面。历史版本用独立线程的真实
     effect 创建 → 建 Starlette app → attach 路由 → 起 serve 任务 → 等 started
                                                             ↓ 超时/失败
                                                         抛异常 → 插件加载失败
-    effect 销毁 → should_exit=True → await serve 任务 → detach 路由
+    effect 销毁 → should_exit=True → await serve 任务 → 补收 lifespan → detach 路由
 """
 from __future__ import annotations
 
@@ -94,6 +94,43 @@ class ServerError(RuntimeError):
 _HASHED_PREFIXES: tuple[str, ...] = ("/ui-static/assets/",)
 #: 其余未 hash 的静态挂载前缀（插件 UI 资源随插件更新，须回源校验）
 _STATIC_PREFIXES: tuple[str, ...] = ("/ui-static/", "/plugin-ui/")
+#: 优雅关停等待在途请求（长轮询等）收尾的上限（秒）：uvicorn 缺省 None＝无限等，
+#: 浏览器 keep-alive / 长轮询在途时会把关停拖满 UvicornHost.stop 的强推窗口
+#: （10s+2s，随后 task.cancel 强杀）；限时后 uvicorn 自行取消在途请求并继续
+#: 走 lifespan.shutdown() 干净收尾（取消噪音由 ShutdownNoiseFilter 压掉）
+_GRACEFUL_SHUTDOWN_S: int = 5
+
+
+class ShutdownNoiseFilter(logging.Filter):
+    """压掉 uvicorn 关停期三类预期内的 ERROR 噪音。
+
+    * **在途请求被取消**——停机时长轮询等在途请求被取消属预期关停语义（与
+      :func:`common.node_runtime._quiet_asyncio_noise` 同一口径；那边压的是
+      asyncio 异常处理器通道，这里压的是 uvicorn 日志通道）。uvicorn 的
+      ``run_asgi`` 会把取消当异常打完整堆栈（``Exception in ASGI application``
+      + CancelledError traceback），看着像崩溃。
+    * **优雅等待超时**——``Cancel N running task(s), timeout graceful
+      shutdown exceeded``：强制收掉在途请求正是关停语义，不是故障。
+    * **lifespan 主任务被取消**——Starlette 把该 CancelledError 的 traceback
+      当 ``lifespan.shutdown.failed`` 的 message 交 uvicorn 原样打出
+      （正文就是 traceback 文本、无 exc_info）；lifespan 孤儿任务已由
+      ``UvicornHost._reap_lifespan`` 兜底收尾，这里再挡一道。
+
+    只丢这三类记录，真故障的堆栈一个不挡。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc_info = record.exc_info
+        if exc_info and isinstance(exc_info[1], asyncio.CancelledError):
+            return False
+        message = record.getMessage()
+        if message.endswith("running task(s), timeout graceful shutdown exceeded"):
+            return False
+        if message.startswith("Traceback (most recent call last):") and message.rstrip().endswith(
+            "CancelledError"
+        ):
+            return False
+        return True
 
 
 class _SecurityHeadersMiddleware:
@@ -261,14 +298,17 @@ class UvicornHost:
 
     @staticmethod
     def _ensure_uvicorn_logging() -> None:
-        """给 uvicorn 错误日志补最小 handler。
+        """给 uvicorn 错误日志补最小 handler，并压掉关停取消噪音。
 
         ``log_config=None``（不接管根 logger）时 ``uvicorn.error`` 没有
         handler，记录会落 ``logging.lastResort`` 被**裸打**成无格式堆栈，
         关停期的消息看着像崩溃。这里补一个格式化 handler，只动 uvicorn
-        自己的 logger，不影响 cordis 日志体系。
+        自己的 logger，不影响 cordis 日志体系；同时挂
+        :class:`ShutdownNoiseFilter` 滤掉在途请求被取消等预期内噪音。
         """
         logger = logging.getLogger("uvicorn.error")
+        if not any(isinstance(f, ShutdownNoiseFilter) for f in logger.filters):
+            logger.addFilter(ShutdownNoiseFilter())
         if not logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(
@@ -305,6 +345,10 @@ class UvicornHost:
             # 不接管根 logger，避免与 cordis 的 logger 服务互相覆盖
             log_config=None,
             reload=False,
+            # 优雅关停限时（缺省 None＝无限等）：浏览器 keep-alive / 长轮询
+            # 在途时 _wait_tasks_to_complete 会一直等连接清空，关停被拖满
+            # stop() 的强推窗口；限时后 uvicorn 取消在途请求继续收尾
+            timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_S,
         )
         self._ensure_uvicorn_logging()
         if self._serve_task is not None and not self._serve_task.done():
@@ -360,6 +404,30 @@ class UvicornHost:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            # 强推/取消路径下 uvicorn 跳过 lifespan.shutdown()（force_exit 分支），
+            # 跑 ASGI lifespan 的主任务会孤零零停在 receive() 等一条永远不来的
+            # 关停消息，直到 asyncio.run 收尾才被取消并打出 ERROR 噪音——补发
+            # 一次关停让它干净收场（见 _reap_lifespan）
+            await self._reap_lifespan(server)
+
+    @staticmethod
+    async def _reap_lifespan(server: uvicorn.Server) -> None:
+        """补发 ASGI lifespan 关停消息，避免遗留任务被取消打关停噪音。
+
+        uvicorn ``Server.shutdown`` 只在 ``force_exit`` 为假时才调
+        ``lifespan.shutdown()``；serve 任务被取消 / 强推时，跑
+        ``Router.lifespan`` 的主任务永远等不到 ``lifespan.shutdown`` 消息，
+        最终在 ``asyncio.run`` 收尾时被取消——Starlette 把该 CancelledError
+        的 traceback 当 ``lifespan.shutdown.failed`` 交 uvicorn 以 ERROR
+        打出（进程其实已正常退出，纯属关停噪音）。这里补发一次关停消息：
+        干净收场过的（``shutdown_event`` 已置位）立即返回，幂等；整体限时
+        兜底、异常吞掉——收尾逻辑不再引入新的失败模式。
+        """
+        lifespan = getattr(server, "lifespan", None)
+        if lifespan is None:
+            return
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(lifespan.shutdown(), timeout=2.0)
 
     @property
     def is_running(self) -> bool:
@@ -911,4 +979,4 @@ def _fiber_name(fiber: Fiber | None) -> str:
     return getattr(fiber, "name", None) or "root"
 
 
-__all__: list[str] = ["ServerError", "UvicornHost", "UvicornWebApiService"]
+__all__: list[str] = ["ServerError", "ShutdownNoiseFilter", "UvicornHost", "UvicornWebApiService"]
