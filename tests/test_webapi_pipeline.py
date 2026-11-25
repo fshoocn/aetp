@@ -16,21 +16,36 @@ from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest import mock
+from urllib.request import Request as UrllibRequest
+from urllib.request import urlopen
 
+import uvicorn
 from cordis_port import Context
 from starlette.datastructures import Headers
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.types import Message, Receive, Scope, Send
 
-from _helpers import arequest, free_port
+from _helpers import AUTH_TOKEN, arequest, free_port
 from common.cordis_utils import unload_all
 from common.plugins.appconfig import AppConfigPlugin
-from common.plugins.webapi import WebApiPlugin
-from common.plugins.webapi.auth import DENY, AuthContext, AuthIdentity, VerifyResult
+from common.plugins.webapi import WebApiPlugin, uvicorn_web_service
+from common.plugins.webapi.auth import (
+    DENY,
+    AuthContext,
+    AuthIdentity,
+    SharedSecretVerifier,
+    VerifyResult,
+)
+from common.plugins.webapi.config import WebApiConfig
 from common.plugins.webapi.pipeline import MAX_ENHANCE_BODY_BYTES, RequestContext
 from common.plugins.webapi.types import RouteRecord
-from common.plugins.webapi.uvicorn_web_service import RequestObserverMiddleware
+from common.plugins.webapi.uvicorn_web_service import (
+    RequestObserverMiddleware,
+    ServerError,
+    UvicornHost,
+)
 from master_plugins.api_stats import ApiStatsPlugin
 
 
@@ -356,6 +371,93 @@ class PipelineIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.fail("等待 request-completed 事件超时")
         raise AssertionError("unreachable")
 
+    async def test_start_is_idempotent(self) -> None:
+        """重复 start 不换 host、不抛：防孤儿 serve 任务（端口泄漏）。"""
+        self._ping()
+        service = self.context.webapi
+        address = service.address()
+        await service.start()
+        await service.start()
+        self.assertTrue(service.is_running())
+        self.assertEqual(service.address(), address)
+        status, _body = await arequest(self.base_url, "/api/ping")
+        self.assertEqual(status, 200)
+
+    async def test_url_for_name_precedence_and_quoting(self) -> None:
+        """url_for：name 命中优先于 path 同名；路径参数做 URL 编码。"""
+
+        def ok(_request: object) -> dict[str, object]:
+            return {"ok": True}
+
+        webapi = self.context.webapi
+        # path 恰好是 /detail 的路由注册在先——name="detail" 的路由仍须命中
+        webapi.get("/detail", ok, name="other")
+        webapi.get("/items/{item_id}", ok, name="detail")
+        webapi.get("/files/{rest:path}", ok, name="file")
+        self.assertEqual(
+            webapi.url_for("detail", item_id="a b/c?"), "/items/a%20b%2Fc%3F"
+        )
+        self.assertEqual(webapi.url_for("/items/{item_id}", item_id="5"), "/items/5")
+        # :path 语义允许斜杠，只编码斜杠以外的字符
+        self.assertEqual(webapi.url_for("file", rest="a/b c"), "/files/a/b%20c")
+
+    async def test_cache_control_respects_explicit_header(self) -> None:
+        """handler 显式 Cache-Control（如 no-store）不被覆盖；缺失才补 no-cache。"""
+
+        def locked(_request: object) -> HTMLResponse:
+            return HTMLResponse("<p>x</p>", headers={"Cache-Control": "no-store"})
+
+        def plain(_request: object) -> HTMLResponse:
+            return HTMLResponse("<p>y</p>")
+
+        self.context.webapi.get("/locked", locked)
+        self.context.webapi.get("/plain", plain)
+        response = await asyncio.to_thread(
+            urlopen, UrllibRequest(f"{self.base_url}/locked"), timeout=5
+        )
+        with response:
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+        response = await asyncio.to_thread(
+            urlopen, UrllibRequest(f"{self.base_url}/plain"), timeout=5
+        )
+        with response:
+            self.assertEqual(response.headers["Cache-Control"], "no-cache")
+
+    async def test_static_route_records_head(self) -> None:
+        """静态挂载与动态路由同契约：GET 携带 HEAD（权限匹配不留盲区）。"""
+        (self.root / "assets").mkdir()
+        self.context.webapi.static("/assets", self.root / "assets")
+        record = next(
+            (item for item in self.context.webapi.routes() if item.path == "/assets"),
+            None,
+        )
+        assert record is not None
+        self.assertEqual(record.methods, frozenset({"GET", "HEAD"}))
+
+
+class HostStartFailureTests(unittest.IsolatedAsyncioTestCase):
+    """UvicornHost 启动失败须如实上报根因，而非笼统猜测。"""
+
+    async def test_start_failure_reports_real_cause(self) -> None:
+        config = WebApiConfig(
+            host="127.0.0.1",
+            port=free_port(),
+            auth_token=AUTH_TOKEN,
+            start_timeout=5.0,
+        )
+        host = UvicornHost(config, AuthContext(SharedSecretVerifier(config)))
+        with mock.patch.object(
+            uvicorn.Server,
+            "serve",
+            new_callable=mock.AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaises(ServerError) as cm:
+                await host.start()
+        self.assertIn("boom", str(cm.exception))
+        cause = cm.exception.__cause__
+        assert isinstance(cause, RuntimeError)
+
 
 class ObserverMiddlewareTests(unittest.IsolatedAsyncioTestCase):
     """观察者中间件的取消 / 断连语义（HTTP 层模拟不到的路径）。"""
@@ -419,6 +521,65 @@ class ObserverMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         await middleware(scope, disconnect_receive, record_send)
         self.assertEqual(len(seen), 1)
         self.assertTrue(seen[0]["aborted"])
+
+    async def test_emit_timeout_warns_and_unblocks(self) -> None:
+        """派发超时不拖住请求收尾：记告警，shield 后台仍完成派发。"""
+        warns: list[str] = []
+        dispatched: list[str] = []
+
+        async def slow_emit(payload: dict[str, object]) -> None:
+            await asyncio.sleep(0.3)  # 模拟出网上报监听器慢/挂
+            dispatched.append(str(payload["path"]))
+
+        async def app(_scope: Scope, _receive: Receive, send: Send) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        async def never_receive() -> Message:
+            await asyncio.Event().wait()
+            return cast("Message", {"type": "http.disconnect"})
+
+        async def record_send(_message: Message) -> None:
+            return None
+
+        middleware = RequestObserverMiddleware(app, emit=slow_emit, warn=warns.append)
+        scope = cast("Scope", {"type": "http", "path": "/api/slow", "method": "GET"})
+        with mock.patch.object(uvicorn_web_service, "_OBSERVER_EMIT_TIMEOUT_S", 0.05):
+            begin = time.monotonic()
+            await middleware(scope, never_receive, record_send)
+            elapsed = time.monotonic() - begin
+        self.assertLess(elapsed, 0.25)  # 不等满 0.3s 的慢派发
+        self.assertEqual(len(warns), 1)
+        self.assertIn("超时", warns[0])
+        for _ in range(100):  # shield：后台派发照常完成
+            if dispatched:
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(dispatched, ["/api/slow"])
+
+    async def test_emit_sync_error_does_not_mask(self) -> None:
+        """emit 同步抛错只记告警：请求收尾不被打断、不掩盖在途异常。"""
+        warns: list[str] = []
+
+        def bad_emit(_payload: dict[str, object]) -> None:
+            raise RuntimeError("boom")
+
+        async def app(_scope: Scope, _receive: Receive, send: Send) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        async def never_receive() -> Message:
+            await asyncio.Event().wait()
+            return cast("Message", {"type": "http.disconnect"})
+
+        async def record_send(_message: Message) -> None:
+            return None
+
+        middleware = RequestObserverMiddleware(app, emit=bad_emit, warn=warns.append)
+        scope = cast("Scope", {"type": "http", "path": "/api/z", "method": "GET"})
+        await middleware(scope, never_receive, record_send)  # 不抛
+        self.assertEqual(len(warns), 1)
+        self.assertIn("boom", warns[0])
 
 
 if __name__ == "__main__":

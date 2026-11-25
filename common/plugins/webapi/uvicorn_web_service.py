@@ -41,6 +41,7 @@ import time
 from collections.abc import Callable, Collection, Generator, Mapping, Sequence
 from pathlib import Path
 from typing import cast
+from urllib.parse import quote
 
 import uvicorn
 from cordis_port import Context, Fiber, Service
@@ -99,6 +100,12 @@ _STATIC_PREFIXES: tuple[str, ...] = ("/ui-static/", "/plugin-ui/")
 #: （10s+2s，随后 task.cancel 强杀）；限时后 uvicorn 自行取消在途请求并继续
 #: 走 lifespan.shutdown() 干净收尾（取消噪音由 ShutdownNoiseFilter 压掉）
 _GRACEFUL_SHUTDOWN_S: int = 5
+#: 观察者事件派发（request-completed 等）等待监听器返回的上限（秒）：
+#: 监听器多为审计 / 上报插件（出网调用），挂死不能拖住请求收尾——
+#: 到点只断开等待，shield 保证派发在后台继续完成
+_OBSERVER_EMIT_TIMEOUT_S: float = 5.0
+#: 缺省告警出口（未注入 warn 回调时走标准 logging）
+_LOG = logging.getLogger("webapi")
 
 
 class ShutdownNoiseFilter(logging.Filter):
@@ -143,7 +150,8 @@ class _SecurityHeadersMiddleware:
     ``immutable`` 长缓存；其余未 hash 静态（插件 UI 资源等）``no-cache``。
 
     纯 ASGI 中间件：只改响应头，不动响应体；静态资源（插件 UI、
-    构建产物）与 API 响应统一受益。
+    构建产物）与 API 响应统一受益。响应已自带 ``Cache-Control`` 时
+    尊重 handler 的显式设置（如 ``no-store``），只补缺失的头。
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -162,7 +170,8 @@ class _SecurityHeadersMiddleware:
                     scope.get("path", ""), headers.get("content-type", "")
                 )
                 if cache_control is not None:
-                    headers["Cache-Control"] = cache_control
+                    # 只补缺失：handler 显式设置的（如敏感页面的 no-store）优先
+                    headers.setdefault("Cache-Control", cache_control)
             await send(message)
 
         await self.app(scope, receive, sender)
@@ -188,13 +197,22 @@ class RequestObserverMiddleware:
     404 / 静态资源同样覆盖（route 可为空）。放在 ASGI 栈**最外层**（最后
     add）——拦截链内测不到的短路响应（如鉴权 401）也计入，供统计 / 审计
     插件订阅。
+
+    派发可靠性（见 :meth:`_dispatch`）：emit 同步抛错 / 监听器异步出错只记
+    ``warn`` 回调告警，绝不打断请求收尾或掩盖在途异常；派发限时
+    :data:`_OBSERVER_EMIT_TIMEOUT_S`，出网上报监听器挂死时到点转后台继续，
+    不拖挂连接。
     """
 
     def __init__(
-        self, app: ASGIApp, emit: Callable[[dict[str, object]], object] | None = None
+        self,
+        app: ASGIApp,
+        emit: Callable[[dict[str, object]], object] | None = None,
+        warn: Callable[[str], object] | None = None,
     ) -> None:
         self.app = app
         self.emit = emit
+        self._warn: Callable[[str], object] = warn or _LOG.warning
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or self.emit is None:
@@ -238,13 +256,42 @@ class RequestObserverMiddleware:
                 "route": str(state.get("route", "")),
                 "identity": identity if isinstance(identity, dict) else None,
             }
-            outcome = self.emit(payload)
-            if inspect.isawaitable(outcome):
-                # 取消传播中 finally 内的裸 await 会被二次打断（事件恰好在
-                # aborted 场景丢失）：shield 保证派发在后台完成，吞掉的只有
-                # 本次取消信号，原异常照常向上传播
-                with contextlib.suppress(asyncio.CancelledError):
-                    await asyncio.shield(outcome)
+            await self._dispatch(payload)
+
+    async def _dispatch(self, payload: dict[str, object]) -> None:
+        """派发观察事件：异常 / 超时都不影响请求收尾。
+
+        * ``emit`` 同步抛错或监听器异步出错：记 ``warn`` 告警后了事——
+          观察者故障绝不掩盖在途异常、也不打断已成功的响应；
+        * 派发限时 :data:`_OBSERVER_EMIT_TIMEOUT_S`：审计 / 上报监听器
+          （出网调用）挂死不能拖住 ASGI 收尾——到点只断开等待，shield
+          保证派发在后台继续完成；
+        * 取消传播中 finally 内的裸 await 会被二次打断（事件恰好在
+          aborted 场景丢失）：shield + suppress 吞掉的只有本次取消信号，
+          原异常照常向上传播。
+        """
+        emit = self.emit
+        if emit is None:  # __call__ 已短路；防御性收敛类型
+            return
+        try:
+            outcome = emit(payload)
+        except Exception as exc:  # noqa: BLE001 —— 观察者故障绝不打断请求收尾
+            self._warn(f"request-completed 观察者 emit 出错：{exc!r}")
+            return
+        if not inspect.isawaitable(outcome):
+            return
+        with contextlib.suppress(asyncio.CancelledError):
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(outcome), _OBSERVER_EMIT_TIMEOUT_S
+                )
+            except TimeoutError:
+                self._warn(
+                    f"request-completed 观察者派发超时"
+                    f"（{_OBSERVER_EMIT_TIMEOUT_S:g} 秒），已转后台继续派发"
+                )
+            except Exception as exc:  # noqa: BLE001 —— 同上：只告警，不打断收尾
+                self._warn(f"request-completed 观察者派发出错：{exc!r}")
 
 
 class _EmbeddedServer(uvicorn.Server):
@@ -261,11 +308,12 @@ class _EmbeddedServer(uvicorn.Server):
 
 
 class UvicornHost:
-    """在后台线程中托管一个 uvicorn 服务器。
+    """把 uvicorn 服务器托管在**宿主事件循环**上（单循环，见模块 docstring）。
 
     属性:
         app: Starlette 应用对象，路由表由 :class:`UvicornWebService` 动态维护。
         server: 底层 ``uvicorn.Server`` 实例（启动后才非 ``None``）。
+        warn: 告警出口（serve 任务异常 / 观察者派发超时），缺省走标准 logging。
     """
 
     def __init__(
@@ -274,8 +322,10 @@ class UvicornHost:
         auth: AuthContext,
         on_denied: Callable[[dict[str, object]], object] | None = None,
         on_completed: Callable[[dict[str, object]], object] | None = None,
+        warn: Callable[[str], object] | None = None,
     ) -> None:
         self.config: WebApiConfig = config
+        self._warn: Callable[[str], object] = warn or _LOG.warning
         self.app: Starlette = Starlette()
         # 先加鉴权（栈内层），再加安全头 / CORS（外层）——鉴权的 401 响应
         # 也能带上 nosniff 与 CORS 头
@@ -292,7 +342,7 @@ class UvicornHost:
             )
         # 观察者最后加 = ASGI 栈最外层：一切请求（含鉴权 401 / 静态 / 预检）
         # 都有 request-completed 通知（统计 / 审计的唯一必要订阅点）
-        self.app.add_middleware(RequestObserverMiddleware, emit=on_completed)
+        self.app.add_middleware(RequestObserverMiddleware, emit=on_completed, warn=self._warn)
         self.server: _EmbeddedServer | None = None
         self._serve_task: asyncio.Task[None] | None = None
 
@@ -364,13 +414,20 @@ class UvicornHost:
             if server.started:
                 return
             if task.done():
-                # serve 任务提前退出：端口占用或地址不可绑定
+                # serve 任务提前退出：端口占用 / 地址不可绑定 / 应用启动失败
+                # ——取回真实异常并入消息与 __cause__，避免只剩笼统猜测，
+                # 也免得 GC 时冒 "Task exception was never retrieved" 噪音
                 self.server = None
                 self._serve_task = None
-                raise ServerError(
-                    f"web 服务启动失败：{self.config.host}:{self.config.port} "
-                    "（端口可能已被占用，或地址不可绑定）"
+                cause = None if task.cancelled() else task.exception()
+                hint = (
+                    f"：{cause!r}"
+                    if cause is not None
+                    else "（端口可能已被占用，或地址不可绑定）"
                 )
+                raise ServerError(
+                    f"web 服务启动失败：{self.config.host}:{self.config.port}{hint}"
+                ) from cause
             await asyncio.sleep(0.05)
 
         await self.stop()
@@ -402,8 +459,15 @@ class UvicornHost:
         finally:
             if not task.done():
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                # gather(return_exceptions=True)：只吞**子任务**的取消 / 异常，
+                # 外层取消照常向上传播（suppress(CancelledError) 会误吞外层）
+                await asyncio.gather(task, return_exceptions=True)
+            if task.done() and not task.cancelled():
+                # 取回 serve 任务的异常（若有）：免得 GC 时报
+                # "Task exception was never retrieved"，也留一条可查的告警
+                cause = task.exception()
+                if cause is not None:
+                    self._warn(f"uvicorn serve 任务异常结束：{cause!r}")
             # 强推/取消路径下 uvicorn 跳过 lifespan.shutdown()（force_exit 分支），
             # 跑 ASGI lifespan 的主任务会孤零零停在 receive() 等一条永远不来的
             # 关停消息，直到 asyncio.run 收尾才被取消并打出 ERROR 噪音——补发
@@ -538,7 +602,8 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         return dispose
 
     def _chain_problem(self, message: str) -> None:
-        """``SKIP`` 出错的告警出口（§4.4.4：记 warning，不静默）。"""
+        """拦截链 ``SKIP`` 出错 / 观察者派发异常的统一告警出口
+        （§4.4.4：记 warning，不静默）。"""
         self._provided_ctx.logger.warning(message)
 
     async def _dispatch_event(self, name: str, payload: dict[str, object]) -> None:
@@ -627,15 +692,22 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
 
     # ------------------------------------------------------------ 服务器生命周期
     async def start(self) -> None:
-        """启动 uvicorn（等待就绪；失败抛 :class:`ServerError`）。
+        """启动 uvicorn（等待就绪；失败抛 :class:`ServerError`；幂等）。
 
         在此之前注册的路由会被一次性挂载；之后注册的路由随 :meth:`route` 立即生效。
+        已在运行时直接返回；上一轮残骸（启动失败留下的死 host）先清掉再重建，
+        避免重复 start 覆盖 ``_host`` 使旧 serve 任务成孤儿（端口泄漏、无法再停）。
         """
+        if self._host is not None:
+            if self._host.is_running:
+                return
+            await self._host.stop()
         host = UvicornHost(
             self.config,
             self.auth,
             on_denied=self._on_auth_denied,
             on_completed=self._on_request_completed,
+            warn=self._chain_problem,
         )
         host.app.state.web_service = self
         # 先把 app 交给路由表，再启动：这样启动期间注册的路由也能被匹配到
@@ -772,7 +844,9 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         record = RouteRecord(
             path=resolved_path,
             kind="static",
-            methods=frozenset({"GET"}),
+            # 与动态路由同契约：GET 自动携带 HEAD（normalize_methods），
+            # mounts() / 权限匹配对 HEAD 静态请求不留盲区
+            methods=normalize_methods("GET"),
             handler=None,
             endpoint=None,
             # 静态挂载缺省也有确定性名字：request-completed / mounts() 按 name
@@ -804,7 +878,9 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
 
     async def _http_exception(self, _request: Request, exc: Exception) -> Response:
         """非 404 的 ``HTTPException``：统一 ``error`` 信封（starlette 默认是纯文本）。"""
-        assert isinstance(exc, HTTPException)
+        if not isinstance(exc, HTTPException):
+            # 注册键保证只会收到 HTTPException；防御性兜底（勿用 assert，-O 下被剥离）
+            return JSONResponse({"error": "服务器内部错误"}, status_code=500)
         if exc.status_code in {204, 304}:
             return Response(status_code=exc.status_code, headers=exc.headers)
         return JSONResponse(
@@ -919,26 +995,26 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
 
     # ------------------------------------------------------------ 运行时查询
     def url_for(self, name: str, **params: object) -> str:
-        record = next(
-            (
-                item
-                for item in self.routes()
-                if item.name == name or item.path == normalize_path(name)
-            ),
-            None,
-        )
+        # 先按 name 全表找、再按 path 兜底：混排时「path 恰好同名」的路由
+        # 不会抢在真正同名的路由前命中（name 语义优先于 path）
+        records = self.routes()
+        record = next((item for item in records if item.name == name), None)
+        if record is None:
+            normalized = normalize_path(name)
+            record = next((item for item in records if item.path == normalized), None)
         if record is None:
             raise RouteError(f"未找到名为 {name!r} 的路由")
         path = record.path
         for param in parse_path_params(path):
             if param not in params:
                 raise RouteError(f"路由 {path!r} 需要路径参数 {param!r}")
-            path = path.replace("{" + param + "}", str(params[param]))
-            # 兼容 ``{param:path}`` 写法
+            value = str(params[param])
+            path = path.replace("{" + param + "}", quote(value, safe=""))
+            # 兼容 ``{param:path}`` 写法（:path 语义允许斜杠，保留 / 不编码）
             index = path.find("{" + param + ":")
             if index != -1:
                 end = path.find("}", index)
-                path = path[:index] + str(params[param]) + path[end + 1 :]
+                path = path[:index] + quote(value, safe="/") + path[end + 1 :]
         return path
 
     def is_running(self) -> bool:
@@ -964,8 +1040,13 @@ class UvicornWebApiService(Service[WebApiConfig], WebApiService):
         self._registry.detach_app()
 
     def _dispose(self) -> None:
-        """清空本服务持有的全部状态。"""
+        """清空路由表 / 404 回退 / 健康指标 / 主机句柄。
+
+        拦截链不在此清空：拦截器经 :meth:`use` 绑定调用方 fiber 的 effect，
+        由各调用方卸载时自行摘除（与路由注册同语义）。
+        """
         self._registry.clear()
+        self._health_providers.clear()
         self._fallback = None
         self._host = None
 
